@@ -38,7 +38,8 @@ def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
     args = spec["args"]
     assert args[0] == "run" and "--frozen" in args and "--exact" in args
     assert args[args.index("--project") + 1] == "${CLAUDE_PLUGIN_ROOT}"
-    assert args[-2:] == ["python", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]
+    # -I: no current directory, PYTHONPATH or user site on sys.path; -B: no .pyc files written into the plugin root
+    assert args[-4:] == ["python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]
     assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "never installs from an index"
     env = spec["env"]
     assert env["UV_PROJECT_ENVIRONMENT"].startswith("${CLAUDE_PLUGIN_DATA}/"), "state never goes in the plugin root"

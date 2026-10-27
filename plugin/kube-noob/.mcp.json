@@ -10,6 +10,8 @@
         "--project",
         "${CLAUDE_PLUGIN_ROOT}",
         "python",
+        "-I",
+        "-B",
         "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"
       ],
       "env": {

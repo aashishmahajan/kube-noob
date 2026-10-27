@@ -23,8 +23,12 @@ helm test kube-noob -n kube-noob
 - The pod runs under `restricted-v2`. NetworkPolicies allow only the same namespace and the router by default. Egress
   allows DNS only.
 - Read-only cluster evidence (`cluster_get`, `cluster_debug_workload`) is opt-in. Set
-  `--set config.clusterEnabled=true --set rbac.scope=namespace` and list the API server CIDRs in
-  `networkPolicy.egress.apiServerCIDRs`. The ServiceAccount gets read verbs only and never Secrets.
+  `--set config.clusterEnabled=true --set "rbac.namespaces={shop,payments}"` and list the API server CIDRs in
+  `networkPolicy.egress.apiServerCIDRs`. The ServiceAccount gets read verbs only, never Secrets, and by default only
+  in its own namespace plus `rbac.namespaces`; `rbac.scope=cluster` widens that. Every holder of the token reads
+  through this ServiceAccount, so grant only the namespaces its users may see.
+- Over HTTP, tools that write the learning file are not offered, because callers share one file. Add team notes with
+  `oc exec deploy/kube-noob -- kube-noob learning note ...` (with `persistence.enabled=true`).
 - Persist notes, corpus and progress with `--set persistence.enabled=true`.
 - Your own runbooks: `kube-noob corpus add-docs <folder> --source platform-runbooks` indexes them wherever the CLI
   or plugin runs. Loading runbooks into the in-cluster service (an init container that reads a Git repo or a
@@ -116,8 +120,9 @@ CPU is idle between calls; a call takes 2 to 70 ms.
 ## Traffic out of the cluster
 
 kube-noob calls no model and, by default, opens no outbound connection. The chart's NetworkPolicy allows egress to
-DNS only. `config.clusterEnabled` adds the API server CIDRs you list; `config.webEnabled` adds TCP 443, and the
-application allowlist limits that to documentation domains. To enforce domains at the network layer too, set
+DNS only. `config.clusterEnabled` adds the API server CIDRs you list; `config.webEnabled` adds TCP 443 to public
+addresses only (private, carrier-grade NAT and link-local ranges are excepted, so nothing in the cluster), or to your
+egress proxy (`networkPolicy.egress.webProxy`), and the application allowlist limits that to documentation domains. To enforce domains at the network layer too, set
 `egressFirewall.enabled=true` (OVN-Kubernetes). It allows only the API server (when cluster access is on) and HTTPS
 to the allowlisted domains (when web access is on), then denies everything else leaving the cluster. It applies to the
 whole namespace, so keep kube-noob in its own. In sidecar mode kube-noob needs no egress; the example's NetworkPolicy

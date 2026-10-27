@@ -115,8 +115,12 @@ def test_sidecar_is_loopback_only_with_dns_only_egress() -> None:
 
 
 def test_homebrew_formula_installs_hash_pinned_wheels() -> None:
+    """Homebrew builds offline: every file is a sha256-checked resource; install is pip --no-index of those wheels."""
     formula = (ROOT / "Formula/kube-noob.rb").read_text()
     assert re.search(r'url "https://files\.pythonhosted\.org/packages/[^"]+/kube_noob-\d+\.\d+\.\d+\.tar\.gz"', formula)
-    assert len(re.findall(r'sha256 "[0-9a-f]{64}"', formula)) == 2
-    assert '"--require-hashes", "--only-binary=:all:", "--no-deps", "-r", buildpath/"requirements.lock"' in formula
-    assert 'depends_on "python@3.13"' in formula and "test do" in formula
+    resources = re.findall(r'resource "([^"]+)" do\n\s+url "([^"]+)"\n\s+sha256 "([0-9a-f]{64})"', formula)
+    assert len(resources) == formula.count('resource "') and len(resources) > 30
+    assert all(url.startswith("https://files.pythonhosted.org/") and url.endswith(".whl") for _, url, _ in resources)
+    assert {"kube-noob", "mcp", "pydantic", "pydantic-core", "pyyaml"} <= {name for name, _, _ in resources}
+    assert '"install", "--no-index", "--no-deps"' in formula and '"check"' in formula
+    assert 'depends_on "python@3.13"' in formula and "depends_on arch: :arm64" in formula and "test do" in formula

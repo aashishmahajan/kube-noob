@@ -78,6 +78,8 @@ jobs:
           pip-audit -r /tmp/plugin-requirements.txt --require-hashes --disable-pip --strict
       - name: Plugin MCP server end to end (as .mcp.json runs it)
         run: python scripts/e2e_plugin.py
+      - name: Formula matches the PyPI release files
+        run: python scripts/brew_formula.py --check
 
   publishable:
     # Upload validation exactly as pypa/gh-action-pypi-publish runs it: same twine, same Python as its container.
@@ -253,7 +255,7 @@ jobs:
           SVC=$(kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}')
           helm install kn deploy/helm/kube-noob -n kube-noob \
             --set image.repository=kube-noob --set image.tag=ci --set image.pullPolicy=Never \
-            --set auth.existingSecret=kn-token --set config.clusterEnabled=true \
+            --set auth.existingSecret=kn-token --set config.clusterEnabled=true --set "rbac.namespaces={demo}" \
             --set config.defaultPlatform=kubernetes --set networkPolicy.allowRouter=false \
             --set networkPolicy.egress.dnsNamespace=kube-system --set networkPolicy.egress.dnsPort=53 \
             --set "networkPolicy.egress.apiServerCIDRs={${EP}/32,${SVC}/32}" --wait --timeout 4m \

@@ -28,7 +28,7 @@ read-only first, about their own clusters and their own runbooks, so the platfor
 1. **Answers scoped to the caller's own permissions.** In service mode, cluster reads use one ServiceAccount, so
    every caller sees what it sees. Next: pass the caller's OpenShift identity (oauth-proxy, or Lightspeed's client
    token) through, and read the cluster as that user. This is the main blocker for multi-tenant clusters. Until
-   then, use `rbac.scope: namespace` or leave cluster tools off.
+   then, the chart reads only its own namespace plus `rbac.namespaces`, or leave cluster tools off.
 2. **Org policy packs.** Let teams add their own audit rules in YAML (for example "images only from
    registry.acme.com" or "label team= required"), so `audit` enforces company conventions and not only upstream
    best practice.

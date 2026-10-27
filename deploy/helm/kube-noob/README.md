@@ -10,9 +10,10 @@ learning), and it calls no model itself.
 helm install kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob -n kube-noob --create-namespace
 ```
 
-The chart generates a random bearer token in the Secret `<release>-kube-noob-token` and keeps it across upgrades. To
-bring your own, create a Secret with the key `token` and set `auth.existingSecret`. Clients connect to
-`http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `Authorization: Bearer <token>`.
+The chart generates a random bearer token in the Secret `<release>-kube-noob-token` and keeps it across
+`helm upgrade`. To bring your own, create a Secret with the key `token` and set `auth.existingSecret`; do this with
+`helm template` or GitOps (Argo CD, Flux), where the chart cannot look the Secret up and would rotate the token.
+Clients connect to `http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `Authorization: Bearer <token>`.
 
 ## Secure by default
 
@@ -29,6 +30,7 @@ bring your own, create a Secret with the key `token` and set `auth.existingSecre
 | `config.offline` | `false` | Admin lock: no web, no downloads, local models only |
 | `config.webEnabled` | `false` | HTTPS GET to allowlisted documentation domains; opens egress 443 |
 | `config.clusterEnabled` | `false` | Read-only cluster tools (never Secrets); needs `networkPolicy.egress.apiServerCIDRs` |
+| `rbac.namespaces` | `[]` | Namespaces it may read besides its own (`rbac.scope=cluster` for all) |
 | `egressFirewall.enabled` | `false` | OVN-Kubernetes EgressFirewall: API server and allowlisted domains only, then deny (namespace-wide) |
 | `persistence.enabled` | `false` | Keep progress, notes and indexed runbooks on a PVC |
 | `route.enabled` | `false` | OpenShift Route with edge TLS |

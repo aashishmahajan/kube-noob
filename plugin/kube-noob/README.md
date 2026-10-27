@@ -33,7 +33,9 @@ kube-noob itself never changes your cluster.
 The server is the readable Python source in `server/`, a copy of the
 [kube-noob repository](https://github.com/aashishmahajan/kube-noob)'s `src/kube_noob`. Claude Code starts it with
 `uv run --frozen`, which installs its dependencies from PyPI at the exact versions and hashes in `uv.lock`, into the
-plugin's data folder. Nothing else is downloaded, and no LLM SDK is installed.
+plugin's data folder, and runs Python isolated (`-I`), so nothing from your working directory or `PYTHONPATH` is
+imported. If no Python 3.11 or later is installed, uv downloads its managed CPython once. Nothing else is downloaded,
+and no LLM SDK is installed.
 
 ## What it accesses
 

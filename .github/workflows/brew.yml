@@ -1,7 +1,7 @@
 name: brew
 
-# Installs Formula/kube-noob.rb with Homebrew on macOS and Linux exactly as users do after tapping this repository,
-# then runs the formula's own test. Runs when the formula changes, weekly, and on demand.
+# Installs Formula/kube-noob.rb with Homebrew on Apple silicon macOS and on Linux, inside Homebrew's network-free
+# build sandbox, then runs the formula's own test. Runs when the formula changes, weekly, and on demand.
 on:
   push:
     branches: [main]
@@ -30,8 +30,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Formula matches the PyPI release files
-        run: python3 scripts/brew_formula.py --check
       - name: Install and test the formula from a local tap
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"

@@ -14,7 +14,7 @@
       "defaultPlatform": {"enum": ["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]}}},
     "auth": {"type": "object", "properties": {"existingSecret": {"type": "string"},
       "allowUnauthenticated": {"type": "boolean"}}},
-    "rbac": {"type": "object", "properties": {"scope": {"enum": ["cluster", "namespace"]}}},
+    "rbac": {"type": "object", "properties": {"scope": {"enum": ["cluster", "namespace"]}, "namespaces": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}}}},
     "egressFirewall": {
       "type": "object",
       "additionalProperties": false,

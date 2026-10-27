@@ -20,7 +20,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
 - **Generate**: hardened manifests and Helm charts for Kubernetes, OpenShift and ROSA, re-audited before they are
   returned.
 - **Debug**: 33 offline playbooks, read-only steps first; opt-in, read-only cluster evidence (Secrets are never read).
-- **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed team fixes locally.
+- **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed fixes locally.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
 Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
@@ -45,8 +45,8 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-Homebrew: `brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob`, then
-`brew install aashishmahajan/kube-noob/kube-noob`. Roles and demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
+Homebrew (Apple silicon, Linux): `brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob`,
+then `brew install aashishmahajan/kube-noob/kube-noob`. Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
 
 ## Use with Claude or any MCP client
 

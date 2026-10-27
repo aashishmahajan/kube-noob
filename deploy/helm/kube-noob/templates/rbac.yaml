@@ -1,15 +1,9 @@
-{{- if .Values.config.clusterEnabled }}
-{{- $cluster := eq .Values.rbac.scope "cluster" }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ if $cluster }}ClusterRole{{ else }}Role{{ end }}
-metadata:
-  name: {{ include "kube-noob.fullname" . }}-read
-  labels: {{- include "kube-noob.labels" . | nindent 4 }}
+{{- define "kube-noob.readRules" -}}
 rules:
   # Read-only allowlist mirrored from kube_noob.debug.cluster.ALLOWED_RESOURCES. No Secrets, ever.
   - apiGroups: [""]
     resources: [pods, pods/log, services, endpoints, events, configmaps, persistentvolumeclaims, resourcequotas,
-                limitranges, serviceaccounts{{ if $cluster }}, persistentvolumes, nodes, namespaces{{ end }}]
+                limitranges, serviceaccounts{{ if .cluster }}, persistentvolumes, nodes, namespaces{{ end }}]
     verbs: [get, list, watch]
   - apiGroups: [apps]
     resources: [deployments, replicasets, statefulsets, daemonsets]
@@ -35,7 +29,7 @@ rules:
   - apiGroups: [platform.stackrox.io]
     resources: [centrals, securedclusters]
     verbs: [get, list, watch]
-{{- if $cluster }}
+{{- if .cluster }}
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get, list, watch]
@@ -46,18 +40,48 @@ rules:
     resources: [securitycontextconstraints]
     verbs: [get, list, watch]
 {{- end }}
+{{- end -}}
+
+{{- if .Values.config.clusterEnabled }}
+{{- $name := printf "%s-read" (include "kube-noob.fullname" .) }}
+{{- $sa := include "kube-noob.fullname" . }}
+{{- if eq .Values.rbac.scope "cluster" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.labels" . | nindent 4 }}
+{{ include "kube-noob.readRules" (dict "cluster" true) }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ if $cluster }}ClusterRoleBinding{{ else }}RoleBinding{{ end }}
+kind: ClusterRoleBinding
 metadata:
-  name: {{ include "kube-noob.fullname" . }}-read
+  name: {{ $name }}
   labels: {{- include "kube-noob.labels" . | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: {{ if $cluster }}ClusterRole{{ else }}Role{{ end }}
-  name: {{ include "kube-noob.fullname" . }}-read
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ $name }}}
 subjects:
-  - kind: ServiceAccount
-    name: {{ include "kube-noob.fullname" . }}
-    namespace: {{ .Release.Namespace }}
+  - {kind: ServiceAccount, name: {{ $sa }}, namespace: {{ .Release.Namespace }}}
+{{- else }}
+{{- /* Namespace scope (default): read only the release namespace plus rbac.namespaces, never cluster-wide. */}}
+{{- range $ns := (concat (list .Release.Namespace) .Values.rbac.namespaces | uniq) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels: {{- include "kube-noob.labels" $ | nindent 4 }}
+{{ include "kube-noob.readRules" (dict "cluster" false) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels: {{- include "kube-noob.labels" $ | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $name }}}
+subjects:
+  - {kind: ServiceAccount, name: {{ $sa }}, namespace: {{ $.Release.Namespace }}}
+{{- end }}
+{{- end }}
 {{- end }}

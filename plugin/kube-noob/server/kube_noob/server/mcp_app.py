@@ -11,6 +11,7 @@ import inspect
 import logging
 import os
 import time
+import traceback
 from importlib import resources
 from typing import Annotated, Any, cast
 
@@ -100,9 +101,17 @@ def _wrapper(spec: ToolSpec) -> Any:
         except KeyError as exc:  # unknown task / chunk / lesson ids
             outcome = "not-found"
             raise ToolError(str(exc.args[0] if exc.args else exc)[:MAX_ERROR_CHARS]) from exc
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - every unexpected failure becomes an opaque error
+            # Log the failure without its message (which can quote the caller's data) and hand the client an
+            # opaque error; the stack shows where it failed.
             outcome = "crash"
-            raise
+            _audit.error(
+                "tool=%s crashed: %s\n%s",
+                TOOL_PREFIX + spec.name,
+                type(exc).__name__,
+                "".join(traceback.format_tb(exc.__traceback__)),
+            )
+            raise ToolError(f"internal error ({type(exc).__name__}); see the server log") from None
         finally:
             # Audit trail without content: which tool, argument names and sizes, outcome, duration.
             _audit.info(
@@ -203,8 +212,8 @@ class BearerAuth:
         await self.app(scope, receive, send)
 
 
-def build_server(settings: Settings) -> MCPServer:
-    toolkit = Toolkit(settings)
+def build_server(settings: Settings, *, shared: bool = False) -> MCPServer:
+    toolkit = Toolkit(settings, shared=shared)
     mcp = MCPServer(
         name="kube_noob_mcp",
         title="kube-noob",
@@ -213,6 +222,9 @@ def build_server(settings: Settings) -> MCPServer:
         website_url="https://github.com/aashishmahajan/kube-noob",
         icons=_icons(),
     )
+    # The SDK logs each failed call's message at INFO, and messages can quote the caller's input (a YAML error shows
+    # the offending line). Our own audit line (tool, argument sizes, outcome) is the record; keep the SDK quiet.
+    logging.getLogger("mcp.server.mcpserver.server").setLevel(logging.WARNING)
     for spec in toolkit.specs():
         mcp.tool(
             name=TOOL_PREFIX + spec.name,
@@ -368,7 +380,9 @@ def http_app(settings: Settings, *, allow_unauthenticated: bool = False) -> ASGI
         security = TransportSecuritySettings(
             enable_dns_rebinding_protection=True, allowed_hosts=allowed_hosts, allowed_origins=srv.allowed_origins
         )
-    mcp = build_server(settings)
+    # Over HTTP many callers share one learning file, so the tools that write it are not offered (add team notes
+    # with `kube-noob learning note` in the pod instead).
+    mcp = build_server(settings, shared=True)
     app = mcp.streamable_http_app(
         streamable_http_path=srv.path,
         transport_security=security,
@@ -376,4 +390,5 @@ def http_app(settings: Settings, *, allow_unauthenticated: bool = False) -> ASGI
         stateless_http=True,
         json_response=True,
     )
-    return BodyLimit(BearerAuth(app, token))
+    # Authenticate before reading any body, so a caller without the token cannot make the server buffer requests.
+    return BearerAuth(BodyLimit(app), token)

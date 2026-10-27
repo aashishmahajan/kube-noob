@@ -191,7 +191,40 @@ class LearnerIn(_In):
 class GradeIn(_In):
     completion: str = Field(..., min_length=1, max_length=200_000)
     task_id: str | None = Field(None, max_length=100, description="Benchmark task id; or pass `task` inline.")
-    task: dict[str, Any] | None = None
+    task: dict[str, Any] | None = Field(
+        None,
+        description="Inline task. Its mustMention / mustNotMention / matches entries are matched as literal text, "
+        "not regular expressions (only built-in benchmark tasks use regular expressions).",
+    )
+
+
+def _literal_task(task: dict[str, Any]) -> dict[str, Any]:
+    """Escape every pattern in a caller-supplied task, so no regular expression from a caller is ever compiled
+    (a pattern such as ``(a+)+$`` would otherwise freeze the server)."""
+    import copy
+    import re
+
+    def claim(spec: Any) -> Any:
+        if isinstance(spec, dict) and "pattern" in spec:
+            return {**spec, "pattern": re.escape(str(spec["pattern"]))}
+        return re.escape(str(spec))
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            out: dict[str, Any] = {}
+            for k, v in node.items():
+                if k in {"mustMention", "mustNotMention"} and isinstance(v, list):
+                    out[k] = [claim(x) for x in v]
+                elif k == "matches":
+                    out[k] = re.escape(str(v))
+                else:
+                    out[k] = walk(v)
+            return out
+        if isinstance(node, list):
+            return [walk(x) for x in node]
+        return node
+
+    return walk(copy.deepcopy(task))  # type: ignore[no-any-return]
 
 
 class WebFetchIn(_In):
@@ -215,8 +248,11 @@ class ToolSpec:
 
 
 class Toolkit:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, shared: bool = False) -> None:
+        """``shared``: served over HTTP to many callers (service or sidecar). Shared servers expose no tool that writes
+        the learning file, so one caller cannot plant notes that every other caller's search then returns."""
         self.settings = settings
+        self.shared = shared
         self.tutor = Tutor(settings.data_dir)
         self.learning = LearningStore(settings.data_dir)
 
@@ -431,7 +467,7 @@ class Toolkit:
     # -- training enforcer -----------------------------------------------------------------------------------
     def grade(self, p: GradeIn) -> dict[str, Any]:
         if p.task is not None:
-            task = p.task
+            task = _literal_task(p.task)
         elif p.task_id is not None:
             task = benchmark().get(p.task_id) or {}
             if not task:
@@ -750,4 +786,6 @@ class Toolkit:
                     open_world=True,
                 )
             )
+        if self.shared:
+            s = [t for t in s if t.name not in {"learning_note_add", "learning_profile_set"}]
         return s

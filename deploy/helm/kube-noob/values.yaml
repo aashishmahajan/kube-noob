@@ -16,7 +16,8 @@ config:
 
 auth:
   # Name of a Secret with key `token`; clients send `Authorization: Bearer <token>`. Empty: the chart generates a
-  # random token in the Secret <release>-kube-noob-token and keeps it across upgrades.
+  # random token in the Secret <release>-kube-noob-token and keeps it across `helm upgrade`. With `helm template` or
+  # GitOps (Argo CD, Flux) the chart cannot see that Secret and would rotate the token on every render: set this.
   existingSecret: ""
   # Only for meshes/gateways that authenticate callers themselves.
   allowUnauthenticated: false
@@ -45,6 +46,9 @@ networkPolicy:
     dnsPort: 5353                   # 53 on vanilla Kubernetes
     apiServerCIDRs: []              # required when config.clusterEnabled (e.g. the kubernetes Service endpoints)
     apiServerPort: 6443
+    # With webEnabled: HTTPS to public addresses only (never in-cluster or private ranges)...
+    webExceptCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+    webProxy: {cidr: "", port: 3128}  # ...or through your cluster-wide egress proxy, if you set its CIDR
 
 # OpenShift (OVN-Kubernetes) only: deny traffic leaving the cluster except the API server (when clusterEnabled) and,
 # when webEnabled, HTTPS to the allowlisted documentation domains. Applies to every pod in the release namespace, so
@@ -71,7 +75,10 @@ egressFirewall:
   denyCIDRs: ["0.0.0.0/0"]          # add "::/0" on dual-stack clusters
 
 rbac:
-  scope: cluster                    # cluster | namespace (read-only; never Secrets)
+  # Read-only, never Secrets. Every holder of the bearer token reads through this ServiceAccount, so the default is
+  # the release namespace plus the namespaces listed below; "cluster" grants cluster-wide reads.
+  scope: namespace                  # namespace | cluster
+  namespaces: []                    # extra namespaces to read in namespace scope, e.g. [shop, payments]
 
 persistence:
   enabled: false                    # keep corpus + learner progress across restarts

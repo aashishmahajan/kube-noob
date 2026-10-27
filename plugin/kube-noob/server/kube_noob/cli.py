@@ -598,7 +598,14 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             s.server.port = a.port
         app = http_app(s, allow_unauthenticated=a.allow_unauthenticated)
         uvicorn.run(
-            app, host=s.server.host, port=s.server.port, log_level="info", proxy_headers=False, server_header=False
+            app,
+            host=s.server.host,
+            port=s.server.port,
+            log_level="info",
+            proxy_headers=False,
+            server_header=False,
+            limit_concurrency=64,  # beyond this, new requests get 503 instead of piling up in memory
+            timeout_keep_alive=5,
         )
         return 0
 

@@ -50,8 +50,20 @@ spec:
         - {protocol: TCP, port: 443}
     {{- end }}
     {{- if and .Values.config.webEnabled (not (.Values.config.offline | default false)) }}
-    - ports:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{- toYaml .Values.networkPolicy.egress.webExceptCIDRs | nindent 14 }}
+      ports:
         - {protocol: TCP, port: 443}
+    {{- with .Values.networkPolicy.egress.webProxy }}
+    {{- if .cidr }}
+    - to:
+        - ipBlock: {cidr: {{ .cidr }}}
+      ports:
+        - {protocol: TCP, port: {{ .port }}}
+    {{- end }}
+    {{- end }}
     {{- end }}
   {{- end }}
 {{- end }}

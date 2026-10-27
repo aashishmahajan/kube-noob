@@ -57,6 +57,11 @@ _NOTE_ID = re.compile(r"^local-\d{1,6}$")
 _MANIFEST_KEYS = re.compile(r"(?m)^\s*[\"']?(apiVersion|kind|metadata|spec|data|stringData)[\"']?\s*:")
 _API_VERSION = re.compile(r"[\"']?\bapiVersion\b[\"']?\s*[:=]")
 _KIND = re.compile(r"[\"']?\bkind\b[\"']?\s*[:=]")
+# A note may say "re-ran the job", never hand readers a download-and-run command.
+_PIPE_TO_SHELL = re.compile(
+    r"(?i)(\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da|k)?sh\b"
+    r"|\|\s*(sudo\s+)?(ba|z|da|k)?sh\s*$|\b(iex|invoke-expression)\b|base64\s+(-d|--decode)[^\n]*\|)"
+)
 _LOG_LINE = re.compile(r"(?m)^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|[IWEF]\d{4} \d{2}:\d{2}|\[\d+\.\d+\])")
 _STACK = re.compile(
     r"(?m)(goroutine \d+ \[|Traceback \(most recent call last\)|^\s+at [\w.$<>]+\(|^panic: |\.go:\d+ \+0x)"
@@ -131,6 +136,8 @@ def check_text(field: str, value: str, limit: int) -> str:
         raise ValueError(f"{field} is longer than {limit} characters; store a summary, not raw output")
     if contains_credential(v):
         raise ValueError(f"{field} looks like it contains a credential; learning notes never store secrets")
+    if _PIPE_TO_SHELL.search(v):
+        raise ValueError(f"{field} pipes a download into a shell; describe the fix in words instead")
     if len(_MANIFEST_KEYS.findall(v)) >= 2 or (_API_VERSION.search(v) and _KIND.search(v)):
         raise ValueError(f"{field} looks like a manifest; describe the fix in words and keep manifests in Git")
     if v.count("\n") >= _MAX_LINES or len(_LOG_LINE.findall(v)) >= 3 or _STACK.search(v):
@@ -386,7 +393,12 @@ class LearningStore:
             if n.get("tags"):
                 body += f"\n\nTags: {', '.join(n['tags'])}"
             docs.append(
-                {"id": n["id"], "title": f"Team note: {n['symptom'][:80]}", "body": body, "created": n.get("created")}
+                {
+                    "id": n["id"],
+                    "title": f"Team note (saved by a user, unverified): {n['symptom'][:80]}",
+                    "body": body,
+                    "created": n.get("created"),
+                }
             )
         return docs
 
