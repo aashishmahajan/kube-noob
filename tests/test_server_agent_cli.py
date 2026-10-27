@@ -1,0 +1,221 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import anyio
+import pytest
+from mcp import Client
+
+from kube_noob.agent.loop import Agent
+from kube_noob.agent.providers import ToolCall, Turn
+from kube_noob.cli import main
+from kube_noob.config import Settings, load_settings
+from kube_noob.evals.export import export_grpo, export_sft
+from kube_noob.knowledge.store import get_store
+from kube_noob.server.mcp_app import build_server, http_app
+from kube_noob.toolkit import Toolkit
+from tests.conftest import FIXTURES
+
+BAD = (FIXTURES / "bad-bundle.yaml").read_text()
+
+
+def test_toolkit_availability_gates() -> None:
+    names = {s.name for s in Toolkit(load_settings()).specs()}
+    assert "web_fetch" not in names and "cluster_get" not in names and "run_protocol" in names
+    on = load_settings(overrides={"webEnabled": True, "cluster": {"enabled": True}})
+    names_on = {s.name for s in Toolkit(on).specs()}
+    assert {"web_fetch", "cluster_get", "cluster_debug_workload"} <= names_on
+
+
+def test_mcp_in_process(settings: Settings) -> None:
+    server = build_server(settings)
+
+    async def run() -> dict[str, Any]:
+        async with Client(server) as c:
+            tools = await c.list_tools()
+            names = {t.name for t in tools.tools}
+            audit = await c.call_tool(
+                "kubenoob_audit_manifests", {"manifests": BAD, "platform": "openshift", "version": "4.22"}
+            )
+            proto = await c.call_tool("kubenoob_run_protocol", {"request": "review for ROSA HCP", "manifests": BAD})
+            bad_args = await c.call_tool("kubenoob_search_knowledge", {"query": "x"})
+            gen = await c.call_tool(
+                "kubenoob_generate_manifests",
+                {
+                    "blueprint": {
+                        "name": "web",
+                        "namespace": "a",
+                        "image": "quay.io/a/web:1.0.0",
+                        "platform": "openshift",
+                        "exposure": {"type": "route"},
+                    }
+                },
+            )
+            prompts = await c.list_prompts()
+            res = await c.read_resource("kubenoob://knowledge/ocp-scc")
+            return {
+                "names": names,
+                "audit": audit,
+                "proto": proto,
+                "bad": bad_args,
+                "gen": gen,
+                "prompts": {p.name for p in prompts.prompts},
+                "res": res,
+            }
+
+    out = anyio.run(run)
+    assert {
+        "kubenoob_run_protocol",
+        "kubenoob_audit_manifests",
+        "kubenoob_diagnose",
+        "kubenoob_learn_submit",
+        "kubenoob_grade_answer",
+    } <= out["names"]
+    assert not any(n.startswith("kubenoob_web") or n.startswith("kubenoob_cluster") for n in out["names"])
+    audit = out["audit"].structured_content
+    assert audit["summary"]["maxSeverity"] == "critical"
+    proto = out["proto"].structured_content
+    assert proto["auditValidationBrief"]["platform"] == "rosa-hcp"
+    assert (
+        proto["auditValidationBrief"]["after"]["counts"]["critical"]
+        < proto["auditValidationBrief"]["before"]["counts"]["critical"]
+    )
+    assert out["bad"].is_error
+    assert out["gen"].structured_content["status"] == "ok"
+    assert {"master_controller", "debug_session", "tutor"} <= out["prompts"]
+    assert "restricted-v2" in out["res"].contents[0].text
+
+
+def test_http_app_auth_and_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    from starlette.testclient import TestClient
+
+    s = load_settings(overrides={"server": {"host": "0.0.0.0", "allowedHosts": ["testserver"]}})  # noqa: S104
+    with pytest.raises(RuntimeError, match="Refusing"):
+        http_app(s)
+    monkeypatch.setenv("KUBE_NOOB_HTTP_TOKEN", "s3cret-token")
+    app = http_app(s)
+    with TestClient(app) as client:
+        assert client.get("/healthz").json()["status"] == "ok"
+        assert client.get("/readyz").json()["status"] == "ready"
+        init = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "t", "version": "1"},
+            },
+        }
+        headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+        assert client.post("/mcp", json=init, headers=headers).status_code == 401
+        r = client.post("/mcp", json=init, headers={**headers, "Authorization": "Bearer s3cret-token"})
+        assert r.status_code == 200, r.text
+        assert r.json()["result"]["serverInfo"]["name"] == "kube_noob_mcp"
+        assert client.post("/mcp", json=init, headers={**headers, "Authorization": "Bearer wrong"}).status_code == 401
+
+
+class ScriptedProvider:
+    name = "scripted"
+    model = "scripted-1"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def turn(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Turn:
+        self.calls += 1
+        assert "webEnabled: false" in system or "Web access is disabled" in system
+        if self.calls == 1:
+            return Turn(
+                "",
+                [
+                    ToolCall("t1", "search_knowledge", {"query": "restricted-v2 runAsUser"}),
+                    ToolCall("t2", "nonexistent_tool", {}),
+                ],
+                "tool_use",
+                self.model,
+                {"role": "assistant", "content": "calling"},
+            )
+        last = json.dumps(messages[-1])
+        assert "kn:ocp-scc" in last and "Unknown tool" in last
+        return Turn(
+            "Remove runAsUser; restricted-v2 assigns a UID from the namespace range [kn:ocp-scc#0] [kn:fake#1].",
+            [],
+            "end_turn",
+            self.model,
+            {"role": "assistant", "content": "done"},
+        )
+
+    def tool_results_message(self, results: list[tuple[ToolCall, str, bool]]) -> list[dict[str, Any]]:
+        return [{"role": "user", "content": [{"id": c.call_id, "out": o, "err": e} for c, o, e in results]}]
+
+    def user_message(self, text: str) -> dict[str, Any]:
+        return {"role": "user", "content": text}
+
+    def complete_text(self, prompt: str, max_tokens: int = 1024) -> str:
+        return "{}"
+
+
+def test_agent_loop_with_tools(settings: Settings) -> None:
+    agent = Agent(settings, provider=ScriptedProvider())
+    res = agent.ask("Why is my pod rejected on OpenShift?")
+    assert res.rounds == 2 and len(res.tool_calls) == 2 and res.tool_calls[1]["error"]
+    assert [c["chunkId"] for c in res.citations] == ["kn:ocp-scc#0"] and res.invalid_citations == ["kn:fake#1"]
+
+
+def test_cli_audit_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    f = tmp_path / "bad.yaml"
+    f.write_text(BAD)
+    assert main(["audit", "-f", str(f), "--platform", "openshift", "--version", "4.22"]) == 1
+    assert "KN-V002" in capsys.readouterr().out
+    assert main(["audit", "-f", str(f), "--fail-on", "never", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["summary"]["maxSeverity"] == "critical"
+
+
+def test_cli_generate_fix_diagnose_learn(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    out = tmp_path / "gen.yaml"
+    assert (
+        main(
+            [
+                "generate",
+                "--name",
+                "web",
+                "--namespace",
+                "demo",
+                "--image",
+                "nginxinc/nginx-unprivileged:1.27.2",
+                "--replicas",
+                "2",
+                "-o",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    assert main(["learn", "submit", "k8s-ex-hardened-deployment", "-f", str(out), "--learner", "cli"]) == 0
+    capsys.readouterr()
+    assert main(["generate", "--name", "x", "--namespace", "y", "--image", "z:1", "--expose", "route"]) == 3
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(BAD)
+    fixed = tmp_path / "fixed.yaml"
+    assert main(["fix", "-f", str(bad), "--platform", "rosa-hcp", "-o", str(fixed)]) == 0
+    assert "route.openshift.io/v1" in fixed.read_text()
+    ev = tmp_path / "ev.txt"
+    ev.write_text("Warning FailedMount Multi-Attach error for volume pvc-1")
+    capsys.readouterr()
+    assert main(["diagnose", "-f", str(ev), "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["diagnoses"][0]["id"] == "DBG-MULTIATTACH"
+    assert main(["debug", "deployment/x", "-n", "y"]) == 2  # cluster access disabled by default
+    assert main(["corpus", "jira"]) == 2  # network ingestion requires --online
+
+
+def test_export_datasets(tmp_path: Path) -> None:
+    sft = export_sft(tmp_path / "sft.jsonl", get_store(), synthetic_limit=6)
+    assert sft["records"] > 50 and sft["bySource"]["curriculum"] >= 4 and sft["bySource"]["playbook"] >= 20
+    lines = [json.loads(x) for x in (tmp_path / "sft.jsonl").read_text().splitlines()]
+    assert all(r["messages"][2]["content"] for r in lines)
+    assert all(r["metadata"]["labelSource"] == "deterministic" for r in lines)
+    grpo = export_grpo(tmp_path / "grpo.jsonl")
+    assert grpo["records"] == 16

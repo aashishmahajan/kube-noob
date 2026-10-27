@@ -1,0 +1,13 @@
+apiVersion: v2
+name: kube-noob
+description: kube-noob MCP server for Kubernetes / OpenShift / ROSA - offline-first learning, audit and debugging.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/aashishmahajan/kube-noob
+sources:
+  - https://github.com/aashishmahajan/kube-noob
+keywords: [kubernetes, openshift, rosa, mcp, security, learning]
+annotations:
+  artifacthub.io/license: Apache-2.0

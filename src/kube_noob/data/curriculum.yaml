@@ -1,0 +1,449 @@
+# kube-noob curriculum. Lessons reference built-in knowledge docs (src/kube_noob/data/knowledge/<id>.md).
+# Exercises are graded offline with the deterministic check DSL (kube_noob/evals/checks.py).
+# `reference` blueprints are rendered by the generator to produce reference solutions (used by tests and SFT export).
+version: 1
+tracks:
+  - id: kubernetes
+    title: Kubernetes foundations
+    summary: Workloads, services, storage, security context, probes, resources, RBAC, NetworkPolicy, debugging.
+    lessons:
+      - id: k8s-101-objects
+        title: Core objects and how they fit together
+        docs: [kubernetes]
+        objectives: [Pick the right workload kind, Wire a Service to pods, Know where configuration and storage live]
+        keyPoints:
+          - Deployments for stateless replicas, StatefulSets for stable identity and per-replica volumes.
+          - A Service only routes to Ready pods whose labels match its selector.
+        tryIt: ["kube-noob generate --name web --namespace demo --image nginxinc/nginx-unprivileged:1.27 --platform kubernetes"]
+        exercises: [k8s-ex-hardened-deployment]
+      - id: k8s-102-security
+        title: Pod Security Standards and the hardened securityContext
+        docs: [k8s-pss, k8s-images]
+        objectives: [Apply the restricted profile, Pin images]
+        keyPoints:
+          - runAsNonRoot, allowPrivilegeEscalation false, drop ALL capabilities, RuntimeDefault seccomp.
+          - Pin images by digest; never latest.
+        exercises: [k8s-ex-hardened-deployment]
+      - id: k8s-103-reliability
+        title: Probes, resources, PDBs and spreading
+        docs: [k8s-probes, k8s-resources, k8s-pdb, k8s-topology-spread]
+        objectives: [Write safe probes, Size requests and limits, Keep upgrades unblocked]
+        keyPoints:
+          - Liveness checks only the process; readiness may check dependencies.
+          - PDB maxUnavailable 1 with at least 2 replicas.
+        exercises: [k8s-ex-ha-web]
+      - id: k8s-104-storage
+        title: Storage access modes
+        docs: [storage-access-modes]
+        objectives: [Match access modes to provisioners, Avoid Multi-Attach deadlocks]
+        keyPoints:
+          - EBS (gp3-csi) is ReadWriteOnce only.
+          - Replicas that each need their own disk belong in a StatefulSet.
+        exercises: [k8s-ex-statefulset-storage]
+      - id: k8s-105-network-rbac
+        title: NetworkPolicy and RBAC least privilege
+        docs: [k8s-networkpolicy, k8s-rbac, k8s-services]
+        objectives: [Default-deny and explicit allows, Least-privilege Roles]
+        keyPoints:
+          - Policies are additive allow-lists once a pod is selected.
+          - No wildcards and no cluster-admin bindings for apps.
+        exercises: [k8s-ex-least-privilege-rbac]
+      - id: k8s-106-debugging
+        title: Debugging pods systematically
+        docs: [k8s-debug-pods, k8s-deprecations]
+        objectives: [Read events and exit codes, Migrate removed APIs]
+        keyPoints:
+          - "Exit 137 = SIGKILL/OOMKilled; 143 = SIGTERM (often a liveness kill)."
+          - "policy/v1beta1 PodDisruptionBudget was removed in 1.25."
+        exercises: [k8s-ex-migrate-removed-apis]
+    exercises:
+      - id: k8s-ex-hardened-deployment
+        title: Hardened Deployment + Service
+        points: 15
+        prompt: >-
+          Write a Deployment named 'web' in namespace 'demo' running image 'nginxinc/nginx-unprivileged:1.27.2' on port
+          8080 with 2 replicas, plus a ClusterIP Service named 'web' that targets it. It must pass the Pod Security
+          'restricted' profile (non-root, no privilege escalation, drop ALL capabilities, RuntimeDefault seccomp),
+          set CPU/memory requests and a memory limit, and have readiness and liveness probes.
+        hints:
+          - Put runAsNonRoot and seccompProfile at pod level; allowPrivilegeEscalation and capabilities per container.
+          - The Service selector must match the pod template labels exactly.
+        checks:
+          platform: kubernetes
+          kinds: [Deployment, Service]
+          schemaValid: true
+          forbidRules: [KN-S002, KN-S003, KN-S006, KN-S008, KN-C001, KN-C004, KN-C005, KN-V011, KN-S012]
+          assertions:
+            - {kind: Deployment, path: spec.replicas, gte: 2}
+            - {kind: Deployment, path: "spec.template.spec.containers[0].image", matches: "nginx-unprivileged"}
+        reference:
+          name: web
+          namespace: demo
+          image: nginxinc/nginx-unprivileged:1.27.2
+          platform: kubernetes
+          replicas: 2
+          port: 8080
+      - id: k8s-ex-ha-web
+        title: Highly available web tier
+        points: 20
+        prompt: >-
+          Produce manifests for 'shop-api' (namespace 'shop', image 'ghcr.io/acme/shop-api:2.3.1', port 8080) on
+          vanilla Kubernetes with 3 replicas spread across zones, a PodDisruptionBudget that still allows node drains,
+          an HPA (max 10) driven by CPU utilization, and a default-deny NetworkPolicy plus an allow rule for the
+          ingress controller namespace 'ingress-nginx'. Expose it with an Ingress on host shop.example.com with TLS.
+        hints:
+          - PDB maxUnavailable 1, never minAvailable equal to replicas.
+          - HPA utilization needs CPU requests on every container.
+        checks:
+          platform: kubernetes
+          kinds: [Deployment, Service, Ingress, PodDisruptionBudget, HorizontalPodAutoscaler, NetworkPolicy]
+          schemaValid: true
+          maxSeverity: low
+          forbidRules: [KN-C009, KN-C010, KN-C012, KN-N003, KN-N001]
+          assertions:
+            - {kind: Deployment, path: spec.replicas, gte: 3}
+            - {kind: Ingress, path: "spec.tls[0].hosts[0]", equals: shop.example.com}
+        reference:
+          name: shop-api
+          namespace: shop
+          image: ghcr.io/acme/shop-api:2.3.1
+          platform: kubernetes
+          replicas: 3
+          hpaMaxReplicas: 10
+          exposure: {type: ingress, host: shop.example.com, ingressClass: nginx}
+      - id: k8s-ex-statefulset-storage
+        title: Per-replica storage with a StatefulSet
+        points: 20
+        prompt: >-
+          Run 3 replicas of 'ledger' (namespace 'fin', image 'quay.io/acme/ledger:5.1.0', port 7000) where each replica
+          needs its own 20Gi ReadWriteOnce volume mounted at /var/lib/ledger. Use the cluster default StorageClass.
+        hints:
+          - Three replicas sharing one RWO claim fail with Multi-Attach; use volumeClaimTemplates.
+          - A StatefulSet needs a headless Service (clusterIP None).
+        checks:
+          platform: kubernetes
+          kinds: [StatefulSet, Service]
+          schemaValid: true
+          forbidRules: [KN-ST002, KN-ST001, KN-ST005]
+          assertions:
+            - {kind: StatefulSet, path: "spec.volumeClaimTemplates[0].spec.resources.requests.storage", equals: 20Gi}
+            - {kind: StatefulSet, path: spec.replicas, gte: 3}
+        reference:
+          name: ledger
+          namespace: fin
+          image: quay.io/acme/ledger:5.1.0
+          platform: kubernetes
+          workload: statefulset
+          replicas: 3
+          port: 7000
+          storage: {size: 20Gi, accessMode: ReadWriteOnce, mountPath: /var/lib/ledger}
+      - id: k8s-ex-least-privilege-rbac
+        title: Least-privilege Role for a config reloader
+        points: 10
+        prompt: >-
+          Create a ServiceAccount 'reloader' in namespace 'apps' and a namespaced Role + RoleBinding that only lets it
+          get, list and watch ConfigMaps in that namespace. No wildcards, no Secrets, no cluster-wide permissions.
+        hints:
+          - "Role rules need apiGroups [\"\"] for core resources."
+        checks:
+          platform: kubernetes
+          kinds: [ServiceAccount, Role, RoleBinding]
+          schemaValid: true
+          forbidRules: [KN-S015, KN-S016, KN-S017]
+          assertions:
+            - {kind: Role, path: "rules[0].resources", contains: configmaps}
+            - {kind: RoleBinding, path: roleRef.kind, equals: Role}
+      - id: k8s-ex-migrate-removed-apis
+        title: Migrate removed APIs for Kubernetes 1.35
+        points: 15
+        prompt: >-
+          This bundle worked on Kubernetes 1.20. Rewrite it so it applies on 1.35 without changing behaviour.
+        starter: |
+          apiVersion: policy/v1beta1
+          kind: PodDisruptionBudget
+          metadata: {name: api, namespace: apps}
+          spec:
+            maxUnavailable: 1
+            selector: {matchLabels: {app: api}}
+          ---
+          apiVersion: batch/v1beta1
+          kind: CronJob
+          metadata: {name: cleanup, namespace: apps}
+          spec:
+            schedule: "0 3 * * *"
+            jobTemplate:
+              spec:
+                template:
+                  spec:
+                    restartPolicy: OnFailure
+                    containers:
+                    - name: cleanup
+                      image: registry.example.com/tools/cleanup:1.0.4
+                      resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}
+        hints:
+          - "policy/v1 and batch/v1 are the replacements; schemas are otherwise compatible."
+        checks:
+          platform: kubernetes
+          version: "1.35"
+          kinds: [PodDisruptionBudget, CronJob]
+          schemaValid: true
+          forbidRules: [KN-V005, KN-V006]
+          assertions:
+            - {kind: CronJob, path: spec.schedule, equals: "0 3 * * *"}
+    quiz:
+      - id: k8s-q-exit137
+        question: A container's lastState shows exit code 137. What is the most likely cause?
+        choices: [The command was not found, It was killed with SIGKILL - typically OOMKilled, It segfaulted, It exited cleanly]
+        answer: 1
+        explanation: 137 = 128 + 9 (SIGKILL). The kernel OOM killer or a forced kill after the grace period sends SIGKILL.
+        source: kn:k8s-debug-pods#0
+      - id: k8s-q-pdb-removed
+        question: In which Kubernetes version was policy/v1beta1 PodDisruptionBudget removed?
+        choices: ["1.22", "1.25", "1.29", "1.32"]
+        answer: 1
+        explanation: The deprecation guide lists policy/v1beta1 PodDisruptionBudget among the 1.25 removals; use policy/v1.
+        source: kn:k8s-deprecations#0
+      - id: k8s-q-liveness
+        question: What should a liveness probe check?
+        choices: [The database and downstream APIs, Only whether the process itself is healthy, Nothing - use readiness only, The node's disk space]
+        answer: 1
+        explanation: Liveness failures restart containers; checking dependencies turns one slow dependency into a restart storm.
+        source: kn:k8s-probes#0
+      - id: k8s-q-rwx-ebs
+        question: A PVC requests ReadWriteMany from StorageClass gp3-csi. What happens?
+        choices: [It binds and works on all nodes, It stays Pending because EBS is ReadWriteOnce only, It silently becomes ReadWriteOnce, It binds but is read-only]
+        answer: 1
+        explanation: gp3-csi uses the AWS EBS CSI driver - block volumes attached to one node in one AZ.
+        source: kn:storage-access-modes#0
+      - id: k8s-q-hpa-unknown
+        question: An HPA shows <unknown>/70% CPU. What is the most common cause?
+        choices: [Too many replicas, Target containers have no CPU requests, The HPA uses autoscaling/v2, The Deployment has a PDB]
+        answer: 1
+        explanation: Utilization is usage divided by request; without CPU requests it cannot be computed.
+        source: kn:k8s-resources#0
+  - id: openshift
+    title: OpenShift
+    summary: SCCs and arbitrary UIDs, Routes and TLS, OVN-Kubernetes egress, operators, version map.
+    lessons:
+      - id: ocp-101-platform
+        title: What OpenShift adds to Kubernetes
+        docs: [openshift, ocp-operators]
+        objectives: [Know the OpenShift-only APIs, Map OCP to Kubernetes versions]
+        keyPoints:
+          - "Route is route.openshift.io/v1; DeploymentConfig is deprecated since 4.14."
+          - "OCP 4.22 runs Kubernetes 1.35."
+      - id: ocp-102-scc
+        title: SCCs and arbitrary UIDs
+        docs: [ocp-scc, ocp-arbitrary-uid]
+        objectives: [Pass restricted-v2 without exceptions, Build images for random UIDs]
+        keyPoints:
+          - Do not hard-code runAsUser on OpenShift.
+          - chgrp -R 0 and chmod -R g=u for writable paths.
+        exercises: [ocp-ex-restricted-v2]
+      - id: ocp-103-routes
+        title: Routes, TLS and router NetworkPolicies
+        docs: [ocp-routes, k8s-networkpolicy]
+        objectives: [Choose edge/reencrypt/passthrough, Allow the router through NetworkPolicy]
+        exercises: [ocp-ex-secure-route]
+      - id: ocp-104-egress
+        title: EgressFirewall
+        docs: [ocp-egressfirewall]
+        objectives: [Write first-match egress rules correctly]
+        exercises: [ocp-ex-egressfirewall]
+    exercises:
+      - id: ocp-ex-restricted-v2
+        title: Make a workload pass restricted-v2
+        points: 15
+        prompt: >-
+          This Deployment is rejected on OpenShift 4.22 with 'unable to validate against any security context
+          constraint'. Fix it so it is admitted under restricted-v2 without granting any extra SCC.
+        starter: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: api, namespace: team-a}
+          spec:
+            replicas: 2
+            selector: {matchLabels: {app: api}}
+            template:
+              metadata: {labels: {app: api}}
+              spec:
+                securityContext: {runAsUser: 1000, fsGroup: 2000}
+                containers:
+                - name: api
+                  image: quay.io/acme/api:3.4.0
+                  securityContext: {allowPrivilegeEscalation: true, capabilities: {add: [NET_ADMIN]}}
+                  resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
+        hints:
+          - "Remove fixed UIDs/fsGroup, set allowPrivilegeEscalation false and drop ALL capabilities."
+        checks:
+          platform: openshift
+          version: "4.22"
+          kinds: [Deployment]
+          schemaValid: true
+          forbidRules: [KN-S004, KN-S005, KN-S002, KN-S001]
+      - id: ocp-ex-secure-route
+        title: Secure Route with router-only access
+        points: 15
+        prompt: >-
+          Expose Service 'catalog' (namespace 'store', image 'quay.io/acme/catalog:1.8.0', port 8080) on OpenShift
+          with an edge-terminated Route on host catalog.apps.example.com that redirects HTTP to HTTPS, and
+          NetworkPolicies that only admit traffic from the router and from pods in the same namespace.
+        hints:
+          - "The router namespace carries policy-group.network.openshift.io/ingress: \"\""
+        checks:
+          platform: openshift
+          kinds: [Deployment, Service, Route, NetworkPolicy]
+          schemaValid: true
+          maxSeverity: low
+          forbidRules: [KN-N002, KN-N001, KN-V002]
+          assertions:
+            - {kind: Route, path: spec.tls.termination, in: [edge, reencrypt]}
+            - {kind: Route, path: spec.tls.insecureEdgeTerminationPolicy, equals: Redirect}
+        reference:
+          name: catalog
+          namespace: store
+          image: quay.io/acme/catalog:1.8.0
+          platform: openshift
+          replicas: 2
+          exposure: {type: route, host: catalog.apps.example.com, tls: edge}
+      - id: ocp-ex-egressfirewall
+        title: Egress allow-list for a payments project
+        points: 10
+        prompt: >-
+          Write the EgressFirewall for project 'payments' allowing only api.stripe.com and the internal range
+          10.0.0.0/16, denying everything else.
+        hints:
+          - "The object must be named default; the catch-all Deny goes last."
+        checks:
+          platform: openshift
+          kinds: [EgressFirewall]
+          schemaValid: true
+          forbidRules: [KN-V015, KN-N006]
+          assertions:
+            - {kind: EgressFirewall, path: "spec.egress[0].type", equals: Allow}
+    quiz:
+      - id: ocp-q-route-group
+        question: Which apiVersion serves the Route kind?
+        choices: [apps.openshift.io/v1, route.openshift.io/v1, networking.k8s.io/v1, gateway.networking.k8s.io/v1]
+        answer: 1
+        explanation: apps.openshift.io/v1 serves DeploymentConfig; Route is route.openshift.io/v1.
+        source: kn:ocp-routes#0
+      - id: ocp-q-runasuser
+        question: A pod on OpenShift sets runAsUser 1000 and is rejected. Best fix?
+        choices: [Grant the privileged SCC, Remove runAsUser and keep runAsNonRoot true, Set runAsUser 0, Disable SCCs]
+        answer: 1
+        explanation: restricted-v2 uses MustRunAsRange and assigns a UID from the namespace range.
+        source: kn:ocp-scc#0
+      - id: ocp-q-egress-order
+        question: An EgressFirewall lists Deny 0.0.0.0/0 first, then Allow api.stripe.com. Result?
+        choices: [Stripe is allowed, Everything external is denied because the first match wins, Rules are merged, The object is rejected]
+        answer: 1
+        explanation: EgressFirewall rules are evaluated in order and the first match wins.
+        source: kn:ocp-egressfirewall#0
+      - id: ocp-q-version
+        question: Which Kubernetes version does OpenShift 4.22 use?
+        choices: ["1.33", "1.34", "1.35", "1.37"]
+        answer: 2
+        explanation: Each OCP 4.x minor tracks one Kubernetes minor; 4.22 = 1.35.
+        source: kn:version-history#0
+  - id: rosa-hcp
+    title: ROSA with Hosted Control Planes
+    summary: HCP architecture, networking, machine pools, upgrades, RWX storage with EFS.
+    lessons:
+      - id: rosa-101-architecture
+        title: Classic vs HCP
+        docs: [rosa-hcp]
+        objectives: [Explain where the control plane runs, Plan machine pools per AZ]
+        keyPoints:
+          - Control plane in a Red Hat-owned account; workers reach it over PrivateLink.
+          - Control plane upgrades first; machine pools within two minors.
+      - id: rosa-102-storage
+        title: Shared storage with EFS
+        docs: [rosa-efs, storage-access-modes]
+        objectives: [Provision RWX on ROSA]
+        exercises: [rosa-ex-rwx]
+    exercises:
+      - id: rosa-ex-rwx
+        title: Shared uploads volume on ROSA HCP
+        points: 20
+        prompt: >-
+          On ROSA HCP, run 'uploads' (namespace 'media', image 'quay.io/acme/uploads:4.0.2', port 8080, 2 replicas)
+          where both replicas read and write the same 50Gi volume at /data, exposed through an edge Route.
+        hints:
+          - "gp3-csi cannot do RWX; use an EFS StorageClass such as efs-sc."
+        checks:
+          platform: rosa-hcp
+          kinds: [Deployment, PersistentVolumeClaim, Route]
+          schemaValid: true
+          forbidRules: [KN-ST001, KN-ST002, KN-N002]
+          assertions:
+            - {kind: PersistentVolumeClaim, path: "spec.accessModes[0]", equals: ReadWriteMany}
+        reference:
+          name: uploads
+          namespace: media
+          image: quay.io/acme/uploads:4.0.2
+          platform: rosa-hcp
+          replicas: 2
+          storage: {size: 50Gi, accessMode: ReadWriteMany, mountPath: /data}
+          exposure: {type: route, tls: edge}
+    quiz:
+      - id: rosa-q-cp
+        question: Where does the ROSA HCP control plane run?
+        choices: [On dedicated nodes in the customer VPC, As pods in a Red Hat-owned AWS account, On the worker nodes, In AWS Lambda]
+        answer: 1
+        explanation: HyperShift runs the control plane as pods in a Red Hat-owned account; workers connect over PrivateLink.
+        source: kn:rosa-hcp#0
+      - id: rosa-q-upgrade
+        question: How are ROSA HCP upgrades sequenced?
+        choices: [Workers first, Control plane first, then machine pools separately, Everything at once, Only by Red Hat]
+        answer: 1
+        explanation: The hosted control plane is upgraded first; machine pools follow and must stay within two minors.
+        source: kn:rosa-hcp#0
+  - id: helm
+    title: Helm
+    summary: Chart structure, values schema, releases, troubleshooting (Helm 3 and 4).
+    lessons:
+      - id: helm-101-charts
+        title: Charts and releases
+        docs: [helm]
+      - id: helm-102-troubleshooting
+        title: Helm troubleshooting
+        docs: [helm-troubleshooting]
+    exercises: []
+    quiz:
+      - id: helm-q-pending
+        question: helm upgrade fails with "another operation (install/upgrade/rollback) is in progress". First step?
+        choices: [Delete the namespace, Check helm history and roll back to the last good revision, Reinstall Helm, Wait one hour]
+        answer: 1
+        explanation: The release is stuck in a pending-* state; rollback (or uninstall if the first install failed).
+        source: kn:helm-troubleshooting#0
+      - id: helm-q-v4
+        question: When was Helm 4.0.0 released?
+        choices: ["2024-05-15", "2025-11-12", "2026-09-09", "It has not been released"]
+        answer: 1
+        explanation: helm/helm tag v4.0.0 is dated 2025-11-12.
+        source: kn:version-history#0
+  - id: stackrox
+    title: RHACS / StackRox
+    summary: Architecture, policies, admission control, release history.
+    lessons:
+      - id: rox-101-architecture
+        title: Central, Sensor, Admission Controller, Collector
+        docs: [stackrox]
+      - id: rox-102-admission
+        title: Why a deployment was blocked
+        docs: [stackrox-admission]
+    exercises: []
+    quiz:
+      - id: rox-q-webhook
+        question: Which webhook evaluates deploy-time policies?
+        choices: [k8sevents.stackrox.io, policyeval.stackrox.io, admission.openshift.io, validate.gatekeeper.sh]
+        answer: 1
+        explanation: policyeval.stackrox.io evaluates deploy-time policies; k8sevents.stackrox.io feeds runtime events.
+        source: kn:stackrox-admission#0
+      - id: rox-q-next
+        question: Which RHACS version follows 4.11?
+        choices: ["4.12", "5.0", "4.11.7 only", "6.0"]
+        answer: 1
+        explanation: The 4.12.x branch was renamed 5.0.x; there is no 4.12 release.
+        source: kn:stackrox#0

@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kube-noob.fullname" . }}
+  labels: {{- include "kube-noob.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    webEnabled: {{ .Values.config.webEnabled }}
+    {{- with .Values.config.allowedDomains }}
+    web:
+      allowedDomains: {{- toYaml . | nindent 8 }}
+    {{- end }}
+    defaultPlatform: {{ .Values.config.defaultPlatform }}
+    cluster:
+      enabled: {{ .Values.config.clusterEnabled }}
+      backend: in-cluster
+    server:
+      host: 0.0.0.0
+      port: {{ .Values.service.port }}
+      authTokenEnv: KUBE_NOOB_HTTP_TOKEN
+      # Host-header allowlist (DNS-rebinding protection): Service DNS names, Route/Ingress host, loopback.
+      allowedHosts:
+        {{- $svc := include "kube-noob.fullname" . }}
+        {{- range (list $svc (printf "%s.%s" $svc .Release.Namespace) (printf "%s.%s.svc" $svc .Release.Namespace) (printf "%s.%s.svc.cluster.local" $svc .Release.Namespace) "127.0.0.1" "localhost") }}
+        - {{ . | quote }}
+        - {{ printf "%s:*" . | quote }}
+        {{- end }}
+        {{- with .Values.route.host }}
+        - {{ . | quote }}
+        {{- end }}
+        {{- with .Values.ingress.host }}
+        - {{ . | quote }}
+        {{- end }}

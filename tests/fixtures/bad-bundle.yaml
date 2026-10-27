@@ -1,0 +1,82 @@
+apiVersion: apps.openshift.io/v1
+kind: Route
+metadata: {name: web, namespace: shop}
+spec:
+  to: {kind: Service, name: web}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: shop}
+spec:
+  replicas: 3
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec:
+      hostNetwork: true
+      containers:
+      - name: web
+        image: nginx:latest
+        imagePullPolice: Always
+        ports: [{containerPort: 8080, name: http}]
+        env: [{name: DB_PASSWORD, value: hunter2}]
+        securityContext:
+          runAsUser: 1000
+          privileged: true
+          capabilities: {add: [SYS_ADMIN]}
+        resources: {requests: {cpu: "2", memory: 1Gi}, limits: {memory: 512Mi}}
+      volumes:
+      - name: data
+        persistentVolumeClaim: {claimName: shared}
+      - name: sock
+        hostPath: {path: /var/run/docker.sock}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web, namespace: shop}
+spec:
+  type: LoadBalancer
+  selector: {app: webx}
+  ports: [{port: 80, targetPort: http}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: shared, namespace: shop}
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: gp3-csi
+  resources: {requests: {storage: 10Gi}}
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata: {name: web, namespace: shop}
+spec:
+  minAvailable: 3
+  selector: {matchLabels: {app: web}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: web-admin}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, name: default, namespace: shop}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: everything}
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+---
+apiVersion: k8s.ovn.org/v1
+kind: EgressFirewall
+metadata: {name: egress, namespace: shop}
+spec:
+  egress:
+  - {type: Deny, to: {cidrSelector: 0.0.0.0/0}}
+  - {type: Allow, to: {dnsName: api.stripe.com}}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: creds, namespace: shop}
+stringData: {password: hunter2}

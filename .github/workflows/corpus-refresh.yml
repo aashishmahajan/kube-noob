@@ -1,0 +1,97 @@
+name: corpus-refresh
+
+# Builds the kube-noob corpus in the cloud: public Git docs (with licenses), release history and a jittered pull of the
+# public Red Hat Jira ROX project (RHACS 4.10+). Jira content is not redistributable, so it is uploaded only encrypted
+# (CORPUS_PASSPHRASE secret); everything else is uploaded as a plain artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      jira_target:
+        description: "Number of ROX issues to keep"
+        default: "1200"
+      min_version:
+        description: "Minimum RHACS version"
+        default: "4.10"
+      git_sources:
+        description: "Git sources (comma separated ids or 'all')"
+        default: "all"
+  schedule:
+    - cron: "17 5 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      KUBE_NOOB_DATA_DIR: ${{ github.workspace }}/corpus-out
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Jira ROX (jittered pull)
+        run: |
+          kube-noob corpus jira --online --project ROX --min-version "${{ inputs.min_version || '4.10' }}" \
+            --target "${{ inputs.jira_target || '1200' }}" --max-scan 8000 --format json > jira-summary.json
+          python - <<'PY'
+          import json
+          s = json.load(open("jira-summary.json"))
+          print(json.dumps({k: s[k] for k in ("records", "scanned", "requests", "retries", "strategy", "errors",
+                                              "versionsConsidered", "gaFloor")}, indent=1))
+          print(json.dumps(s["insights"], indent=1))
+          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(f"### ROX issues kept: {s['records']} (scanned {s['scanned']}, strategy {s['strategy']})\n")
+              fh.write("| version | issues |\n|---|---|\n")
+              for v, n in s["insights"]["byVersion"]:
+                  fh.write(f"| {v} | {n} |\n")
+          PY
+      - name: Git documentation sources
+        run: kube-noob corpus build --online --sources "${{ inputs.git_sources || 'all' }}" --format json | tee git-summary.json
+      - name: Release history
+        run: kube-noob corpus history --online --format json | tee history-summary.json
+      - name: Verify corpus integrity
+        run: kube-noob corpus verify && kube-noob corpus stats --format json | tee stats.json
+      - name: Package redistributable corpus
+        run: |
+          mkdir -p public
+          python - <<'PY'
+          import json, pathlib, shutil
+          src = pathlib.Path("corpus-out/corpus")
+          manifest = json.loads((src / "MANIFEST.json").read_text())
+          for name, entry in manifest["shards"].items():
+              if entry["redistributable"]:
+                  shutil.copy(src / entry["file"], "public/")
+          (pathlib.Path("public") / "MANIFEST.json").write_text(json.dumps(manifest, indent=2))
+          PY
+          ls -la public
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: corpus-redistributable
+          path: |
+            public/
+            *-summary.json
+            stats.json
+          retention-days: 30
+      - name: Encrypt full corpus (includes non-redistributable Jira data)
+        env:
+          CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
+        run: |
+          if [ -z "${CORPUS_PASSPHRASE}" ]; then
+            echo "CORPUS_PASSPHRASE not set - skipping encrypted full-corpus artifact"; exit 0; fi
+          tar -C corpus-out -czf corpus-full.tgz corpus
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -in corpus-full.tgz -out corpus-full.tgz.enc \
+            -pass env:CORPUS_PASSPHRASE
+          rm corpus-full.tgz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: corpus-full-encrypted
+          path: corpus-full.tgz.enc
+          if-no-files-found: ignore
+          retention-days: 14

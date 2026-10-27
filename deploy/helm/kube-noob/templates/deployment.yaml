@@ -1,0 +1,96 @@
+{{- if and (not .Values.auth.existingSecret) (not .Values.auth.allowUnauthenticated) }}
+{{- fail "Set auth.existingSecret (Secret with key 'token') or explicitly set auth.allowUnauthenticated=true" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kube-noob.fullname" . }}
+  labels: {{- include "kube-noob.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: {{- include "kube-noob.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  template:
+    metadata:
+      labels: {{- include "kube-noob.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "kube-noob.fullname" . }}
+      automountServiceAccountToken: {{ .Values.config.clusterEnabled }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "kube-noob.selectorLabels" . | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "kube-noob.selectorLabels" . | nindent 14 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: kube-noob
+          image: {{ include "kube-noob.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"{{ if .Values.auth.allowUnauthenticated }}, "--allow-unauthenticated"{{ end }}]
+          env:
+            - name: KUBE_NOOB_CONFIG
+              value: /etc/kube-noob/config.yaml
+            - name: KUBE_NOOB_DATA_DIR
+              value: /var/lib/kube-noob
+            {{- if .Values.auth.existingSecret }}
+            - name: KUBE_NOOB_HTTP_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.auth.existingSecret }}, key: token}
+            {{- end }}
+          ports:
+            - {name: http, containerPort: {{ .Values.service.port }}, protocol: TCP}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 24
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/kube-noob, readOnly: true}
+            - {name: data, mountPath: /var/lib/kube-noob}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "kube-noob.fullname" . }}}
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim: {claimName: {{ include "kube-noob.fullname" . }}-data}
+          {{- else }}
+          emptyDir: {sizeLimit: 2Gi}
+          {{- end }}

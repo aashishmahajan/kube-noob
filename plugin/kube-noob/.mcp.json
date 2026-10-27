@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kube-noob": {
+      "command": "uvx",
+      "args": ["kube-noob@0.1.0", "mcp"],
+      "env": {
+        "KUBE_NOOB_WEB_ENABLED": "false",
+        "KUBE_NOOB_CLUSTER_ENABLED": "false"
+      }
+    }
+  }
+}

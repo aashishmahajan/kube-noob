@@ -1,0 +1,12 @@
+kube-noob
+Copyright 2026 The kube-noob Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product bundles third-party material; see THIRD_PARTY_NOTICES.md and
+src/kube_noob/schemas/data/PROVENANCE.json for sources, licenses and attribution.
+
+Kubernetes, Helm, OpenShift, Red Hat OpenShift Service on AWS (ROSA), Red Hat Advanced
+Cluster Security (RHACS) and StackRox are trademarks of their respective owners. kube-noob
+is an independent project and is not affiliated with or endorsed by the Linux Foundation,
+the Cloud Native Computing Foundation, Red Hat, Inc. or Amazon Web Services.

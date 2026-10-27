@@ -1,0 +1,63 @@
+{{- if .Values.config.clusterEnabled }}
+{{- $cluster := eq .Values.rbac.scope "cluster" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if $cluster }}ClusterRole{{ else }}Role{{ end }}
+metadata:
+  name: {{ include "kube-noob.fullname" . }}-read
+  labels: {{- include "kube-noob.labels" . | nindent 4 }}
+rules:
+  # Read-only allowlist mirrored from kube_noob.debug.cluster.ALLOWED_RESOURCES. No Secrets, ever.
+  - apiGroups: [""]
+    resources: [pods, pods/log, services, endpoints, events, configmaps, persistentvolumeclaims, resourcequotas,
+                limitranges, serviceaccounts{{ if $cluster }}, persistentvolumes, nodes, namespaces{{ end }}]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+  - apiGroups: [route.openshift.io]
+    resources: [routes]
+    verbs: [get, list, watch]
+  - apiGroups: [k8s.ovn.org]
+    resources: [egressfirewalls]
+    verbs: [get, list, watch]
+  - apiGroups: [platform.stackrox.io]
+    resources: [centrals, securedclusters]
+    verbs: [get, list, watch]
+{{- if $cluster }}
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [config.openshift.io]
+    resources: [clusteroperators, clusterversions]
+    verbs: [get, list, watch]
+  - apiGroups: [security.openshift.io]
+    resources: [securitycontextconstraints]
+    verbs: [get, list, watch]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if $cluster }}ClusterRoleBinding{{ else }}RoleBinding{{ end }}
+metadata:
+  name: {{ include "kube-noob.fullname" . }}-read
+  labels: {{- include "kube-noob.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: {{ if $cluster }}ClusterRole{{ else }}Role{{ end }}
+  name: {{ include "kube-noob.fullname" . }}-read
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kube-noob.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

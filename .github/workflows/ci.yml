@@ -1,0 +1,162 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - run: ruff check src tests scripts
+      - run: ruff format --check src tests scripts
+      - run: mypy
+      - name: Dependency vulnerability audit
+        run: pip-audit -r requirements.lock --require-hashes --disable-pip --strict
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - run: pytest --cov --cov-report=term-missing:skip-covered --cov-fail-under=80
+      - name: Build sdist + wheel
+        run: python -m build
+      - name: Install wheel in a clean venv and smoke-test
+        run: |
+          python -m venv /tmp/wheelenv
+          /tmp/wheelenv/bin/pip install dist/*.whl
+          /tmp/wheelenv/bin/kube-noob --version
+          /tmp/wheelenv/bin/kube-noob search "restricted-v2" --format json | python -c "import json,sys; assert json.load(sys.stdin)['results']"
+
+  helm-and-dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - run: pip install -e .
+      - name: Lint the kube-noob chart
+        run: helm lint --strict deploy/helm/kube-noob --set auth.existingSecret=kn-token
+      - name: Audit our own chart (Kubernetes)
+        run: |
+          helm template kn deploy/helm/kube-noob -n kube-noob --set auth.existingSecret=kn-token \
+            --set networkPolicy.allowRouter=false --set networkPolicy.allowIngressNamespace=ingress-nginx \
+            | kube-noob audit -f - --platform kubernetes --fail-on medium
+      - name: Audit our own chart (OpenShift 4.22, Route, live cluster tools)
+        run: |
+          helm template kn deploy/helm/kube-noob -n kube-noob --set auth.existingSecret=kn-token \
+            --set route.enabled=true --set config.clusterEnabled=true \
+            --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on medium
+      - name: Audit the sidecar example
+        run: kube-noob audit -f deploy/sidecar/app-with-kube-noob-sidecar.yaml --platform openshift --fail-on medium
+      - name: Generated Helm charts render and audit clean
+        run: |
+          for p in kubernetes openshift rosa-hcp; do
+            expose=route; [ "$p" = kubernetes ] && expose=ingress
+            rm -rf /tmp/charts-$p && mkdir -p /tmp/charts-$p
+            kube-noob helm-chart --name demo --namespace demo --image ghcr.io/example/demo:1.0.0 \
+              --platform $p --expose $expose --host demo.example.com -o /tmp/charts-$p
+            helm lint --strict /tmp/charts-$p/demo
+            helm template demo /tmp/charts-$p/demo -n demo | kube-noob audit -f - --platform $p --fail-on high
+          done
+
+  e2e-kind:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: kn
+      - run: pip install -e .
+      - name: Server-side dry-run of generated manifests
+        run: |
+          kubectl create namespace demo
+          kube-noob generate --name web --namespace demo --image nginxinc/nginx-unprivileged:1.27.2 \
+            --replicas 2 --expose ingress --host web.example.com -o /tmp/gen.yaml
+          kubectl apply --dry-run=server -f /tmp/gen.yaml
+          kube-noob generate --name db --namespace demo --image registry.example.com/db:1.0.0 --workload statefulset \
+            --storage-size 1Gi -o /tmp/sts.yaml
+          kubectl apply --dry-run=server -f /tmp/sts.yaml
+      - name: Fixed manifests apply server-side
+        run: |
+          kube-noob fix -f tests/fixtures/bad-bundle.yaml --platform kubernetes -o /tmp/fixed.yaml || true
+          python - <<'PY'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("/tmp/fixed.yaml")) if d]
+          keep = [d for d in docs if not d["apiVersion"].endswith("openshift.io/v1") and d["apiVersion"] != "k8s.ovn.org/v1"]
+          open("/tmp/fixed-k8s.yaml", "w").write(yaml.safe_dump_all(keep))
+          PY
+          kubectl create namespace shop
+          kubectl apply --dry-run=server -f /tmp/fixed-k8s.yaml
+      - name: Build image and load into kind
+        run: |
+          docker build -f Containerfile -t kube-noob:ci .
+          kind load docker-image kube-noob:ci --name kn
+      - name: Install chart with read-only cluster tools
+        run: |
+          kubectl create namespace kube-noob
+          kubectl -n kube-noob create secret generic kn-token --from-literal=token=ci-token
+          EP=$(kubectl get endpoints kubernetes -o jsonpath='{.subsets[0].addresses[0].ip}')
+          SVC=$(kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}')
+          helm install kn deploy/helm/kube-noob -n kube-noob \
+            --set image.repository=kube-noob --set image.tag=ci --set image.pullPolicy=Never \
+            --set auth.existingSecret=kn-token --set config.clusterEnabled=true \
+            --set config.defaultPlatform=kubernetes --set networkPolicy.allowRouter=false \
+            --set networkPolicy.egress.dnsNamespace=kube-system --set networkPolicy.egress.dnsPort=53 \
+            --set "networkPolicy.egress.apiServerCIDRs={${EP}/32,${SVC}/32}" --wait --timeout 4m
+      - name: Deploy a crashing workload to debug
+        run: |
+          kubectl -n demo create deployment crasher --image=busybox:1.36 -- sh -c 'echo starting; echo password=hunter2; exit 3'
+          kubectl -n demo create secret generic do-not-read --from-literal=k=v
+          sleep 45
+          kubectl -n demo get pods
+      - name: MCP end-to-end over HTTP
+        run: |
+          kubectl -n kube-noob port-forward svc/kn-kube-noob 18080:8080 &
+          sleep 5
+          python scripts/e2e_mcp_http.py --url http://127.0.0.1:18080/mcp --token ci-token \
+            --cluster-namespace demo --cluster-deployment crasher
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A
+          kubectl -n kube-noob describe pods
+          kubectl -n kube-noob logs deploy/kn-kube-noob --tail=200

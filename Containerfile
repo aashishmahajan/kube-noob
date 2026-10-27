@@ -1,0 +1,41 @@
+# kube-noob container image (OpenShift restricted-v2 compatible: non-root, arbitrary UID, group 0 writable dirs).
+# Build:  docker build -f Containerfile -t kube-noob:dev .
+# CI resolves BASE_IMAGE to an immutable digest at build time and records it in the SLSA provenance.
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/python-312:latest
+
+FROM ${BASE_IMAGE} AS build
+USER 0
+WORKDIR /src
+COPY pyproject.toml README.md LICENSE NOTICE requirements.lock ./
+COPY src ./src
+RUN python3 -m pip install --no-cache-dir --upgrade "pip>=24.3" "build>=1.2" \
+ && python3 -m build --wheel --outdir /wheels . \
+ && python3 -m venv /opt/kube-noob \
+ && /opt/kube-noob/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: -r requirements.lock \
+ && /opt/kube-noob/bin/pip install --no-cache-dir --no-deps /wheels/*.whl \
+ && /opt/kube-noob/bin/kube-noob --version
+
+FROM ${BASE_IMAGE}
+LABEL org.opencontainers.image.title="kube-noob" \
+      org.opencontainers.image.description="Offline-first Kubernetes/OpenShift/ROSA/Helm/RHACS learning, audit and debugging MCP server" \
+      org.opencontainers.image.source="https://github.com/aashishmahajan/kube-noob" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      io.k8s.display-name="kube-noob" \
+      io.openshift.tags="kubernetes,openshift,mcp,security"
+USER 0
+COPY --from=build /opt/kube-noob /opt/kube-noob
+RUN mkdir -p /var/lib/kube-noob /etc/kube-noob \
+ && chgrp -R 0 /var/lib/kube-noob /etc/kube-noob \
+ && chmod -R g=u /var/lib/kube-noob /etc/kube-noob
+ENV PATH="/opt/kube-noob/bin:${PATH}" \
+    KUBE_NOOB_DATA_DIR=/var/lib/kube-noob \
+    KUBE_NOOB_WEB_ENABLED=false \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/tmp
+# Numeric non-root user; OpenShift replaces it with a namespace-range UID in group 0, which still works.
+USER 1001
+WORKDIR /var/lib/kube-noob
+EXPOSE 8080
+ENTRYPOINT ["kube-noob"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]

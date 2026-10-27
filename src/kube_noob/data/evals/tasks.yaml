@@ -1,0 +1,154 @@
+# kube-noob benchmark. Held out from the curriculum exercises (which feed SFT export) to avoid train/test leakage.
+# type: manifest -> graded with the check DSL; type: qa -> graded with mustMention / mustNotMention regexes.
+# requireCitations: answer must cite local knowledge chunks as [kn:<doc>#<n>].
+version: 1
+tasks:
+  - id: bench-k8s-secure-api
+    type: manifest
+    platform: kubernetes
+    prompt: >-
+      Write production manifests for 'billing-api' (namespace 'billing', image
+      'ghcr.io/acme/billing-api@sha256:3f2c3a1b8d9e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90', port 8443 HTTP)
+      on Kubernetes 1.35: 3 replicas across zones, restricted Pod Security, probes, requests/limits, PDB, default-deny
+      NetworkPolicy, ClusterIP Service. Return YAML only.
+    checks:
+      platform: kubernetes
+      version: "1.35"
+      kinds: [Deployment, Service, PodDisruptionBudget, NetworkPolicy]
+      schemaValid: true
+      maxSeverity: low
+      assertions:
+        - {kind: Deployment, path: spec.replicas, gte: 3}
+  - id: bench-ocp-route-reencrypt
+    type: manifest
+    platform: openshift
+    prompt: >-
+      On OpenShift 4.22 expose 'portal' (namespace 'web', image 'quay.io/acme/portal:7.2.1', HTTPS on port 8443) with
+      a reencrypt Route that trusts the service-serving CA, plus NetworkPolicies admitting only the router and
+      openshift-monitoring. Return YAML.
+    checks:
+      platform: openshift
+      version: "4.22"
+      kinds: [Deployment, Service, Route, NetworkPolicy]
+      schemaValid: true
+      maxSeverity: low
+      forbidRules: [KN-S004, KN-N002]
+      assertions:
+        - {kind: Route, path: spec.tls.termination, equals: reencrypt}
+        - {kind: Service, path: "metadata.annotations", exists: true}
+  - id: bench-rosa-rwx
+    type: manifest
+    platform: rosa-hcp
+    prompt: >-
+      ROSA HCP: 3 replicas of 'render' (namespace 'gfx', image 'quay.io/acme/render:2.0.0', port 8080) must share one
+      100Gi read-write volume at /work. Provide the PVC, Deployment and Service. Return YAML.
+    checks:
+      platform: rosa-hcp
+      kinds: [Deployment, PersistentVolumeClaim, Service]
+      schemaValid: true
+      forbidRules: [KN-ST001, KN-ST002]
+      assertions:
+        - {kind: PersistentVolumeClaim, path: "spec.accessModes[0]", equals: ReadWriteMany}
+  - id: bench-fix-removed-apis
+    type: manifest
+    platform: kubernetes
+    prompt: >-
+      Migrate for Kubernetes 1.35 and return YAML only:
+      apiVersion: networking.k8s.io/v1beta1 / kind: Ingress / metadata: {name: shop, namespace: shop} /
+      spec.rules[0]: host shop.example.com, path /, backend serviceName shop servicePort 80.
+    checks:
+      platform: kubernetes
+      version: "1.35"
+      kinds: [Ingress]
+      schemaValid: true
+      forbidRules: [KN-V005]
+      assertions:
+        - {kind: Ingress, path: "spec.rules[0].http.paths[0].backend.service.name", equals: shop}
+        - {kind: Ingress, path: "spec.rules[0].http.paths[0].pathType", in: [Prefix, Exact, ImplementationSpecific]}
+  - id: bench-statefulset-rwo
+    type: manifest
+    platform: openshift
+    prompt: >-
+      OpenShift: run a 3-node 'kafka-lite' (namespace 'stream', image 'quay.io/acme/kafka-lite:3.8.0', port 9092 TCP)
+      where every replica has its own 50Gi volume. Return YAML.
+    checks:
+      platform: openshift
+      kinds: [StatefulSet, Service]
+      schemaValid: true
+      forbidRules: [KN-ST002, KN-S004]
+      assertions:
+        - {kind: StatefulSet, path: "spec.volumeClaimTemplates[0].spec.resources.requests.storage", equals: 50Gi}
+  - id: bench-egress
+    type: manifest
+    platform: openshift
+    prompt: >-
+      Write the OVN-Kubernetes egress firewall for project 'etl' allowing s3.amazonaws.com and 172.16.0.0/12 only.
+    checks:
+      platform: openshift
+      kinds: [EgressFirewall]
+      schemaValid: true
+      forbidRules: [KN-V015, KN-N006]
+  - id: bench-rbac-readonly
+    type: manifest
+    platform: kubernetes
+    prompt: >-
+      Create a ClusterRole and ClusterRoleBinding for ServiceAccount 'auditor' in namespace 'sec' that can read pods,
+      deployments and events cluster-wide but nothing else (no secrets, no wildcards). Return YAML.
+    checks:
+      platform: kubernetes
+      kinds: [ClusterRole, ClusterRoleBinding, ServiceAccount]
+      schemaValid: true
+      forbidRules: [KN-S015, KN-S016, KN-S017]
+  - id: bench-qa-rwx-gp3
+    type: qa
+    requireCitations: true
+    prompt: >-
+      Our ROSA HCP PVC with accessModes ReadWriteMany and storageClassName gp3-csi is stuck Pending. Why, and what is
+      the fix? Cite local knowledge as [kn:<id>#<n>].
+    mustMention: ["EBS", "ReadWriteOnce|RWO", "EFS", "efs\\.csi\\.aws\\.com|efs-sc"]
+    mustNotMention: ["gp3-csi (supports|provides) (RWX|ReadWriteMany)"]
+  - id: bench-qa-route-group
+    type: qa
+    requireCitations: true
+    prompt: "Is 'apiVersion: apps.openshift.io/v1' correct for a Route? Answer and cite [kn:<id>#<n>]."
+    mustMention: ["route\\.openshift\\.io/v1", "DeploymentConfig"]
+    mustNotMention: ["apps\\.openshift\\.io/v1 is (correct|the right)"]
+  - id: bench-qa-scc-uid
+    type: qa
+    requireCitations: true
+    prompt: >-
+      Pods with securityContext.runAsUser 1000 fail on OpenShift 4.22 with 'unable to validate against any security
+      context constraint'. Explain and fix without granting anyuid. Cite [kn:<id>#<n>].
+    mustMention: ["restricted-v2", "range|MustRunAsRange", "runAsNonRoot"]
+    mustNotMention: ["add-scc-to-user (anyuid|privileged)"]
+  - id: bench-qa-hcp-machineconfig
+    type: qa
+    requireCitations: true
+    prompt: On ROSA HCP, how should we change kubelet settings for worker nodes? Cite [kn:<id>#<n>].
+    mustMention: ["kubeletconfig", "machine pool|machinepool"]
+    mustNotMention: ["oc (apply|create) .*MachineConfig"]
+  - id: bench-qa-helm-lock
+    type: qa
+    requireCitations: false
+    prompt: helm upgrade says "another operation (install/upgrade/rollback) is in progress". What do we do?
+    mustMention: ["helm history", "rollback", "pending"]
+  - id: bench-qa-rhacs-next
+    type: qa
+    requireCitations: true
+    prompt: We run RHACS 4.11. What is the next minor release and is there a 4.12? Cite [kn:<id>#<n>].
+    mustMention: ["5\\.0", "no 4\\.12|not? .*4\\.12|4\\.12.*renamed"]
+  - id: bench-qa-oom
+    type: qa
+    requireCitations: false
+    prompt: A pod restarts with Last State Terminated, Reason OOMKilled, Exit Code 137. Diagnose and fix.
+    mustMention: ["memory limit|limits", "137|SIGKILL"]
+  - id: bench-qa-pdb-upgrade
+    type: qa
+    requireCitations: true
+    prompt: Our cluster upgrade is stuck draining a node. The app has replicas 3 and a PDB minAvailable 3. Why? Cite.
+    mustMention: ["disruption", "maxUnavailable: ?1|minAvailable.*(lower|less|2)"]
+  - id: bench-qa-ocp-k8s-map
+    type: qa
+    requireCitations: true
+    prompt: Which Kubernetes versions do OpenShift 4.20 and 4.22 run? Cite.
+    mustMention: ["1\\.33", "1\\.35"]

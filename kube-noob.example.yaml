@@ -1,0 +1,22 @@
+# kube-noob configuration (copy to ./kube-noob.yaml or ~/.config/kube-noob/config.yaml)
+webEnabled: false              # true = allow allowlisted web lookups (agent web search + kubenoob_web_fetch)
+web:
+  allowedDomains: [kubernetes.io, helm.sh, docs.redhat.com, cloud.redhat.com, docs.aws.amazon.com, github.com]
+  timeoutSeconds: 20
+defaultPlatform: openshift     # kubernetes | openshift | rosa-classic | rosa-hcp
+cluster:
+  enabled: false               # read-only live cluster tools
+  backend: auto                # auto | in-cluster | kubectl | oc
+  context: null                # kubeconfig context for kubectl/oc
+llm:                           # used by `kube-noob ask` / `train bench`, never by the MCP server
+  provider: anthropic          # anthropic | openai-compatible | none
+  model: claude-fable-5-1
+  apiKeyEnv: ANTHROPIC_API_KEY
+  # provider: openai-compatible
+  # baseUrl: http://localhost:8000/v1   # vLLM / Ollama / your fine-tuned kube-noob model
+judge:
+  provider: none               # eval-only LLM judge; never exported as training labels
+server:
+  host: 127.0.0.1
+  port: 8080
+  authTokenEnv: KUBE_NOOB_HTTP_TOKEN

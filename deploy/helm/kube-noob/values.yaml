@@ -1,0 +1,64 @@
+# kube-noob Helm values. Defaults are secure: no web access, no cluster access, authenticated HTTP, NetworkPolicies on.
+image:
+  repository: ghcr.io/aashishmahajan/kube-noob
+  tag: ""            # defaults to .Chart.AppVersion
+  digest: ""         # sha256:... - takes precedence over tag when set
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+config:
+  webEnabled: false          # true allows allowlisted web lookups (and opens egress 443 below)
+  allowedDomains: []         # empty = built-in documentation allowlist
+  defaultPlatform: openshift # kubernetes | openshift | rosa-classic | rosa-hcp
+  clusterEnabled: false      # true = read-only live cluster tools (creates RBAC below)
+
+auth:
+  # Name of a Secret with key `token`; clients send `Authorization: Bearer <token>`.
+  existingSecret: ""
+  # Only for meshes/gateways that authenticate callers themselves.
+  allowUnauthenticated: false
+
+service:
+  port: 8080
+
+route:            # OpenShift Route (edge TLS)
+  enabled: false
+  host: ""
+
+ingress:          # vanilla Kubernetes Ingress
+  enabled: false
+  className: ""
+  host: ""
+  tlsSecret: ""
+
+networkPolicy:
+  enabled: true
+  allowRouter: true                 # OpenShift router namespace (policy-group.network.openshift.io/ingress)
+  allowIngressNamespace: ""         # e.g. ingress-nginx on vanilla Kubernetes
+  allowSameNamespace: true
+  egress:
+    enabled: true
+    dnsNamespace: openshift-dns     # kube-system on vanilla Kubernetes
+    dnsPort: 5353                   # 53 on vanilla Kubernetes
+    apiServerCIDRs: []              # required when config.clusterEnabled (e.g. the kubernetes Service endpoints)
+    apiServerPort: 6443
+
+rbac:
+  scope: cluster                    # cluster | namespace (read-only; never Secrets)
+
+persistence:
+  enabled: false                    # keep corpus + learner progress across restarts
+  size: 5Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 512Mi}
+
+podDisruptionBudget:
+  enabled: true
+
+nodeSelector: {}
+tolerations: []
