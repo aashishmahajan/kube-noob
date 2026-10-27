@@ -511,7 +511,7 @@ function buildIso() {
   ISO.lock = billboard(w, 380, 520, 200, `<svg width="90" height="110" viewBox="0 0 90 110"><path d="M22 50 V34 A23 23 0 0 1 68 34 V50" fill="none" stroke="#fbbf24" stroke-width="10"/><rect x="8" y="48" width="74" height="58" rx="12" fill="#fbbf24"/><circle cx="45" cy="74" r="8" fill="#7c2d12"/><rect x="41" y="76" width="8" height="16" rx="3" fill="#7c2d12"/></svg>`);
   ISO.arrows = flat(w, -300, 480, 2, 1700, 1100, `<svg width="1700" height="1100" viewBox="0 0 1700 1100">
      <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4ade80"/></marker></defs>
-     <path class="ok" d="M680 30 L680 760" stroke="#4ade80" stroke-width="16" fill="none" stroke-linecap="round" marker-end="url(#ah)"/>
+     <path class="ok" d="M680 30 L680 760" stroke="#4ade80" stroke-width="16" fill="none" stroke-linecap="round"/>
      <path class="no1" d="M720 30 L1450 700" stroke="#f87171" stroke-width="16" fill="none" stroke-linecap="round"/>
      <path class="no2" d="M640 30 L80 700" stroke="#f87171" stroke-width="16" fill="none" stroke-linecap="round"/></svg>`);
   ISO.dnsLabel = billboard(w, 380, 1290, 30, `<div class="label mono" style="color:#bbf7d0">DNS :53 only</div>`);
@@ -753,6 +753,7 @@ const KINDS = {
       const len = p.getTotalLength();
       const v = easeOut(clamp((L - t0) / (t1 - t0))) * reach;
       p.setAttribute('stroke-dasharray', `${len * v} ${len}`);
+      if (cls === 'ok') p.setAttribute('marker-end', v > 0.97 ? 'url(#ah)' : '');
     };
     grow('ok', 0.8, 2.0, 1); grow('no1', 1.4, 2.2, 0.45); grow('no2', 1.8, 2.6, 0.45);
     ISO.dnsLabel.style.display = ''; ISO.dnsLabel.style.opacity = sstep(1.8, 2.3, L);
