@@ -6,7 +6,7 @@
 // advances exactly one frame between screenshots, so every frame is on time however slow 4K rendering is. The page
 // is laid out at 1920x1080 and captured at --scale times that (default 2: 3840x2160), encoded as H.264 High (x264
 // preset slow, CRF 16, tuned for animation). Capture stops one second after the page sets window.__done, and a still
-// of the title card is written next to the video as <page>-title.png.
+// of the title card is written next to the video as <page>-title.png, and the scene marks as <page>-marks.json.
 // Needs: Node with the `playwright` package and Chromium, ffmpeg on PATH.
 'use strict';
 const fs = require('fs');
@@ -118,6 +118,9 @@ async function main() {
   }
   ff.stdin.end();
   await done;
+  // Scene marks (virtual milliseconds) for audio_kit.py score, which lays narration and music on them.
+  const marks = await page.evaluate(() => window.__marks || []);
+  fs.writeFileSync(path.join(dir, pageName.replace(/\.html$/, '') + '-marks.json'), JSON.stringify(marks, null, 1));
   await browser.close();
   console.log(outFile);
 }

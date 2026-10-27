@@ -10,7 +10,7 @@
   "videos": {
     "teaser": {
       "title": "kube-noob: no AI inside (30 s)",
-      "cta": "pipx install kube-noob",
+      "cta": "uv tool install kube-noob",
       "scenes": [
         {
           "kind": "alarm",
@@ -49,12 +49,12 @@
         {
           "kind": "install",
           "min": 6.0,
-          "caption": "pipx install kube-noob",
+          "caption": "uv tool install kube-noob",
           "captionPos": "lower",
           "captionMono": true,
           "vo": "Free and open source. Link below.",
           "term": [
-            "$ pipx install kube-noob",
+            "$ uv tool install kube-noob",
             "$ kube-noob audit -f deployment.yaml --platform openshift --version 4.22",
             "kube-noob audit | platform=openshift k8s=1.35 | score=37.0 | low=5 medium=7 high=3",
             "[HIGH    ] KN-S013   Deployment/shop/orders-api L23",

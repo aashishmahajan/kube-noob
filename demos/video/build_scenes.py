@@ -37,7 +37,7 @@ WALKTHROUGH_META = {
     "cited, offline.",
     "brand": "kube-noob · offline · read-only",
     "endTitle": "Try it in 30 seconds",
-    "endCodes": ["pipx install kube-noob", "kube-noob demo --list"],
+    "endCodes": ["uv tool install kube-noob", "kube-noob demo --list"],
     "endSub": "Use it from Claude or OpenShift Lightspeed, or the CLI with no AI at all<br>"
     f'<span class="accent">{REPO}</span>',
 }
@@ -232,6 +232,10 @@ def sidecar(transcript: Path) -> list[dict[str, Any]]:
 
 
 def write(out_dir: Path, name: str, scenes: list[dict[str, Any]], meta: dict[str, Any]) -> Path:
+    narration = out_dir / "narration.json"  # written by audio_kit.py narrate: hold each scene until its line ends
+    if narration.is_file():
+        lines = json.loads(narration.read_text())["lines"]
+        meta = {**meta, "minMs": {scene_id: line["minMs"] for scene_id, line in lines.items()}}
     html = (
         (HERE / "player.html")
         .read_text()

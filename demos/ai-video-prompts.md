@@ -25,7 +25,7 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 | 2 | 5 s | The red glow freezes and fades; small glowing cubes (pods) dissolve into dust, suggesting lost evidence. Slow motion, moody. | The evidence is gone. | It's also the one that destroys your evidence. |
 | 3 | 7 s | A friendly cartoon rocket with a round window and a smile flies in from the lower left on a green-blue arc of light and stops beside the terminal. Clean 3D illustration style, soft rim light. | kube-noob | Meet kube-noob. There's no AI inside it. |
 | 4 | 8 s | Split screen: on the left a chat bubble labelled only with a speech icon, on the right the rocket holding a clipboard with green check marks; a beam connects them. Flat, modern, navy and green palette. | No AI inside. Works with yours. | Your AI does the talking. kube-noob supplies the rules, the read-only steps and the citations. |
-| 5 | 5 s | The terminal window turns calm green; three green lines type out (blank text to overlay later). The rocket gives a thumbs up. | pipx install kube-noob | Free and open source. Link below. |
+| 5 | 5 s | The terminal window turns calm green; three green lines type out (blank text to overlay later). The rocket gives a thumbs up. | uv tool install kube-noob | Free and open source. Link below. |
 
 ## Video 2: kube-noob as a sidecar (60 seconds)
 

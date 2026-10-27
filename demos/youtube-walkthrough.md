@@ -2,8 +2,9 @@
 
 There are two cuts:
 
-- The **rendered cut** (about 2 minutes, 3840x2160, silent) is recorded from the installed `kube-noob`'s real output by
-  `demos/video/render.sh <out-dir>`. Lay the voice-over below on top of it.
+- The **rendered cut** (about 2 minutes, 3840x2160) is recorded from the installed `kube-noob`'s real output by
+  `demos/video/render.sh <out-dir>`, narrated with the voice-over below (Kokoro voice) over the kube-noob brand music.
+  Each scene is held until its line is spoken, so chapter times shift by a few seconds.
 - The **long cut** (about 5 minutes) is a scene list for a video tool such as Astra. It uses the same commands, so
   every on-screen number is real.
 
@@ -23,7 +24,7 @@ struck-through `oc delete` above `oc get events`, `oc describe` and `oc logs --p
 ```text
 kube-noob has no AI inside. It is the Kubernetes, OpenShift and ROSA HCP rulebook your AI is missing: audit rules, read-only-first troubleshooting steps, cited docs and graded exercises. Claude or OpenShift Lightspeed calls it as tools; the CLI runs it with no AI at all. Free, open source, and it makes no network calls unless you turn them on.
 
-pipx install kube-noob
+uv tool install kube-noob
 kube-noob demo --list
 
 GitHub: https://github.com/aashishmahajan/kube-noob
@@ -48,7 +49,8 @@ claude, openshift lightspeed, kubernetes troubleshooting, crashloopbackoff, scc
 
 ## Voice-over for the rendered cut (about 300 words)
 
-Timestamps are approximate (within 2 seconds).
+`render.sh` speaks these rows in order, one per scene (title, the seven chapters, end card). Timestamps are
+approximate.
 
 | Time | Voice-over |
 |---|---|
@@ -60,7 +62,7 @@ Timestamps are approximate (within 2 seconds).
 | 1:09 | When your team confirms a fix, save it. Next time, search finds your team's note next to the docs, with a citation. Secrets, logs and manifests are rejected. |
 | 1:27 | There's no AI inside kube-noob. Claude or Lightspeed does the talking; kube-noob supplies the rules and the citations, or you use the CLI on its own. It makes no network calls and reads no cluster unless you allow it, and `doctor` shows exactly what it can reach. |
 | 1:44 | Don't trust me. Run the self-test: 61 real questions across Kubernetes, Helm, OpenShift 4.22, ROSA HCP and RHACS. |
-| 1:54 | pipx install kube-noob, then kube-noob demo. Link below. |
+| 1:54 | Install it with uv tool install kube-noob, then run kube-noob demo. Link below. |
 
 ## Long cut for Astra (about 5 minutes)
 
@@ -81,4 +83,4 @@ Each scene is one shot. "Screen" means a terminal recording of the command shown
 | 10 | 0:30 | `kube-noob doctor` with and without `KUBE_NOOB_OFFLINE=1` | offline lock ON | Off by default, lockable by admins, provable with doctor. |
 | 11 | 0:20 | Lightspeed and Claude screenshots (your own) | Your AI talks. kube-noob checks. | Claude or Lightspeed does the talking and kube-noob does the checking. Or skip the AI and use the CLI. |
 | 12 | 0:15 | `kube-noob selftest` | 61/61 | Prove it on your machine: 61 real questions. |
-| 13 | 0:10 | End card | pipx install kube-noob | Link below. Tell me what it should catch next. |
+| 13 | 0:10 | End card | uv tool install kube-noob | Link below. Tell me what it should catch next. |

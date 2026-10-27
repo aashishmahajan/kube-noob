@@ -52,6 +52,11 @@ document.getElementById("endTitle").textContent = META.endTitle;
 document.getElementById("endCodes").innerHTML = META.endCodes.map(c => `<code>${c.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</code>`).join("");
 document.getElementById("endSub").innerHTML = META.endSub;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Scene marks for the sound track (capture_page.js saves them), and holds so narration fits each scene.
+window.__marks = [];
+const HOLD = META.minMs || {};
+const mark = id => { window.__marks.push({ id, t: performance.now() }); return performance.now(); };
+const holdUntil = async t => { const left = t - performance.now(); if (left > 0) await sleep(left); };
 const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function color(line) {
   let h = esc(line);
@@ -78,8 +83,10 @@ async function typeCmd(lines, cmd) {
 async function run() {
   const title = document.getElementById("title"), stage = document.getElementById("stage");
   const cc = document.getElementById("chapterCard"), ct = document.getElementById("chapterText");
-  await sleep(300); await show(title, true); await sleep(3800); await show(title, false);
+  await sleep(300); const t0 = mark("title"); await show(title, true); await sleep(3800);
+  await holdUntil(t0 + (HOLD.title || 0)); await show(title, false);
   for (const scene of SCENES) {
+    const s0 = mark(scene.id);
     ct.textContent = scene.chapter; await show(cc, true); await sleep(1600); await show(cc, false);
     document.getElementById("chapter").textContent = scene.chapter;
     await show(stage, true);
@@ -92,9 +99,11 @@ async function run() {
       for (const l of step.output) { const d = document.createElement("div"); d.innerHTML = color(l) || "&nbsp;"; lines.appendChild(d); await sleep(70); }
       await sleep(Math.min(5200, 2600 + step.output.length * 140));
     }
+    await holdUntil(s0 + (HOLD[scene.id] || 0));
     await show(stage, false);
   }
-  await show(document.getElementById("end"), true); await sleep(5500);
+  const e0 = mark("end"); await show(document.getElementById("end"), true); await sleep(5500);
+  await holdUntil(e0 + (HOLD.end || 0));
   window.__done = true;
 }
 run();
