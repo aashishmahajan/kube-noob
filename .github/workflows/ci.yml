@@ -145,6 +145,15 @@ jobs:
                >/dev/null 2>&1; then
             echo "::error title=chart::offline + webEnabled must fail to render"; exit 1
           fi
+          helm lint --strict deploy/helm/kube-noob
+          helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
+          helm template kn deploy/helm/kube-noob | kube-noob audit -f - --platform openshift --version 4.20 --fail-on medium
+          if helm template kn deploy/helm/kube-noob $base | grep -q "kind: Secret"; then
+            echo "::error title=chart::no Secret may be generated when auth.existingSecret is set"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob --set auth.allowUnauthenticated=true | grep -q "KUBE_NOOB_HTTP_TOKEN"; then
+            echo "::error title=chart::allowUnauthenticated must not wire a token"; exit 1
+          fi
           ef() { helm template kn deploy/helm/kube-noob $base --set egressFirewall.enabled=true "$@"; }
           ef | grep -q "kind: EgressFirewall"
           [ "$(ef | grep -c 'dnsName:')" = 0 ] || { echo "::error title=chart::EgressFirewall allows DNS names without webEnabled"; exit 1; }

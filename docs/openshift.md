@@ -142,5 +142,5 @@ contents); your cluster's logging decides how long that is kept. Details: [PRIVA
 - Claude plugin: `/plugin marketplace add aashishmahajan/kube-noob`. It runs the bundled server source with
   dependencies pinned by hash in `uv.lock`. The Claude plugin directory listing is a manual submission (see
   [release readiness](release-readiness.md)).
-- OpenShift Helm chart catalog and OperatorHub: not submitted yet. The chart carries the `charts.openshift.io`
-  annotations; an operator bundle is on the roadmap.
+- OpenShift Helm chart catalog: ready to submit to the community tier; steps in [openshift-catalog.md](openshift-catalog.md).
+  OperatorHub (Software Catalog) needs an operator bundle and is on the roadmap.

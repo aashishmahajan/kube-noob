@@ -90,6 +90,8 @@ def test_positioning_says_no_ai_inside_and_never_claims_otherwise() -> None:
         ROOT / ".claude-plugin" / "marketplace.json",
         ROOT / "plugin" / "kube-noob" / ".claude-plugin" / "plugin.json",
         ROOT / "plugin" / "kube-noob" / "README.md",
+        ROOT / "deploy" / "helm" / "kube-noob" / "README.md",
+        ROOT / "deploy" / "helm" / "kube-noob" / "Chart.yaml",
         ROOT / "src" / "kube_noob" / "__init__.py",
         ROOT / "src" / "kube_noob" / "cli.py",
         *sorted((ROOT / "docs").glob("*.md")),

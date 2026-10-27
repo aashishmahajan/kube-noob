@@ -4,4 +4,7 @@ MCP endpoint (in-cluster): http://{{ include "kube-noob.fullname" . }}.{{ .Relea
 Web access: {{ if (.Values.config.offline | default false) }}LOCKED OFF (offline: true){{ else if .Values.config.webEnabled }}ENABLED (allowlisted domains, GET-only, text only){{ else }}disabled (offline knowledge only){{ end }}
 Live cluster tools: {{ if .Values.config.clusterEnabled }}enabled (read-only, {{ .Values.rbac.scope }} scope){{ else }}disabled{{ end }}
 
+Token: {{ with (include "kube-noob.tokenSecret" .) }}clients send "Authorization: Bearer <token>"; read it with
+  kubectl -n {{ $.Release.Namespace }} get secret {{ . }} -o jsonpath='{.data.token}' | base64 -d{{ else }}NONE (auth.allowUnauthenticated=true: put an authenticating proxy in front){{ end }}
+
 Health: kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kube-noob.fullname" . }} 8080 && curl localhost:8080/readyz

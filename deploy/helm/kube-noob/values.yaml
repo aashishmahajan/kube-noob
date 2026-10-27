@@ -15,7 +15,8 @@ config:
   clusterEnabled: false      # true = read-only live cluster tools (creates RBAC below)
 
 auth:
-  # Name of a Secret with key `token`; clients send `Authorization: Bearer <token>`.
+  # Name of a Secret with key `token`; clients send `Authorization: Bearer <token>`. Empty: the chart generates a
+  # random token in the Secret <release>-kube-noob-token and keeps it across upgrades.
   existingSecret: ""
   # Only for meshes/gateways that authenticate callers themselves.
   allowUnauthenticated: false
