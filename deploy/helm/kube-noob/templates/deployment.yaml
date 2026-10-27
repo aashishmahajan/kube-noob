@@ -1,3 +1,9 @@
+{{- if and .Values.watch.enabled (not .Values.config.clusterEnabled) }}
+{{- fail "watch.enabled needs config.clusterEnabled: the watch reads pods, events, deployments and replicasets" }}
+{{- end }}
+{{- if and .Values.watch.enabled (gt (int .Values.replicaCount) 1) }}
+{{- fail "watch.enabled keeps one incident ledger: set replicaCount: 1" }}
+{{- end }}
 {{- if and (.Values.config.offline | default false) .Values.config.webEnabled }}
 {{- fail "config.offline locks web access off; unset config.webEnabled (the two contradict each other)" }}
 {{- end }}

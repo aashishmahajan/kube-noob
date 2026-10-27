@@ -30,6 +30,7 @@ Clients connect to `http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `A
 | `config.offline` | `false` | Admin lock: no web, no downloads, local models only |
 | `config.webEnabled` | `false` | HTTPS GET to allowlisted documentation domains; opens egress 443 |
 | `config.clusterEnabled` | `false` | Read-only cluster tools (never Secrets); needs `networkPolicy.egress.apiServerCIDRs` |
+| `watch.enabled` | `false` | Always-on incident watch in the release namespace and `rbac.namespaces`; needs `config.clusterEnabled` and `replicaCount: 1` |
 | `rbac.namespaces` | `[]` | Namespaces it may read besides its own (`rbac.scope=cluster` for all) |
 | `egressFirewall.enabled` | `false` | OVN-Kubernetes EgressFirewall: API server and allowlisted domains only, then deny (namespace-wide) |
 | `persistence.enabled` | `false` | Keep progress, notes and indexed runbooks on a PVC |

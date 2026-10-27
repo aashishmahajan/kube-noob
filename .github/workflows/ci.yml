@@ -147,6 +147,20 @@ jobs:
                >/dev/null 2>&1; then
             echo "::error title=chart::offline + webEnabled must fail to render"; exit 1
           fi
+          if helm template kn deploy/helm/kube-noob $base --set watch.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::watch.enabled without config.clusterEnabled must fail to render"; exit 1
+          fi
+          wt() { helm template kn deploy/helm/kube-noob -n shop $base --set watch.enabled=true \
+            --set config.clusterEnabled=true --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" "$@"; }
+          if wt >/dev/null 2>&1; then
+            echo "::error title=chart::watch.enabled with two replicas (two ledgers) must fail to render"; exit 1
+          fi
+          wt --set replicaCount=1 --set "rbac.namespaces={payments}" --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['watch'] == {'enabled': True, 'intervalSeconds': 60, 'namespaces': ['shop', 'payments']}, cfg
+          "
+          wt --set replicaCount=1 | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"
@@ -280,6 +294,29 @@ jobs:
           kubectl -n demo create secret generic do-not-read --from-literal=k=v
           sleep 45
           kubectl -n demo get pods
+      - name: Incident watch finds and explains the crash loop and a Pod Security denial (read-only)
+        run: |
+          set -euo pipefail
+          kubectl create namespace strict
+          kubectl label namespace strict pod-security.kubernetes.io/enforce=restricted
+          kubectl -n strict create deployment rooty --image=busybox:1.36 -- sleep 3600
+          sleep 20
+          export KUBE_NOOB_DATA_DIR=/tmp/kn-watch
+          kube-noob --cluster-enabled --format json watch -n demo -n strict --once > /tmp/watch.json
+          python - <<'PY'
+          import json
+          out = json.load(open("/tmp/watch.json"))
+          rows = {(r["workload"], r["signal"]): r for r in out["open"]}
+          assert out["errors"] == [], out["errors"]
+          crash = rows.get(("deployment/crasher", "CrashLoopBackOff"))
+          assert crash and crash["diagnosis"] == "DBG-CRASHLOOP", rows
+          denied = rows.get(("deployment/rooty", "FailedCreate"))
+          assert denied and "Pod Security" in denied["headline"], rows
+          ledger = open("/tmp/kn-watch/incidents.json").read()
+          assert "hunter2" not in ledger, "a secret from the crashing container's output reached the ledger"
+          print(json.dumps(sorted(rows), indent=1))
+          PY
+          kube-noob incidents
       - name: MCP end-to-end over HTTP
         run: |
           kubectl -n kube-noob port-forward svc/kn-kube-noob 18080:8080 &

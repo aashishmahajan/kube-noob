@@ -291,6 +291,30 @@ def build_parser() -> argparse.ArgumentParser:
     prc.add_argument("--live", action="store_true", help="read the policies from the cluster (read-only)")
     prc.add_argument("--platform", choices=PLATFORMS)
 
+    wt = sub.add_parser(
+        "watch",
+        help="Watch namespaces read-only: open, explain and remember incidents (needs cluster access)",
+        description="Polls pods, events, deployments and replicasets (get/list only, never Secrets), groups problems "
+        "into incidents, explains each new one and records it in the local incident ledger. Example: kube-noob "
+        "--cluster-enabled watch -n shop --once",
+    )
+    wt.add_argument("-n", "--namespace", dest="namespaces", action="append", default=[], help="repeat for several")
+    wt.add_argument("--once", action="store_true", help="poll once and exit")
+    wt.add_argument("--interval", type=int, default=None, help="seconds between polls (default watch.intervalSeconds)")
+
+    inc = sub.add_parser("incidents", help="Incidents the watch recorded: list, show, or confirm the fix")
+    isub = inc.add_subparsers(dest="incidents_cmd")
+    _patch(isub, common)
+    il = isub.add_parser("list", help="Open incidents (default), or --all")
+    il.add_argument("--all", action="store_true", help="include resolved incidents")
+    il.add_argument("-n", "--namespace", default=None)
+    ish = isub.add_parser("show", help="One incident in full")
+    ish.add_argument("incident_id")
+    icf = isub.add_parser("confirm", help="Remember the cause and fix that worked (summaries only)")
+    icf.add_argument("incident_id")
+    icf.add_argument("--cause", required=True)
+    icf.add_argument("--fix", required=True)
+
     dbg = sub.add_parser("debug", help="Collect live read-only evidence for a workload and diagnose it")
     dbg.add_argument("target", help="kind/name, e.g. deployment/orders-api")
     dbg.add_argument("-n", "--namespace", required=True)
@@ -358,6 +382,7 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--host")
     sv.add_argument("--port", type=int)
     sv.add_argument("--allow-unauthenticated", action="store_true")
+    sv.add_argument("--watch", action="store_true", help="also run the incident watch (watch.enabled)")
 
     c = sub.add_parser("corpus", help="Build / inspect the local corpus (network: maintainers & CI)")
     csub = c.add_subparsers(dest="corpus_cmd", required=True)
@@ -588,6 +613,12 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "policy":
         return _policy(a, s, kit, fmt)
 
+    if a.cmd == "watch":
+        return _watch(a, s, fmt)
+
+    if a.cmd == "incidents":
+        return _incidents(a, kit, fmt)
+
     if a.cmd == "bundle":
         from kube_noob.debug.diagnose import bundle_markdown
 
@@ -694,6 +725,10 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         if a.port:
             s.server.port = a.port
         app = http_app(s, allow_unauthenticated=a.allow_unauthenticated)
+        if a.watch or s.watch.enabled:
+            from kube_noob.watch import start_background
+
+            start_background(s)
         uvicorn.run(
             app,
             host=s.server.host,
@@ -858,6 +893,79 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
         )
     _print_reach(out) if a.format == "text" else _emit(out, fmt)
     return 0 if out["verdict"] == "allowed" else 1
+
+
+def _print_poll(result: dict[str, Any]) -> None:
+    ch = result["changes"]
+    _tprint(
+        f"{result['polledAt']}  {', '.join(result['namespaces']) or 'nothing readable'}: "
+        f"{len(ch['opened'])} new, {len(ch['reopened'])} back again, {len(ch['resolved'])} resolved, "
+        f"{len(result['open'])} open"
+    )
+    for row in result["open"]:
+        _tprint(f"  {row['id']}  {row['headline']}")
+    for err in result.get("errors", []):
+        _tprint(f"  read failed: {err}")
+
+
+def _watch(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    import threading
+
+    from kube_noob.debug.cluster import get_backend
+    from kube_noob.watch import Watcher, resolve_namespaces
+
+    if not s.cluster.enabled:
+        raise ConfigError("watch needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
+    if a.interval is not None:
+        if not 15 <= a.interval <= 3600:
+            raise ConfigError("--interval must be 15 to 3600 seconds")
+        s.watch.interval_seconds = a.interval
+    watcher = Watcher(s, get_backend(s), resolve_namespaces(s, a.namespaces), getattr(a, "platform", None))
+    if a.once:
+        result = watcher.poll()
+        _print_poll(result) if a.format == "text" else _emit(result, fmt)
+        return 0
+    stop = threading.Event()
+    try:
+        while not stop.is_set():
+            result = watcher.poll()
+            _print_poll(result) if a.format == "text" else _emit(result, fmt)
+            sys.stdout.flush()
+            stop.wait(s.watch.interval_seconds)
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
+def _incidents(a: argparse.Namespace, kit: Any, fmt: str) -> int:
+    from kube_noob import toolkit as tk
+
+    cmd = a.incidents_cmd or "list"
+    if cmd == "show":
+        out = kit.incident(tk.IncidentIn(id=a.incident_id))
+        _emit(out, fmt)
+        return 0
+    if cmd == "confirm":
+        _emit(
+            kit.incident_confirm(
+                tk.IncidentConfirmIn(id=a.incident_id, cause=a.cause, fix=a.fix, confirmed_by_user=True)
+            ),
+            fmt,
+        )
+        return 0
+    out = kit.incidents(
+        tk.IncidentsIn(
+            status="all" if getattr(a, "all", False) else "open", namespace=getattr(a, "namespace", None), limit=100
+        )
+    )
+    if a.format == "text":
+        for row in out["incidents"]:
+            _tprint(f"{row['id']}  {row['status']:8} x{row['occurrences']}  {row['headline']}")
+        if out.get("note"):
+            _tprint(out["note"])
+    else:
+        _emit(out, fmt)
+    return 0
 
 
 def _learning(a: argparse.Namespace, kit: Any, fmt: str) -> int:

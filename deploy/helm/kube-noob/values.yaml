@@ -74,6 +74,13 @@ egressFirewall:
   extraDnsNames: []                 # e.g. "*.docs.redhat.com" where your OVN-Kubernetes supports wildcard names
   denyCIDRs: ["0.0.0.0/0"]          # add "::/0" on dual-stack clusters
 
+watch:
+  # Always-on incident watch: polls pods, events, deployments and replicasets read-only in the release namespace and
+  # rbac.namespaces, explains each new incident and keeps an incident ledger (on the PVC when persistence is enabled).
+  # Needs config.clusterEnabled and replicaCount 1 (one ledger).
+  enabled: false
+  intervalSeconds: 60
+
 rbac:
   # Read-only, never Secrets. Every holder of the bearer token reads through this ServiceAccount, so the default is
   # the release namespace plus the namespaces listed below; "cluster" grants cluster-wide reads.

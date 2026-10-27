@@ -33,6 +33,7 @@ model at all. Updated 2026-10-27, after 0.3.1.
 | Release writes the Homebrew formula; CI installs it the way users do (tap, `brew install kube-noob`) | Done | 0.2.3 |
 | Reported issues: errors matched to the OpenShift 4.20 to 4.22 release notes with link, fix version and workaround | Done | 0.3.0 |
 | Every answer states the knowledge date; live checks read the cluster version; web results marked external | Done | 0.3.0 |
+| Incident watch: always-on, read-only detection in the service or terminal; each incident explained once, with what changed before it and the fix the team confirmed for earlier occurrences | Done | Unreleased |
 | Audit findings name their NIST SP 800-53 Rev. 5 controls; `doctor` reports FIPS mode; FedRAMP High deployment guide | Done | 0.3.1 |
 | Policy debugging: Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, LimitRange and RBAC denials explained with the fix; NetworkPolicy reachability (offline or live, read-only) with the smallest allow policy | Done | 0.3.1 |
 | OpenShift Helm catalog (community) submission | Not started: needs the owner's fork and pull requests ([openshift-catalog.md](openshift-catalog.md)) | after 0.2.2 |

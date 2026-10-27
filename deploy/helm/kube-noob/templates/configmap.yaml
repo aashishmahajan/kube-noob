@@ -17,6 +17,14 @@ data:
     cluster:
       enabled: {{ .Values.config.clusterEnabled }}
       backend: in-cluster
+    watch:
+      enabled: {{ .Values.watch.enabled }}
+      intervalSeconds: {{ .Values.watch.intervalSeconds }}
+      namespaces:
+        - {{ .Release.Namespace | quote }}
+        {{- range .Values.rbac.namespaces }}
+        - {{ . | quote }}
+        {{- end }}
     server:
       host: 0.0.0.0
       port: {{ .Values.service.port }}

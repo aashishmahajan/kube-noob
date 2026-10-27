@@ -59,6 +59,9 @@ def _instructions(settings: Settings) -> str:
         "ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, RBAC) use kubenoob_explain_denial; for 'can pod "
         "A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
+        + ". When asked what is wrong, read kubenoob_incidents first: the watch's open incidents with their diagnosis, "
+        "what changed before they started and fixes the team confirmed for earlier occurrences"
+        + (" (kubenoob_cluster_check_namespace polls a namespace now)" if settings.cluster.enabled else "")
         + ". Every result carries knowledgeAsOf: say how "
         "current kube-noob's knowledge is when the answer depends on versions or recent changes."
         + (

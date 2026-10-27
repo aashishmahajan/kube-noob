@@ -14,7 +14,9 @@ description: >
 Diagnose before change. Never lead with a command that executes in a container or changes the cluster. Commands
 are for the user to run: give them as copy-paste lines (no shell comments) and do not run them yourself.
 
-1. Ask for read-only evidence: the output of `oc describe pod`, `oc get events --sort-by=.lastTimestamp`,
+1. Call `kubenoob_incidents` first: if the watch already recorded the problem, its incident has the diagnosis, what
+   changed before it started, how often it came back and the fix the team confirmed last time; lead with that.
+   Otherwise ask for read-only evidence: the output of `oc describe pod`, `oc get events --sort-by=.lastTimestamp`,
    `oc logs --previous`, or a redacted bundle (`kube-noob bundle deployment/<name> -n <ns> --cluster-enabled`).
 2. Call `kubenoob_diagnose` with the raw text, the platform and, on OpenShift, the cluster version if known (`4.20.8`).
    Present its `readOnlyNextSteps` first.
@@ -34,3 +36,5 @@ are for the user to run: give them as copy-paste lines (no shell comments) and d
 7. Only then offer `diagnosticCommands` (rsh, exec, curl) and `proposedChanges`; for each, state the impact and ask for
    approval.
 8. If the fix is a manifest change, run `kubenoob_run_protocol` on the corrected YAML before presenting it.
+9. When the user confirms what fixed an incident, offer `kubenoob_incident_confirm` so the next occurrence comes with
+   it (summaries only).

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+An incident watch that remembers: always on, read-only, no model.
+
+- `kube-noob watch -n <namespace>` (and `watch.enabled` in the chart, `kube-noob serve --watch`): polls pods,
+  events, deployments and replicasets with get and list only, and groups what it finds into incidents by namespace,
+  workload and signal: CrashLoopBackOff, OOMKilled, ImagePullBackOff, container config errors, FailedCreate (with the
+  policy that denied it), Unschedulable, FailedMount, failing probes, stuck rollouts and evictions.
+- Each new or recurring incident is explained once: the matching playbook, the policy denial, reported OpenShift
+  issues, and what changed in the Deployment's last rollout (image, environment variable names, resources) when it
+  started soon after.
+- The incident ledger (`incidents.json` in the data directory) keeps occurrences, durations and the fixes a person
+  confirmed (`kube-noob incidents confirm`); a recurrence comes back with the last confirmed fix, and the same problem
+  in another workload shows it too. It never stores log lines, object specs or Secret values (PRIVACY.md).
+- MCP tools `kubenoob_incidents`, `kubenoob_incident`, `kubenoob_incident_confirm` (not on shared HTTP servers) and,
+  with cluster access, `kubenoob_cluster_check_namespace`. CI runs the watch on kind against a crash loop and a
+  Pod Security denial.
+
 ## 0.3.1 - 2026-10-27
 
 Why was this denied, and can pod A reach pod B? Policy debugging, offline and read-only.

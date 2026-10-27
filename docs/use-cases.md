@@ -110,6 +110,26 @@ kube-noob policy reach --from shop/orders-api --to shop/payments --port 9090 -f 
 kube-noob policy reach --from shop/orders-api --to shop/payments --port grpc --live --cluster-enabled
 ```
 
+### Always on: the incident watch
+
+`watch` polls your namespaces read-only (pods, events, deployments, replicasets; never Secrets) and turns what it sees
+into incidents: crash loops, OOM kills, image pulls, container config errors, pods that cannot be created (with the
+policy that denied them), scheduling, mount and probe failures, stuck rollouts and evictions. Each new incident is
+explained once (playbook, policy denial, reported OpenShift bug) and gets a "what changed" note when it started soon
+after a rollout ("started 4 min after the rollout to revision 2: image 2.7.0 -> 2.7.1; memory limit 256Mi -> 128Mi").
+
+The incident ledger is its memory: how often each incident came back, how long each one lasted, and the fix your team
+confirmed, which comes back with the next occurrence and with the same problem in other workloads. Claude or
+Lightspeed read it through `kubenoob_incidents`; in the cluster, set `watch.enabled` in the chart.
+
+```bash
+kube-noob --cluster-enabled watch -n shop -n payments
+kube-noob --cluster-enabled watch -n shop --once
+kube-noob incidents
+kube-noob incidents show inc-3fa94c0e12
+kube-noob incidents confirm inc-3fa94c0e12 --cause "memory limit cut to 128Mi" --fix "restored the 256Mi limit"
+```
+
 ## Platform admin: run it inside the cluster, locked down
 
 ```bash

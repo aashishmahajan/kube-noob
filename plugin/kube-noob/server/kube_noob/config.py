@@ -172,6 +172,24 @@ class JudgeSettings(_LLMEndpoint):
         return self
 
 
+class WatchSettings(_Base):
+    """Always-on incident watch (``kube-noob watch``, ``kube-noob serve`` with ``enabled``). Read-only."""
+
+    enabled: bool = False
+    interval_seconds: int = Field(default=60, ge=15, le=3600)
+    namespaces: list[str] = Field(default_factory=list, max_length=50)  # empty: the pod's own namespace
+    resolve_after_polls: int = Field(default=3, ge=1, le=100)
+    retention_days: int = Field(default=30, ge=1, le=365)
+
+    @field_validator("namespaces")
+    @classmethod
+    def _dns_names(cls, v: list[str]) -> list[str]:
+        bad = [n for n in v if not re.fullmatch(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?", n)]
+        if bad:
+            raise ValueError(f"watch.namespaces must be namespace names: {bad}")
+        return v
+
+
 class ServerSettings(_Base):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
@@ -199,6 +217,7 @@ class Settings(_Base):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     judge: JudgeSettings = Field(default_factory=JudgeSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
+    watch: WatchSettings = Field(default_factory=WatchSettings)
     data_dir: Path = Field(default_factory=_default_data_dir)
     default_platform: Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"] = "kubernetes"
     source_path: Path | None = Field(default=None, exclude=True)

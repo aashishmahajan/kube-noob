@@ -8,6 +8,7 @@ web tools exist only when ``webEnabled: true``; live-cluster tools only when ``c
 from __future__ import annotations
 
 import contextlib
+import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -203,6 +204,28 @@ class NetpolCheckIn(TrafficIn):
     default_namespace: str = Field(
         "default", max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", description="For objects without one."
     )
+
+
+class IncidentsIn(_In):
+    status: Literal["open", "resolved", "all"] = Field("open", description="Which incidents to list.")
+    namespace: str | None = Field(None, max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+    limit: int = Field(20, ge=1, le=100)
+
+
+class IncidentIn(_In):
+    id: str = Field(..., pattern=r"^inc-[0-9a-f]{10}$", description="Incident id, e.g. inc-3fa94c0e12.")
+
+
+class IncidentConfirmIn(IncidentIn):
+    cause: str = Field(..., min_length=3, max_length=600, description="The confirmed root cause, in words.")
+    fix: str = Field(..., min_length=3, max_length=1200, description="What fixed it, in words (no manifests).")
+    confirmed_by_user: bool = Field(
+        ..., description="True only after the user explicitly confirmed this cause and fix worked."
+    )
+
+
+class NamespaceCheckIn(_In):
+    namespace: str = Field(..., max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
 
 class LearningNoteIn(_In):
@@ -518,6 +541,55 @@ class Toolkit:
         self._observe([f"netpol:{out['verdict']}"])
         return out
 
+    # -- incidents (the always-on watch's memory) --------------------------------------------------------------
+    def _ledger(self) -> Any:
+        from kube_noob.incidents import IncidentLedger
+
+        w = self.settings.watch
+        return IncidentLedger(self.settings.data_dir, w.retention_days, w.resolve_after_polls)
+
+    def incidents(self, p: IncidentsIn) -> dict[str, Any]:
+        rows = self._ledger().listing(p.status, p.namespace, p.limit)
+        out: dict[str, Any] = {"incidents": rows}
+        if not rows:
+            out["note"] = (
+                "No incidents recorded. The watch records them when it runs: `kube-noob watch -n <namespace>`, or "
+                "watch.enabled in the in-cluster service."
+            )
+        return out
+
+    def incident(self, p: IncidentIn) -> dict[str, Any]:
+        return dict(self._ledger().get(p.id))
+
+    def incident_confirm(self, p: IncidentConfirmIn) -> dict[str, Any]:
+        if not p.confirmed_by_user:
+            raise ValueError(
+                "Ask the user to confirm the cause and fix first; only confirmed fixes are kept "
+                "(confirmed_by_user: true)."
+            )
+        inc = self._ledger().confirm(p.id, p.cause, p.fix)
+        saved: dict[str, Any] = {"incident": inc["id"], "confirmedFixes": inc["confirmedFixes"]}
+        if self.settings.learning_enabled:
+            tag = re.sub(r"[^a-z0-9-]", "-", inc["signal"].lower())[:40].strip("-") or "incident"
+            note = self.learning.add_note(
+                f"{inc['signal']} on {inc['workload']} in namespace {inc['namespace']}",
+                p.cause,
+                p.fix,
+                None,
+                [tag, "incident"],
+            )
+            saved["learningNote"] = note["id"]
+        return saved
+
+    def cluster_check_namespace(self, p: NamespaceCheckIn) -> dict[str, Any]:
+        from kube_noob.watch import Watcher
+
+        backend = get_backend(self.settings)
+        result = Watcher(self.settings, backend, [p.namespace]).poll()
+        led = self._ledger()
+        result["openDetails"] = [led.get(r["id"]) for r in result["open"] if r["namespace"] == p.namespace][:5]
+        return result
+
     def cluster_get(self, p: ClusterGetIn) -> dict[str, Any]:
         resolve_resource(p.resource)  # refuse Secrets / non-allowlisted kinds before touching any backend
         backend = get_backend(self.settings)
@@ -814,6 +886,31 @@ class Toolkit:
                 self.check_network_policy,
             ),
             ToolSpec(
+                "incidents",
+                "Incidents the watch has seen",
+                "Open (or resolved) incidents from the local incident ledger: workload, signal, how often it came "
+                "back, the diagnosis and what changed before it started. Read this first when asked what is wrong.",
+                IncidentsIn,
+                self.incidents,
+            ),
+            ToolSpec(
+                "incident",
+                "One incident in full",
+                "An incident with its evidence (redacted), diagnosis, policy denials, reported issues, rollout change, "
+                "every occurrence, the fixes a person confirmed, and confirmed fixes for the same problem elsewhere.",
+                IncidentIn,
+                self.incident,
+            ),
+            ToolSpec(
+                "incident_confirm",
+                "Remember the fix for an incident",
+                "AFTER the user confirms it worked: store the cause and fix on the incident (and as a learning note), "
+                "so the next occurrence comes with it. Summaries only; never leaves the machine.",
+                IncidentConfirmIn,
+                self.incident_confirm,
+                read_only=False,
+            ),
+            ToolSpec(
                 "learn_tracks",
                 "List learning tracks",
                 "Tracks, lessons, exercises and the learner's progress.",
@@ -924,6 +1021,15 @@ class Toolkit:
                     open_world=True,
                 ),
                 ToolSpec(
+                    "cluster_check_namespace",
+                    "Check a namespace now (live, read-only)",
+                    "Run one watch poll on a namespace: find crash loops, OOM kills, image pulls, policy denials, "
+                    "scheduling, mount and probe failures, explain each new one, and record them in the ledger.",
+                    NamespaceCheckIn,
+                    self.cluster_check_namespace,
+                    open_world=True,
+                ),
+                ToolSpec(
                     "cluster_version",
                     "Cluster version",
                     "Kubernetes and OpenShift versions of the live cluster, and whether they are newer than "
@@ -946,5 +1052,5 @@ class Toolkit:
                 )
             )
         if self.shared:
-            s = [t for t in s if t.name not in {"learning_note_add", "learning_profile_set"}]
+            s = [t for t in s if t.name not in {"learning_note_add", "learning_profile_set", "incident_confirm"}]
         return s
