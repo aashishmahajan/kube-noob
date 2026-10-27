@@ -1,7 +1,7 @@
 kube-noob {{ .Chart.AppVersion }} is running in {{ .Release.Namespace }}.
 
 MCP endpoint (in-cluster): http://{{ include "kube-noob.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/mcp
-Web access: {{ if .Values.config.webEnabled }}ENABLED (allowlisted domains){{ else }}disabled (offline knowledge only){{ end }}
+Web access: {{ if .Values.config.offline }}LOCKED OFF (offline: true){{ else if .Values.config.webEnabled }}ENABLED (allowlisted domains, GET-only, text only){{ else }}disabled (offline knowledge only){{ end }}
 Live cluster tools: {{ if .Values.config.clusterEnabled }}enabled (read-only, {{ .Values.rbac.scope }} scope){{ else }}disabled{{ end }}
 
 Health: kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kube-noob.fullname" . }} 8080 && curl localhost:8080/readyz

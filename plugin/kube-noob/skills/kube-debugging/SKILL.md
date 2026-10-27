@@ -8,11 +8,14 @@ description: >
 
 # Debugging
 
-1. Ask for (or use what was pasted): `oc describe pod`, `oc get events --sort-by=.lastTimestamp`, `oc logs --previous`.
-2. Call `kubenoob_diagnose` with the raw text (and platform if known). It returns ranked root causes, read-only checks
-   with names filled in, fixes, related audit rules and knowledge ids.
-3. If live cluster access is enabled on the server (`kubenoob_config_status` shows `cluster.enabled: true`), call
-   `kubenoob_cluster_debug_workload` for the workload - it is read-only, never reads Secrets and redacts sensitive values.
-4. Explain the most likely cause first, give the confirming check, then the fix. Cite `[kn:...]` chunks.
-5. If the fix is a manifest change, run the master controller protocol on the corrected YAML before presenting it.
-Never suggest destructive commands (delete, patch, scale to zero) without stating the impact and asking first.
+Diagnose before change. Never lead with a command that executes in a container or changes the cluster.
+
+1. Collect read-only evidence: `oc describe pod`, `oc get events --sort-by=.lastTimestamp`, `oc logs --previous`, or a
+   redacted bundle (`kube-noob bundle deployment/<name> -n <ns> --cluster-enabled`).
+2. Call `kubenoob_diagnose` with the raw text (and platform if known). Present its `readOnlyNextSteps` first.
+3. If `kubenoob_config_status` shows `cluster.enabled: true`, call `kubenoob_cluster_debug_workload` (read-only, never
+   reads Secrets, redacts values).
+4. Explain the most likely cause with the confirming read-only check, citing `[kn:...]` chunks.
+5. Only then offer `diagnosticCommands` (rsh, exec, curl) and `proposedChanges`; for each, state the impact and ask for
+   approval.
+6. If the fix is a manifest change, run `kubenoob_run_protocol` on the corrected YAML before presenting it.

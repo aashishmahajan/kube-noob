@@ -1,6 +1,9 @@
 {{- if and (not .Values.auth.existingSecret) (not .Values.auth.allowUnauthenticated) }}
 {{- fail "Set auth.existingSecret (Secret with key 'token') or explicitly set auth.allowUnauthenticated=true" }}
 {{- end }}
+{{- if and .Values.config.offline .Values.config.webEnabled }}
+{{- fail "config.offline locks web access off; unset config.webEnabled (the two contradict each other)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,6 +65,8 @@ spec:
             - name: KUBE_NOOB_DATA_DIR
               value: /var/lib/kube-noob
             # Explicit env (highest precedence) so the values here always win over anything baked into the image.
+            - name: KUBE_NOOB_OFFLINE
+              value: {{ .Values.config.offline | quote }}
             - name: KUBE_NOOB_WEB_ENABLED
               value: {{ .Values.config.webEnabled | quote }}
             - name: KUBE_NOOB_CLUSTER_ENABLED

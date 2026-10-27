@@ -1,6 +1,8 @@
 # kube-noob configuration (copy to ~/.config/kube-noob/config.yaml, or pass --config <file> / KUBE_NOOB_CONFIG;
 # the current directory is not searched implicitly)
+offline: false                 # admin lock: true = no web, no corpus downloads, local models only (cannot be lifted later)
 webEnabled: false              # true = allow allowlisted web lookups (agent web search + kubenoob_web_fetch)
+learningEnabled: true          # local learning.json: your profile, confirmed notes, pattern counters (no logs/secrets)
 web:
   allowedDomains: [kubernetes.io, helm.sh, docs.redhat.com, cloud.redhat.com, docs.aws.amazon.com, github.com]
   timeoutSeconds: 20

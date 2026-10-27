@@ -71,6 +71,11 @@ def run_protocol(
     if platform is None and blueprint is not None and blueprint.get("platform"):
         platform = str(blueprint["platform"])
         assumptions.append(f"platform taken from the blueprint ('{platform}')")
+    if version is None and blueprint is not None:
+        bp_version = blueprint.get("platformVersion") or blueprint.get("platform_version")
+        if bp_version:
+            version = str(bp_version)
+            assumptions.append(f"version taken from the blueprint ('{version}')")
     if platform is None:
         inferred, why = infer_platform(request, manifests)
         if inferred:

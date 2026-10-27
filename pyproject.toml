@@ -70,6 +70,9 @@ path = "src/kube_noob/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/kube_noob"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"examples" = "kube_noob/data/examples"
+
 [tool.hatch.build.targets.sdist]
 include = [
   "src/kube_noob",
@@ -87,6 +90,8 @@ include = [
   "plugin",
   ".claude-plugin",
   "scripts",
+  "examples",
+  "demos",
 ]
 
 [tool.ruff]

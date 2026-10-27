@@ -23,12 +23,13 @@ from kube_noob.catalog import OCP_TO_K8S, REMOVED_APIS, k8s_version_for, parse_m
 from kube_noob.config import Settings
 from kube_noob.debug.cluster import get_backend, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
-from kube_noob.errors import ClarificationNeeded
+from kube_noob.errors import ClarificationNeeded, WebContentRejectedError
 from kube_noob.evals.reward import benchmark, grade
 from kube_noob.generate.blueprint import Blueprint, clarify
 from kube_noob.generate.helm import generate_chart
 from kube_noob.generate.manifests import generate
 from kube_noob.knowledge.store import get_store
+from kube_noob.learn.memory import LearningStore
 from kube_noob.learn.tutor import Tutor
 from kube_noob.net import Purpose, http_client
 
@@ -36,6 +37,21 @@ PlatformT = Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
 MAX_MANIFEST_CHARS = 1_000_000
 StageName = Literal["validate", "audit", "calibrate", "red-team"]
 ALL_STAGE_NAMES: tuple[StageName, ...] = ("validate", "audit", "calibrate", "red-team")
+# web_fetch reads documentation text only: archives, binaries, scripts and images are refused before decoding.
+READABLE_CONTENT_TYPES = frozenset(
+    {
+        "text/html",
+        "text/plain",
+        "text/markdown",
+        "text/x-markdown",
+        "application/xhtml+xml",
+        "application/json",
+        "application/yaml",
+        "application/x-yaml",
+        "text/yaml",
+        "text/x-yaml",
+    }
+)
 
 
 class _In(BaseModel):
@@ -111,6 +127,27 @@ class DiagnoseIn(_In):
     limit: int = Field(5, ge=1, le=10)
 
 
+class LearningNoteIn(_In):
+    symptom: str = Field(..., min_length=3, max_length=400, description="What was observed, in one or two sentences.")
+    cause: str = Field(..., min_length=3, max_length=600, description="The confirmed root cause.")
+    fix: str = Field(..., min_length=3, max_length=1200, description="What fixed it, in words (no manifests).")
+    platform: PlatformT | None = None
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    confirmed_by_user: bool = Field(
+        ..., description="True only after the user explicitly confirmed this cause and fix worked."
+    )
+
+
+class LearningProfileIn(_In):
+    platform: PlatformT | None = None
+    versions: dict[str, str] = Field(
+        default_factory=dict, description="Keys kubernetes|openshift|helm|rhacs|rosa, values like '4.22'."
+    )
+    conventions: list[str] | None = Field(
+        None, max_length=20, description="Team conventions, e.g. 'namespaces are <team>-<env>'."
+    )
+
+
 class ClusterGetIn(_In):
     resource: str = Field(..., max_length=64, description="Allowlisted resource, e.g. pods, deployments, routes.")
     name: str | None = Field(None, max_length=253)
@@ -180,10 +217,16 @@ class Toolkit:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.tutor = Tutor(settings.data_dir)
+        self.learning = LearningStore(settings.data_dir)
 
     # -- helpers ---------------------------------------------------------------------------------------------
     def store(self) -> Any:
         return get_store(self.settings.data_dir)
+
+    def _observe(self, keys: list[str]) -> None:
+        """Count pattern ids (never content) so summaries reflect what this user actually runs into."""
+        if self.settings.learning_enabled:
+            self.learning.bump(keys)
 
     # -- protocol / audit ------------------------------------------------------------------------------------
     def run_protocol(self, p: ProtocolIn) -> dict[str, Any]:
@@ -204,7 +247,12 @@ class Toolkit:
     def audit(self, p: AuditIn) -> dict[str, Any]:
         stages = {Stage(s) for s in p.stages}
         r = analyze(p.manifests, p.platform, p.version, stages=stages, min_severity=Severity.parse(p.min_severity))
-        return r.as_dict()
+        out = r.as_dict()
+        self._observe(
+            [f"platform:{out.get('platform')}"]
+            + [f"rule:{f['ruleId']}" for f in out.get("findings", []) if "ruleId" in f]
+        )
+        return out
 
     def red_team(self, p: ManifestsIn) -> dict[str, Any]:
         r = analyze(p.manifests, p.platform, p.version)
@@ -313,7 +361,9 @@ class Toolkit:
 
     # -- debugging -------------------------------------------------------------------------------------------
     def diagnose(self, p: DiagnoseIn) -> dict[str, Any]:
-        return diagnose(p.text, platform=p.platform, limit=p.limit).as_dict()
+        out = diagnose(p.text, platform=p.platform, limit=p.limit).as_dict()
+        self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
+        return out
 
     def cluster_get(self, p: ClusterGetIn) -> dict[str, Any]:
         resolve_resource(p.resource)  # refuse Secrets / non-allowlisted kinds before touching any backend
@@ -327,11 +377,33 @@ class Toolkit:
 
     def cluster_debug(self, p: ClusterDebugIn) -> dict[str, Any]:
         backend = get_backend(self.settings)
-        return debug_workload(backend, p.namespace, p.kind, p.name, p.platform, self.settings.cluster.max_log_lines)
+        out = debug_workload(backend, p.namespace, p.kind, p.name, p.platform, self.settings.cluster.max_log_lines)
+        self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
+        return out
 
     def cluster_version(self, _: EmptyIn) -> dict[str, Any]:
         b = get_backend(self.settings)
         return {"backend": b.name, **b.version()}
+
+    # -- local learning file ---------------------------------------------------------------------------------
+    def learning_summary(self, _: EmptyIn) -> dict[str, Any]:
+        return {**self.learning.summary(), "enabled": self.settings.learning_enabled}
+
+    def learning_note_add(self, p: LearningNoteIn) -> dict[str, Any]:
+        if not p.confirmed_by_user:
+            raise ValueError(
+                "Ask the user to confirm the cause and fix first; only confirmed notes are kept "
+                "(confirmed_by_user: true)."
+            )
+        if not self.settings.learning_enabled:
+            raise ValueError("learningEnabled is false; nothing is stored.")
+        note = self.learning.add_note(p.symptom, p.cause, p.fix, p.platform, p.tags)
+        return {"saved": note, "citation": f"[kn:{note['id']}#0]", "path": str(self.learning.path)}
+
+    def learning_profile_set(self, p: LearningProfileIn) -> dict[str, Any]:
+        if not self.settings.learning_enabled:
+            raise ValueError("learningEnabled is false; nothing is stored.")
+        return {"profile": self.learning.set_profile(p.platform, p.versions, p.conventions)}
 
     # -- learning --------------------------------------------------------------------------------------------
     def tracks(self, p: LearnerIn) -> dict[str, Any]:
@@ -376,6 +448,13 @@ class Toolkit:
         size = 0
         truncated = False
         with http_client(self.settings, Purpose.WEB) as c, c.stream("GET", p.url) as resp:
+            # Decide on the headers alone: a binary, archive or script body is never read, stored or executed.
+            content_type = resp.headers.get("content-type", "")
+            if content_type.split(";")[0].strip().lower() not in READABLE_CONTENT_TYPES:
+                raise WebContentRejectedError(
+                    f"Refusing to fetch {p.url}: content type {content_type or 'unknown'!r} is not readable text. "
+                    "kube-noob only reads documentation pages; it never downloads files or executes content."
+                )
             # Stream and stop at web.maxBytes: a huge or endless response must not be buffered in memory.
             for chunk in resp.iter_bytes():
                 chunks.append(chunk)
@@ -383,7 +462,6 @@ class Toolkit:
                 if size >= limit:
                     truncated = True
                     break
-            content_type = resp.headers.get("content-type", "")
             encoding = resp.encoding or "utf-8"
             final_url, status = str(resp.url), resp.status_code
         body = b"".join(chunks)[:limit].decode(encoding, errors="replace")
@@ -402,8 +480,14 @@ class Toolkit:
 
     def config_status(self, _: EmptyIn) -> dict[str, Any]:
         from kube_noob import __version__
+        from kube_noob.posture import posture
 
-        return {"version": __version__, "config": self.settings.public_view(), "knowledge": self.store().stats()}
+        return {
+            "version": __version__,
+            "posture": posture(self.settings),
+            "config": self.settings.public_view(),
+            "knowledge": self.store().stats(),
+        }
 
     # -- registry --------------------------------------------------------------------------------------------
     def specs(self) -> list[ToolSpec]:
@@ -568,6 +652,31 @@ class Toolkit:
                 "or QA rules), source-attribution credit for valid [kn:...] citations, format, penalties.",
                 GradeIn,
                 self.grade,
+            ),
+            ToolSpec(
+                "learning_summary",
+                "Show what kube-noob has learned locally",
+                "The user's environment profile (platform, versions, conventions), confirmed troubleshooting notes "
+                "(cite as [kn:local-N#0]) and the most frequent playbooks/rules. Read this before tailoring advice.",
+                EmptyIn,
+                self.learning_summary,
+            ),
+            ToolSpec(
+                "learning_note_add",
+                "Remember a confirmed fix",
+                "Save a short symptom -> cause -> fix note to the local learning file AFTER the user confirms it "
+                "worked. Summaries only: credentials, manifests and raw logs are rejected. Never leaves the machine.",
+                LearningNoteIn,
+                self.learning_note_add,
+                read_only=False,
+            ),
+            ToolSpec(
+                "learning_profile_set",
+                "Remember the user's environment",
+                "Save platform, versions and team conventions the user stated, so later answers fit their setup.",
+                LearningProfileIn,
+                self.learning_profile_set,
+                read_only=False,
             ),
             ToolSpec(
                 "config_status",

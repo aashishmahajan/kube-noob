@@ -192,6 +192,14 @@ def build_parser() -> argparse.ArgumentParser:
     dbg.add_argument("-n", "--namespace", required=True)
     dbg.add_argument("--platform", choices=PLATFORMS)
 
+    bun = sub.add_parser(
+        "bundle", help="Write a redacted, read-only diagnostic bundle (Markdown + JSON) for a workload"
+    )
+    bun.add_argument("target", help="kind/name, e.g. deployment/orders-api")
+    bun.add_argument("-n", "--namespace", required=True)
+    bun.add_argument("-o", "--out", default="kube-noob-bundle", help="output directory (default: ./kube-noob-bundle)")
+    bun.add_argument("--platform", choices=PLATFORMS)
+
     s = sub.add_parser("search", help="Search local knowledge")
     s.add_argument("query")
     s.add_argument("-n", "--limit", type=int, default=5)
@@ -219,6 +227,24 @@ def build_parser() -> argparse.ArgumentParser:
     lq.add_argument("--choice", type=int)
     lsub.add_parser("progress")
     lr.set_defaults(learner="local")
+
+    lg = sub.add_parser("learning", help="What kube-noob remembers locally (profile, confirmed notes, counters)")
+    lgs = lg.add_subparsers(dest="learning_cmd", required=True)
+    _patch(lgs, common)
+    lgs.add_parser("show", help="Profile, recent notes and the most frequent playbooks/rules")
+    ln = lgs.add_parser("note", help="Save a confirmed symptom -> cause -> fix (summaries only, no secrets)")
+    ln.add_argument("--symptom", required=True)
+    ln.add_argument("--cause", required=True)
+    ln.add_argument("--fix", required=True)
+    ln.add_argument("--platform", choices=PLATFORMS)
+    ln.add_argument("--tag", action="append", default=[], dest="tags")
+    lgf = lgs.add_parser("forget", help="Delete a note by id (local-N)")
+    lgf.add_argument("note_id")
+    lgp = lgs.add_parser("profile", help="Set your platform, versions and team conventions")
+    lgp.add_argument("--platform", choices=PLATFORMS)
+    for key in ("kubernetes", "openshift", "helm", "rhacs", "rosa"):
+        lgp.add_argument(f"--{key}", metavar="X.Y", help=f"{key} version")
+    lgp.add_argument("--convention", action="append", dest="conventions", help="repeat for several")
 
     ask = sub.add_parser("ask", help="Ask the agent (LLM + local tools)")
     ask.add_argument("question")
@@ -271,6 +297,10 @@ def build_parser() -> argparse.ArgumentParser:
     tsub.add_parser("tasks", help="List benchmark tasks")
 
     sub.add_parser("config", help="Show the effective configuration")
+    sub.add_parser("doctor", help="Show what kube-noob can reach (network, cluster, model); exit 1 on conflicts")
+    dm = sub.add_parser("demo", help="Offline walkthroughs of common use cases (no network, no cluster)")
+    dm.add_argument("scenario", nargs="?", help="scenario name or 'all' (see --list)")
+    dm.add_argument("--list", action="store_true", dest="list_demos")
     return p
 
 
@@ -411,6 +441,29 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         _emit(kit.diagnose(tk.DiagnoseIn(text=_read(a.file), platform=getattr(a, "platform", None))), fmt)
         return 0
 
+    if a.cmd == "bundle":
+        from kube_noob.debug.diagnose import bundle_markdown
+
+        kind, _, name = a.target.partition("/")
+        if not name:
+            raise ConfigError("target must be kind/name, e.g. deployment/orders-api")
+        if not s.cluster.enabled:
+            raise ConfigError("a bundle needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
+        result = kit.cluster_debug(
+            tk.ClusterDebugIn(
+                namespace=a.namespace, kind=kind.lower(), name=name, platform=getattr(a, "platform", None)
+            )
+        )
+        bundle_dir = Path(a.out)
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        (bundle_dir / "bundle.json").write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+        (bundle_dir / "bundle.md").write_text(bundle_markdown(result), encoding="utf-8")
+        _emit(
+            {"bundle": str(bundle_dir), "files": ["bundle.md", "bundle.json"], "diagnoses": len(result["diagnoses"])},
+            fmt,
+        )
+        return 0
+
     if a.cmd == "debug":
         kind, _, name = a.target.partition("/")
         if not name:
@@ -461,6 +514,9 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _emit(kit.progress(tk.LearnerIn(learner=a.learner)), fmt)
         return 0
 
+    if a.cmd == "learning":
+        return _learning(a, kit, fmt)
+
     if a.cmd == "ask":
         from kube_noob.agent.loop import Agent
 
@@ -503,13 +559,69 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "config":
         _emit(kit.config_status(tk.EmptyIn()), fmt)
         return 0
+    if a.cmd == "demo":
+        from kube_noob import demo
+
+        if a.list_demos or not a.scenario:
+            if a.format == "text":
+                for d in demo.listing():
+                    print(f"{d['name']:10} {d['title']}  [{d['for']}]")
+                print("\nRun: kube-noob demo <name>   or   kube-noob demo all")
+            else:
+                _emit(demo.listing(), fmt)
+            return 0
+        names = list(demo.SCENARIOS) if a.scenario == "all" else [a.scenario]
+        for n in names:
+            if n not in demo.SCENARIOS:
+                raise KeyError(f"unknown demo {n!r}; choose from {', '.join(demo.SCENARIOS)} or 'all'")
+            demo.run(n, s)
+            print()
+        return 0
+    if a.cmd == "doctor":
+        from kube_noob.posture import posture, render_text
+
+        report = posture(s)
+        print(render_text(report)) if a.format == "text" else _emit(report, fmt)
+        return 1 if report["conflicts"] else 0
     raise ConfigError(f"unknown command {a.cmd}")
+
+
+def _learning(a: argparse.Namespace, kit: Any, fmt: str) -> int:
+    from kube_noob import toolkit as tk
+
+    lc = a.learning_cmd
+    if lc == "show":
+        out = kit.learning_summary(tk.EmptyIn())
+    elif lc == "note":
+        out = kit.learning_note_add(
+            tk.LearningNoteIn(
+                symptom=a.symptom, cause=a.cause, fix=a.fix, platform=a.platform, tags=a.tags, confirmed_by_user=True
+            )
+        )
+    elif lc == "forget":
+        if not kit.learning.forget(a.note_id):
+            raise KeyError(f"no note {a.note_id}; see `kube-noob learning show`")
+        out = {"forgotten": a.note_id}
+    else:
+        versions = {
+            k: getattr(a, k) for k in ("kubernetes", "openshift", "helm", "rhacs", "rosa") if getattr(a, k, None)
+        }
+        out = kit.learning_profile_set(
+            tk.LearningProfileIn(platform=a.platform, versions=versions, conventions=a.conventions)
+        )
+    _emit(out, fmt)
+    return 0
 
 
 def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob.sources.corpus import read_manifest, verify, write_shard
 
     cc = a.corpus_cmd
+    if cc in {"build", "jira", "history"} and s.offline:
+        raise ConfigError(
+            "the offline lock is on (offline: true / KUBE_NOOB_OFFLINE); corpus downloads are blocked. "
+            "Import a prepared corpus instead: kube-noob corpus import <dir-or-tgz>"
+        )
     if cc in {"build", "jira", "history"} and not (a.online or s.web_enabled):
         raise ConfigError("corpus ingestion uses the network; pass --online (or set webEnabled: true)")
     if cc == "build":

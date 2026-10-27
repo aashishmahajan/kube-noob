@@ -163,8 +163,41 @@ jobs:
       - run: ./mcp-publisher login github-oidc
       - run: ./mcp-publisher publish
 
+  demos:
+    # Record every `kube-noob demo` scenario from the built wheel; GIFs are attached to the release.
+    needs: build-dist
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Install the built wheel
+        run: python -m pip install dist/*.whl && kube-noob demo --list
+      - uses: charmbracelet/vhs-action@f6d7db07a432fcd3b06772628d36a57f96d95dcf # v2.1.1
+      - name: Render demo GIFs
+        run: |
+          set -euo pipefail
+          command -v vhs ttyd ffmpeg
+          mkdir -p demos/out
+          for tape in demos/*.tape; do vhs "$tape"; done
+          for tape in demos/*.tape; do test -s "demos/out/$(basename "$tape" .tape).gif"; done
+          ls -l demos/out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: demos
+          path: demos/out/*.gif
+
   github-release:
-    needs: [publish-pypi, image]
+    needs: [publish-pypi, image, demos]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -174,7 +207,11 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: demos
+          path: demos/
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag
+        run: gh release create "${GITHUB_REF_NAME}" dist/* demos/*.gif --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag

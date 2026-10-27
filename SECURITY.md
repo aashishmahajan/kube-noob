@@ -14,8 +14,11 @@ The latest minor release receives security fixes.
 
 kube-noob makes no outbound connections and touches no cluster unless you enable it. This is tested in CI and was
 verified end to end inside a network namespace with no route (docs/release-readiness.md). With web access enabled it
-only performs HTTPS GETs to allowlisted documentation domains, streams at most `web.maxBytes`, never writes the content
-to disk and never executes it. The MCP server's only subprocesses are read-only `oc`/`kubectl` calls (argv, no shell)
+only performs HTTPS GETs to allowlisted documentation domains, refuses non-text content types (archives, binaries,
+scripts), streams at most `web.maxBytes`, never writes the content to disk and never executes it. The admin lock
+(`offline: true` / `KUBE_NOOB_OFFLINE=1`) overrides `webEnabled`, blocks corpus downloads and allows only loopback or
+in-cluster model endpoints; no later configuration source can lift it. `kube-noob doctor` reports the effective
+posture. The local learning file stores only user-confirmed summaries and ids, never logs, manifests or credentials. The MCP server's only subprocesses are read-only `oc`/`kubectl` calls (argv, no shell)
 when cluster access is enabled; the maintainer CLI commands `corpus build --online` and `helm-audit` run `git` and
 `helm template` locally.
 

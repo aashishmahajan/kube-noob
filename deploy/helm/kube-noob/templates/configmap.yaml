@@ -5,6 +5,7 @@ metadata:
   labels: {{- include "kube-noob.labels" . | nindent 4 }}
 data:
   config.yaml: |
+    offline: {{ .Values.config.offline }}
     webEnabled: {{ .Values.config.webEnabled }}
     {{- with .Values.config.allowedDomains }}
     web:

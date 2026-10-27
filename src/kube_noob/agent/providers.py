@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from kube_noob.config import LLMSettings, Settings
+from kube_noob.config import LLMSettings, Settings, is_local_url
 from kube_noob.errors import ProviderError
 from kube_noob.net import Purpose, http_client
 
@@ -243,8 +243,14 @@ class OpenAICompatibleProvider:
 
 
 def build_provider(llm: LLMSettings, settings: Settings) -> Provider:
+    if llm.provider == "none":
+        raise ProviderError("llm.provider is 'none'; configure 'anthropic' or 'openai-compatible' to use the agent.")
+    if settings.offline and not (llm.provider == "openai-compatible" and is_local_url(llm.base_url)):
+        raise ProviderError(
+            "The offline lock is on: the agent may only use a local model (llm.provider: openai-compatible with a "
+            "loopback or *.svc llm.baseUrl). Use the MCP server from your own client, or point llm.baseUrl at a "
+            "model served in the cluster."
+        )
     if llm.provider == "anthropic":
         return AnthropicProvider(llm, settings)
-    if llm.provider == "openai-compatible":
-        return OpenAICompatibleProvider(llm, settings)
-    raise ProviderError("llm.provider is 'none'; configure 'anthropic' or 'openai-compatible' to use the agent.")
+    return OpenAICompatibleProvider(llm, settings)

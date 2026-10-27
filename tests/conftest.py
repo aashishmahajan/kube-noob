@@ -19,8 +19,10 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         "KUBE_NOOB_LLM_PROVIDER",
         "KUBE_NOOB_LLM_MODEL",
         "KUBE_NOOB_DEFAULT_PLATFORM",
+        "KUBE_NOOB_OFFLINE",
     ):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr("kube_noob.config.SYSTEM_CONFIG", tmp_path / "no-system-config.yaml")
     monkeypatch.setenv("KUBE_NOOB_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.chdir(tmp_path)

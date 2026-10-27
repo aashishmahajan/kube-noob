@@ -7,7 +7,7 @@
 | Sunday 05:17 | Corpus refresh (Git sources, release history, ROX Jira) | `corpus-refresh.yml` |
 | Monday 04:23 | CodeQL | `codeql.yml` |
 | Monday 06:41 | Risk review: dependency CVEs, released-image CVEs, upstream drift, SDK drift | `risk-review.yml` |
-| Monday (after the review) | Agent review: reads the issue, verifies facts, fixes, releases a patch if needed | Claude scheduled task |
+| Monday 04:37 US Central (09:37 or 10:37 UTC) | Agent review: reads the issue and open Dependabot PRs, verifies facts, fixes, pushes a patch and hands back the tag command | Claude scheduled task "kube-noob weekly risk review" |
 | Tuesday 03:41 | OpenSSF Scorecard | `scorecard.yml` |
 | Weekly | Dependabot PRs for pip, Actions and the base image | `dependabot.yml` |
 

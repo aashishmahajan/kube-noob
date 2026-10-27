@@ -1,0 +1,37 @@
+# A Deployment that "works on my laptop" and fails or is unsafe on OpenShift / ROSA HCP.
+# Try: kube-noob audit -f examples/insecure-deployment.yaml --platform openshift
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: orders-api}
+  template:
+    metadata:
+      labels: {app: orders-api}
+    spec:
+      containers:
+        - name: api
+          image: quay.io/example/orders-api:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: DB_PASSWORD
+              value: changeme
+          securityContext:
+            runAsUser: 1000
+            allowPrivilegeEscalation: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-api
+  namespace: shop
+spec:
+  selector: {app: orders}
+  ports:
+    - port: 80
+      targetPort: 80

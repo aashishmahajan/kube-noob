@@ -21,6 +21,11 @@ Jobs to be done:
 | Diagnose before change | every playbook splits read-only checks from changes; diagnose/debug output lists read-only next steps first and labels changes "requires approval"; `kube-noob bundle` collects a redacted read-only evidence bundle | makes the safe path the default path, not a prompt instruction |
 | Learning from context | local, upgrade-safe learning file in the data dir: profile (platform, versions, conventions), confirmed notes (symptom, cause, fix) and aggregate counters; never raw logs or manifests; notes are searchable and cited as `kn:local-...` | learning must not leak data or turn guesses into truth; explicit confirmation plus derived facts only |
 
+## Status
+
+Delivered in 0.2.0. Each criterion below is enforced by the tests listed in [guidance.md](guidance.md) (G02-G04,
+G06-G09, G16, G20-G21).
+
 ## Acceptance criteria
 
 1. Offline lock
@@ -42,7 +47,7 @@ Jobs to be done:
    - Confirmed notes appear in `search_knowledge` as `origin: local` and are citable.
 4. Demos and education
    - `kube-noob demo --list` shows at least 5 offline scenarios; each runs in under 10 seconds without network.
-   - CI renders one GIF per scenario from VHS tapes and attaches them to the release.
+   - The release workflow renders one GIF per scenario from VHS tapes and attaches them to the GitHub release.
    - `docs/use-cases.md`, `docs/learning.md` and `examples/` exist; the README links them in one line each.
 
 ## Riskiest assumptions and cheapest tests

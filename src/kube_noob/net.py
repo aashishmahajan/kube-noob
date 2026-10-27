@@ -43,6 +43,16 @@ def http_client(
     extra_headers: dict[str, str] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> httpx.Client:
+    if settings.offline and purpose in (Purpose.WEB, Purpose.SOURCES):
+        raise WebDisabledError(
+            purpose.value,
+            f"Outbound access for '{purpose.value}' is blocked by the offline lock (offline: true / "
+            "KUBE_NOOB_OFFLINE). kube-noob answers from local knowledge only.",
+        )
+    if settings.offline and purpose is Purpose.LLM and not settings.llm_endpoint_is_local():
+        raise WebDisabledError(
+            "llm", "The offline lock only allows model endpoints on loopback or inside the cluster (*.svc)."
+        )
     if purpose is Purpose.WEB and not settings.web_enabled:
         raise WebDisabledError("web lookup")
     if purpose is Purpose.SOURCES and not (settings.web_enabled or allow_sources):
@@ -53,6 +63,8 @@ def http_client(
         allowed = list(settings.web.allowed_domains)
 
         def _guard(request: httpx.Request) -> None:
+            if request.method != "GET":
+                raise WebDisabledError("web lookup", f"Web access is read-only: {request.method} is not allowed (GET).")
             if request.url.scheme != "https":
                 raise DomainNotAllowedError(f"{request.url.host} (non-https scheme {request.url.scheme})")
             if not host_allowed(request.url.host, allowed):

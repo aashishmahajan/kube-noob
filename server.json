@@ -36,6 +36,12 @@
           "description": "Enable read-only live cluster tools using your kubectl/oc context (default false)",
           "isRequired": false,
           "default": "false"
+        },
+        {
+          "name": "KUBE_NOOB_OFFLINE",
+          "description": "Admin lock: no web, no downloads, local models only (default false)",
+          "isRequired": false,
+          "default": "false"
         }
       ]
     }

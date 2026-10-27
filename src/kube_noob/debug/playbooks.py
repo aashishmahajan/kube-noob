@@ -53,6 +53,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C003", "KN-C005"),
         knowledge=("k8s-debug-pods", "ocp-arbitrary-uid"),
+        weight=0.9,  # a symptom, not a cause: a specific cause (OOM, probe, UID) with equal evidence ranks first
     ),
     Playbook(
         "DBG-IMAGEPULL",
@@ -704,6 +705,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Hostname mismatch (SAN does not include the host being called).",
         ),
         (
+            "oc get events -n {ns} --sort-by=.lastTimestamp   # which component reports the x509 error",
+            "oc get route -n {ns} -o wide                     # TLS termination per Route",
             "openssl s_client -connect <host>:443 -servername <host> </dev/null | openssl x509 -noout -dates "
             "-subject -ext subjectAltName",
         ),
@@ -879,6 +882,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "owned by a specific user are not writable.",
         ),
         (
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.metadata.annotations.openshift\\.io/scc}}'   # admitting SCC",
+            "oc get namespace {ns} -o jsonpath='{{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}}'",
+            "oc logs {pod} -n {ns} --previous   # 'Permission denied' on a path shows which directory",
             "oc rsh -n {ns} {pod} id",
             "oc rsh -n {ns} {pod} ls -ld <dir>",
         ),

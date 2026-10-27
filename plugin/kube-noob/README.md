@@ -18,7 +18,9 @@ Requires [uv](https://docs.astral.sh/uv/); the server runs as `uvx --from kube-n
 - Network: none by default. `KUBE_NOOB_WEB_ENABLED=true` allows HTTPS reads from allowlisted documentation domains only.
 - Cluster: none by default. `KUBE_NOOB_CLUSTER_ENABLED=true` allows read-only `oc`/`kubectl` get and logs with your
   current context; it never writes, never reads Secrets and redacts credentials.
-- Files: reads the manifests you give it; stores learning progress in `~/.local/share/kube-noob`.
+- Files: reads the manifests you give it; stores learning progress and `learning.json` (your profile and confirmed
+  notes; never logs, manifests or secrets) in `~/.local/share/kube-noob`, which survives plugin upgrades.
+- Admins can lock it offline with `KUBE_NOOB_OFFLINE=1`; `kube-noob doctor` shows the effective posture.
 - No telemetry, no collected credentials; the server never calls an LLM.
 
 Both switches live in the `env` block of `.mcp.json` and take precedence over config files.

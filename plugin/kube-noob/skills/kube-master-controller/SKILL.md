@@ -28,6 +28,10 @@ kube-noob MCP tools (prefixed `kubenoob_`).
 
 `kubenoob_run_protocol` performs all seven steps in one call; prefer it, then drill down with the specific tools.
 
+Before tailoring advice, call `kubenoob_learning_summary` for the user's saved platform, versions, conventions and
+confirmed team notes (cite them as `[kn:local-N#0]`). When the user states their platform or a convention, offer to
+save it with `kubenoob_learning_profile_set`.
+
 ## Output format
 1. **Audit & Validation Brief** - platform, versions, assumptions, before/after severity counts.
 2. **Production Manifest / Solution** - the final YAML (from the tool output, never retyped from memory).

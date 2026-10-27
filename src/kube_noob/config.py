@@ -11,6 +11,9 @@ enable web/cluster access or point the agent's API key at an attacker's endpoint
 to use a project file explicitly.
 
 Keys are camelCase in YAML (``webEnabled: true``) and snake_case in Python.
+
+``offline: true`` (or ``KUBE_NOOB_OFFLINE=1``) is an admin lock, not a default: it overrides ``webEnabled``, blocks
+corpus downloads and allows only local model endpoints, and no later source in the chain can lift it.
 """
 
 from __future__ import annotations
@@ -86,6 +89,17 @@ class ClusterSettings(_Base):
 # AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN or similar.
 _API_KEY_ENV = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)$")
 _CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
+
+
+def is_local_url(url: str | None) -> bool:
+    """Loopback or cluster-local host (``*.svc``, ``*.svc.cluster.local``, ``*.local``, ``*.internal``)."""
+    if not url:
+        return False
+    host = (urlsplit(url).hostname or "").lower()
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost" or host.endswith(_CLUSTER_LOCAL_SUFFIXES)
 
 
 def _check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> None:
@@ -170,6 +184,8 @@ def _default_data_dir() -> Path:
 
 
 class Settings(_Base):
+    offline: bool = False  # admin lock: no web, no corpus downloads, only local model endpoints
+    learning_enabled: bool = True  # local learning.json: confirmed notes, profile, pattern counters
     web_enabled: bool = False
     web: WebSettings = Field(default_factory=WebSettings)
     cluster: ClusterSettings = Field(default_factory=ClusterSettings)
@@ -179,6 +195,18 @@ class Settings(_Base):
     data_dir: Path = Field(default_factory=_default_data_dir)
     default_platform: Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"] = "kubernetes"
     source_path: Path | None = Field(default=None, exclude=True)
+    web_locked: bool = Field(default=False, exclude=True)
+
+    @model_validator(mode="after")
+    def _offline_lock(self) -> Settings:
+        if self.offline and self.web_enabled:
+            self.web_enabled = False
+            self.web_locked = True
+        return self
+
+    def llm_endpoint_is_local(self) -> bool:
+        """True when the configured model endpoint stays inside the machine or cluster."""
+        return self.llm.provider == "openai-compatible" and is_local_url(self.llm.base_url)
 
     def public_view(self) -> dict[str, Any]:
         """Config safe to display (no secrets are ever stored in Settings, only env var names)."""
@@ -187,13 +215,25 @@ class Settings(_Base):
         return out
 
 
+SYSTEM_CONFIG = Path("/etc/kube-noob/config.yaml")
+
+
+def _system_lock() -> bool:
+    """``offline: true`` in the system config is an admin lock that applies even when a user config file wins."""
+    try:
+        raw = yaml.safe_load(SYSTEM_CONFIG.read_text(encoding="utf-8")) if SYSTEM_CONFIG.is_file() else None
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(raw, dict) and raw.get("offline") is True
+
+
 def _candidate_files() -> list[Path]:
     env = os.environ.get("KUBE_NOOB_CONFIG")
     if env:
         return [Path(env)]
     xdg = os.environ.get("XDG_CONFIG_HOME")
     cfg_home = Path(xdg) if xdg else Path.home() / ".config"
-    return [cfg_home / "kube-noob" / "config.yaml", Path("/etc/kube-noob/config.yaml")]
+    return [cfg_home / "kube-noob" / "config.yaml", SYSTEM_CONFIG]
 
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -227,6 +267,12 @@ def _env_overrides() -> dict[str, Any]:
     web = _env_bool("KUBE_NOOB_WEB_ENABLED")
     if web is not None:
         o["webEnabled"] = web
+    offline = _env_bool("KUBE_NOOB_OFFLINE")
+    if offline is not None:
+        o["offline"] = offline
+    learning = _env_bool("KUBE_NOOB_LEARNING_ENABLED")
+    if learning is not None:
+        o["learningEnabled"] = learning
     cluster = _env_bool("KUBE_NOOB_CLUSTER_ENABLED")
     if cluster is not None:
         o.setdefault("cluster", {})["enabled"] = cluster
@@ -271,9 +317,15 @@ def load_settings(path: str | Path | None = None, overrides: dict[str, Any] | No
             break
         if path:  # an explicit path that does not exist is an error, not a silent fallback
             raise ConfigError(f"Config file {cand} does not exist")
+    # The offline lock only ever tightens: any of the system config, the chosen config file or KUBE_NOOB_OFFLINE can
+    # switch it on, and nothing later in the chain (environment "0", CLI flags, tool overrides) can switch it off.
+    locked = data.get("offline") is True or _system_lock()
     data = _deep_merge(data, _env_overrides())
+    locked = locked or data.get("offline") is True
     if overrides:
         data = _deep_merge(data, overrides)
+    if locked:
+        data["offline"] = True
     try:
         settings = Settings.model_validate(data)
     except ValidationError as exc:

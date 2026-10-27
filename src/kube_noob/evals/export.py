@@ -24,6 +24,7 @@ from kube_noob import __version__
 from kube_noob.audit.engine import analyze
 from kube_noob.audit.model import Severity
 from kube_noob.debug.playbooks import PLAYBOOKS
+from kube_noob.debug.steps import split_comment
 from kube_noob.evals.reward import benchmark
 from kube_noob.generate.blueprint import Blueprint
 from kube_noob.generate.manifests import generate
@@ -133,7 +134,7 @@ def playbook_records() -> Iterator[dict[str, Any]]:
             f"**{p.title}**\n\nLikely causes:\n"
             + "\n".join(f"- {c}" for c in p.root_causes)
             + "\n\nRead-only checks:\n"
-            + "\n".join(f"- `{c}`" for c in p.checks)
+            + "\n".join(_check_line(c) for c in p.checks)
             + "\n\nFixes:\n"
             + "\n".join(f"- {f}" for f in p.fixes)
             + ("\n\nSee: " + ", ".join(f"[kn:{k}#0]" for k in p.knowledge) if p.knowledge else "")
@@ -145,8 +146,15 @@ def playbook_records() -> Iterator[dict[str, Any]]:
         )
 
 
+def _check_line(check: str) -> str:
+    cmd, why = split_comment(check)
+    return f"- `{cmd}`" + (f": {why}" if why else "")
+
+
 def knowledge_records(store: KnowledgeStore, include_restricted: bool) -> Iterator[dict[str, Any]]:
     for c in store.chunks:
+        if c.origin == "local":  # the user's own notes are never training data, whatever the flags say
+            continue
         if not c.redistributable and not include_restricted:
             continue
         if len(c.text) < 200 or not c.heading:

@@ -8,6 +8,7 @@ image:
 replicaCount: 2
 
 config:
+  offline: false             # admin lock: no web, no corpus downloads, local models only; overrides webEnabled
   webEnabled: false          # true allows allowlisted web lookups (and opens egress 443 below)
   allowedDomains: []         # empty = built-in documentation allowlist
   defaultPlatform: openshift # kubernetes | openshift | rosa-classic | rosa-hcp

@@ -85,7 +85,7 @@ def test_mcp_in_process(settings: Settings) -> None:
     )
     assert out["bad"].is_error
     assert out["gen"].structured_content["status"] == "ok"
-    assert {"master_controller", "debug_session", "tutor"} <= out["prompts"]
+    assert {"master_controller", "debug_session", "tutor", "getting_started"} <= out["prompts"]
     assert "restricted-v2" in out["res"].contents[0].text
 
 

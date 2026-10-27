@@ -18,8 +18,9 @@ Use it as an MCP server, a Claude plugin, a CLI, or a sidecar/service on OpenShi
   removed-API checks, safe auto-fixes, 9 red-team scenarios, RHACS policy mapping.
 - **Generate**: hardened manifests and Helm charts for `kubernetes`, `openshift`, `rosa-classic`, `rosa-hcp`, re-audited
   before they are returned.
-- **Debug**: 33 offline playbooks; opt-in, read-only cluster evidence (Secrets are never read, values are redacted).
-- **Learn**: 5 tracks, 16 lessons, graded exercises and quizzes.
+- **Debug**: 33 offline playbooks, read-only steps first; opt-in, read-only cluster evidence (Secrets are never read,
+  values are redacted).
+- **Learn**: 5 tracks, 16 lessons, graded exercises and quizzes; remembers confirmed team fixes locally.
 - **Cite**: answers reference local knowledge as `[kn:<doc>#<n>]` with source and license.
 
 Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
@@ -28,10 +29,13 @@ Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit,
 
 ```bash
 pipx install kube-noob
-kube-noob learn tracks
+kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
 kube-noob diagnose -f events.txt
+kube-noob doctor
 ```
+
+Pick your role in [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md); every demo runs offline.
 
 Generate a hardened app for ROSA HCP from a blueprint:
 
@@ -80,21 +84,26 @@ see [deploy/sidecar](https://github.com/aashishmahajan/kube-noob/blob/main/deplo
 
 ## Safe by default
 
-| Setting | Default | Enable with |
+| Setting | Default | Change with |
 |---|---|---|
-| Web lookups (allowlisted HTTPS docs only) | off | `webEnabled: true` / `KUBE_NOOB_WEB_ENABLED=true` |
+| Web lookups (HTTPS GET, allowlisted docs, text only) | off | `webEnabled: true` / `KUBE_NOOB_WEB_ENABLED=true` |
+| Admin offline lock (overrides web, local models only) | off | `offline: true` / `KUBE_NOOB_OFFLINE=1` / chart `config.offline` |
 | Live cluster (read-only, no Secrets) | off | `cluster.enabled: true` / `--cluster-enabled` |
+| Local learning file (profile, confirmed notes) | on | `learningEnabled: false` |
 | LLM agent (`kube-noob ask`) | Anthropic `claude-fable-5-1` | `llm.provider: openai-compatible` + `llm.baseUrl` for local models |
+
+`kube-noob doctor` prints what the process can reach and exits 1 when the configuration contradicts the lock.
 
 Config comes from `--config`, `$KUBE_NOOB_CONFIG`, `~/.config/kube-noob/config.yaml` or `/etc/kube-noob/config.yaml`,
 never implicitly from the current directory. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
 
 ## Docs
 
+- [Use cases by role](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning with kube-noob](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
 - [Architecture and trust boundaries](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
 - [Corpus, training and the reward](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
 - [Operations: weekly risk review and releases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
-- [Release readiness assessment](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md) and [0.2.0 scope](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap-0.2.md)
+- [Guidance traceability (every rule and its test)](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md) and [release readiness](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
 - [Security policy](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md) and [Contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md)
 
 ## Credits

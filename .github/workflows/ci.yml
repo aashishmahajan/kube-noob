@@ -53,6 +53,9 @@ jobs:
           /tmp/wheelenv/bin/pip install dist/*.whl
           /tmp/wheelenv/bin/kube-noob --version
           /tmp/wheelenv/bin/kube-noob search "restricted-v2" --format json | python -c "import json,sys; assert json.load(sys.stdin)['results']"
+          cd /tmp && /tmp/wheelenv/bin/kube-noob demo all > /tmp/demo.out && grep -q "kube-noob demo: Show and lock" /tmp/demo.out
+      - name: MCP stdio end-to-end under the offline lock (installed wheel)
+        run: /tmp/wheelenv/bin/python -I scripts/e2e_mcp_offline.py /tmp/wheelenv/bin/kube-noob
 
   publishable:
     # Upload validation exactly as pypa/gh-action-pypi-publish runs it: same twine, same Python as its container.
@@ -108,6 +111,12 @@ jobs:
           fi
           helm template kn deploy/helm/kube-noob $base --set config.webEnabled=true \
             | grep -A1 "name: KUBE_NOOB_WEB_ENABLED" | grep -q '"true"'
+          helm template kn deploy/helm/kube-noob $base --set config.offline=true \
+            | grep -A1 "name: KUBE_NOOB_OFFLINE" | grep -q '"true"'
+          if helm template kn deploy/helm/kube-noob $base --set config.offline=true --set config.webEnabled=true \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::offline + webEnabled must fail to render"; exit 1
+          fi
       - name: Audit the sidecar example
         run: kube-noob audit -f deploy/sidecar/app-with-kube-noob-sidecar.yaml --platform openshift --fail-on medium
       - name: Generated Helm charts render and audit clean

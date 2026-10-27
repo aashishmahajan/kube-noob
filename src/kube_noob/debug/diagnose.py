@@ -12,6 +12,7 @@ from typing import Any
 
 from kube_noob.debug.cluster import Backend, redact_text
 from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Playbook
+from kube_noob.debug.steps import classify_step, split_comment
 from kube_noob.errors import ClusterAccessError
 
 MAX_INPUT = 400_000
@@ -50,11 +51,29 @@ class Diagnosis:
             "confidence": round(min(1.0, self.score / 3.0), 2),
             "evidence": self.evidence,
             "rootCauses": list(p.root_causes),
-            "checks": self.checks,
-            "fixes": list(p.fixes),
+            # Diagnose before change: read-only evidence first; anything that executes or mutates needs approval.
+            "readOnlyNextSteps": [_step(c) for c in self.checks if classify_step(c) == "read"],
+            "diagnosticCommands": [
+                {**_step(c), "requiresApproval": True} for c in self.checks if classify_step(c) == "exec"
+            ],
+            "proposedChanges": [{"change": f, "requiresApproval": True} for f in p.fixes],
             "relatedRules": list(p.related_rules),
             "knowledge": list(p.knowledge),
         }
+
+
+def _step(check: str) -> dict[str, str]:
+    """A copy-paste-safe step: the bare command plus why it helps, or a plain instruction for prose guidance."""
+    cmd, why = split_comment(check)
+    if re.match(r"^[a-z][\w.-]*\s", cmd + " ") is None:
+        return {"instruction": check.strip()}
+    return {"command": cmd, **({"why": why} if why else {})}
+
+
+def _step_line(step: dict[str, str]) -> str:
+    if "command" not in step:
+        return f"- {step['instruction']}"
+    return f"- `{step['command']}`" + (f": {step['why']}" if step.get("why") else "")
 
 
 @dataclass
@@ -66,6 +85,10 @@ class DiagnoseResult:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "approach": (
+                "Run the read-only steps first (get, describe, logs, events). Commands that execute in a container or "
+                "change the cluster are listed separately and require explicit approval."
+            ),
             "context": self.context,
             "exitCodes": {str(k): v for k, v in self.exit_codes.items()},
             "diagnoses": [d.as_dict() for d in self.diagnoses],
@@ -272,3 +295,29 @@ def debug_workload(
         "logs": {k: v[-6000:] for k, v in ev["logs"].items()},
         **result.as_dict(),
     }
+
+
+def bundle_markdown(result: dict[str, Any]) -> str:
+    """Human-readable diagnostic bundle: evidence first, then read-only steps, then gated commands and changes."""
+    lines = [
+        f"# Diagnostic bundle: {result['target']}",
+        "",
+        f"Collected read-only via `{result['backend']}`. Secrets were not read; sensitive values are redacted.",
+        "",
+        "## Evidence",
+        *(f"- {e}" for e in result.get("evidence", [])),
+    ]
+    for d in result.get("diagnoses", []):
+        lines += ["", f"## {d['id']}: {d['title']} (confidence {d['confidence']})", "", "Likely causes:"]
+        lines += [f"- {c}" for c in d["rootCauses"]]
+        lines += ["", "Read-only next steps:", *(_step_line(s) for s in d["readOnlyNextSteps"])]
+        if d["diagnosticCommands"]:
+            lines += ["", "Diagnostic commands that execute in a container (require approval):"]
+            lines += [_step_line(c) for c in d["diagnosticCommands"]]
+        lines += ["", "Proposed changes (require approval):"]
+        lines += [f"- {c['change']}" for c in d["proposedChanges"]]
+    if result.get("logs"):
+        lines += ["", "## Recent logs (redacted)"]
+        for name, text in result["logs"].items():
+            lines += ["", f"### {name}", "```", text[-3000:], "```"]
+    return "\n".join(lines) + "\n"

@@ -98,3 +98,19 @@ def test_helm_chart_structure(tmp_path: Path) -> None:
     assert not lint_chart_metadata(root)
     with pytest.raises(Exception, match="not empty"):
         generate_chart(bp, tmp_path)
+
+
+def test_protocol_takes_version_from_blueprint() -> None:
+    from kube_noob.audit.protocol import run_protocol
+
+    bp = {
+        "name": "orders-api",
+        "namespace": "shop",
+        "image": "quay.io/x/y:1.0.0",
+        "platform": "rosa-hcp",
+        "platformVersion": "4.22",
+    }
+    out = run_protocol("deploy orders-api", blueprint=bp)
+    brief = out["auditValidationBrief"]
+    assert brief["platformVersion"] == "4.22" and brief["kubernetesVersion"] == "1.35"
+    assert not any("No version given" in a for a in brief["assumptions"])

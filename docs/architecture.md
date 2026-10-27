@@ -53,5 +53,11 @@ flowchart LR
 - MCP clients and model output are untrusted input: every tool validates with Pydantic, YAML is size/alias bounded.
 - The HTTP transport authenticates with a bearer token (constant time) unless bound to loopback (sidecar).
 - Outbound HTTP only through `kube_noob.net`: web purpose requires `webEnabled` and allowlisted HTTPS hosts on every
-  hop; LLM and in-cluster API clients are separate, explicit purposes.
+  hop, GET only; `web_fetch` refuses non-text content types before reading the body. LLM and in-cluster API clients
+  are separate, explicit purposes.
+- The admin lock (`offline: true`) is applied at config load and only tightens: it disables web, refuses corpus
+  downloads and allows only loopback or `*.svc` model endpoints. `kube-noob doctor` reports the result.
 - Cluster access is read-only, allowlisted per resource, never Secrets, and redacts values before they reach a model.
+  Diagnoses list read-only steps first; commands that execute or change state are labelled as needing approval.
+- `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
+  as `origin: local`, are never redistributable and never exported as training data.

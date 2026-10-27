@@ -92,7 +92,7 @@ class Chunk:
     text: str
     url: str | None
     license: str
-    origin: str  # builtin | corpus
+    origin: str  # builtin | corpus | local (the user's confirmed learning notes; never exported)
     source_id: str
     version: str | None = None
     redistributable: bool = True
@@ -349,6 +349,27 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
     return out
 
 
+def local_chunks(data_dir: Path) -> list[Chunk]:
+    """The user's confirmed notes from ``learning.json``: searchable and citable, never redistributable."""
+    from kube_noob.learn.memory import LearningStore
+
+    out: list[Chunk] = []
+    for doc in LearningStore(data_dir).note_documents():
+        for c in chunk_document(
+            doc["id"],
+            doc["title"],
+            doc["body"],
+            url=None,
+            license_="user-provided (local only)",
+            origin="local",
+            source_id="local",
+            redistributable=False,
+            extra={"created": doc.get("created")},
+        ):
+            out.append(c)
+    return out
+
+
 _lock = threading.Lock()
 _stores: OrderedDict[str, KnowledgeStore] = OrderedDict()
 _MAX_STORES = 4
@@ -363,6 +384,10 @@ def _store_key(data_dir: Path | None) -> str:
         for f in sorted(cdir.glob("*.jsonl")):
             st = f.stat()
             h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns}".encode())
+    learning = data_dir / "learning.json"
+    if learning.is_file():
+        st = learning.stat()
+        h.update(f"learning:{st.st_size}:{st.st_mtime_ns}".encode())
     return h.hexdigest()
 
 
@@ -376,6 +401,7 @@ def get_store(data_dir: Path | None = None) -> KnowledgeStore:
             chunks = builtin_chunks()
             if data_dir is not None:
                 chunks.extend(corpus_chunks(data_dir))
+                chunks.extend(local_chunks(data_dir))
             store = KnowledgeStore(chunks)
             _stores[key] = store
             while len(_stores) > _MAX_STORES:

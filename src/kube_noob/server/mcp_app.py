@@ -257,9 +257,11 @@ def build_server(settings: Settings) -> MCPServer:
             else ""
         )
         return (
-            f"Diagnose this problem. Call kubenoob_diagnose with the text below first.{live} Explain the most "
-            f"likely root cause, the read-only checks to confirm it and the fix, citing [kn:...] chunks.\n\n"
-            f"{symptoms}"
+            f"Diagnose this problem. Call kubenoob_diagnose with the text below first.{live} Diagnose before "
+            f"change: give the likely root cause and its readOnlyNextSteps (get, describe, logs, events, or "
+            f"`kube-noob bundle`) first; list diagnosticCommands and proposedChanges only after that, each marked "
+            f"as requiring the user's approval. Cite [kn:...] chunks. If the user confirms the fix worked, offer "
+            f"to remember it with kubenoob_learning_note_add.\n\n{symptoms}"
         )
 
     @mcp.prompt(
@@ -273,6 +275,30 @@ def build_server(settings: Settings) -> MCPServer:
             "kubenoob_learn_lesson, kubenoob_learn_exercise / kubenoob_learn_submit and kubenoob_learn_quiz. "
             "Teach one concept at a time, ask the learner to try the exercise, and explain feedback with "
             "citations."
+        )
+
+    @mcp.prompt(
+        name="getting_started",
+        title="Getting started with kube-noob",
+        description="A short, role-based tour: what kube-noob can do offline and the first three things to try.",
+    )
+    def getting_started(role: str = "", platform: str = "") -> str:
+        who = role or "not stated yet (ask: learner, developer, SRE/on-call, platform admin or security)"
+        where = platform or "not stated yet (ask: Kubernetes, OpenShift, ROSA Classic or ROSA HCP, and the version)"
+        return (
+            "Give the user a two-minute tour of kube-noob. It works offline by default: no web and no cluster "
+            "access unless enabled, and it never changes the cluster.\n"
+            f"User role: {who}. Platform: {where}.\n"
+            "1. Call kubenoob_learning_summary. If the profile is empty and the user states a platform or version, "
+            "offer to save it with kubenoob_learning_profile_set.\n"
+            "2. Suggest the three most useful first steps for the role, each as one sentence plus the tool to use:\n"
+            "   - learner/trainer: kubenoob_learn_tracks, then kubenoob_learn_lesson and kubenoob_learn_submit;\n"
+            "   - developer: kubenoob_audit_manifests or kubenoob_run_protocol on their YAML or a blueprint;\n"
+            "   - SRE/on-call: kubenoob_diagnose on pasted events or logs, read-only steps first;\n"
+            "   - platform admin/security: kubenoob_config_status to show the posture (offline lock, web, cluster), "
+            "then kubenoob_audit_manifests against their charts.\n"
+            "3. Mention that `kube-noob demo --list` in a terminal shows offline walkthroughs for each use case.\n"
+            "Keep it under 150 words and cite [kn:...] chunks only for factual claims."
         )
 
     @mcp.resource(
