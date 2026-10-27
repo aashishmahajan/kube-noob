@@ -177,20 +177,18 @@ def _search(kit: Any, emit: Emit) -> None:
 def _learning(kit: Any, emit: Emit) -> None:
     from kube_noob import toolkit as tk
 
+    note = {
+        "symptom": "orders-api pods rejected by SCC: runAsUser 1000 outside the namespace range",
+        "cause": "the Helm chart hard-codes runAsUser for vanilla Kubernetes",
+        "fix": "drop runAsUser on OpenShift and let restricted-v2 assign the UID",
+    }
     _step(
         emit,
         "Remember a fix your team confirmed (summaries only; secrets and logs are rejected)",
-        'kube-noob learning note --symptom "..." --cause "..." --fix "..."',
+        f'kube-noob learning note --symptom "{note["symptom"]}" --cause "{note["cause"]}" --fix "{note["fix"]}"',
     )
     saved = kit.learning_note_add(
-        tk.LearningNoteIn(
-            symptom="orders-api pods rejected by SCC: runAsUser 1000 outside the namespace range",
-            cause="the Helm chart hard-codes runAsUser for vanilla Kubernetes",
-            fix="set securityContext.runAsUser only when .Capabilities.APIVersions lacks security.openshift.io/v1",
-            platform="openshift",
-            tags=["scc", "helm"],
-            confirmed_by_user=True,
-        )
+        tk.LearningNoteIn(**note, platform="openshift", tags=["scc", "helm"], confirmed_by_user=True)
     )
     emit(f"saved {saved['citation']} to learning.json (local only, survives upgrades)")
     _step(
@@ -205,14 +203,16 @@ def _learning(kit: Any, emit: Emit) -> None:
 def _posture(kit: Any, emit: Emit) -> None:
     from kube_noob.posture import posture, render_text
 
+    # As the MCP server and plugin run it: the server itself never calls a model (llm.provider: none).
+    settings = kit.settings.model_copy(update={"llm": kit.settings.llm.model_copy(update={"provider": "none"})})
     _step(emit, "Prove what kube-noob can reach (nothing, by default)", "kube-noob doctor")
-    emit(render_text(posture(kit.settings)))
+    emit(render_text(posture(settings)))
     _step(
         emit,
         "Platform teams can lock it: no web, no downloads, local models only",
         "KUBE_NOOB_OFFLINE=1 kube-noob doctor",
     )
-    locked = kit.settings.model_copy(update={"offline": True})
+    locked = settings.model_copy(update={"offline": True})
     emit(render_text(posture(locked)))
 
 

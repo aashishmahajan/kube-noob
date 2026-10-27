@@ -335,6 +335,11 @@ def main(argv: list[str] | None = None) -> int:
         msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
         print(f"error: {msg}", file=sys.stderr)
         return 4
+    except BrokenPipeError:
+        # `kube-noob ... | head`: the reader went away; exit quietly like other CLI tools.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 141
 
 
 def _dispatch(a: argparse.Namespace, s: Settings) -> int:

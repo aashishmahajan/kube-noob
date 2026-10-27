@@ -70,3 +70,21 @@ def test_every_scenario_has_a_recorded_tape() -> None:
         assert name in tapes, f"demos/{name}.tape missing"
         assert f"Output demos/out/{name}.gif" in tapes[name] and f'Type "kube-noob demo {name}"' in tapes[name]
     assert 'Type "kube-noob demo --list"' in tapes["tour"]
+
+
+def test_cli_exits_quietly_when_the_reader_goes_away() -> None:
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "kube_noob", "demo", "all"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    first = proc.stdout.readline()
+    proc.stdout.close()
+    err = proc.stderr.read()
+    proc.wait(timeout=60)
+    assert first.startswith("== kube-noob demo") and "Traceback" not in err
