@@ -19,6 +19,7 @@ corpus downloads and allows only local model endpoints, and no later source in t
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import re
 from pathlib import Path
@@ -30,6 +31,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from pydantic.alias_generators import to_camel
 
 from kube_noob.errors import ConfigError
+
+_log = logging.getLogger("kube_noob.config")
 
 DEFAULT_ALLOWED_DOMAINS: tuple[str, ...] = (
     "kubernetes.io",
@@ -91,15 +94,20 @@ _API_KEY_ENV = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)$")
 _CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
 
 
+_LOCK_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local")
+
+
 def is_local_url(url: str | None) -> bool:
-    """Loopback or cluster-local host (``*.svc``, ``*.svc.cluster.local``, ``*.local``, ``*.internal``)."""
+    """Endpoints the offline lock allows: loopback, ``localhost`` or an in-cluster Service (``*.svc``,
+    ``*.svc.cluster.local``). Deliberately narrower than ``_CLUSTER_LOCAL_SUFFIXES``: ``*.internal`` and ``*.local``
+    can resolve to corporate or cloud-metadata hosts outside the cluster."""
     if not url:
         return False
-    host = (urlsplit(url).hostname or "").lower()
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
     try:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
-        return host == "localhost" or host.endswith(_CLUSTER_LOCAL_SUFFIXES)
+        return host == "localhost" or host.endswith(_LOCK_LOCAL_SUFFIXES)
 
 
 def _check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> None:
@@ -197,16 +205,20 @@ class Settings(_Base):
     source_path: Path | None = Field(default=None, exclude=True)
     web_locked: bool = Field(default=False, exclude=True)
 
+    @field_validator("offline", "web_enabled", "learning_enabled", mode="before")
+    @classmethod
+    def _null_is_default(cls, v: Any, info: Any) -> Any:
+        # `offline:` with no value (for example a Helm value missing after `upgrade --reuse-values`) means unset.
+        if v is None:
+            return info.field_name == "learning_enabled"
+        return v
+
     @model_validator(mode="after")
     def _offline_lock(self) -> Settings:
         if self.offline and self.web_enabled:
             self.web_enabled = False
             self.web_locked = True
         return self
-
-    def llm_endpoint_is_local(self) -> bool:
-        """True when the configured model endpoint stays inside the machine or cluster."""
-        return self.llm.provider == "openai-compatible" and is_local_url(self.llm.base_url)
 
     def public_view(self) -> dict[str, Any]:
         """Config safe to display (no secrets are ever stored in Settings, only env var names)."""
@@ -219,12 +231,16 @@ SYSTEM_CONFIG = Path("/etc/kube-noob/config.yaml")
 
 
 def _system_lock() -> bool:
-    """``offline: true`` in the system config is an admin lock that applies even when a user config file wins."""
-    try:
-        raw = yaml.safe_load(SYSTEM_CONFIG.read_text(encoding="utf-8")) if SYSTEM_CONFIG.is_file() else None
-    except (OSError, yaml.YAMLError):
+    """``offline`` in the system config is an admin lock that applies even when a user config file wins. It fails
+    closed: a system config that exists but cannot be read or parsed counts as locked."""
+    if not SYSTEM_CONFIG.exists():
         return False
-    return isinstance(raw, dict) and raw.get("offline") is True
+    try:
+        raw = yaml.safe_load(SYSTEM_CONFIG.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError, UnicodeDecodeError) as exc:
+        _log.warning("system config %s is unreadable (%s); applying the offline lock", SYSTEM_CONFIG, exc)
+        return True
+    return isinstance(raw, dict) and _truthy(raw.get("offline"))
 
 
 def _candidate_files() -> list[Path]:
@@ -240,9 +256,18 @@ _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
 
+def _truthy(value: Any) -> bool:
+    """The lock reads every spelling pydantic would coerce to True (true, 1, "yes", "on", ...)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return value == 1
+    return isinstance(value, str) and value.strip().lower() in _TRUE
+
+
 def _env_bool(name: str) -> bool | None:
     raw = os.environ.get(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return None
     v = raw.strip().lower()
     if v in _TRUE:
@@ -319,9 +344,9 @@ def load_settings(path: str | Path | None = None, overrides: dict[str, Any] | No
             raise ConfigError(f"Config file {cand} does not exist")
     # The offline lock only ever tightens: any of the system config, the chosen config file or KUBE_NOOB_OFFLINE can
     # switch it on, and nothing later in the chain (environment "0", CLI flags, tool overrides) can switch it off.
-    locked = data.get("offline") is True or _system_lock()
+    locked = _truthy(data.get("offline")) or _system_lock()
     data = _deep_merge(data, _env_overrides())
-    locked = locked or data.get("offline") is True
+    locked = locked or _truthy(data.get("offline"))
     if overrides:
         data = _deep_merge(data, overrides)
     if locked:

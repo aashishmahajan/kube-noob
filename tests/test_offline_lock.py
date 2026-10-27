@@ -61,15 +61,23 @@ def test_lock_only_tightens(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     assert s.offline and not s.web_enabled
 
 
-def _fetch(monkeypatch: pytest.MonkeyPatch, content_type: str, body: bytes, method_check: list[str]) -> Any:
-    s = load_settings(overrides={"webEnabled": True})
+def _fetch(
+    monkeypatch: pytest.MonkeyPatch,
+    content_type: str,
+    body: bytes,
+    method_check: list[str],
+    extra: dict[str, str] | None = None,
+    max_bytes: int = 2_000_000,
+) -> Any:
+    s = load_settings(overrides={"webEnabled": True, "web": {"maxBytes": max_bytes}})
     kit = tk.Toolkit(s)
     real = _REAL_HTTP_CLIENT
 
     def fake(settings: Any, purpose: Any, **kw: Any) -> httpx.Client:
         def handler(req: httpx.Request) -> httpx.Response:
             method_check.append(req.method)
-            return httpx.Response(200, headers={"content-type": content_type}, content=body)
+            chunks = [body[i : i + 65536] for i in range(0, len(body), 65536)] or [b""]
+            return httpx.Response(200, headers={"content-type": content_type, **(extra or {})}, content=iter(chunks))
 
         return real(settings, purpose, transport=httpx.MockTransport(handler))
 
@@ -101,3 +109,16 @@ def test_doctor_reports_posture_and_flags_conflicts(
     assert main(["doctor", "--format", "json"]) == 1
     locked = json.loads(capsys.readouterr().out)
     assert locked["offlineLock"] is True and locked["conflicts"]
+
+
+def test_web_fetch_bounds_compressed_bodies_and_odd_charsets(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gzip
+
+    methods: list[str] = []
+    bomb = gzip.compress(b"a" * 50_000_000)
+    out = _fetch(monkeypatch, "text/plain", bomb, methods, {"content-encoding": "gzip"}, max_bytes=10_000)
+    assert out["truncated"] is True and len(out["text"]) <= 10_000
+    with pytest.raises(WebContentRejectedError, match="encoding"):
+        _fetch(monkeypatch, "text/plain", b"x", methods, {"content-encoding": "br"})
+    for charset in ("hex", "base64", "rot13", "zlib", "no-such-codec"):
+        assert _fetch(monkeypatch, f"text/plain; charset={charset}", b"plain", methods)["text"] == "plain"

@@ -5,7 +5,8 @@
 * ``Purpose.SOURCES`` - maintainer-run corpus builds (git/Jira ingestion). Requires ``webEnabled: true`` or an
                         explicit ``allow_sources=True`` from a CLI command the operator ran on purpose.
 * ``Purpose.LLM``     - the configured model provider endpoint. Not web browsing; always permitted when an
-                        LLM provider is configured.
+                        LLM provider is configured. Under the offline lock every request (and no redirect, no proxy
+                        from the environment) must target loopback or an in-cluster ``*.svc`` host.
 
 No other module may construct an ``httpx`` client directly.
 """
@@ -17,7 +18,7 @@ import enum
 import httpx
 
 from kube_noob import __version__
-from kube_noob.config import Settings
+from kube_noob.config import Settings, is_local_url
 from kube_noob.errors import DomainNotAllowedError, WebDisabledError
 
 USER_AGENT = f"kube-noob/{__version__} (+https://github.com/aashishmahajan/kube-noob)"
@@ -49,10 +50,6 @@ def http_client(
             f"Outbound access for '{purpose.value}' is blocked by the offline lock (offline: true / "
             "KUBE_NOOB_OFFLINE). kube-noob answers from local knowledge only.",
         )
-    if settings.offline and purpose is Purpose.LLM and not settings.llm_endpoint_is_local():
-        raise WebDisabledError(
-            "llm", "The offline lock only allows model endpoints on loopback or inside the cluster (*.svc)."
-        )
     if purpose is Purpose.WEB and not settings.web_enabled:
         raise WebDisabledError("web lookup")
     if purpose is Purpose.SOURCES and not (settings.web_enabled or allow_sources):
@@ -72,16 +69,30 @@ def http_client(
 
         hooks["request"].append(_guard)
 
+    locked_llm = settings.offline and purpose is Purpose.LLM
+    if locked_llm:
+
+        def _local_only(request: httpx.Request) -> None:
+            if not is_local_url(str(request.url)):
+                raise WebDisabledError(
+                    "llm",
+                    f"The offline lock only allows model endpoints on loopback or inside the cluster (*.svc); "
+                    f"refused {request.url.host}.",
+                )
+
+        hooks["request"].append(_local_only)
+
     headers = {"User-Agent": USER_AGENT}
     if extra_headers:
         headers.update(extra_headers)
     return httpx.Client(
         timeout=timeout if timeout is not None else settings.web.timeout_seconds,
-        follow_redirects=True,
+        follow_redirects=not locked_llm,
         max_redirects=5,
         headers=headers,
         event_hooks=hooks,
         transport=transport,
+        trust_env=not locked_llm,
     )
 
 

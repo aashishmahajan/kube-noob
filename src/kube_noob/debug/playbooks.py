@@ -189,7 +189,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "oc get events -n {ns} --field-selector reason=FailedCreate",
             "oc describe rs -n {ns} -l <app-label>      # FailedCreate message lists every SCC tried",
             "oc get ns {ns} -o jsonpath='{{.metadata.annotations.openshift\\.io/sa\\.scc\\.uid-range}}'",
-            "oc adm policy scc-subject-review -f <manifest.yaml>   [OCP] which SCC would admit it",
+            "oc adm policy scc-subject-review -f <manifest.yaml>   # [OCP] which SCC would admit it",
         ),
         (
             "Remove runAsUser/runAsGroup/fsGroup and keep runAsNonRoot: true (preferred).",
@@ -238,8 +238,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "oc describe pod {pod} -n {ns}   # FailedScheduling details per node",
             "oc describe nodes | grep -A8 'Allocated resources'",
-            "oc get machineautoscaler,clusterautoscaler -A   [OCP]",
-            "rosa list machinepools -c <cluster>   [ROSA] autoscaling min/max",
+            "oc get machineautoscaler,clusterautoscaler -A   # [OCP]",
+            "rosa list machinepools -c <cluster>   # [ROSA] autoscaling min/max",
         ),
         (
             "Right-size requests from real usage; scale the node pool / enable autoscaling.",
@@ -301,7 +301,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "oc describe pvc {pvc} -n {ns}   # Events show the provisioner error",
             "oc get storageclass",
             "oc get csidriver",
-            "oc get pods -n openshift-cluster-csi-drivers   [OCP]",
+            "oc get pods -n openshift-cluster-csi-drivers   # [OCP]",
         ),
         (
             "RWX on AWS/ROSA: install the AWS EFS CSI Driver Operator, create an EFS StorageClass "
@@ -652,7 +652,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "oc rsh -n {ns} {pod} getent hosts kubernetes.default.svc",
             "oc get networkpolicy -n {ns} -o yaml | grep -B3 -A10 egress",
-            "oc get pods -n openshift-dns   [OCP]",
+            "oc get pods -n openshift-dns   # [OCP]",
         ),
         (
             "Allow egress to the cluster DNS pods (port 5353 TCP/UDP to namespace openshift-dns on OpenShift; 53 to "
@@ -678,7 +678,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         (
             "oc get networkpolicy -n {ns}",
-            "oc get egressfirewall -n {ns} -o yaml   [OCP]",
+            "oc get egressfirewall -n {ns} -o yaml   # [OCP]",
             "oc rsh -n {ns} {pod} curl -sv --max-time 5 <target>",
         ),
         (

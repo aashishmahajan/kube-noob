@@ -113,6 +113,8 @@ jobs:
             | grep -A1 "name: KUBE_NOOB_WEB_ENABLED" | grep -q '"true"'
           helm template kn deploy/helm/kube-noob $base --set config.offline=true \
             | grep -A1 "name: KUBE_NOOB_OFFLINE" | grep -q '"true"'
+          helm template kn deploy/helm/kube-noob $base --set config.offline=null \
+            | grep -A1 "name: KUBE_NOOB_OFFLINE" | grep -q '"false"'
           if helm template kn deploy/helm/kube-noob $base --set config.offline=true --set config.webEnabled=true \
                >/dev/null 2>&1; then
             echo "::error title=chart::offline + webEnabled must fail to render"; exit 1

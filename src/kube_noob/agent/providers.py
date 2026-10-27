@@ -189,6 +189,11 @@ class OpenAICompatibleProvider:
             ) from exc
         except httpx.TransportError as exc:
             raise ProviderError(f"Cannot reach the model endpoint {self.base}: {exc}") from exc
+        if resp.is_redirect:
+            raise ProviderError(
+                f"{self.base} redirected to {resp.headers.get('location', '?')}; set llm.baseUrl to the final URL"
+                + (" (redirects are never followed under the offline lock)" if self.settings.offline else "")
+            )
         if resp.status_code >= 400:
             raise ProviderError(f"{self.base} returned HTTP {resp.status_code}: {resp.text[:300]}")
         try:

@@ -354,7 +354,12 @@ def local_chunks(data_dir: Path) -> list[Chunk]:
     from kube_noob.learn.memory import LearningStore
 
     out: list[Chunk] = []
-    for doc in LearningStore(data_dir).note_documents():
+    try:
+        docs = LearningStore(data_dir).note_documents()
+    except Exception as exc:  # noqa: BLE001 - a damaged learning file must never break search
+        _log.warning("local learning notes not indexed: %s", exc)
+        return out
+    for doc in docs:
         for c in chunk_document(
             doc["id"],
             doc["title"],

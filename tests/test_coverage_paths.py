@@ -89,11 +89,8 @@ def test_toolkit_web_fetch_strips_html(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def fake(settings: Any, purpose: Any, **kw: Any) -> httpx.Client:
         def handler(req: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                200,
-                headers={"content-type": "text/html"},
-                text="<html><script>evil()</script><p>Hello &amp; welcome</p></html>",
-            )
+            body = b"<html><script>evil()</script><p>Hello &amp; welcome</p></html>"
+            return httpx.Response(200, headers={"content-type": "text/html"}, content=iter([body]))
 
         return real(settings, purpose, transport=httpx.MockTransport(handler))
 

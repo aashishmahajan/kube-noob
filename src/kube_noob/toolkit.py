@@ -7,6 +7,7 @@ web tools exist only when ``webEnabled: true``; live-cluster tools only when ``c
 
 from __future__ import annotations
 
+import contextlib
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -226,7 +227,8 @@ class Toolkit:
     def _observe(self, keys: list[str]) -> None:
         """Count pattern ids (never content) so summaries reflect what this user actually runs into."""
         if self.settings.learning_enabled:
-            self.learning.bump(keys)
+            with contextlib.suppress(Exception):  # counting is best effort; bump() already logs
+                self.learning.bump(keys)
 
     # -- protocol / audit ------------------------------------------------------------------------------------
     def run_protocol(self, p: ProtocolIn) -> dict[str, Any]:
@@ -440,14 +442,18 @@ class Toolkit:
 
     # -- web (only registered when webEnabled) ---------------------------------------------------------------
     def web_fetch(self, p: WebFetchIn) -> dict[str, Any]:
+        import codecs
         import html
         import re
+        import zlib
 
         limit = self.settings.web.max_bytes
         chunks: list[bytes] = []
         size = 0
         truncated = False
-        with http_client(self.settings, Purpose.WEB) as c, c.stream("GET", p.url) as resp:
+        # Only encodings we can decompress with a hard output bound; httpx's own decoding inflates whole chunks.
+        headers = {"Accept-Encoding": "gzip, deflate"}
+        with http_client(self.settings, Purpose.WEB) as c, c.stream("GET", p.url, headers=headers) as resp:
             # Decide on the headers alone: a binary, archive or script body is never read, stored or executed.
             content_type = resp.headers.get("content-type", "")
             if content_type.split(";")[0].strip().lower() not in READABLE_CONTENT_TYPES:
@@ -455,14 +461,32 @@ class Toolkit:
                     f"Refusing to fetch {p.url}: content type {content_type or 'unknown'!r} is not readable text. "
                     "kube-noob only reads documentation pages; it never downloads files or executes content."
                 )
-            # Stream and stop at web.maxBytes: a huge or endless response must not be buffered in memory.
-            for chunk in resp.iter_bytes():
-                chunks.append(chunk)
-                size += len(chunk)
-                if size >= limit:
-                    truncated = True
-                    break
-            encoding = resp.encoding or "utf-8"
+            encoding_hdr = resp.headers.get("content-encoding", "identity").strip().lower()
+            if encoding_hdr not in {"", "identity", "gzip", "x-gzip", "deflate"}:
+                raise WebContentRejectedError(f"Refusing {p.url}: unsupported content encoding {encoding_hdr!r}.")
+            inflate = zlib.decompressobj(zlib.MAX_WBITS | 32) if encoding_hdr in {"gzip", "x-gzip", "deflate"} else None
+            # Stream raw bytes and stop at web.maxBytes of decoded output: a huge, endless or compression-bomb
+            # response is never held in memory.
+            # A response another layer already read is decoded and in memory; otherwise stream the wire bytes.
+            raw_chunks = [resp.content] if resp.is_stream_consumed or resp.is_closed else resp.iter_raw()
+            if resp.is_stream_consumed or resp.is_closed:
+                inflate = None
+            try:
+                for raw in raw_chunks:
+                    piece = inflate.decompress(raw, limit - size) if inflate else raw[: limit - size]
+                    chunks.append(piece)
+                    size += len(piece)
+                    if size >= limit or (inflate is not None and inflate.unconsumed_tail):
+                        truncated = True
+                        break
+            except zlib.error as exc:
+                raise WebContentRejectedError(f"Refusing {p.url}: corrupt compressed body ({exc}).") from exc
+            charset = resp.charset_encoding or "utf-8"
+            try:
+                info = codecs.lookup(charset)
+                encoding = info.name if getattr(info, "_is_text_encoding", True) else "utf-8"
+            except LookupError:
+                encoding = "utf-8"
             final_url, status = str(resp.url), resp.status_code
         body = b"".join(chunks)[:limit].decode(encoding, errors="replace")
         if "html" in content_type:
