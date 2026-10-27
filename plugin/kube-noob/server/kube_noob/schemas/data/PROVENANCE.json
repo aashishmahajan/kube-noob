@@ -1,0 +1,74 @@
+{
+  "files": [
+    {
+      "file": "kubernetes-v1.35.0-definitions.json.gz",
+      "license": "Apache-2.0 (yannh/kubernetes-json-schema); generated from kubernetes/kubernetes OpenAPI",
+      "sha256Upstream": "8390593209c0aa7d759c14b4f8609f2f7b1ecb010d1b99cf1ce29643a14870bb",
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.35.0/_definitions.json",
+      "transform": "strict additionalProperties=false; descriptions removed"
+    },
+    {
+      "file": "crds/route.openshift.io_v1_Route.json",
+      "group": "route.openshift.io",
+      "kind": "Route",
+      "license": "MIT (datreeio/CRDs-catalog), from openshift/api Apache-2.0",
+      "sha256Upstream": "6fe1b706e170b2410a284b096e0d505139bf678bd2339f4fc07ff4f3353a4f8f",
+      "source": "https://raw.githubusercontent.com/datreeio/CRDs-catalog/3eb90d47aba8d61919d4419dd38301536e32a94b/openshift/v4.15-strict/route_route.openshift.io_v1.json",
+      "version": "v1"
+    },
+    {
+      "file": "crds/security.openshift.io_v1_SecurityContextConstraints.json",
+      "group": "security.openshift.io",
+      "kind": "SecurityContextConstraints",
+      "license": "MIT (datreeio/CRDs-catalog), from openshift/api Apache-2.0",
+      "sha256Upstream": "052d3eee1f5f9b24921b0ba3d3e91eace1c5b413cb7467dea0d8fa0cb6012c07",
+      "source": "https://raw.githubusercontent.com/datreeio/CRDs-catalog/3eb90d47aba8d61919d4419dd38301536e32a94b/openshift/v4.15-strict/securitycontextconstraints_security.openshift.io_v1.json",
+      "version": "v1"
+    },
+    {
+      "file": "crds/gateway.networking.k8s.io_v1_HTTPRoute.json",
+      "group": "gateway.networking.k8s.io",
+      "kind": "HTTPRoute",
+      "license": "MIT (datreeio/CRDs-catalog), from kubernetes-sigs/gateway-api Apache-2.0",
+      "sha256Upstream": "e5692e62edd9b8a14bd2527d0a732e174a649131aa4d47159737dc6527c59ca5",
+      "source": "https://raw.githubusercontent.com/datreeio/CRDs-catalog/3eb90d47aba8d61919d4419dd38301536e32a94b/gateway.networking.k8s.io/httproute_v1.json",
+      "version": "v1"
+    },
+    {
+      "file": "crds/gateway.networking.k8s.io_v1_Gateway.json",
+      "group": "gateway.networking.k8s.io",
+      "kind": "Gateway",
+      "license": "MIT (datreeio/CRDs-catalog), from kubernetes-sigs/gateway-api Apache-2.0",
+      "sha256Upstream": "85575b3a7d79416f8b09658cf6a3f9a6b79544bbf10c4c465c78bdaab1ea0364",
+      "source": "https://raw.githubusercontent.com/datreeio/CRDs-catalog/3eb90d47aba8d61919d4419dd38301536e32a94b/gateway.networking.k8s.io/gateway_v1.json",
+      "version": "v1"
+    },
+    {
+      "file": "crds/k8s.ovn.org_v1_EgressFirewall.json",
+      "group": "k8s.ovn.org",
+      "kind": "EgressFirewall",
+      "license": "Apache-2.0 (openshift/cluster-network-operator)",
+      "sha256Upstream": "fa680244a6004b042fecab38f8f355eb24bc38e8612ff8b948c92c369547a47c",
+      "source": "https://raw.githubusercontent.com/openshift/cluster-network-operator/a1b26444418f0f14c7d35a1242c2bbd705932bdb/bindata/network/ovn-kubernetes/common/001-crd.yaml",
+      "version": "v1"
+    },
+    {
+      "file": "crds/platform.stackrox.io_v1alpha1_Central.json",
+      "group": "platform.stackrox.io",
+      "kind": "Central",
+      "license": "Apache-2.0 (stackrox/stackrox)",
+      "sha256Upstream": "c74346002b27ade76cf4f539b656db2942c6f6f89c8665d566b93484b83cbe2e",
+      "source": "https://raw.githubusercontent.com/stackrox/stackrox/3373dee426f5cdeecc0b3a631346dd2442463f1e/operator/config/crd/bases/platform.stackrox.io_centrals.yaml",
+      "version": "v1alpha1"
+    },
+    {
+      "file": "crds/platform.stackrox.io_v1alpha1_SecuredCluster.json",
+      "group": "platform.stackrox.io",
+      "kind": "SecuredCluster",
+      "license": "Apache-2.0 (stackrox/stackrox)",
+      "sha256Upstream": "d1b4cd7df9d0556711e6cd097f0f2474e069dd5ce87219fbe82c6cf4e263e852",
+      "source": "https://raw.githubusercontent.com/stackrox/stackrox/3373dee426f5cdeecc0b3a631346dd2442463f1e/operator/config/crd/bases/platform.stackrox.io_securedclusters.yaml",
+      "version": "v1alpha1"
+    }
+  ]
+}

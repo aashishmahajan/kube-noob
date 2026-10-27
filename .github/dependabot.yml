@@ -6,6 +6,12 @@ updates:
     groups:
       python:
         patterns: ["*"]
+  - package-ecosystem: uv
+    directory: /plugin/kube-noob
+    schedule: {interval: weekly}
+    groups:
+      plugin:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly}

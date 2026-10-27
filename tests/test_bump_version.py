@@ -7,6 +7,7 @@ import importlib.util
 import json
 import shutil
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -18,8 +19,9 @@ FILES = [
     "server.json",
     ".claude-plugin/marketplace.json",
     "plugin/kube-noob/.claude-plugin/plugin.json",
-    "plugin/kube-noob/.mcp.json",
-    "plugin/kube-noob/README.md",
+    "plugin/kube-noob/pyproject.toml",
+    "plugin/kube-noob/uv.lock",
+    "plugin/kube-noob/server/kube_noob/__init__.py",
     "README.md",
     "deploy/helm/kube-noob/Chart.yaml",
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml",
@@ -59,16 +61,18 @@ def test_bump_updates_every_reference(repo: Path) -> None:
     assert f'__version__ = "{new}"' in (repo / "src/kube_noob/__init__.py").read_text()
     server = json.loads((repo / "server.json").read_text())
     assert server["version"] == server["packages"][0]["version"] == new
-    assert json.loads((repo / "plugin/kube-noob/.mcp.json").read_text())["mcpServers"]["kube-noob"]["args"][1] == (
-        f"kube-noob=={new}"
-    )
+    lock = tomllib.loads((repo / "plugin/kube-noob/uv.lock").read_text())
+    assert next(p for p in lock["package"] if p["name"] == "kube-noob-plugin")["version"] == new
+    assert tomllib.loads((repo / "plugin/kube-noob/pyproject.toml").read_text())["project"]["version"] == new
+    assert f'__version__ = "{new}"' in (repo / "plugin/kube-noob/server/kube_noob/__init__.py").read_text()
     chart = yaml.safe_load((repo / "deploy/helm/kube-noob/Chart.yaml").read_text())
     assert chart["version"] == new and chart["appVersion"] == new
     assert f"kube-noob:{new}" in (repo / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()
     changelog = (repo / "CHANGELOG.md").read_text()
     assert changelog.index(f"## {new}") < changelog.index(f"## {old}") and "patched UBI" in changelog
     for f in FILES:
-        assert old not in (repo / f).read_text() or f == "CHANGELOG.md", f
+        # CHANGELOG keeps history; uv.lock may hold dependency versions that contain the old string (checked above).
+        assert old not in (repo / f).read_text() or f in {"CHANGELOG.md", "plugin/kube-noob/uv.lock"}, f
 
 
 def test_bump_rejects_bad_or_non_increasing_versions(repo: Path) -> None:

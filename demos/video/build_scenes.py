@@ -17,7 +17,7 @@ CHAPTERS = [
     ("protocol", "3. Blueprint to audited ROSA HCP manifests", 8),
     ("learn", "4. Learn Kubernetes objects, graded offline", 10),
     ("learning", "5. Remember what your team fixed", 6),
-    ("posture", "6. Prove it never leaves your network", 9),
+    ("posture", "6. No AI inside, no network calls: prove it", 9),
 ]
 
 

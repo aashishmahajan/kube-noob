@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "kube-noob"
 dynamic = ["version"]
-description = "Offline-first learning, manifest-audit and debugging agent for Kubernetes, Helm, OpenShift, ROSA HCP and StackRox (RHACS). Runs as an MCP server, a CLI, or an OpenShift sidecar."
+description = "Kubernetes, Helm, OpenShift, ROSA HCP and RHACS expertise as deterministic tools: audit, diagnose, cited search, learning. No AI inside: use it from Claude, OpenShift Lightspeed, any MCP client or the CLI."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
@@ -51,6 +51,7 @@ dev = [
   "types-PyYAML>=6.0",
   "build>=1.2",
   "pip-audit>=2.7",
+  "uv>=0.11",
 ]
 
 [project.scripts]

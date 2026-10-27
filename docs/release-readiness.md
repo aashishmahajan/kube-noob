@@ -63,7 +63,7 @@ LICENSE). Never ingest CIS Benchmark text; reference control ids only.
 | PyPI | trusted publishing from `release.yml` (environment `pypi`) | pending publisher configured |
 | MCP Registry | `server.json` + `mcp-name` marker in the README; `release.yml` publishes with GitHub OIDC after PyPI | automated |
 | Claude Code (own marketplace) | `/plugin marketplace add aashishmahajan/kube-noob` | live |
-| Claude directory (plugins) | submit at claude.ai/directory/manage, "Plugin bundle"; needs a paid plan, public repo, pinned `uvx` package, LICENSE + README in the plugin folder | ready to submit |
+| Claude directory (plugins) | submit at claude.ai/directory/manage, "Plugin bundle"; needs a paid plan, public repo, LICENSE + README in the plugin folder; the plugin runs bundled source with a `uv.lock` (no `uvx` download, which is held for policy review) and links PRIVACY.md | submitted |
 | Claude Desktop `.mcpb` | the directory no longer accepts MCPB; optional release asset | not planned |
 | claude.ai Connectors (remote) | needs one hosted HTTPS server with OAuth; poor fit for in-cluster use | not planned |
 | OpenShift Developer Catalog | community Helm chart via `openshift-helm-charts/charts` (OWNERS PR first); partner listing needs Partner Connect and a certified image | next |

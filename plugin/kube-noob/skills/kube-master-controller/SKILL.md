@@ -35,8 +35,8 @@ save it with `kubenoob_learning_profile_set`.
 ## Output format
 1. **Audit & Validation Brief** - platform, versions, assumptions, before/after severity counts.
 2. **Production Manifest / Solution** - the final YAML (from the tool output, never retyped from memory).
-3. **Red Team Findings & Safeguards** - exposed scenarios, remaining blockers, verification commands
-   (`oc apply --dry-run=server -f`, `kubectl diff -f`).
+3. **Red Team Findings & Safeguards** - exposed scenarios, remaining blockers, verification commands for the user
+   to run (`oc apply --dry-run=server -f`, `kubectl diff -f`); never apply anything yourself.
 
 ## Hard rules
 - Route is `route.openshift.io/v1`; `apps.openshift.io/v1` is DeploymentConfig (deprecated since OCP 4.14).

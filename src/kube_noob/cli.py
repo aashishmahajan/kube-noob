@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--format", choices=["text", "json", "yaml"], default=argparse.SUPPRESS)
     p = argparse.ArgumentParser(
         prog="kube-noob",
-        description="Offline-first Kubernetes/OpenShift/ROSA/Helm/RHACS learning, audit and debugging agent.",
+        description="Kubernetes/OpenShift/ROSA/Helm/RHACS audit, debugging and learning tools. No AI inside.",
         parents=[common],
     )
     p.set_defaults(config=None, web_enabled=False, cluster_enabled=False, format="text")
@@ -246,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
         lgp.add_argument(f"--{key}", metavar="X.Y", help=f"{key} version")
     lgp.add_argument("--convention", action="append", dest="conventions", help="repeat for several")
 
-    ask = sub.add_parser("ask", help="Ask the agent (LLM + local tools)")
+    ask = sub.add_parser("ask", help="Optional: ask a model you configure, which calls these tools")
     ask.add_argument("question")
 
     sub.add_parser("mcp", help="Run the MCP server over stdio")

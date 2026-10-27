@@ -1,11 +1,15 @@
 # Architecture
 
+kube-noob has no model inside. The server, the CLI and the plugin run deterministic code: rules, schemas, playbooks,
+a BM25 index and graders. A model appears only on the client side (Claude, Lightspeed, any MCP client) or in the
+optional `kube-noob ask` agent, which calls the same toolkit.
+
 ```mermaid
 flowchart LR
   subgraph Clients
     A[Claude / Cursor / VS Code<br/>MCP client]
     B[kube-noob CLI]
-    C[Agent: kube-noob ask<br/>Anthropic or OpenAI-compatible LLM]
+    C[Optional agent: kube-noob ask<br/>a model you configure]
     D[Sidecar app in the same pod]
   end
   subgraph Server["kube-noob (stdio or streamable HTTP)"]

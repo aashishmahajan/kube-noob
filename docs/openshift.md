@@ -6,7 +6,7 @@ and read-only.
 | Mode | Who calls it | Network exposure | When to use |
 |---|---|---|---|
 | Service (Helm chart) | MCP clients and OpenShift Lightspeed, over HTTP with a bearer token | ClusterIP; optional Route | One shared instance for a team or the whole cluster |
-| Sidecar | Only containers in the same pod, on `127.0.0.1` | none | An in-house assistant or bot that needs Kubernetes expertise |
+| Sidecar | Only containers in the same pod, on `127.0.0.1` | none | Your own bot or agent that needs Kubernetes expertise |
 | OpenShift Lightspeed tool | Lightspeed's chat in the console calls the Service | in-cluster only | Developers ask in the console; kube-noob supplies audits, diagnoses and cited answers |
 
 ## 1. Service mode
@@ -44,7 +44,8 @@ kube-noob audit -f deploy/sidecar/app-with-kube-noob-sidecar.yaml --platform ope
 
 ## 3. OpenShift Lightspeed integration
 
-OpenShift Lightspeed can call external MCP servers when the `MCPServer` feature gate is on. The field names below
+OpenShift Lightspeed can call external MCP servers when the `MCPServer` feature gate is on. Lightspeed's own model
+does the talking; kube-noob answers its tool calls with audits, diagnoses and cited docs, and calls no model itself. The field names below
 come from the `OLSConfig` API in the lightspeed-operator. Run `oc explain olsconfig.spec.mcpServers` to confirm the
 schema of your installed version.
 
@@ -95,7 +96,8 @@ LLM provider settings.
 - MCP Registry: `io.github.aashishmahajan/kube-noob` is published by the release workflow.
 - Container image: `ghcr.io/aashishmahajan/kube-noob:<version>` is multi-arch and signed with cosign. Verify it
   with the commands in [SECURITY.md](../SECURITY.md).
-- Claude plugin: `/plugin marketplace add aashishmahajan/kube-noob`. The Claude plugin directory listing is a
-  manual submission (see [release readiness](release-readiness.md)).
+- Claude plugin: `/plugin marketplace add aashishmahajan/kube-noob`. It runs the bundled server source with
+  dependencies pinned by hash in `uv.lock`. The Claude plugin directory listing is a manual submission (see
+  [release readiness](release-readiness.md)).
 - OpenShift Helm chart catalog and OperatorHub: not submitted yet. The chart carries the `charts.openshift.io`
   annotations; an operator bundle is on the roadmap.

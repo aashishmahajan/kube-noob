@@ -8,10 +8,11 @@ description: >
 
 # Debugging
 
-Diagnose before change. Never lead with a command that executes in a container or changes the cluster.
+Diagnose before change. Never lead with a command that executes in a container or changes the cluster. Commands
+are for the user to run: give them as copy-paste lines (no shell comments) and do not run them yourself.
 
-1. Collect read-only evidence: `oc describe pod`, `oc get events --sort-by=.lastTimestamp`, `oc logs --previous`, or a
-   redacted bundle (`kube-noob bundle deployment/<name> -n <ns> --cluster-enabled`).
+1. Ask for read-only evidence: the output of `oc describe pod`, `oc get events --sort-by=.lastTimestamp`,
+   `oc logs --previous`, or a redacted bundle (`kube-noob bundle deployment/<name> -n <ns> --cluster-enabled`).
 2. Call `kubenoob_diagnose` with the raw text (and platform if known). Present its `readOnlyNextSteps` first.
 3. If `kubenoob_config_status` shows `cluster.enabled: true`, call `kubenoob_cluster_debug_workload` (read-only, never
    reads Secrets, redacts values).

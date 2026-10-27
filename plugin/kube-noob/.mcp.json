@@ -1,16 +1,22 @@
 {
   "mcpServers": {
     "kube-noob": {
-      "command": "uvx",
+      "command": "uv",
       "args": [
-        "--from",
-        "kube-noob==0.2.0",
-        "kube-noob",
-        "mcp"
+        "run",
+        "--frozen",
+        "--exact",
+        "--quiet",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "python",
+        "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"
       ],
       "env": {
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv",
         "KUBE_NOOB_WEB_ENABLED": "false",
-        "KUBE_NOOB_CLUSTER_ENABLED": "false"
+        "KUBE_NOOB_CLUSTER_ENABLED": "false",
+        "KUBE_NOOB_LLM_PROVIDER": "none"
       }
     }
   }

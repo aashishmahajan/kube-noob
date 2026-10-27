@@ -25,17 +25,18 @@ def test_mcp_registry_metadata() -> None:
 
 
 def test_plugin_pins_the_release() -> None:
-    mcp = json.loads((ROOT / "plugin/kube-noob/.mcp.json").read_text())
-    args = mcp["mcpServers"]["kube-noob"]["args"]
-    assert args[:2] == ["--from", f"kube-noob=={__version__}"]
+    import tomllib
+
     plugin = json.loads((ROOT / "plugin/kube-noob/.claude-plugin/plugin.json").read_text())
     market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
     assert plugin["version"] == __version__ == market["plugins"][0]["version"]
+    assert tomllib.loads((ROOT / "plugin/kube-noob/pyproject.toml").read_text())["project"]["version"] == __version__
+    lock = tomllib.loads((ROOT / "plugin/kube-noob/uv.lock").read_text())
+    assert next(p for p in lock["package"] if p["name"] == "kube-noob-plugin")["version"] == __version__
     assert (ROOT / "plugin/kube-noob/LICENSE").read_text() == (ROOT / "LICENSE").read_text()
     assert len((ROOT / "plugin/kube-noob/README.md").read_text().split()) >= 40
-    for readme in ("README.md", "plugin/kube-noob/README.md"):
-        pins = re.findall(r"kube-noob==(\d+\.\d+\.\d+)", (ROOT / readme).read_text())
-        assert pins and set(pins) == {__version__}, readme
+    pins = re.findall(r"kube-noob==(\d+\.\d+\.\d+)", (ROOT / "README.md").read_text())
+    assert pins and set(pins) == {__version__}, "README.md uvx pin for other MCP clients"
 
 
 def test_chart_and_image_versions() -> None:

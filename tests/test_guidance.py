@@ -68,3 +68,50 @@ def test_docs_are_concise_and_linked() -> None:
     use_cases = (ROOT / "docs/use-cases.md").read_text()
     assert all(f"kube-noob demo {d}" in use_cases for d in ("learn", "audit", "diagnose", "posture"))
     assert "getting_started" in use_cases
+
+
+_AI_CLAIMS = [
+    re.compile(r"(?i)\boffline AI\b"),
+    re.compile(r"(?i)\bkube-noob (is|as) an? [^.\n|]{0,60}?\b(assistant|chatbot|agent|AI)\b"),
+    re.compile(r"(?i)\b(debugging|audit|learning) agent\b"),
+    re.compile(r"(?i)\bmine runs\b"),
+]
+
+
+def test_positioning_says_no_ai_inside_and_never_claims_otherwise() -> None:
+    """kube-noob calls no model; the AI is the client (Claude, Lightspeed) or the optional `kube-noob ask`."""
+    for doc in ("README.md", "plugin/kube-noob/README.md", "docs/use-cases.md", "PRIVACY.md"):
+        assert "no AI inside" in (ROOT / doc).read_text().replace("No AI inside", "no AI inside"), doc
+    copy = [
+        ROOT / "README.md",
+        ROOT / "PRIVACY.md",
+        ROOT / "pyproject.toml",
+        ROOT / "server.json",
+        ROOT / ".claude-plugin" / "marketplace.json",
+        ROOT / "plugin" / "kube-noob" / ".claude-plugin" / "plugin.json",
+        ROOT / "plugin" / "kube-noob" / "README.md",
+        ROOT / "src" / "kube_noob" / "__init__.py",
+        ROOT / "src" / "kube_noob" / "cli.py",
+        *sorted((ROOT / "docs").glob("*.md")),
+        *sorted((ROOT / "plugin" / "kube-noob" / "skills").glob("*/SKILL.md")),
+        *sorted((ROOT / "demos").glob("*.md")),
+        *sorted((ROOT / "demos" / "video").glob("*.html")),
+    ]
+    found = [
+        f"{path.relative_to(ROOT)}: {m.group(0)!r}"
+        for path in copy
+        for rx in _AI_CLAIMS
+        for m in rx.finditer(path.read_text())
+    ]
+    assert found == []
+
+
+def test_privacy_policy_lists_every_destination() -> None:
+    from kube_noob.config import DEFAULT_ALLOWED_DOMAINS
+
+    privacy = (ROOT / "PRIVACY.md").read_text()
+    for domain in DEFAULT_ALLOWED_DOMAINS:
+        assert re.search(rf"(?<![\w.-]){re.escape(domain)}(?![\w-])", privacy), domain
+    for destination in ("API server", "The model you configure", "Public GitHub", "Jira"):
+        assert destination in privacy, destination
+    assert "no telemetry" in privacy.lower() and "uv.lock" in privacy

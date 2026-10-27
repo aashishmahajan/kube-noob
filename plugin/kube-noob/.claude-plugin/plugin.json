@@ -1,7 +1,7 @@
 {
   "name": "kube-noob",
   "version": "0.2.0",
-  "description": "Offline-first Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox learning, manifest audit (7-step SRE protocol) and debugging. Web access off by default.",
+  "description": "Kubernetes, OpenShift, ROSA HCP, Helm and RHACS expertise as tools for Claude: audit YAML, diagnose read-only first, cite docs, learn with graded exercises. No AI inside: Claude does the thinking, kube-noob runs locally and makes no network calls.",
   "author": {
     "name": "kube-noob maintainers",
     "url": "https://github.com/aashishmahajan/kube-noob"
@@ -9,5 +9,10 @@
   "homepage": "https://github.com/aashishmahajan/kube-noob",
   "repository": "https://github.com/aashishmahajan/kube-noob",
   "license": "Apache-2.0",
-  "keywords": ["kubernetes", "openshift", "rosa", "hcp", "helm", "stackrox", "rhacs", "sre", "security", "mcp", "learning"]
+  "keywords": ["kubernetes", "openshift", "rosa", "hcp", "helm", "stackrox", "rhacs", "sre", "security", "mcp", "learning"],
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md",
+  "supportUrl": "https://github.com/aashishmahajan/kube-noob/issues",
+  "privacyPolicyUrl": "https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md",
+  "termsOfServiceUrl": "https://github.com/aashishmahajan/kube-noob/blob/main/LICENSE"
 }

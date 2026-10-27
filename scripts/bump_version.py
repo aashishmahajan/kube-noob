@@ -2,7 +2,8 @@
 """Bump the kube-noob release version everywhere it ships, and add a CHANGELOG entry.
 
 Usage: python scripts/bump_version.py 0.1.1 "Security: rebuild on patched UBI base image."
-Then: commit, push, wait for CI, tag v0.1.1 and push the tag (docs/operations.md).
+Then: commit, push, wait for CI, tag v0.1.1 and push the tag (docs/operations.md). The plugin's bundled server copy,
+pyproject.toml and uv.lock move with it; CI checks them with scripts/sync_plugin_server.py --check.
 """
 
 from __future__ import annotations
@@ -21,8 +22,9 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "server.json": (r'"version": "(?P<v>[^"]+)"',),
     ".claude-plugin/marketplace.json": (r'"version": "(?P<v>[^"]+)"',),
     "plugin/kube-noob/.claude-plugin/plugin.json": (r'"version": "(?P<v>[^"]+)"',),
-    "plugin/kube-noob/.mcp.json": (r'"kube-noob==(?P<v>[^"]+)"',),
-    "plugin/kube-noob/README.md": (r"kube-noob==(?P<v>\d+\.\d+\.\d+)",),
+    "plugin/kube-noob/pyproject.toml": (r'^version = "(?P<v>[^"]+)"$',),
+    "plugin/kube-noob/uv.lock": (r'^name = "kube-noob-plugin"\nversion = "(?P<v>[^"]+)"$',),
+    "plugin/kube-noob/server/kube_noob/__init__.py": (r'__version__ = "(?P<v>[^"]+)"',),
     "README.md": (r"kube-noob==(?P<v>\d+\.\d+\.\d+)",),
     "deploy/helm/kube-noob/Chart.yaml": (r"^version: (?P<v>\S+)$", r'^appVersion: "(?P<v>[^"]+)"$'),
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),

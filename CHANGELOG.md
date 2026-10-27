@@ -4,6 +4,13 @@
 
 Enterprise self-help release: safe by construction, provable in your environment, and grounded in your own runbooks.
 
+- No AI inside, said plainly: README, plugin, docs and video copy explain that Claude, OpenShift Lightspeed or any MCP
+  client does the talking and kube-noob supplies deterministic tools; only the optional `kube-noob ask` calls a model.
+  A test keeps copy from calling kube-noob an AI, assistant or agent.
+- The Claude plugin runs the readable server source bundled in `plugin/kube-noob/server` with every dependency pinned
+  by hash in `uv.lock` (`uv run --frozen`), installs no LLM SDK, keeps its environment in the plugin data folder, and
+  reports no model in its posture. CI checks the copy, the lock, a vulnerability audit and an end-to-end start.
+- PRIVACY.md lists what kube-noob reads, stores and sends, per destination; the plugin manifest links it.
 - Admin offline lock (`offline: true`, `KUBE_NOOB_OFFLINE=1`, Helm `config.offline`): overrides `webEnabled`, blocks
   corpus downloads, allows only loopback or `*.svc` model endpoints (no redirects, no proxy environment), and no
   later config source can lift it. `kube-noob doctor` reports the posture and exits 1 on contradictions.

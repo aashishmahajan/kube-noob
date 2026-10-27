@@ -1,5 +1,6 @@
-"""kube-noob: offline-first Kubernetes / Helm / OpenShift / ROSA HCP / StackRox learning,
-manifest-audit and debugging agent.
+"""kube-noob: Kubernetes / Helm / OpenShift / ROSA HCP / StackRox expertise as deterministic tools for learning,
+manifest audit and debugging. There is no AI inside: Claude, OpenShift Lightspeed or any MCP client calls the tools,
+and the CLI runs them with no model at all. Only the optional ``kube-noob ask`` agent calls a model you configure.
 
 The package is usable as:
   * an MCP server (``kube-noob mcp`` over stdio, ``kube-noob serve`` over streamable HTTP),

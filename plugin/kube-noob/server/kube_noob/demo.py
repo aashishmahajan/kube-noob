@@ -1,0 +1,256 @@
+"""Scripted, offline walkthroughs: ``kube-noob demo <scenario>``.
+
+Every scenario runs in-process against the bundled ``examples/`` with web and cluster access forced off and a
+throwaway data directory, so a demo never touches the network, a cluster or the user's progress and learning file.
+Each step prints the equivalent CLI command, so a viewer can repeat it. The VHS tapes in ``demos/`` record these
+scenarios as GIFs for every release.
+"""
+
+from __future__ import annotations
+
+import tempfile
+import textwrap
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from importlib import resources
+from pathlib import Path
+from typing import Any
+
+from kube_noob.config import Settings
+
+Emit = Callable[[str], None]
+
+
+def examples_dir() -> Path:
+    """Bundled examples (wheel: ``kube_noob/data/examples``; source checkout: ``<repo>/examples``)."""
+    packaged = Path(str(resources.files("kube_noob") / "data" / "examples"))
+    if packaged.is_dir():
+        return packaged
+    repo = Path(__file__).resolve().parents[2] / "examples"
+    if repo.is_dir():
+        return repo
+    raise FileNotFoundError("bundled examples are missing from this installation; reinstall kube-noob")
+
+
+def _example(name: str) -> str:
+    return (examples_dir() / name).read_text(encoding="utf-8")
+
+
+def _wrap(text: str, indent: str = "    ") -> str:
+    return textwrap.fill(text, width=100, initial_indent=indent, subsequent_indent=indent + "  ")
+
+
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    title: str
+    audience: str
+    run: Callable[[Any, Emit], None]
+
+
+def _step(emit: Emit, why: str, command: str) -> None:
+    emit(f"\n# {why}")
+    emit(f"$ {command}")
+
+
+def _audit(kit: Any, emit: Emit) -> None:
+    from kube_noob import toolkit as tk
+
+    text = _example("insecure-deployment.yaml")
+    _step(
+        emit,
+        "Audit a Deployment that works on a laptop but not on OpenShift",
+        "kube-noob audit -f examples/insecure-deployment.yaml --platform openshift --version 4.22",
+    )
+    rep = kit.audit(tk.AuditIn(manifests=text, platform="openshift", version="4.22"))
+    c = rep["summary"]["counts"]
+    emit(f"score {rep['summary']['score']}/100 | high={c['high']} medium={c['medium']} low={c['low']}")
+    for f in [f for f in rep["findings"] if f["severity"] in {"critical", "high"}][:3]:
+        emit(f"[{f['severity'].upper():8}] {f['ruleId']} line {f['line']}: {f['message']}")
+        emit(_wrap(f"fix: {f['remediation']}"))
+    _step(
+        emit,
+        "Apply the safe mechanical fixes and re-audit",
+        "kube-noob fix -f examples/insecure-deployment.yaml --platform openshift -o fixed.yaml",
+    )
+    fixed = kit.fix(tk.FixIn(manifests=text, platform="openshift", version="4.22"))
+    emit(f"{len(fixed['changes'])} changes applied; score {rep['summary']['score']} -> {fixed['after']['score']}")
+    for ch in fixed["changes"][:4]:
+        emit(f"  + {ch['path']}: {ch['reason']}")
+    emit("Left for a human (needs app knowledge):")
+    for m in fixed["manualFollowUps"][:2]:
+        emit(_wrap(f"- {m}", "  "))
+
+
+def _diagnose(kit: Any, emit: Emit) -> None:
+    from kube_noob import toolkit as tk
+
+    for name, why in (
+        ("events-scc.txt", "Pods are never created: paste the events"),
+        ("events-crashloop.txt", "A pod keeps restarting: paste `oc describe pod`"),
+    ):
+        _step(emit, why, f"kube-noob diagnose -f examples/{name}")
+        out = kit.diagnose(tk.DiagnoseIn(text=_example(name), limit=2))
+        d = out["diagnoses"][0]
+        emit(f"{d['id']}: {d['title']} (confidence {d['confidence']})")
+        n = 1
+        emit(f"  {n}. read-only first:")
+        for s in d["readOnlyNextSteps"][:3]:
+            emit(f"     {s.get('command') or s['instruction']}")
+            if s.get("why"):
+                emit(f"       why: {s['why']}")
+        if d["diagnosticCommands"]:
+            n += 1
+            emit(f"  {n}. runs in a container (asks before running):")
+            emit(f"     {d['diagnosticCommands'][0]['command']}")
+        if d["proposedChanges"]:
+            n += 1
+            emit(f"  {n}. change, only after the evidence (asks before running):")
+            emit(_wrap(d["proposedChanges"][0]["change"], "     "))
+
+
+def _protocol(kit: Any, emit: Emit) -> None:
+    import yaml
+
+    from kube_noob import toolkit as tk
+
+    _step(
+        emit,
+        "Describe the app; get audited, platform-correct manifests",
+        'kube-noob protocol "Deploy orders-api on ROSA HCP" --blueprint examples/blueprint.yaml',
+    )
+    out = kit.run_protocol(
+        tk.ProtocolIn(request="Deploy orders-api on ROSA HCP", blueprint=yaml.safe_load(_example("blueprint.yaml")))
+    )
+    brief = out["auditValidationBrief"]
+    emit(
+        f"status: {out['status']} | {brief['platform']} {brief['platformVersion']} (Kubernetes "
+        f"{brief['kubernetesVersion']}) | score {brief['after']['score']}/100"
+    )
+    kinds: dict[str, int] = {}
+    for r in brief["resources"]:
+        kinds[r.split("/")[0]] = kinds.get(r.split("/")[0], 0) + 1
+    emit("generated: " + ", ".join(k + (f" x{n}" if n > 1 else "") for k, n in kinds.items()))
+    red = out["redTeamFindingsAndSafeguards"]
+    for p in red.get("prerequisites", [])[:2]:
+        emit(f"prerequisite: {p}")
+    emit("validate before applying:")
+    for cmd in out["validationCommands"][:2]:
+        emit(f"  {cmd}")
+
+
+def _learn(kit: Any, emit: Emit) -> None:
+    from kube_noob import toolkit as tk
+
+    _step(emit, "Open the first lesson", "kube-noob learn lesson k8s-101-objects")
+    lesson = kit.lesson(tk.LessonIn(lesson_id="k8s-101-objects", learner="demo"))
+    emit(lesson["title"])
+    for kp in lesson["keyPoints"][:3]:
+        emit(_wrap(f"- {kp}", "  "))
+    _step(
+        emit,
+        "Submit a first attempt at the exercise; it is graded offline",
+        "kube-noob learn submit k8s-ex-hardened-deployment -f examples/exercise-answer.yaml",
+    )
+    res = kit.submit(
+        tk.SubmitIn(exercise_id="k8s-ex-hardened-deployment", answer=_example("exercise-answer.yaml"), learner="demo")
+    )
+    emit(f"passed: {res['passed']} | score {res['score']} | points {res['pointsEarned']}")
+    for fb in res["feedback"][:3]:
+        emit(_wrap(f"- {fb['ruleId']}: {fb['message']} fix: {fb['fix']}", "  "))
+
+
+def _search(kit: Any, emit: Emit) -> None:
+    from kube_noob import toolkit as tk
+
+    _step(
+        emit,
+        "Ask the local knowledge base; every answer carries a citation",
+        'kube-noob search "restricted-v2 SCC runAsUser range"',
+    )
+    out = kit.search(tk.SearchIn(query="restricted-v2 SCC runAsUser range", limit=3))
+    for r in out["results"]:
+        emit(f"[{r['chunkId']}] {r['title']}")
+
+
+def _learning(kit: Any, emit: Emit) -> None:
+    from kube_noob import toolkit as tk
+
+    note = {
+        "symptom": "orders-api pods rejected by SCC: runAsUser 1000 outside the namespace range",
+        "cause": "the Helm chart hard-codes runAsUser for vanilla Kubernetes",
+        "fix": "drop runAsUser on OpenShift and let restricted-v2 assign the UID",
+    }
+    _step(
+        emit,
+        "Remember a fix your team confirmed (summaries only; secrets and logs are rejected)",
+        f'kube-noob learning note --symptom "{note["symptom"]}" --cause "{note["cause"]}" --fix "{note["fix"]}"',
+    )
+    saved = kit.learning_note_add(
+        tk.LearningNoteIn(**note, platform="openshift", tags=["scc", "helm"], confirmed_by_user=True)
+    )
+    emit(f"saved {saved['citation']} to learning.json (local only, survives upgrades)")
+    _step(
+        emit,
+        "Next time, the same search finds your team's note next to the docs",
+        'kube-noob search "orders-api SCC runAsUser helm"',
+    )
+    for r in kit.search(tk.SearchIn(query="orders-api SCC runAsUser helm chart", limit=3))["results"]:
+        emit(f"[{r['chunkId']}] {r['title']}")
+
+
+def _posture(kit: Any, emit: Emit) -> None:
+    from kube_noob.posture import posture, render_text
+
+    # As the MCP server and plugin run it: the server itself never calls a model (llm.provider: none).
+    settings = kit.settings.model_copy(update={"llm": kit.settings.llm.model_copy(update={"provider": "none"})})
+    _step(emit, "Prove what kube-noob can reach (nothing, by default)", "kube-noob doctor")
+    emit(render_text(posture(settings)))
+    _step(
+        emit,
+        "Platform teams can lock it: no web, no downloads, local models only",
+        "KUBE_NOOB_OFFLINE=1 kube-noob doctor",
+    )
+    locked = settings.model_copy(update={"offline": True})
+    emit(render_text(posture(locked)))
+
+
+SCENARIOS: dict[str, Scenario] = {
+    s.name: s
+    for s in (
+        Scenario("audit", "Audit and auto-fix a Deployment for OpenShift", "developers, platform engineers", _audit),
+        Scenario("diagnose", "Diagnose SCC and CrashLoop/OOM failures, read-only first", "SREs, on-call", _diagnose),
+        Scenario(
+            "protocol", "Blueprint to audited ROSA HCP manifests (7-step protocol)", "platform engineers", _protocol
+        ),
+        Scenario("learn", "Lesson plus a graded exercise", "learners, trainers", _learn),
+        Scenario("search", "Cited answers from local knowledge", "everyone", _search),
+        Scenario("learning", "Remember a confirmed team fix and find it later", "teams", _learning),
+        Scenario("posture", "Show and lock the security posture", "security, platform admins", _posture),
+    )
+}
+
+
+def run(name: str, settings: Settings, emit: Emit = print) -> float:
+    """Run one scenario offline in a throwaway data dir; returns the elapsed seconds."""
+    from kube_noob import toolkit as tk
+
+    scenario = SCENARIOS[name]
+    with tempfile.TemporaryDirectory(prefix="kube-noob-demo-") as tmp:
+        safe = settings.model_copy(
+            update={
+                "web_enabled": False,
+                "cluster": settings.cluster.model_copy(update={"enabled": False}),
+                "data_dir": Path(tmp),
+                "learning_enabled": True,
+            }
+        )
+        start = time.monotonic()
+        emit(f"== kube-noob demo: {scenario.title} ==")
+        scenario.run(tk.Toolkit(safe), emit)
+        return time.monotonic() - start
+
+
+def listing() -> list[dict[str, str]]:
+    return [{"name": s.name, "title": s.title, "for": s.audience} for s in SCENARIOS.values()]

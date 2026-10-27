@@ -10,7 +10,7 @@ read-only first, about their own clusters and their own runbooks, so the platfor
 | App developer | When my deploy fails on the shared cluster, find out why without opening a ticket | Slack the platform team, search the wiki, paste logs into a public chatbot | `diagnose` and the Lightspeed or Claude tools give the cause and read-only steps, in the company's terms |
 | SRE / on-call | Get from symptom to evidence fast, without making it worse | Personal notes, tribal knowledge | Playbooks that read before they change, a redacted evidence `bundle`, confirmed team notes |
 | Platform team | Stop answering the same 20 questions; enforce conventions before deploy | Docs nobody reads, admission policies that only say "no" | Org runbooks indexed and cited, audit in CI, a weekly "top issues" signal from counters |
-| Security | Allow an AI assistant without data leaving the boundary | Ban it | Offline lock, `doctor`, no egress, signed images, nothing exported |
+| Security | Allow AI assistants without data leaving the boundary | Ban them | No model inside kube-noob, offline lock, `doctor`, no egress, signed images, nothing exported |
 
 ## Delivered (0.2.0)
 
@@ -47,7 +47,7 @@ no-egress promise).
 
 | Assumption | Cheapest test |
 |---|---|
-| Platform teams will let an OSS assistant into the cluster | Show the `doctor` output and SECURITY.md to two OpenShift admins; ask what blocks approval |
+| Platform teams will let an OSS tool server into the cluster | Show the `doctor` output and SECURITY.md to two OpenShift admins; ask what blocks approval |
 | Developers will ask it before opening a ticket | Turn on Lightspeed integration for one team; compare ticket counts for the top 5 categories over 4 weeks |
 | BM25 over their runbooks is good enough | Run `selftest` plus 20 questions written by the team against their own `add-docs` corpus |
 | Read-as-caller is possible without new infrastructure | Prototype it with oauth-proxy's `--pass-access-token` on a test cluster |

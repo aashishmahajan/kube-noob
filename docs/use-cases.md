@@ -3,6 +3,22 @@
 Pick your role, run the demo, then try it on your own files. Every demo runs offline in under a second and never
 touches your cluster or your saved progress: `kube-noob demo --list`.
 
+## No AI inside: three ways to use it
+
+kube-noob is the rulebook, not the chatbot. Its audit rules, playbooks, docs index and graders give the same answer
+every time, and they run where you put them.
+
+1. **With Claude** (plugin in Claude Code or Cowork): ask in your own words and paste YAML, events or logs. Claude
+   calls kube-noob's tools and explains the results. Your conversation goes to Claude as usual; kube-noob sends
+   nothing.
+2. **With OpenShift Lightspeed or another MCP client**: the same tools, served in your cluster
+   ([openshift.md](openshift.md)). That client's model does the talking.
+3. **With no AI at all**: the CLI below. Audits, diagnoses, cited search, lessons and evidence bundles need no model
+   and no network, which suits CI gates and air-gapped clusters.
+
+`kube-noob ask` is the one optional command that uses a model: one you configure, and only a local one under the
+offline lock.
+
 ## Learner or trainer: practise Kubernetes objects offline
 
 You write YAML and get graded feedback straight away. The grader uses the same rules as a production review, and it
