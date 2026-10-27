@@ -90,10 +90,53 @@ LLM provider settings.
 4. Check: ask Lightspeed "audit this Deployment for OpenShift 4.22" with a manifest pasted in. The kube-noob audit log
    (`oc logs deploy/kube-noob -n kube-noob`) shows a `tool=kubenoob_...` line for each call.
 
+## Compatibility
+
+OpenShift 4.20 and later (Kubernetes 1.33 and later), including ROSA Classic and ROSA HCP. Every change runs the chart
+install, a Helm test, the sidecar example under Pod Security `restricted`, and an MCP end-to-end check on Kubernetes
+1.33, 1.34, 1.35 and the newest release (CI job `e2e-kind`). The chart and the sidecar example are audited for
+OpenShift 4.20, 4.21 and 4.22. Pods run under `restricted-v2` with an arbitrary UID, no capabilities, `RuntimeDefault`
+seccomp and a read-only root filesystem. The only APIs used are stable `v1` ones (`apps`, `networking.k8s.io`,
+`policy`, `route.openshift.io`, `rbac.authorization.k8s.io`) plus the optional `k8s.ovn.org/v1` EgressFirewall.
+
+## Sizing
+
+Measured with `scripts/measure_footprint.py` (Python 3.13): about 80 MiB resident at start and 85 MiB peak after
+search, audit, diagnose and a full protocol run, the same for stdio and HTTP. Each MB of indexed text (team runbooks,
+a corpus) adds about 25 MiB; 3,000 issue-sized documents (11 MB) peaked at 340 MiB.
+
+| Mode | Request | Limit |
+|---|---|---|
+| Sidecar, built-in knowledge | 128Mi | 256Mi |
+| Service (chart default), up to about 15 MB of indexed text | 256Mi | 512Mi |
+| Larger corpus | 85 MiB plus 25 MiB per MB of text | request plus 50% |
+
+CPU is idle between calls; a call takes 2 to 70 ms.
+
+## Traffic out of the cluster
+
+kube-noob calls no model and, by default, opens no outbound connection. The chart's NetworkPolicy allows egress to
+DNS only. `config.clusterEnabled` adds the API server CIDRs you list; `config.webEnabled` adds TCP 443, and the
+application allowlist limits that to documentation domains. To enforce domains at the network layer too, set
+`egressFirewall.enabled=true` (OVN-Kubernetes). It allows only the API server (when cluster access is on) and HTTPS
+to the allowlisted domains (when web access is on), then denies everything else leaving the cluster. It applies to the
+whole namespace, so keep kube-noob in its own. In sidecar mode kube-noob needs no egress; the example's NetworkPolicy
+allows DNS only, and you add your app's own destinations.
+
+## Data retention
+
+kube-noob processes requests in memory and keeps nothing from them. It stores only what a user saves on purpose:
+learning progress, confirmed notes and indexed documents, in `/var/lib/kube-noob`. With `persistence.enabled=false`
+(the default) that is an `emptyDir` and is gone when the pod is deleted; with persistence it stays on the PVC until you
+delete it. Each request writes one log line to stdout (tool name, argument sizes, outcome, duration; never argument
+contents); your cluster's logging decides how long that is kept. Details: [PRIVACY.md](../PRIVACY.md).
+
 ## Status of the public listings
 
 - PyPI: `kube-noob` is published with Trusted Publishing and provenance on every tag.
 - MCP Registry: `io.github.aashishmahajan/kube-noob` is published by the release workflow.
+- Homebrew: `brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob`, then
+  `brew install aashishmahajan/kube-noob/kube-noob`. CI installs the formula on macOS and Linux every week.
 - Container image: `ghcr.io/aashishmahajan/kube-noob:<version>` is multi-arch and signed with cosign. Verify it
   with the commands in [SECURITY.md](../SECURITY.md).
 - Claude plugin: `/plugin marketplace add aashishmahajan/kube-noob`. It runs the bundled server source with

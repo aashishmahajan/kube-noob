@@ -45,6 +45,30 @@ networkPolicy:
     apiServerCIDRs: []              # required when config.clusterEnabled (e.g. the kubernetes Service endpoints)
     apiServerPort: 6443
 
+# OpenShift (OVN-Kubernetes) only: deny traffic leaving the cluster except the API server (when clusterEnabled) and,
+# when webEnabled, HTTPS to the allowlisted documentation domains. Applies to every pod in the release namespace, so
+# install kube-noob in its own namespace before enabling it.
+egressFirewall:
+  enabled: false
+  defaultDomains:                   # kept equal to kube-noob's built-in allowlist (tests check it)
+    - kubernetes.io
+    - helm.sh
+    - docs.redhat.com
+    - docs.openshift.com
+    - access.redhat.com
+    - cloud.redhat.com
+    - developers.redhat.com
+    - redhat.atlassian.net
+    - docs.aws.amazon.com
+    - github.com
+    - raw.githubusercontent.com
+    - stackrox.io
+    - www.stackrox.io
+    - gateway-api.sigs.k8s.io
+    - kind.sigs.k8s.io
+  extraDnsNames: []                 # e.g. "*.docs.redhat.com" where your OVN-Kubernetes supports wildcard names
+  denyCIDRs: ["0.0.0.0/0"]          # add "::/0" on dual-stack clusters
+
 rbac:
   scope: cluster                    # cluster | namespace (read-only; never Secrets)
 

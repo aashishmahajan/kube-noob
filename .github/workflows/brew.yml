@@ -1,0 +1,48 @@
+name: brew
+
+# Installs Formula/kube-noob.rb with Homebrew on macOS and Linux exactly as users do after tapping this repository,
+# then runs the formula's own test. Runs when the formula changes, weekly, and on demand.
+on:
+  push:
+    branches: [main]
+    paths: ["Formula/**", "scripts/brew_formula.py", ".github/workflows/brew.yml"]
+  pull_request:
+    paths: ["Formula/**", "scripts/brew_formula.py", ".github/workflows/brew.yml"]
+  schedule:
+    - cron: "23 7 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brew-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Formula matches the PyPI release files
+        run: python3 scripts/brew_formula.py --check
+      - name: Install and test the formula from a local tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          set -euo pipefail
+          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
+          brew tap-new --no-git kube-noob/ci
+          cp Formula/kube-noob.rb "$(brew --repository kube-noob/ci)/Formula/kube-noob.rb"
+          brew install --verbose kube-noob/ci/kube-noob
+          brew test kube-noob/ci/kube-noob
+          kube-noob --version
+          kube-noob diagnose -f examples/events-crashloop.txt --format json | python3 -c "import json,sys; print(json.load(sys.stdin)['diagnoses'][0]['id'])"
+          kube-noob selftest

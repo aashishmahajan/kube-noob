@@ -85,3 +85,38 @@ def test_ships_as_mcp_plugin_cli_and_openshift_service() -> None:
     assert (ROOT / "plugin/kube-noob/.mcp.json").is_file() and (ROOT / ".claude-plugin/marketplace.json").is_file()
     assert (ROOT / "deploy/helm/kube-noob/Chart.yaml").is_file()
     assert "kube-noob" in (ROOT / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()
+
+
+def test_chart_egress_firewall_mirrors_the_web_allowlist() -> None:
+    from kube_noob.config import DEFAULT_ALLOWED_DOMAINS
+
+    values = yaml.safe_load((ROOT / "deploy/helm/kube-noob/values.yaml").read_text())
+    assert values["egressFirewall"]["enabled"] is False, "EgressFirewall is namespace-wide, so it must be opt-in"
+    assert values["egressFirewall"]["defaultDomains"] == list(DEFAULT_ALLOWED_DOMAINS)
+    assert values["egressFirewall"]["denyCIDRs"] == ["0.0.0.0/0"]
+    template = (ROOT / "deploy/helm/kube-noob/templates/egressfirewall.yaml").read_text()
+    assert "name: default" in template and "not (.Values.config.offline" in template
+    assert "provider: none" in (ROOT / "deploy/helm/kube-noob/templates/configmap.yaml").read_text()
+
+
+def test_sidecar_is_loopback_only_with_dns_only_egress() -> None:
+    docs = list(yaml.safe_load_all((ROOT / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()))
+    dep = next(d for d in docs if d["kind"] == "Deployment")
+    kn = next(c for c in dep["spec"]["template"]["spec"]["containers"] if c["name"] == "kube-noob")
+    assert kn["args"][kn["args"].index("--host") + 1] == "127.0.0.1" and "ports" not in kn
+    env = {e["name"]: e["value"] for e in kn["env"]}
+    assert env["KUBE_NOOB_WEB_ENABLED"] == "false" and env["KUBE_NOOB_LLM_PROVIDER"] == "none"
+    assert kn["resources"] == {"requests": {"cpu": "50m", "memory": "128Mi"}, "limits": {"memory": "256Mi"}}
+    svc = next(d for d in docs if d["kind"] == "Service")
+    assert all(p["targetPort"] != 8080 for p in svc["spec"]["ports"])
+    pol = next(d for d in docs if d["kind"] == "NetworkPolicy")
+    assert pol["spec"]["policyTypes"] == ["Ingress", "Egress"]
+    assert [p["port"] for rule in pol["spec"]["egress"] for p in rule["ports"]] == [5353, 5353]
+
+
+def test_homebrew_formula_installs_hash_pinned_wheels() -> None:
+    formula = (ROOT / "Formula/kube-noob.rb").read_text()
+    assert re.search(r'url "https://files\.pythonhosted\.org/packages/[^"]+/kube_noob-\d+\.\d+\.\d+\.tar\.gz"', formula)
+    assert len(re.findall(r'sha256 "[0-9a-f]{64}"', formula)) == 2
+    assert '"--require-hashes", "--only-binary=:all:", "--no-deps", "-r", buildpath/"requirements.lock"' in formula
+    assert 'depends_on "python@3.13"' in formula and "test do" in formula

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,32 @@ def _read(path: str) -> str:
         parts = [f.read_text(encoding="utf-8") for f in sorted(p.rglob("*")) if f.suffix in {".yaml", ".yml"}]
         return "\n---\n".join(parts)
     return p.read_text(encoding="utf-8")
+
+
+_PATHLIKE = re.compile(r"[/\\]|\.[A-Za-z0-9]{1,5}$")
+
+
+def _read_text_or_file(value: str) -> str:
+    """For `diagnose`: '-' reads stdin, an existing path is read, anything else is the pasted text itself.
+
+    A single token that looks like a missing file (``events.txt``, ``logs/pod.log``) is an error rather than text, so a
+    typo in a file name is reported instead of being diagnosed as the words "events.txt".
+    """
+    if value == "-":
+        if sys.stdin.isatty():
+            print("Paste events, describe output or logs, then press Ctrl-D:", file=sys.stderr)
+        return sys.stdin.read()
+    try:
+        is_path = "\n" not in value and Path(value).exists()
+    except (OSError, ValueError):  # too long or not a valid path: it is text
+        is_path = False
+    if is_path:
+        return _read(value)
+    if not any(c.isspace() for c in value) and _PATHLIKE.search(value):
+        raise ConfigError(
+            f"no such file: {value}. To diagnose text instead, pass it in quotes: kube-noob diagnose '<text>'"
+        )
+    return value
 
 
 def _emit(obj: Any, fmt: str) -> None:
@@ -183,8 +210,15 @@ def build_parser() -> argparse.ArgumentParser:
     ha.add_argument("--version", dest="pversion")
     ha.add_argument("--namespace", default="default")
 
-    d = sub.add_parser("diagnose", help="Diagnose pasted events/logs/errors offline")
-    d.add_argument("-f", "--file", default="-")
+    d = sub.add_parser(
+        "diagnose",
+        help="Diagnose pasted events/logs/errors offline",
+        description="Diagnose events, describe output, logs or errors. Pass the text in quotes, a file with -f, or "
+        "pipe it in. Examples: kube-noob diagnose 'Back-off restarting failed container' | kube-noob diagnose -f "
+        "events.txt | pbpaste | kube-noob diagnose",
+    )
+    d.add_argument("text", nargs="*", help="the error text; quote multi-line text (single quotes avoid $ expansion)")
+    d.add_argument("-f", "--file", default=None, help="a file, '-' for stdin, or the text itself")
     d.add_argument("--platform", choices=PLATFORMS)
 
     dbg = sub.add_parser("debug", help="Collect live read-only evidence for a workload and diagnose it")
@@ -449,7 +483,12 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return 1 if top is not None and top >= 3 else 0
 
     if a.cmd == "diagnose":
-        _emit(kit.diagnose(tk.DiagnoseIn(text=_read(a.file), platform=getattr(a, "platform", None))), fmt)
+        if a.text and a.file is not None:
+            raise ConfigError("pass the text or -f, not both")
+        text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
+        if len(text.strip()) < 3:
+            raise ConfigError("nothing to diagnose: pass the error text in quotes, a file with -f, or pipe it in")
+        _emit(kit.diagnose(tk.DiagnoseIn(text=text, platform=getattr(a, "platform", None))), fmt)
         return 0
 
     if a.cmd == "bundle":

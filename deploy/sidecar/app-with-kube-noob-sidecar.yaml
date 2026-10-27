@@ -1,6 +1,8 @@
 # Sidecar pattern: kube-noob runs next to your app/agent in the same pod and listens on 127.0.0.1 only,
 # so no Service, Route or token is needed - only containers in this pod can reach the MCP endpoint
-# (http://127.0.0.1:8080/mcp). Web and cluster access stay disabled.
+# (http://127.0.0.1:8080/mcp). Web and cluster access stay disabled, so kube-noob itself needs no egress at all.
+# Memory: about 85 MiB peak with the built-in knowledge (scripts/measure_footprint.py); add about 25 MiB per MB of
+# runbooks you index. Admitted under restricted-v2 and Pod Security "restricted" (OpenShift 4.20 and later).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -56,10 +58,11 @@ spec:
           args: ["serve", "--host", "127.0.0.1", "--port", "8080"]
           env:
             - {name: KUBE_NOOB_WEB_ENABLED, value: "false"}
+            - {name: KUBE_NOOB_LLM_PROVIDER, value: none}
             - {name: KUBE_NOOB_DEFAULT_PLATFORM, value: openshift}
           readinessProbe: {exec: {command: ["python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/readyz', timeout=2)"]}, periodSeconds: 10, timeoutSeconds: 3}
           livenessProbe: {exec: {command: ["python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]}, periodSeconds: 20, timeoutSeconds: 3}
-          resources: {requests: {cpu: 50m, memory: 192Mi}, limits: {memory: 384Mi}}
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 256Mi}}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -83,9 +86,14 @@ kind: NetworkPolicy
 metadata: {name: assistant, namespace: team-tools}
 spec:
   podSelector: {matchLabels: {app.kubernetes.io/name: assistant}}
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - podSelector: {}
         - namespaceSelector: {matchLabels: {policy-group.network.openshift.io/ingress: ""}}
       ports: [{protocol: TCP, port: 8000}]
+  # kube-noob needs no egress. DNS only; add your app's own destinations (for example its model endpoint) below.
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: openshift-dns}}
+      ports: [{protocol: UDP, port: 5353}, {protocol: TCP, port: 5353}]

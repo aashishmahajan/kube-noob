@@ -1,0 +1,34 @@
+{{- if .Values.egressFirewall.enabled }}
+{{- /*
+OVN-Kubernetes EgressFirewall (OpenShift 4.x): limits traffic that leaves the cluster from EVERY pod in the release
+namespace, by DNS name and CIDR. Install kube-noob in its own namespace when you enable it. OVN-Kubernetes honours one
+EgressFirewall per namespace and only the one named "default".
+*/}}
+{{- $web := and .Values.config.webEnabled (not (.Values.config.offline | default false)) }}
+{{- $domains := .Values.config.allowedDomains | default .Values.egressFirewall.defaultDomains }}
+apiVersion: k8s.ovn.org/v1
+kind: EgressFirewall
+metadata:
+  name: default
+  labels: {{- include "kube-noob.labels" . | nindent 4 }}
+spec:
+  egress:
+    {{- if .Values.config.clusterEnabled }}
+    {{- range .Values.networkPolicy.egress.apiServerCIDRs }}
+    - type: Allow
+      to: {cidrSelector: {{ . }}}
+    {{- end }}
+    {{- end }}
+    {{- if $web }}
+    {{- range (concat $domains .Values.egressFirewall.extraDnsNames) }}
+    - type: Allow
+      to: {dnsName: {{ . }}}
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
+    {{- end }}
+    {{- range .Values.egressFirewall.denyCIDRs }}
+    - type: Deny
+      to: {cidrSelector: {{ . }}}
+    {{- end }}
+{{- end }}

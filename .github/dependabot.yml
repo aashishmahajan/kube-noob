@@ -3,6 +3,7 @@ updates:
   - package-ecosystem: pip
     directory: /
     schedule: {interval: weekly}
+    versioning-strategy: increase-if-necessary   # ranges already admit new releases; requirements.lock pins them
     groups:
       python:
         patterns: ["*"]

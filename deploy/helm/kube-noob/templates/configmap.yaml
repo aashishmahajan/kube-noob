@@ -12,6 +12,8 @@ data:
       allowedDomains: {{- toYaml . | nindent 8 }}
     {{- end }}
     defaultPlatform: {{ .Values.config.defaultPlatform }}
+    llm:
+      provider: none          # the server never calls a model; the client (Lightspeed, Claude) does the talking
     cluster:
       enabled: {{ .Values.config.clusterEnabled }}
       backend: in-cluster

@@ -21,7 +21,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
   returned.
 - **Debug**: 33 offline playbooks, read-only steps first; opt-in, read-only cluster evidence (Secrets are never read).
 - **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed team fixes locally.
-- **Cite**: answers reference local knowledge as `[kn:<doc>#<n>]` with source and license.
+- **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
 Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
 
@@ -40,12 +40,13 @@ Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit,
 pipx install kube-noob
 kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
-kube-noob diagnose -f events.txt
+kube-noob diagnose 'paste events or errors'
 kube-noob doctor
 kube-noob selftest
 ```
 
-Pick your role in [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md); every demo runs offline.
+Homebrew: `brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob`, then
+`brew install aashishmahajan/kube-noob/kube-noob`. Roles and demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
 
 ## Use with Claude or any MCP client
 

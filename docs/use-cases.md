@@ -48,13 +48,16 @@ To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It ex
 
 ## SRE or on-call: diagnose before you change anything
 
-1. Paste events, `describe` output or logs into `diagnose`. You get the likely cause, then read-only steps (get,
+1. Paste events, `describe` output or logs into `diagnose`: as quoted text (multi-line is fine; single quotes stop the
+   shell expanding `$`), as a file with `-f`, or piped in. You get the likely cause, then read-only steps (get,
    describe, logs, events).
 2. Commands that run inside a container are listed next, and changes come last. Both are marked as needing approval.
 
 ```bash
 kube-noob demo diagnose
+kube-noob diagnose 'Back-off restarting failed container api in pod api-1'
 kube-noob diagnose -f events.txt
+oc get events -n shop --sort-by=.lastTimestamp | kube-noob diagnose
 kube-noob bundle deployment/orders-api -n shop --cluster-enabled
 ```
 

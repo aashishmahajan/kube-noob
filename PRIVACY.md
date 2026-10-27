@@ -24,6 +24,9 @@ Everything lives in the data directory: `~/.local/share/kube-noob` by default, o
 | `learning.json` | Your profile (platform, versions, team conventions) and fixes you confirmed (symptom, cause, fix). Notes that contain credentials, logs or manifests are rejected. Counters record rule and playbook ids only, never your text | `kube-noob learning forget <id>`, delete the file, or set `learningEnabled: false` |
 | `corpus/` | Documents you indexed with `corpus add-docs` (credentials masked), and public corpus data you built or imported | Delete the directory |
 
+Nothing from a request is kept after it is answered. What is listed above stays until you delete it; the maintainers
+never receive it.
+
 `kube-noob bundle` writes a redacted evidence pack to the folder you name (default `./kube-noob-bundle`). The MCP
 server's log line records each tool name, argument sizes and duration, never argument contents.
 

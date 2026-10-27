@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from kube_noob.debug.diagnose import diagnose
@@ -123,3 +126,34 @@ def test_specific_cause_outranks_generic_crashloop() -> None:
         "Warning BackOff kubelet Back-off restarting failed container api in pod api-1_shop"
     )
     assert [d["id"] for d in diagnose(text).as_dict()["diagnoses"]][:2] == ["DBG-OOM", "DBG-CRASHLOOP"]
+
+
+def test_diagnose_cli_takes_pasted_text_a_file_or_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import io
+
+    from kube_noob.cli import main
+
+    pasted = (
+        'Warning FailedCreate replicaset/api-7d9f Error creating: pods "api-7d9f-" is forbidden: unable to validate '
+        'against any security context constraint: [provider "restricted-v2": .containers[0].runAsUser: Invalid value: '
+        "1000: must be in the ranges: [1000680000, 1000689999]]\nNormal ScalingReplicaSet deployment/api Scaled up"
+    )
+
+    def top(argv: list[str]) -> str:
+        assert main([*argv, "--format", "json"]) == 0
+        return str(json.loads(capsys.readouterr().out)["diagnoses"][0]["id"])
+
+    assert top(["diagnose", "-f", pasted]) == "DBG-SCC"
+    assert top(["diagnose", pasted]) == "DBG-SCC"
+    assert top(["diagnose", "Reason: OOMKilled", "Exit Code: 137"]) == "DBG-OOM"
+    events = tmp_path / "events.txt"
+    events.write_text(pasted)
+    assert top(["diagnose", "-f", str(events)]) == "DBG-SCC"
+    monkeypatch.setattr("sys.stdin", io.StringIO("Failed to pull image: manifest unknown\nImagePullBackOff\n"))
+    assert top(["diagnose"]) == "DBG-IMAGEPULL"
+    assert top(["diagnose", "-f", "x" * 5000 + " CrashLoopBackOff"])
+    assert main(["diagnose", "-f", str(tmp_path / "evnts.txt")]) == 2
+    assert "no such file" in capsys.readouterr().err
+    assert main(["diagnose", "text", "-f", str(events)]) == 2
