@@ -4,7 +4,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "kube-noob==0.1.1",
+        "kube-noob==0.2.0",
         "kube-noob",
         "mcp"
       ],

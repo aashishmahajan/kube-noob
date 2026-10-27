@@ -1,6 +1,6 @@
 {
   "name": "kube-noob",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Offline-first Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox learning, manifest audit (7-step SRE protocol) and debugging. Web access off by default.",
   "author": {
     "name": "kube-noob maintainers",

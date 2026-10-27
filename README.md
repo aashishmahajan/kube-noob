@@ -65,7 +65,7 @@ Claude Code plugin (skills + server):
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.1.1", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.2.0", "kube-noob", "mcp"]}}}
 ```
 
 Tools are prefixed `kubenoob_` (protocol, audit, fix, generate, diagnose, search, learn, grade). Cluster and web
