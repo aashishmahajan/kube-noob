@@ -8,6 +8,7 @@ USER 0
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE NOTICE requirements.lock ./
 COPY src ./src
+COPY examples ./examples
 RUN python3 -m pip install --no-cache-dir --upgrade "pip>=24.3" "build>=1.2" \
  && python3 -m build --wheel --outdir /wheels . \
  && python3 -m venv /opt/kube-noob \

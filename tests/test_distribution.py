@@ -45,3 +45,16 @@ def test_chart_and_image_versions() -> None:
     for label in ("name=", "vendor=", "version=", "release=", "summary=", "description=", "maintainer="):
         assert re.search(rf"^(LABEL)?\s+{label}", containerfile, re.MULTILINE), label
     assert "COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /licenses/" in containerfile
+
+
+def test_image_build_context_has_every_wheel_input() -> None:
+    """The Containerfile builds the wheel itself, so it must copy every path the wheel force-includes."""
+    import tomllib
+
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    wheel = cfg["tool"]["hatch"]["build"]["targets"]["wheel"]
+    containerfile = (ROOT / "Containerfile").read_text()
+    ignored = (ROOT / ".dockerignore").read_text().split()
+    for src in list(wheel.get("force-include", {})) + [p.split("/")[0] for p in wheel["packages"]]:
+        assert re.search(rf"^COPY .*\b{re.escape(src)}\b", containerfile, re.MULTILINE), src
+        assert src not in ignored, src
