@@ -36,12 +36,19 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
           HOMEBREW_NO_ANALYTICS: "1"
         run: |
-          set -euo pipefail
+          set -uo pipefail
           if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
-          brew tap-new --no-git kube-noob/ci
+          report() {
+            logs="$(brew --cache)/../Logs"
+            [ -d "$HOME/Library/Logs/Homebrew" ] && logs="$HOME/Library/Logs/Homebrew"
+            { tail -40 /tmp/brew.log; for f in $(ls -t "$logs"/kube-noob/* 2>/dev/null | head -2); do echo "== $f"; tail -40 "$f"; done; } > /tmp/brew-fail.txt
+            echo "::error title=brew $1 failed::$(sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g' /tmp/brew-fail.txt)"
+            exit 1
+          }
+          brew tap-new --no-git kube-noob/ci > /tmp/brew.log 2>&1 || report tap-new
           cp Formula/kube-noob.rb "$(brew --repository kube-noob/ci)/Formula/kube-noob.rb"
-          brew install --verbose --formula kube-noob/ci/kube-noob
-          brew test kube-noob/ci/kube-noob
+          brew install --verbose --formula kube-noob/ci/kube-noob > /tmp/brew.log 2>&1 || report install
+          brew test kube-noob/ci/kube-noob > /tmp/brew.log 2>&1 || report test
           kube-noob --version
           kube-noob diagnose -f examples/events-crashloop.txt --format json | python3 -c "import json,sys; print(json.load(sys.stdin)['diagnoses'][0]['id'])"
           kube-noob selftest
