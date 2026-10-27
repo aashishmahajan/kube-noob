@@ -598,7 +598,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "serve":
         import uvicorn
 
-        from kube_noob.server.mcp_app import http_app
+        from kube_noob.server.http import http_app
 
         if a.host:
             s.server.host = a.host

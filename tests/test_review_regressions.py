@@ -367,7 +367,7 @@ def test_requests_without_the_token_are_rejected_before_the_body_is_read(monkeyp
     import anyio
 
     from kube_noob.config import load_settings
-    from kube_noob.server.mcp_app import http_app
+    from kube_noob.server.http import http_app
 
     monkeypatch.setenv("KUBE_NOOB_HTTP_TOKEN", "s3cret-token")
     app = http_app(load_settings())

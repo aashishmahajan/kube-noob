@@ -30,20 +30,22 @@ kube-noob itself never changes your cluster.
 
 ## How it runs
 
-The server is the readable Python source in `server/`, a copy of the
-[kube-noob repository](https://github.com/aashishmahajan/kube-noob)'s `src/kube_noob`. Claude Code starts it with
-`uv run --frozen`, which installs its dependencies from PyPI at the exact versions and hashes in `uv.lock`, into the
-plugin's data folder, and runs Python isolated (`-I`), so nothing from your working directory or `PYTHONPATH` is
-imported. If no Python 3.11 or later is installed, uv downloads its managed CPython once. Nothing else is downloaded,
-and no LLM SDK is installed.
+The server is readable Python source in `server/`: the modules of the
+[kube-noob repository](https://github.com/aashishmahajan/kube-noob)'s `src/kube_noob` that the stdio MCP server
+imports, copied unchanged. The CLI, the optional model agent, the HTTP service and the cluster backends are not
+included, so nothing in the plugin reads a credential. Claude Code starts it with `uv run --frozen --isolated`, which
+installs the dependencies from PyPI at the exact versions and hashes in `uv.lock` into a throwaway environment in uv's
+cache, and runs Python isolated (`-I`), so nothing from your working directory or `PYTHONPATH` is imported. If no
+Python 3.11 or later is installed, uv downloads its managed CPython once. Nothing else is downloaded, and no LLM SDK
+is installed.
 
 ## What it accesses
 
 - Network: none. Web lookups and cluster access are off in `.mcp.json`; the server never calls a model.
 - Files: stores learning progress and `learning.json` (your platform, versions, conventions and the fixes you
   confirmed; never logs, manifests or secrets) in `~/.local/share/kube-noob`, which survives plugin upgrades.
-- To let it read your cluster (read-only, never Secrets), set `KUBE_NOOB_CLUSTER_ENABLED=true` in `.mcp.json`. To
-  allow HTTPS reads from allowlisted documentation sites, set `KUBE_NOOB_WEB_ENABLED=true`.
+- To read your cluster (read-only, never Secrets) or allowlisted documentation sites, use the kube-noob CLI
+  (`pipx install kube-noob`) or the in-cluster service; the plugin stays offline.
 - No telemetry and no accounts. Details: [PRIVACY.md](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md).
 
 ## Skills

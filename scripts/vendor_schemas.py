@@ -3,7 +3,9 @@
 
 * Kubernetes core: yannh/kubernetes-json-schema ``<version>/_definitions.json`` (generated from the upstream OpenAPI).
   We make it *strict* (additionalProperties: false on every object that declares properties, unless it preserves
-  unknown fields) so typos like ``imagePullPolice`` are caught, and strip descriptions to keep the wheel small.
+  unknown fields) so typos like ``imagePullPolice`` are caught, and strip descriptions to keep the wheel small. Written
+  as plain JSON in parts under PART_LIMIT bytes, one definition per line, so every file stays readable text (the Claude
+  plugin directory reads files up to 256 KiB and holds compressed or larger ones for review).
 * CRDs (OpenShift, OVN-K, StackRox, Gateway API): JSON schemas listed in CRD_SOURCES.
 
 Every vendored file is recorded in PROVENANCE.json with source URL, upstream sha256 and license.
@@ -15,7 +17,6 @@ Requires network access to raw.githubusercontent.com; run by maintainers / CI, n
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
 import json
 import sys
@@ -27,6 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "src" / "kube_noob" / "schemas" / "data"
 YANNH = "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master"
 DATREE = "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main"
+
+PART_LIMIT = 200_000
 
 DATREE_SHA = "3eb90d47aba8d61919d4419dd38301536e32a94b"
 CNO_SHA = "a1b26444418f0f14c7d35a1242c2bbd705932bdb"
@@ -154,6 +157,27 @@ def strip_descriptions(node: Any) -> Any:
     return node
 
 
+def write_definition_parts(definitions: dict[str, Any], k8s: str, out: Path = OUT) -> list[Path]:
+    """Write ``{"definitions": {...}}`` as numbered parts under PART_LIMIT bytes, one definition per line."""
+    for old in [*out.glob("kubernetes-*-definitions.json.gz"), *out.glob("kubernetes-*-definitions-*.json")]:
+        old.unlink()
+    parts: list[list[str]] = [[]]
+    size = 0
+    for name in sorted(definitions):
+        line = json.dumps(name) + ":" + json.dumps(definitions[name], separators=(",", ":"), sort_keys=True)
+        if parts[-1] and size + len(line) + 2 > PART_LIMIT - 64:
+            parts.append([])
+            size = 0
+        parts[-1].append(line)
+        size += len(line) + 2
+    written = []
+    for i, lines in enumerate(parts, start=1):
+        target = out / f"kubernetes-{k8s}-definitions-{i}.json"
+        target.write_text('{"definitions":{\n' + ",\n".join(lines) + "\n}}\n", encoding="utf-8")
+        written.append(target)
+    return written
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--k8s", default="v1.35.0")
@@ -161,25 +185,21 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     provenance: dict[str, Any] = {"files": []}
 
-    for old in OUT.glob("kubernetes-*-definitions.json.gz"):
-        old.unlink()
     url = f"{YANNH}/{args.k8s}/_definitions.json"
     raw = fetch(url)
     defs = json.loads(raw)
     strict = strictify(defs)
-    target = OUT / f"kubernetes-{args.k8s}-definitions.json.gz"
-    payload = json.dumps(strict, separators=(",", ":"), sort_keys=True).encode()
-    target.write_bytes(gzip.compress(payload, mtime=0))
-    provenance["files"].append(
-        {
-            "file": target.name,
-            "source": url,
-            "sha256Upstream": hashlib.sha256(raw).hexdigest(),
-            "license": "Apache-2.0 (yannh/kubernetes-json-schema); generated from kubernetes/kubernetes OpenAPI",
-            "transform": "strict additionalProperties=false; descriptions removed",
-        }
-    )
-    print(f"wrote {target} ({target.stat().st_size} bytes, {len(defs['definitions'])} definitions)")
+    for target in write_definition_parts(strict["definitions"], args.k8s):
+        provenance["files"].append(
+            {
+                "file": target.name,
+                "source": url,
+                "sha256Upstream": hashlib.sha256(raw).hexdigest(),
+                "license": "Apache-2.0 (yannh/kubernetes-json-schema); generated from kubernetes/kubernetes OpenAPI",
+                "transform": "strict additionalProperties=false; descriptions removed; split into parts",
+            }
+        )
+        print(f"wrote {target} ({target.stat().st_size} bytes)")
 
     crd_dir = OUT / "crds"
     crd_dir.mkdir(exist_ok=True)

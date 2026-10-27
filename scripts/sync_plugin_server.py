@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
-"""Copy the kube-noob server source into the Claude plugin, so the plugin runs readable, locked code.
+"""Copy the kube-noob stdio MCP server into the Claude plugin, so the plugin runs readable, locked code.
 
 The plugin (plugin/kube-noob) does not download kube-noob at start-up. It ships:
 
-- server/kube_noob/      a byte-for-byte copy of src/kube_noob, plus examples/ under data/examples (as in the wheel)
+- server/kube_noob/      the modules the stdio MCP server imports, copied unchanged from src/kube_noob, plus the
+                         package data and examples/ under data/examples (as in the wheel)
 - server/kube_noob_plugin.py   the entry point .mcp.json runs (stdio MCP server only)
 - pyproject.toml         generated here: the runtime dependencies of the server, minus the LLM SDK it never uses
 - uv.lock                every dependency pinned with its registry source and hashes (`uv lock`, see below)
 
+Which modules ship is computed, not listed: every kube_noob module reachable by `import` from
+kube_noob.server.stdio. So the CLI, the optional model agent, the HTTP service (bearer token) and the corpus builders
+(GitHub and Jira tokens) are not in the plugin, and nothing in it reads a credential. The one import not followed is
+kube_noob.debug.backends (kubeconfig and ServiceAccount token), which get_backend reaches only when cluster access is
+enabled; the plugin turns cluster access off.
+
+The plugin directory reads files up to 256 KiB and at most 512 files per plugin; --check enforces both, and that
+every file except the listing icon is UTF-8 text.
+
 Usage:
   python scripts/sync_plugin_server.py           write the copy and pyproject.toml
-  python scripts/sync_plugin_server.py --check   exit 1 if the plugin copy or pyproject.toml is stale (CI)
+  python scripts/sync_plugin_server.py --check   exit 1 if the plugin copy is stale or breaks a limit (CI)
 
 After a dependency change, refresh the lock:
   uv lock --project plugin/kube-noob --default-index https://pypi.org/simple
@@ -18,6 +28,7 @@ After a dependency change, refresh the lock:
 
 from __future__ import annotations
 
+import ast
 import filecmp
 import re
 import shutil
@@ -28,9 +39,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = Path("plugin/kube-noob")
 VENDORED = PLUGIN / "server" / "kube_noob"
+ENTRY = "kube_noob.server.stdio"
+# Reached only through kube_noob.debug.cluster.get_backend after it checks that cluster access is enabled.
+GUARDED_IMPORTS = frozenset({"kube_noob.debug.backends"})
 # LLM SDKs never ship in the plugin, even if one returns to the core dependencies; the plugin runs the MCP server only.
 EXCLUDED_DEPENDENCIES = frozenset({"anthropic", "openai"})
-_IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".DS_Store")
+MAX_FILE_BYTES = 256 * 1024
+MAX_FILES = 512
+BINARY_ALLOWED = frozenset({Path(".claude-plugin/icon.png")})
+_SKIP_PARTS = frozenset({"__pycache__", ".venv", ".pytest_cache"})
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
@@ -73,21 +90,100 @@ def plugin_pyproject(root: Path = ROOT) -> str:
     return "\n".join(lines)
 
 
+def _module_files(src: Path) -> dict[str, Path]:
+    """Dotted module name -> file, for every module under src/kube_noob."""
+    out: dict[str, Path] = {}
+    for path in sorted(src.rglob("*.py")):
+        if _SKIP_PARTS.intersection(path.parts):
+            continue
+        parts = list(path.relative_to(src.parent).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        out[".".join(parts)] = path
+    return out
+
+
+def _imports(module: str, path: Path) -> set[str]:
+    """kube_noob names imported anywhere in the module (top level or inside functions)."""
+    package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+        if isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package.split(".")[: len(package.split(".")) - (node.level - 1)]
+                target = ".".join([*base, *([node.module] if node.module else [])])
+            else:
+                target = node.module or ""
+            names.add(target)
+            names.update(f"{target}.{a.name}" for a in node.names)
+    return {n for n in names if n == "kube_noob" or n.startswith("kube_noob.")}
+
+
+def plugin_modules(root: Path = ROOT) -> set[str]:
+    """Every kube_noob module the stdio MCP server can import, minus the guarded cluster backends."""
+    files = _module_files(root / "src" / "kube_noob")
+    seen: set[str] = set()
+    stack = [ENTRY]
+    while stack:
+        mod = stack.pop()
+        if mod in seen or mod in GUARDED_IMPORTS:
+            continue
+        seen.add(mod)
+        parts = mod.split(".")
+        stack.extend(".".join(parts[:i]) for i in range(1, len(parts)))
+        for imported in _imports(mod, files[mod]):
+            target = imported
+            while target and target not in files:
+                target = target.rpartition(".")[0]
+            if target:
+                stack.append(target)
+    return seen
+
+
 def _expected_tree(root: Path) -> dict[Path, Path]:
     """Relative path inside VENDORED -> source file."""
-    files: dict[Path, Path] = {}
     src = root / "src" / "kube_noob"
+    files = _module_files(src)
+    modules = plugin_modules(root)
+    out: dict[Path, Path] = {files[m].relative_to(src): files[m] for m in sorted(modules)}
     for path in sorted(src.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts and path.suffix not in {".pyc", ".pyo"}:
-            files[path.relative_to(src)] = path
+        if not path.is_file() or path.suffix in {".py", ".pyc", ".pyo"} or _SKIP_PARTS.intersection(path.parts):
+            continue
+        package = path.parent
+        while not (package / "__init__.py").is_file():
+            package = package.parent
+        dotted = ".".join(package.relative_to(src.parent).parts)
+        if dotted in modules:
+            out[path.relative_to(src)] = path
     for path in sorted((root / "examples").iterdir()):
         if path.is_file():
-            files[Path("data") / "examples" / path.name] = path
-    return files
+            out[Path("data") / "examples" / path.name] = path
+    return out
+
+
+def _limit_problems(root: Path) -> list[str]:
+    plugin = root / PLUGIN
+    problems: list[str] = []
+    files = [p for p in plugin.rglob("*") if p.is_file() and not _SKIP_PARTS.intersection(p.parts)]
+    if len(files) >= MAX_FILES:
+        problems.append(f"{PLUGIN} has {len(files)} files; the plugin directory reads at most {MAX_FILES}")
+    for path in files:
+        rel = path.relative_to(plugin)
+        if path.stat().st_size > MAX_FILE_BYTES:
+            problems.append(f"over {MAX_FILE_BYTES // 1024} KiB: {PLUGIN / rel}")
+        if rel in BINARY_ALLOWED:
+            continue
+        try:
+            path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            problems.append(f"not UTF-8 text: {PLUGIN / rel}")
+    return problems
 
 
 def check(root: Path = ROOT) -> list[str]:
-    """Problems that make the plugin copy differ from the source; empty when in sync."""
+    """Problems that make the plugin copy differ from the source or break a directory limit; empty when fine."""
     problems: list[str] = []
     dest = root / VENDORED
     expected = _expected_tree(root)
@@ -95,7 +191,7 @@ def check(root: Path = ROOT) -> list[str]:
         {
             p.relative_to(dest)
             for p in dest.rglob("*")
-            if p.is_file() and "__pycache__" not in p.parts and p.suffix not in {".pyc", ".pyo"}
+            if p.is_file() and not _SKIP_PARTS.intersection(p.parts) and p.suffix not in {".pyc", ".pyo"}
         }
         if dest.is_dir()
         else set()
@@ -103,7 +199,7 @@ def check(root: Path = ROOT) -> list[str]:
     for rel in sorted(set(expected) - actual):
         problems.append(f"missing in plugin: {VENDORED / rel}")
     for rel in sorted(actual - set(expected)):
-        problems.append(f"not in src/ or examples/: {VENDORED / rel}")
+        problems.append(f"not needed by the stdio server: {VENDORED / rel}")
     for rel in sorted(set(expected) & actual):
         if not filecmp.cmp(expected[rel], dest / rel, shallow=False):
             problems.append(f"differs from its source: {VENDORED / rel}")
@@ -112,6 +208,7 @@ def check(root: Path = ROOT) -> list[str]:
         problems.append(f"stale: {PLUGIN / 'pyproject.toml'}")
     if not (root / PLUGIN / "uv.lock").is_file():
         problems.append(f"missing: {PLUGIN / 'uv.lock'}")
+    problems.extend(_limit_problems(root))
     return problems
 
 
@@ -119,12 +216,10 @@ def sync(root: Path = ROOT) -> None:
     dest = root / VENDORED
     if dest.exists():
         shutil.rmtree(dest)
-    shutil.copytree(root / "src" / "kube_noob", dest, ignore=_IGNORED)
-    examples = dest / "data" / "examples"
-    examples.mkdir(parents=True, exist_ok=True)
-    for path in sorted((root / "examples").iterdir()):
-        if path.is_file():
-            shutil.copy2(path, examples / path.name)
+    for rel, source in _expected_tree(root).items():
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
     (root / PLUGIN / "pyproject.toml").write_text(plugin_pyproject(root), encoding="utf-8")
 
 
@@ -139,13 +234,13 @@ def main(argv: list[str]) -> int:
         if problems:
             print("Fix: python scripts/sync_plugin_server.py, then commit plugin/kube-noob", file=sys.stderr)
             return 1
-        print("plugin server copy is in sync with src/ and examples/")
+        print("plugin server copy is in sync with src/ and examples/, and within the directory's limits")
         return 0
     sync()
     problems = check()
     for p in problems:
         print(p)
-    print(f"synced {VENDORED} and {PLUGIN / 'pyproject.toml'}")
+    print(f"synced {VENDORED} ({len(plugin_modules())} modules) and {PLUGIN / 'pyproject.toml'}")
     return 1 if any(not p.startswith("missing: ") for p in problems) else 0
 
 

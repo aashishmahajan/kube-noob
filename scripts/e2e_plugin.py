@@ -3,6 +3,8 @@
 Usage: python scripts/e2e_plugin.py
 Needs `uv` on PATH. Expands ${CLAUDE_PLUGIN_ROOT} and ${CLAUDE_PLUGIN_DATA} the way Claude Code does, starts the
 server over stdio with a throwaway data dir and config dir, and checks that:
+- .mcp.json sets no uv, pip or npm variable (no index or registry redirect), and the bundled source has no CLI,
+  model agent, HTTP service or cluster backend, so nothing in the plugin reads a credential;
 - the server runs the bundled source under plugin/kube-noob/server with the locked dependencies, and no LLM SDK;
 - web and cluster tools are off and the posture reports no model;
 - audit, diagnose and cited search answer from local data.
@@ -75,8 +77,18 @@ def check_environment(params: StdioServerParameters) -> None:
     check(not found["anthropic"] and not found["openai"], f"an LLM SDK is installed in the plugin environment: {found}")
 
 
+def check_manifest_and_bundle() -> None:
+    spec = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["kube-noob"]
+    redirects = [k for k in spec.get("env", {}) if k.upper().startswith(("UV_", "PIP_", "NPM_", "PYTHON"))]
+    check(not redirects, f".mcp.json sets package-manager variables: {redirects}")
+    bundle = PLUGIN / "server" / "kube_noob"
+    for absent in ("cli.py", "__main__.py", "agent", "sources", "server/http.py", "debug/backends.py"):
+        check(not (bundle / absent).exists(), f"the plugin bundles {absent}, which the stdio server does not need")
+
+
 async def main() -> None:
     check(shutil.which("uv"), "uv is not on PATH")
+    check_manifest_and_bundle()
     data = Path(tempfile.mkdtemp(prefix="kn-plugin-e2e-"))
     plugin_data = Path(tempfile.mkdtemp(prefix="kn-plugin-data-"))
     params = server_params(data, plugin_data)

@@ -7,9 +7,12 @@ No AI inside, said and enforced; safer to run for a whole team; easier to instal
 - No AI inside, said plainly: README, plugin, docs and video copy explain that Claude, OpenShift Lightspeed or any MCP
   client does the talking and kube-noob supplies deterministic tools; only the optional `kube-noob ask` calls a model.
   A test keeps copy from calling kube-noob an AI, assistant or agent.
-- The Claude plugin runs the readable server source bundled in `plugin/kube-noob/server` with every dependency pinned
-  by hash in `uv.lock` (`uv run --frozen`), installs no LLM SDK, keeps its environment in the plugin data folder, and
-  reports no model in its posture. CI checks the copy, the lock, a vulnerability audit and an end-to-end start.
+- The Claude plugin runs the readable stdio server bundled in `plugin/kube-noob/server` with every dependency pinned
+  by hash in `uv.lock` (`uv run --frozen --isolated`, a throwaway environment in uv's cache), installs no LLM SDK,
+  sets no package-manager variables and reports no model in its posture. It ships only the modules the stdio server
+  imports, so nothing in it reads a credential; every file is readable text under 256 KiB (the Kubernetes schema
+  ships as plain JSON parts instead of gzip). CI checks the copy, the limits, the lock, a vulnerability audit and an
+  end-to-end start.
 - PRIVACY.md lists what kube-noob reads, stores and sends, per destination; the plugin manifest links it.
 - No model is configured by default (`llm.provider: none`); the Anthropic SDK moved to the optional
   `kube-noob[ask]` extra, so the core install, the image, the plugin and Homebrew carry no LLM SDK.

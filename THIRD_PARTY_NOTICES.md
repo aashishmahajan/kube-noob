@@ -7,7 +7,7 @@ kube-noob bundles derived data and links to public sources. Licenses were verifi
 
 | Material | Upstream | License | Where |
 |---|---|---|---|
-| Kubernetes v1.35.0 JSON schema definitions (made strict, descriptions removed) | yannh/kubernetes-json-schema (generated from kubernetes/kubernetes OpenAPI) | Apache-2.0 | `src/kube_noob/schemas/data/kubernetes-v1.35.0-definitions.json.gz` |
+| Kubernetes v1.35.0 JSON schema definitions (made strict, descriptions removed) | yannh/kubernetes-json-schema (generated from kubernetes/kubernetes OpenAPI) | Apache-2.0 | `src/kube_noob/schemas/data/kubernetes-v1.35.0-definitions-*.json` |
 | Route, SecurityContextConstraints schemas | datreeio/CRDs-catalog @3eb90d47 (from openshift/api) | MIT (catalog), Apache-2.0 (openshift/api) | `schemas/data/crds/` |
 | HTTPRoute, Gateway schemas | datreeio/CRDs-catalog @3eb90d47 (from kubernetes-sigs/gateway-api) | MIT, Apache-2.0 | `schemas/data/crds/` |
 | EgressFirewall schema | openshift/cluster-network-operator @a1b26444 | Apache-2.0 | `schemas/data/crds/` |

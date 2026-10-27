@@ -6,6 +6,7 @@
         "run",
         "--frozen",
         "--exact",
+        "--isolated",
         "--quiet",
         "--project",
         "${CLAUDE_PLUGIN_ROOT}",
@@ -15,7 +16,6 @@
         "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"
       ],
       "env": {
-        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv",
         "KUBE_NOOB_WEB_ENABLED": "false",
         "KUBE_NOOB_CLUSTER_ENABLED": "false",
         "KUBE_NOOB_LLM_PROVIDER": "none"

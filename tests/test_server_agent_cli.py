@@ -15,7 +15,8 @@ from kube_noob.cli import main
 from kube_noob.config import Settings, load_settings
 from kube_noob.evals.export import export_grpo, export_sft
 from kube_noob.knowledge.store import get_store
-from kube_noob.server.mcp_app import build_server, http_app
+from kube_noob.server.http import http_app
+from kube_noob.server.mcp_app import build_server
 from kube_noob.toolkit import Toolkit
 from tests.conftest import FIXTURES
 
@@ -283,7 +284,7 @@ def test_http_body_limit_and_audit_log(monkeypatch: pytest.MonkeyPatch, caplog: 
 
     from starlette.testclient import TestClient
 
-    from kube_noob.server.mcp_app import MAX_BODY_BYTES
+    from kube_noob.server.http import MAX_BODY_BYTES
 
     monkeypatch.setenv("KUBE_NOOB_HTTP_TOKEN", "s3cret-token")
     headers = {

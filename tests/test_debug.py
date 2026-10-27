@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from kube_noob.config import load_settings
-from kube_noob.debug.cluster import KubectlBackend, get_backend, redact_text, resolve_resource
+from kube_noob.debug.backends import KubectlBackend
+from kube_noob.debug.cluster import get_backend, redact_text, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
 from kube_noob.debug.playbooks import PLAYBOOKS
 from kube_noob.errors import ClusterAccessError

@@ -7,7 +7,6 @@ StackRox, Gateway API) live in ``data/crds``. See ``data/PROVENANCE.json``.
 
 from __future__ import annotations
 
-import gzip
 import json
 from dataclasses import dataclass
 from functools import cache
@@ -38,8 +37,15 @@ def _data_dir() -> Any:
 @cache
 def schema_index() -> SchemaIndex:
     data = _data_dir()
-    raw = data.joinpath(f"kubernetes-{SCHEMA_K8S_VERSION}-definitions.json.gz").read_bytes()
-    defs = json.loads(gzip.decompress(raw))["definitions"]
+    prefix = f"kubernetes-{SCHEMA_K8S_VERSION}-definitions-"
+    parts = sorted(
+        (f for f in data.iterdir() if f.name.startswith(prefix) and f.name.endswith(".json")), key=lambda f: f.name
+    )
+    if not parts:
+        raise FileNotFoundError(f"no {prefix}*.json schema files in kube_noob.schemas data")
+    defs: dict[str, Any] = {}
+    for part in parts:
+        defs.update(json.loads(part.read_text(encoding="utf-8"))["definitions"])
     by_gvk: dict[tuple[str, str, str], str] = {}
     for name, d in defs.items():
         for gvk in d.get("x-kubernetes-group-version-kind") or []:

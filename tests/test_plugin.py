@@ -37,16 +37,19 @@ def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
     assert spec["command"] == "uv"
     args = spec["args"]
     assert args[0] == "run" and "--frozen" in args and "--exact" in args
+    # --isolated: a throwaway environment in uv's cache, so nothing is written into the plugin root
+    assert "--isolated" in args
     assert args[args.index("--project") + 1] == "${CLAUDE_PLUGIN_ROOT}"
     # -I: no current directory, PYTHONPATH or user site on sys.path; -B: no .pyc files written into the plugin root
     assert args[-4:] == ["python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]
     assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "never installs from an index"
     env = spec["env"]
-    assert env["UV_PROJECT_ENVIRONMENT"].startswith("${CLAUDE_PLUGIN_DATA}/"), "state never goes in the plugin root"
+    # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm.
+    assert set(env) == {"KUBE_NOOB_WEB_ENABLED", "KUBE_NOOB_CLUSTER_ENABLED", "KUBE_NOOB_LLM_PROVIDER"}
     assert env["KUBE_NOOB_WEB_ENABLED"] == "false" and env["KUBE_NOOB_CLUSTER_ENABLED"] == "false"
     assert env["KUBE_NOOB_LLM_PROVIDER"] == "none"
     entry = (PLUGIN / "server" / "kube_noob_plugin.py").read_text()
-    assert 'cli_main(["mcp"])' in entry and "expected the bundled server" in entry
+    assert "from kube_noob.server.stdio import main as serve" in entry and "expected the bundled server" in entry
 
 
 def test_lock_pins_every_dependency_with_registry_and_hashes() -> None:
@@ -81,6 +84,13 @@ def test_plugin_fits_the_directory_limits() -> None:
     assert len(files) < 512
     too_big = [str(p.relative_to(PLUGIN)) for p in files if p.stat().st_size >= 256 * 1024]
     assert too_big == []
+    binary = []
+    for p in files:
+        try:
+            p.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            binary.append(str(p.relative_to(PLUGIN)))
+    assert binary == [".claude-plugin/icon.png"], "everything but the listing icon is readable text"
     assert not (PLUGIN / "bin").exists(), "claude.ai and Cowork do not install a plugin with a top-level bin/"
     assert (PLUGIN / "LICENSE").read_text() == (ROOT / "LICENSE").read_text()
 
@@ -109,10 +119,40 @@ def test_icon_is_small_and_carries_no_shell_like_text() -> None:
         assert not re.search(pat, printable, re.IGNORECASE), pat
 
 
-def test_directory_listing_fields() -> None:
+def test_manifest_uses_only_fields_the_plugin_reference_defines() -> None:
     manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
+    known = {"name", "version", "description", "author", "homepage", "repository", "license", "keywords", "icon"}
+    assert set(manifest) <= known, set(manifest) - known
     assert (PLUGIN / manifest["icon"]).is_file()
-    for key in ("homepage", "documentationUrl", "supportUrl", "privacyPolicyUrl"):
-        assert manifest[key].startswith("https://github.com/aashishmahajan/kube-noob"), key
-    assert (ROOT / "PRIVACY.md").is_file() and manifest["privacyPolicyUrl"].endswith("/PRIVACY.md")
+    assert manifest["homepage"].startswith("https://github.com/aashishmahajan/kube-noob")
+    assert (ROOT / "PRIVACY.md").is_file()
     assert "No AI inside" in manifest["description"]
+
+
+def _bundled_text() -> dict[str, str]:
+    bundle = PLUGIN / "server"
+    return {
+        str(p.relative_to(PLUGIN)): p.read_text(encoding="utf-8")
+        for p in bundle.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
+    }
+
+
+def test_bundle_reads_no_credentials_from_the_machine() -> None:
+    """No env token or API key, kubeconfig, ServiceAccount token or Jira credential is read by bundled code."""
+    reads = re.compile(
+        r"environ(?:\.get)?\(\s*[\"'][A-Z0-9_]*(?:TOKEN|API_KEY|SECRET|PASSWORD)[\"']"
+        r"|environ\.get\(\s*(?:srv|llm|settings)\.\w*(?:token|key)\w*"
+        r"|/var/run/secrets/kubernetes\.io/serviceaccount|environ(?:\.get)?\(\s*[\"']KUBECONFIG|JIRA_API_TOKEN"
+    )
+    found = {path: m.group(0) for path, text in _bundled_text().items() if (m := reads.search(text))}
+    assert found == {}
+
+
+def test_bundle_has_no_download_and_execute_pattern() -> None:
+    pattern = re.compile(
+        r"(?i)\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b.{0,200}?\|.{0,40}?\b(sudo\s+)?(ba|z|da|k)?sh\b"
+        r"|\b(curl|wget)\b.{0,40}\|"
+    )
+    found = {path: m.group(0)[:80] for path, text in _bundled_text().items() if (m := pattern.search(text))}
+    assert found == {}

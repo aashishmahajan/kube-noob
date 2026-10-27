@@ -1,11 +1,18 @@
 {
   "files": [
     {
-      "file": "kubernetes-v1.35.0-definitions.json.gz",
+      "file": "kubernetes-v1.35.0-definitions-1.json",
       "license": "Apache-2.0 (yannh/kubernetes-json-schema); generated from kubernetes/kubernetes OpenAPI",
       "sha256Upstream": "8390593209c0aa7d759c14b4f8609f2f7b1ecb010d1b99cf1ce29643a14870bb",
       "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.35.0/_definitions.json",
-      "transform": "strict additionalProperties=false; descriptions removed"
+      "transform": "strict additionalProperties=false; descriptions removed; split into parts"
+    },
+    {
+      "file": "kubernetes-v1.35.0-definitions-2.json",
+      "license": "Apache-2.0 (yannh/kubernetes-json-schema); generated from kubernetes/kubernetes OpenAPI",
+      "sha256Upstream": "8390593209c0aa7d759c14b4f8609f2f7b1ecb010d1b99cf1ce29643a14870bb",
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.35.0/_definitions.json",
+      "transform": "strict additionalProperties=false; descriptions removed; split into parts"
     },
     {
       "file": "crds/route.openshift.io_v1_Route.json",

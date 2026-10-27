@@ -13,7 +13,7 @@ from kube_noob import toolkit as tk
 from kube_noob.agent import providers
 from kube_noob.cli import main
 from kube_noob.config import load_settings
-from kube_noob.debug import cluster
+from kube_noob.debug import backends, cluster
 from kube_noob.evals import runner
 from kube_noob.evals.judge import LLMJudge, NoJudge, build_judge
 from kube_noob.sources.history import minor_timeline, timeline_record
@@ -267,7 +267,7 @@ def test_in_cluster_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     sa.mkdir()
     (sa / "token").write_text("tkn")
     (sa / "ca.crt").write_text("ca")
-    monkeypatch.setattr(cluster, "SA_DIR", sa)
+    monkeypatch.setattr(backends, "SA_DIR", sa)
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
     paths: list[str] = []
 
@@ -289,7 +289,7 @@ def test_in_cluster_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
         )
 
     monkeypatch.setattr(
-        cluster,
+        backends,
         "cluster_client",
         lambda base, token, ca, timeout: httpx.Client(
             base_url=base, transport=httpx.MockTransport(handler), headers={"Authorization": f"Bearer {token}"}
