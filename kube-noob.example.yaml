@@ -12,7 +12,7 @@ cluster:
   backend: auto                # auto | in-cluster | kubectl | oc
   context: null                # kubeconfig context for kubectl/oc
 llm:                           # used by `kube-noob ask` / `train bench`, never by the MCP server
-  provider: anthropic          # anthropic | openai-compatible | none
+  provider: none               # none | anthropic (pip install 'kube-noob[ask]') | openai-compatible
   model: claude-fable-5-1
   apiKeyEnv: ANTHROPIC_API_KEY
   # provider: openai-compatible

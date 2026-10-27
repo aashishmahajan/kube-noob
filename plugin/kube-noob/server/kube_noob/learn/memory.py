@@ -62,6 +62,8 @@ _PIPE_TO_SHELL = re.compile(
     r"(?i)(\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da|k)?sh\b"
     r"|\|\s*(sudo\s+)?(ba|z|da|k)?sh\s*$|\b(iex|invoke-expression)\b|base64\s+(-d|--decode)[^\n]*\|)"
 )
+# `kubectl get events` / `describe` rows: "Warning  BackOff  3m  kubelet  Back-off restarting ..."
+_EVENT_ROW = re.compile(r"(?m)^\s*(Normal|Warning)\s{2,}\S+\s{2,}")
 _LOG_LINE = re.compile(r"(?m)^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|[IWEF]\d{4} \d{2}:\d{2}|\[\d+\.\d+\])")
 _STACK = re.compile(
     r"(?m)(goroutine \d+ \[|Traceback \(most recent call last\)|^\s+at [\w.$<>]+\(|^panic: |\.go:\d+ \+0x)"
@@ -140,7 +142,7 @@ def check_text(field: str, value: str, limit: int) -> str:
         raise ValueError(f"{field} pipes a download into a shell; describe the fix in words instead")
     if len(_MANIFEST_KEYS.findall(v)) >= 2 or (_API_VERSION.search(v) and _KIND.search(v)):
         raise ValueError(f"{field} looks like a manifest; describe the fix in words and keep manifests in Git")
-    if v.count("\n") >= _MAX_LINES or len(_LOG_LINE.findall(v)) >= 3 or _STACK.search(v):
+    if v.count("\n") >= _MAX_LINES or _LOG_LINE.search(v) or _EVENT_ROW.search(v) or _STACK.search(v):
         raise ValueError(f"{field} looks like raw log or command output; summarise it in a sentence or two")
     return v
 

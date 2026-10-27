@@ -33,6 +33,10 @@ _POD_PATTERNS = (
 )
 _PVC_PATTERN = re.compile(r"(?:persistentvolumeclaim|pvc)[/ ]\"?([a-z0-9][-a-z0-9.]{0,252})\"?", re.IGNORECASE)
 _SA_PATTERN = re.compile(r"system:serviceaccount:[a-z0-9-]+:([a-z0-9][-a-z0-9]{0,62})")
+_FORBIDDEN = re.compile(
+    r"User \"(?P<subject>[^\"]{1,253})\" cannot (?P<verb>[a-z]+) resource \"(?P<resource>[a-z0-9./-]{1,253})\""
+    r"(?: in API group \"(?P<group>[a-z0-9.-]*)\")?"
+)
 _EXIT_PATTERN = re.compile(r"(?:exit ?code|exitCode)[\"':\s]+(\d{1,3})", re.IGNORECASE)
 
 
@@ -119,15 +123,48 @@ def extract_context(text: str) -> dict[str, str]:
     m = _SA_PATTERN.search(text)
     if m:
         ctx["sa"] = m.group(1)
+    m = _FORBIDDEN.search(text)
+    if m:
+        ctx["subject"], ctx["verb"] = m.group("subject"), m.group("verb")
+        group = m.group("group")
+        ctx["resource"] = f"{m.group('resource')}.{group}" if group else m.group("resource")
     return ctx
 
 
 def _fill(cmd: str, ctx: dict[str, str]) -> str:
     out = cmd
-    defaults = {"ns": "<namespace>", "pod": "<pod>", "name": "<name>", "pvc": "<pvc>", "sa": "default"}
+    sa_subject = f"system:serviceaccount:{ctx.get('ns', '<namespace>')}:{ctx.get('sa', 'default')}"
+    defaults = {
+        "ns": "<namespace>",
+        "pod": "<pod>",
+        "name": "<name>",
+        "pvc": "<pvc>",
+        "sa": "default",
+        "subject": sa_subject if "sa" in ctx else "<user-or-serviceaccount>",
+        "verb": "<verb>",
+        "resource": "<resource>",
+    }
     for key, default in defaults.items():
         out = out.replace("{" + key + "}", ctx.get(key, default))
     return out.replace("{{", "{").replace("}}", "}")
+
+
+_OPENSHIFT_ONLY = re.compile(
+    r"#\s*\[(OCP|ROSA)\]|\boc (get|describe) (route|scc|securitycontextconstraints)\b|\boc adm (?!top)"
+)
+
+
+def _for_platform(cmd: str, platform: str | None) -> str | None:
+    """Commands as the user's platform spells them: plain Kubernetes gets kubectl and no OpenShift-only steps."""
+    if platform != "kubernetes" or not cmd.startswith(("oc ", "openssl", "kubectl")):
+        return cmd
+    if _OPENSHIFT_ONLY.search(cmd):
+        return None
+    cmd = re.sub(r"^oc adm top ", "kubectl top ", cmd)
+    rsh = re.match(r"^oc rsh (-n \S+ )?(\S+) (.+)$", cmd)
+    if rsh:
+        return f"kubectl exec {rsh.group(1) or ''}{rsh.group(2)} -- {rsh.group(3)}"
+    return re.sub(r"^oc ", "kubectl ", cmd)
 
 
 def diagnose(text: str, platform: str | None = None, limit: int = 5) -> DiagnoseResult:
@@ -153,7 +190,8 @@ def diagnose(text: str, platform: str | None = None, limit: int = 5) -> Diagnose
                     evidence.append(clipped)
         if hits:
             score = hits * p.weight
-            results.append(Diagnosis(p, score, evidence[:5], [_fill(c, ctx) for c in p.checks]))
+            checks = [_for_platform(_fill(c, ctx), platform) for c in p.checks]
+            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c]))
     results.sort(key=lambda d: (-d.score, d.playbook.pid))
     codes = {int(c) for c in _EXIT_PATTERN.findall(text)}
     exit_info = {c: EXIT_CODES[c] for c in sorted(codes) if c in EXIT_CODES}

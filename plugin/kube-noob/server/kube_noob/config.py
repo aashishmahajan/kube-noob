@@ -149,7 +149,8 @@ class _LLMEndpoint(_Base):
 
 
 class LLMSettings(_LLMEndpoint):
-    provider: Literal["anthropic", "openai-compatible", "none"] = "anthropic"
+    # Only `kube-noob ask`, `train bench` and the eval judge use a model; nothing does until you choose one.
+    provider: Literal["anthropic", "openai-compatible", "none"] = "none"
     model: str = DEFAULT_MODEL
     max_tokens: int = Field(default=4096, ge=256, le=64000)
     max_tool_rounds: int = Field(default=12, ge=1, le=50)

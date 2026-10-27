@@ -164,3 +164,19 @@ def test_legacy_bundle_migrates_to_current_apis() -> None:
     assert not {"KN-V005", "KN-V007", "KN-V010", "KN-C009"} & ids(after)
     hpa = next(d for d in res.documents if d["kind"] == "HorizontalPodAutoscaler")
     assert hpa["spec"]["metrics"][0]["resource"]["target"] == {"type": "Utilization", "averageUtilization": 70}
+
+
+def test_fixer_flips_explicit_privilege_escalation_on_openshift_only() -> None:
+    from kube_noob.audit.fixer import fix_manifests
+
+    src = (
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: api, namespace: shop}\nspec:\n"
+        "  selector: {matchLabels: {app: api}}\n  template:\n    metadata: {labels: {app: api}}\n    spec:\n"
+        "      containers:\n        - name: api\n          image: quay.io/acme/api:1.0.0\n"
+        "          securityContext: {allowPrivilegeEscalation: true}\n"
+    )
+    ocp = fix_manifests(src, platform="openshift", k8s_version="1.35")
+    assert "allowPrivilegeEscalation: false" in ocp.yaml()
+    k8s = fix_manifests(src, platform="kubernetes", k8s_version="1.35")
+    assert "allowPrivilegeEscalation: true" in k8s.yaml()
+    assert any("allowPrivilegeEscalation: true" in m for m in k8s.manual)

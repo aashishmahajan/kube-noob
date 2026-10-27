@@ -257,8 +257,9 @@ def test_openai_compatible_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(Exception, match="none"):
         providers.build_provider(load_settings(overrides={"llm": {"provider": "none"}}).llm, s)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert load_settings().llm.provider == "none", "no model is called unless one is chosen"
     with pytest.raises(Exception, match="ANTHROPIC_API_KEY"):
-        providers.build_provider(load_settings().llm, s)
+        providers.build_provider(load_settings(overrides={"llm": {"provider": "anthropic"}}).llm, s)
 
 
 def test_in_cluster_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

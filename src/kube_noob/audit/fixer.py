@@ -293,6 +293,22 @@ class _Fixer:
                     False,
                     "Block setuid privilege escalation.",
                 )
+            elif sc.get("allowPrivilegeEscalation") is True and not privileged:
+                if self.platform in OPENSHIFT_FAMILY:
+                    sc["allowPrivilegeEscalation"] = False
+                    self.change(
+                        "KN-S002",
+                        doc.ref(),
+                        (*c.path, "securityContext", "allowPrivilegeEscalation"),
+                        True,
+                        False,
+                        "restricted-v2 rejects allowPrivilegeEscalation: true, so the pod could not start anyway.",
+                    )
+                else:
+                    self.result.manual.append(
+                        f"{doc.ref()} container '{c.name}' sets allowPrivilegeEscalation: true; set it to false "
+                        "unless the app needs setuid binaries (Pod Security 'restricted' rejects true)."
+                    )
             if caps.get("drop") is None:
                 caps["drop"] = []
             drop = caps["drop"]

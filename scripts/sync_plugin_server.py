@@ -28,8 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = Path("plugin/kube-noob")
 VENDORED = PLUGIN / "server" / "kube_noob"
-# Imported lazily and only by `kube-noob ask`, `train bench` and the eval judge; the plugin starts the MCP server only.
-EXCLUDED_DEPENDENCIES = frozenset({"anthropic"})
+# LLM SDKs never ship in the plugin, even if one returns to the core dependencies; the plugin runs the MCP server only.
+EXCLUDED_DEPENDENCIES = frozenset({"anthropic", "openai"})
 _IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".DS_Store")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
 

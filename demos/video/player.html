@@ -30,21 +30,27 @@
 <body>
 <div id="title" class="card" style="opacity:0">
   <h1>kube-<span class="accent">noob</span></h1>
-  <h2>No AI inside. The Kubernetes, OpenShift and ROSA HCP rulebook<br>your AI is missing: read-only first, cited, offline.</h2>
+  <h2 id="titleSub"></h2>
 </div>
 <div id="chapterCard" class="card" style="opacity:0"><h1 id="chapterText" style="font-size:72px"></h1></div>
 <div id="stage">
-  <div id="chapter"></div><div id="brand">kube-noob 0.2.0 · offline · read-only</div>
+  <div id="chapter"></div><div id="brand"></div>
   <div id="term"><div class="bar"><span></span><span></span><span></span></div><div id="lines"></div></div>
   <div id="caption"></div>
 </div>
 <div id="end" class="card" style="opacity:0">
-  <h1>Try it in 30 seconds</h1>
-  <div><code>pipx install kube-noob</code><code>kube-noob demo --list</code></div>
-  <h2 style="margin-top:36px">Use it from Claude or OpenShift Lightspeed, or the CLI with no AI at all<br><span class="accent">github.com/aashishmahajan/kube-noob</span></h2>
+  <h1 id="endTitle"></h1>
+  <div id="endCodes"></div>
+  <h2 id="endSub" style="margin-top:36px"></h2>
 </div>
 <script>
 const SCENES = __SCENES__;
+const META = __META__;
+document.getElementById("titleSub").innerHTML = META.titleSub;
+document.getElementById("brand").textContent = META.brand;
+document.getElementById("endTitle").textContent = META.endTitle;
+document.getElementById("endCodes").innerHTML = META.endCodes.map(c => `<code>${c.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</code>`).join("");
+document.getElementById("endSub").innerHTML = META.endSub;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function color(line) {
@@ -54,13 +60,15 @@ function color(line) {
        .replace(/\bmedium=\d+/g, m => `<span class="med">${m}</span>`)
        .replace(/(\d+\/\d+ passed|passed: True|status: ready|posture: OK|offline lock\s+ON|score 100\.0\/100)/g, m => `<span class="ok">${m}</span>`)
        .replace(/\[kn:[^\]]+\]/g, m => `<span class="cite">${m}</span>`)
-       .replace(/(read-only first:|asks before running\):)/g, m => `<span class="ok">${m}</span>`);
+       .replace(/(read-only first:|asks before running\):|closed \(listens on 127\.0\.0\.1 only\)|connected)/g, m => `<span class="ok">${m}</span>`)
+       .replace(/^(Claude|kube-noob|tool) ›/, m => `<span class="cite">${m}</span>`);
   return h;
 }
 async function show(el, on) { el.style.opacity = on ? 1 : 0; await sleep(550); }
 async function typeCmd(lines, cmd) {
   const row = document.createElement("div");
-  row.innerHTML = `<span class="prompt">$ </span><span class="cmd"></span><span class="cursor"></span>`;
+  row.innerHTML = `<span class="prompt"></span><span class="cmd"></span><span class="cursor"></span>`;
+  row.querySelector(".prompt").textContent = (typeCmd.prompt || "$") + " ";
   lines.appendChild(row);
   const target = row.querySelector(".cmd");
   for (const ch of cmd) { target.textContent += ch; await sleep(cmd.length > 70 ? 18 : 32); }
@@ -79,6 +87,7 @@ async function run() {
       const lines = document.getElementById("lines"); lines.innerHTML = "";
       document.getElementById("caption").innerHTML = `<b>▶</b>${esc(step.caption)}`;
       await sleep(900);
+      typeCmd.prompt = step.prompt || "$";
       await typeCmd(lines, step.command);
       for (const l of step.output) { const d = document.createElement("div"); d.innerHTML = color(l) || "&nbsp;"; lines.appendChild(d); await sleep(70); }
       await sleep(Math.min(5200, 2600 + step.output.length * 140));

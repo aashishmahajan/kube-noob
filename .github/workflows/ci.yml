@@ -149,7 +149,8 @@ jobs:
           fi
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
-          helm template kn deploy/helm/kube-noob | kube-noob audit -f - --platform openshift --version 4.20 --fail-on medium
+          helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"
+          helm template kn deploy/helm/kube-noob $base | kube-noob audit -f - --platform openshift --version 4.20 --fail-on medium
           if helm template kn deploy/helm/kube-noob $base | grep -q "kind: Secret"; then
             echo "::error title=chart::no Secret may be generated when auth.existingSecret is set"; exit 1
           fi

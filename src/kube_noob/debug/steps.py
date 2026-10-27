@@ -36,6 +36,8 @@ _HELM_READ = {"status", "history", "get", "list", "ls", "show", "template", "lin
 _ROSA_READ = {"describe", "list", "logs", "verify", "whoami", "version"}
 _LOCAL_READ = {"skopeo": {"inspect"}, "roxctl": {"deployment", "image"}}
 _NETWORK_EXEC = {"curl", "wget", "openssl", "dig", "nslookup", "nc", "ping", "getent"}
+_LOCAL_INFO = {"date", "hostname", "uname", "id"}  # read the local machine only
+_KUBECONFIG_READ = {"view", "current-context", "get-contexts", "get-clusters"}
 
 
 def split_comment(text: str) -> tuple[str, str | None]:
@@ -138,6 +140,8 @@ def _classify_segment(seg: str) -> StepKind:
             return "read"
         if sub == "auth":
             return "read" if nxt in {"can-i", "whoami"} else "change"
+        if sub == "config":
+            return "read" if nxt in _KUBECONFIG_READ else "change"
         if sub == "rollout":
             return "read" if nxt in {"status", "history"} else "change"
         if sub in _KUBE_EXEC:
@@ -162,6 +166,8 @@ def _classify_segment(seg: str) -> StepKind:
             return "change"
         if tool == "tee":
             return "change"
+        return "read"
+    if tool in _LOCAL_INFO:
         return "read"
     if tool in _NETWORK_EXEC:
         return "exec"

@@ -157,3 +157,21 @@ def test_diagnose_cli_takes_pasted_text_a_file_or_stdin(
     assert main(["diagnose", "-f", str(tmp_path / "evnts.txt")]) == 2
     assert "no such file" in capsys.readouterr().err
     assert main(["diagnose", "text", "-f", str(events)]) == 2
+
+
+def test_x509_rbac_and_platform_specific_steps() -> None:
+    """Client-side x509 needs local checks, RBAC errors name the real subject, Kubernetes gets kubectl."""
+    x509 = diagnose("Unable to connect to the server: x509: certificate signed by unknown authority").as_dict()
+    top = x509["diagnoses"][0]
+    assert top["id"] == "DBG-X509-CLIENT"
+    assert all(not s["command"].startswith("oc get") for s in top["readOnlyNextSteps"])
+    rbac = diagnose(
+        'Error from server (Forbidden): pods is forbidden: User "dev" cannot list resource "pods" in API group "" '
+        'in the namespace "shop"'
+    ).as_dict()["diagnoses"][0]
+    assert rbac["readOnlyNextSteps"][0]["command"] == "oc auth can-i list pods -n shop --as=dev"
+    nginx = diagnose('[emerg] mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)').as_dict()
+    assert nginx["diagnoses"][0]["id"] == "DBG-ARBITRARY-UID"
+    k8s = diagnose("Reason: OOMKilled\nExit Code: 137", platform="kubernetes").as_dict()["diagnoses"][0]
+    commands = [s["command"] for s in k8s["readOnlyNextSteps"]]
+    assert commands and all(c.startswith(("kubectl", "openssl")) for c in commands)

@@ -1,7 +1,14 @@
-"""Turn real `kube-noob demo` output into the scene list the walkthrough player animates.
+"""Turn real kube-noob output into the scene list the video player animates.
 
-Usage: python demos/video/build_scenes.py <out-dir>   (run from the repo root, kube-noob on PATH)
-Writes <out-dir>/walkthrough.html with the scenes embedded.
+Usage (from the repo root):
+  python demos/video/build_scenes.py walkthrough <out-dir>
+      runs `kube-noob demo <scenario>` and `kube-noob selftest` (kube-noob on PATH) -> <out-dir>/walkthrough.html
+  python demos/video/build_scenes.py mcp <claude-stream.jsonl> <out-dir>
+      a real Claude Code session with the plugin (`claude -p ... --output-format stream-json --verbose`), with the
+      prompt saved next to it as <name>.prompt.txt -> <out-dir>/mcp.html
+  python demos/video/build_scenes.py sidecar <transcript.txt> <out-dir>
+      the transcript scripts/demo_sidecar_kind.sh records on a kind cluster in CI -> <out-dir>/sidecar.html
+Every line on screen is output that a command or a session actually produced.
 """
 
 from __future__ import annotations
@@ -9,7 +16,12 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
+from typing import Any
+
+HERE = Path(__file__).parent
+REPO = "github.com/aashishmahajan/kube-noob"
 
 CHAPTERS = [
     ("audit", "1. Audit for the platform you run", 16),
@@ -20,35 +32,62 @@ CHAPTERS = [
     ("posture", "6. No AI inside, no network calls: prove it", 9),
 ]
 
+WALKTHROUGH_META = {
+    "titleSub": "No AI inside. The Kubernetes, OpenShift and ROSA HCP rulebook<br>your AI is missing: read-only first, "
+    "cited, offline.",
+    "brand": "kube-noob · offline · read-only",
+    "endTitle": "Try it in 30 seconds",
+    "endCodes": ["pipx install kube-noob", "kube-noob demo --list"],
+    "endSub": "Use it from Claude or OpenShift Lightspeed, or the CLI with no AI at all<br>"
+    f'<span class="accent">{REPO}</span>',
+}
+MCP_META = {
+    "titleSub": "kube-noob in Claude, end to end.<br>Claude does the thinking; kube-noob supplies the rules.",
+    "brand": "Claude Code + kube-noob plugin · real session",
+    "endTitle": "Add it to Claude",
+    "endCodes": ["/plugin marketplace add aashishmahajan/kube-noob", "/plugin install kube-noob@kube-noob"],
+    "endSub": "Runs on your machine. No AI inside kube-noob, no network calls of its own.<br>"
+    f'<span class="accent">{REPO}</span>',
+}
+SIDECAR_META = {
+    "titleSub": "kube-noob as a sidecar on Kubernetes and OpenShift.<br>Your app calls it on 127.0.0.1; "
+    "nothing else can.",
+    "brand": "kube-noob sidecar · recorded on a kind cluster in CI",
+    "endTitle": "Run it next to your app",
+    "endCodes": ["deploy/sidecar/app-with-kube-noob-sidecar.yaml"],
+    "endSub": "Pod Security restricted · loopback only · no egress · about 85 MiB<br>"
+    f'<span class="accent">{REPO}</span>',
+}
+
 
 def _run(*args: str) -> str:
     return subprocess.run(["kube-noob", *args], capture_output=True, text=True, check=False).stdout  # noqa: S607
 
 
-def _parse(text: str, max_out: int) -> list[dict[str, object]]:
+def parse_transcript(text: str, max_out: int) -> list[dict[str, object]]:
+    """`# caption` / `$ command` / output lines, the format of `kube-noob demo` and demo_sidecar_kind.sh."""
     steps: list[dict[str, object]] = []
-    cur: dict[str, object] | None = None
+    cur: dict[str, Any] | None = None
     for line in text.splitlines():
-        if line.startswith("== kube-noob demo:"):
-            continue
         if line.startswith("# "):
             cur = {"caption": line[2:], "command": "", "output": []}
             steps.append(cur)
         elif line.startswith("$ ") and cur is not None:
             cur["command"] = line[2:]
-        elif cur is not None and (line.strip() or cur["output"]):
-            cur["output"].append(line)  # type: ignore[union-attr]
+        elif cur is not None and cur["command"] and not line.startswith("=="):
+            cur["output"].append(line)
     for s in steps:
-        out = s["output"]
-        while out and not out[-1].strip():  # type: ignore[index]
-            out.pop()  # type: ignore[union-attr]
-        s["output"] = out[:max_out]  # type: ignore[index]
+        out: list[str] = s["output"]  # type: ignore[assignment]
+        while out and not out[-1].strip():
+            out.pop()
+        s["output"] = out[:max_out]
     return steps
 
 
-def main(out_dir: str) -> None:
-    here = Path(__file__).parent
-    scenes = [{"id": n, "chapter": title, "steps": _parse(_run("demo", n), keep)} for n, title, keep in CHAPTERS]
+def walkthrough() -> list[dict[str, Any]]:
+    scenes: list[dict[str, Any]] = [
+        {"id": n, "chapter": title, "steps": parse_transcript(_run("demo", n), keep)} for n, title, keep in CHAPTERS
+    ]
     scenes.append(
         {
             "id": "selftest",
@@ -62,9 +101,141 @@ def main(out_dir: str) -> None:
             ],
         }
     )
-    html = (here / "player.html").read_text().replace("__SCENES__", json.dumps(scenes))
-    Path(out_dir, "walkthrough.html").write_text(html)
+    return scenes
+
+
+def _wrap(text: str, width: int = 100) -> list[str]:
+    lines: list[str] = []
+    for para in text.splitlines():
+        lines.extend(textwrap.wrap(para, width) or [""])
+    return lines
+
+
+def _tool_summary(name: str, result: dict[str, Any]) -> list[str]:
+    if name.endswith("audit_manifests"):
+        c = result["summary"]["counts"]
+        lines = [f"score {result['summary']['score']}/100 | high={c['high']} medium={c['medium']} low={c['low']}"]
+        for f in [f for f in result["findings"] if f["severity"] in {"critical", "high"}][:4]:
+            lines.append(f"[{f['severity'].upper():8}] {f['ruleId']} line {f['line']}: {f['message']}")
+        return lines
+    if name.endswith("fix_manifests"):
+        lines = [f"{len(result['changes'])} safe fixes; score {result['after']['score']}/100 after"]
+        lines += [f"  + {ch['path']}: {ch['reason']}" for ch in result["changes"][:5]]
+        lines += [f"  left for a human: {m[:90]}" for m in result.get("manualFollowUps", [])[:2]]
+        return lines
+    return _wrap(json.dumps(result)[:400])
+
+
+def mcp(stream: Path) -> list[dict[str, Any]]:
+    rows = [json.loads(line) for line in stream.read_text().splitlines() if line.strip()]
+    init = next(r for r in rows if r.get("type") == "system" and r.get("subtype") == "init")
+    server = next(s for s in init["mcp_servers"] if "kube-noob" in s["name"])
+    # stream-json does not echo the prompt; `claude -p` sessions recorded for a video keep it in <name>.prompt.txt
+    prompt_file = stream.with_suffix(".prompt.txt")
+    if not prompt_file.is_file():
+        raise SystemExit(f"write the prompt you gave claude -p to {prompt_file}")
+    prompt = prompt_file.read_text().strip()
+    calls: dict[str, dict[str, Any]] = {}
+    tool_steps: list[dict[str, Any]] = []
+    answer = ""
+    for r in rows:
+        content = r.get("message", {}).get("content") if r.get("type") in {"assistant", "user"} else None
+        if not isinstance(content, list):
+            continue
+        for c in content:
+            if r["type"] == "assistant" and c.get("type") == "tool_use" and "kube-noob" in c["name"]:
+                calls[c["id"]] = c
+            elif r["type"] == "assistant" and c.get("type") == "text":
+                answer = c["text"]
+            elif r["type"] == "user" and c.get("type") == "tool_result" and c.get("tool_use_id") in calls:
+                call = calls[c["tool_use_id"]]
+                raw = (
+                    c["content"] if isinstance(c["content"], str) else "".join(x.get("text", "") for x in c["content"])
+                )
+                tool = call["name"].split("__")[-1]
+                args = {k: v for k, v in call["input"].items() if k != "manifests"}
+                tool_steps.append(
+                    {
+                        "caption": "Claude calls kube-noob: deterministic rules, no model inside",
+                        "prompt": "tool ›",
+                        "command": f"{tool}({', '.join(f'{k}={v!r}' for k, v in args.items())})",
+                        "output": _tool_summary(tool, json.loads(raw)),
+                    }
+                )
+    answer_lines = [line for line in _wrap(answer) if not line.startswith("```")]
+    return [
+        {
+            "id": "connect",
+            "chapter": "1. The plugin starts kube-noob on your machine",
+            "steps": [
+                {
+                    "caption": "Claude Code loads the plugin; its MCP server runs locally from the bundled source",
+                    "command": "/plugin install kube-noob@kube-noob",
+                    "output": [
+                        f"MCP server {server['name']}: {server['status']}",
+                        "web access: off   cluster access: off   model calls: none",
+                    ],
+                }
+            ],
+        },
+        {
+            "id": "ask",
+            "chapter": "2. Ask in your own words",
+            "steps": [
+                {"caption": "A Deployment that works on a laptop", "prompt": "you ›", "command": prompt, "output": []}
+            ],
+        },
+        {"id": "tools", "chapter": "3. Claude calls kube-noob's tools", "steps": tool_steps},
+        {
+            "id": "answer",
+            "chapter": "4. Claude explains, citing rule ids",
+            "steps": [
+                {
+                    "caption": "The answer comes from the rules kube-noob returned",
+                    "prompt": "Claude ›",
+                    "command": "Top 3 problems",
+                    "output": answer_lines[2:24],
+                }
+            ],
+        },
+    ]
+
+
+def sidecar(transcript: Path) -> list[dict[str, Any]]:
+    steps = parse_transcript(transcript.read_text(), 18)
+    chapters = [
+        ("1. Check it, then deploy it next to your app", steps[:3]),
+        ("2. The app calls kube-noob on 127.0.0.1", steps[3:5]),
+        ("3. Private, small and locked down", steps[5:]),
+    ]
+    return [{"id": f"s{i}", "chapter": t, "steps": s} for i, (t, s) in enumerate(chapters) if s]
+
+
+def write(out_dir: Path, name: str, scenes: list[dict[str, Any]], meta: dict[str, Any]) -> Path:
+    html = (
+        (HERE / "player.html")
+        .read_text()
+        .replace("__SCENES__", json.dumps(scenes))
+        .replace("__META__", json.dumps(meta))
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{name}.html"
+    path.write_text(html)
+    return path
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[0] == "walkthrough":
+        print(write(Path(argv[1]), "walkthrough", walkthrough(), WALKTHROUGH_META))
+    elif len(argv) == 3 and argv[0] == "mcp":
+        print(write(Path(argv[2]), "mcp", mcp(Path(argv[1])), MCP_META))
+    elif len(argv) == 3 and argv[0] == "sidecar":
+        print(write(Path(argv[2]), "sidecar", sidecar(Path(argv[1])), SIDECAR_META))
+    else:
+        print(__doc__)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    raise SystemExit(main(sys.argv[1:]))

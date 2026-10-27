@@ -67,7 +67,13 @@ class AnthropicProvider:
     name = "anthropic"
 
     def __init__(self, llm: LLMSettings, settings: Settings, fallbacks: bool = True) -> None:
-        import anthropic
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise ProviderError(
+                "llm.provider is 'anthropic' but the Anthropic SDK is not installed: pip install 'kube-noob[ask]' "
+                "(or use llm.provider: openai-compatible with a local model)."
+            ) from exc
 
         self.model = llm.model
         self.llm = llm

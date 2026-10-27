@@ -126,6 +126,9 @@ def _patch(subparsers: Any, common: argparse.ArgumentParser) -> None:
     subparsers.add_parser = add_parser
 
 
+GLOBAL_DEFAULTS: dict[str, Any] = {"config": None, "web_enabled": False, "cluster_enabled": False, "format": "text"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
@@ -149,7 +152,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Kubernetes/OpenShift/ROSA/Helm/RHACS audit, debugging and learning tools. No AI inside.",
         parents=[common],
     )
-    p.set_defaults(config=None, web_enabled=False, cluster_enabled=False, format="text")
+    # No set_defaults here: the global options' actions are shared with every subcommand (parents=[common]), so a
+    # parser-level default would reset a value given before the subcommand (`kube-noob --config X doctor`).
+    # Defaults are filled in after parsing (GLOBAL_DEFAULTS).
     p.add_argument("--version", action="version", version=f"kube-noob {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
     _add = sub.add_parser
@@ -356,6 +361,9 @@ def _settings(a: argparse.Namespace) -> Settings:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     a = parser.parse_args(argv)
+    for key, value in GLOBAL_DEFAULTS.items():
+        if not hasattr(a, key):
+            setattr(a, key, value)
     try:
         s = _settings(a)
         return _dispatch(a, s)

@@ -348,7 +348,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"MountVolume\.SetUp failed",
             r"Unable to attach or mount volumes",
             r"timed out waiting for the condition",
-            r"permission denied",
+            r"MountVolume\.\w+ failed .*permission denied",
             r"Read-only file system",
         ),
         (
@@ -477,8 +477,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Wrong apiGroup in the Role (e.g. '' vs 'apps').",
         ),
         (
-            "oc auth can-i <verb> <resource> -n {ns} --as=system:serviceaccount:{ns}:{sa}",
-            "oc get rolebinding,clusterrolebinding -A -o wide | grep {sa}",
+            "oc auth can-i {verb} {resource} -n {ns} --as={subject}",
+            "oc get rolebinding,clusterrolebinding -A -o wide | grep -- '{subject}'",
         ),
         (
             "Grant the minimum: a Role with the exact apiGroups/resources/verbs plus a RoleBinding in the target "
@@ -691,6 +691,34 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         weight=0.8,
     ),
     Playbook(
+        "DBG-X509-CLIENT",
+        "oc / kubectl cannot verify the API server's certificate",
+        (
+            r"Unable to connect to the server: (x509|tls)",
+            r"Unable to connect to the server: .*certificate",
+            r"error: x509: certificate signed by unknown authority",
+        ),
+        (
+            "The kubeconfig does not trust the CA that signed the API server certificate (new cluster, rotated "
+            "certificate, or a corporate proxy that re-signs TLS).",
+            "The kubeconfig points at the wrong server, or the machine clock is skewed.",
+        ),
+        (
+            "oc config view --minify -o jsonpath='{{.clusters[0].cluster.server}}'   # which API server you call",
+            "openssl s_client -connect <api-host>:6443 -servername <api-host> </dev/null | openssl x509 -noout "
+            "-issuer -subject -dates",
+            "date -u   # clock skew breaks certificate validity",
+        ),
+        (
+            "Log in again with the right CA: `oc login <api-url> --certificate-authority=<ca.crt>` (ROSA and "
+            "OpenShift Dedicated serve a publicly trusted certificate unless you changed it). Behind a TLS-inspecting "
+            "proxy, add the proxy's CA to the system trust store. Avoid --insecure-skip-tls-verify outside "
+            "throwaway clusters.",
+        ),
+        knowledge=("k8s-tls-x509",),
+        weight=1.4,
+    ),
+    Playbook(
         "DBG-X509",
         "TLS / certificate errors",
         (
@@ -872,6 +900,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         "Permission denied writing files on OpenShift",
         (
             r"mkdir: cannot create directory .*Permission denied",
+            r"mkdir\(\) \S+ failed \(13: Permission denied\)",
+            r"open\(\) \S+ failed \(13: Permission denied\)",
             r"EACCES",
             r"Permission denied",
             r"cannot open .* for writing",

@@ -71,8 +71,9 @@ def test_plugin_installs_no_llm_sdk() -> None:
     lock = tomllib.loads((PLUGIN / "uv.lock").read_text())
     names = {p["name"] for p in lock["package"]}
     assert not names & {"anthropic", "openai", "litellm", "google-genai", "cohere"}
-    root_deps = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
-    assert any(d.startswith("anthropic") for d in root_deps), "only the plugin drops the SDK `kube-noob ask` uses"
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert not any(d.startswith("anthropic") for d in project["dependencies"]), "no LLM SDK in the core install"
+    assert any(d.startswith("anthropic") for d in project["optional-dependencies"]["ask"])
 
 
 def test_plugin_fits_the_directory_limits() -> None:

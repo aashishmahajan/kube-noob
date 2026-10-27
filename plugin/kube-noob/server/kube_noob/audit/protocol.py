@@ -29,6 +29,13 @@ _PLATFORM_HINTS: tuple[tuple[str, str], ...] = (
 )
 
 
+# "OpenShift 4.21", "ROSA HCP 4.20", "OCP 4.22" or "Kubernetes 1.33" written in the request itself.
+_VERSION_IN_REQUEST = re.compile(
+    r"(?i)\b(?:openshift|ocp|rosa(?:\s+(?:hcp|classic))?)\s*v?(?P<ocp>4\.\d{1,2})\b"
+    r"|\b(?:kubernetes|k8s)\s*v?(?P<k8s>1\.\d{2})\b"
+)
+
+
 def infer_platform(request: str, manifests: str | None) -> tuple[str | None, str]:
     text = request.lower()
     for pat, plat in _PLATFORM_HINTS:
@@ -87,6 +94,15 @@ def run_protocol(
                 "Which platform is the target: vanilla Kubernetes, OpenShift (on-prem IPI/UPI), "
                 "ROSA Classic or ROSA with HCP? Defaulted to vanilla Kubernetes."
             )
+    if version is None:
+        named = _VERSION_IN_REQUEST.search(request or "")
+        if named and (named.group("ocp") or named.group("k8s")):
+            if named.group("ocp") and platform in {"openshift", "rosa-classic", "rosa-hcp"}:
+                version = named.group("ocp")
+            elif named.group("k8s") and platform == "kubernetes":
+                version = named.group("k8s")
+            if version:
+                assumptions.append(f"version taken from the request ('{version}')")
     if version is None:
         assumptions.append(f"No version given; assuming Kubernetes {k8s_version_for(platform, None)} semantics.")
     bp: Blueprint | None = None

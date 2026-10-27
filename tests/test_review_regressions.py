@@ -429,3 +429,29 @@ def test_notes_never_carry_download_and_run_commands() -> None:
         with pytest.raises(ValueError, match="pipes a download into a shell"):
             check_text("fix", bad, 1200)
     assert check_text("fix", "added the pull secret to the default service account", 1200)
+
+
+def test_global_options_before_the_subcommand_are_honoured(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`kube-noob --config locked.yaml doctor` must load that file: an admin's offline lock must not fail open."""
+    cfg = tmp_path / "locked.yaml"
+    cfg.write_text("offline: true\n")
+    for argv in (
+        ["--config", str(cfg), "--format", "json", "doctor"],
+        ["doctor", "--config", str(cfg), "--format", "json"],
+    ):
+        main(argv)
+        out = json.loads(capsys.readouterr().out)
+        assert out["configFile"] == str(cfg) and out["offlineLock"] is True, argv
+
+
+def test_notes_reject_even_a_single_log_or_event_line() -> None:
+    from kube_noob.learn.memory import check_text
+
+    for raw in (
+        "E1027 10:01:02.123456    1 reflector.go:150] failed to list *v1.Pod: Unauthorized",
+        "2026-10-27T10:01:02Z ERROR could not connect to db",
+        "Warning  BackOff  3m (x12 over 10m)  kubelet  Back-off restarting failed container api",
+    ):
+        with pytest.raises(ValueError, match="raw log"):
+            check_text("symptom", raw, 400)
+    assert check_text("symptom", "Warning: pods restart after the 4.22 upgrade", 400)

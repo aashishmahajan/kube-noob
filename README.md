@@ -79,7 +79,7 @@ NetworkPolicies and runs under `restricted-v2`.
 | Admin offline lock (overrides web, local models only) | off | `offline: true` / `KUBE_NOOB_OFFLINE=1` / chart `config.offline` |
 | Live cluster (read-only, no Secrets) | off | `cluster.enabled: true` / `--cluster-enabled` |
 | Local learning file (profile, confirmed notes) | on | `learningEnabled: false` |
-| Model for `kube-noob ask` only | Anthropic `claude-fable-5-1` | `llm.provider: openai-compatible` + `llm.baseUrl` |
+| Model for `kube-noob ask` only | none | `llm.provider: anthropic` (`kube-noob[ask]`) or `openai-compatible` |
 
 `kube-noob doctor` prints what the process can reach and exits 1 when the configuration contradicts the lock.
 

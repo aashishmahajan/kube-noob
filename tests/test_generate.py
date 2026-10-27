@@ -114,3 +114,15 @@ def test_protocol_takes_version_from_blueprint() -> None:
     brief = out["auditValidationBrief"]
     assert brief["platformVersion"] == "4.22" and brief["kubernetesVersion"] == "1.35"
     assert not any("No version given" in a for a in brief["assumptions"])
+
+
+def test_protocol_takes_version_from_the_request_text() -> None:
+    from kube_noob.audit.protocol import run_protocol
+
+    manifests = (Path(__file__).resolve().parents[1] / "examples" / "insecure-deployment.yaml").read_text()
+    brief = run_protocol("Review this for OpenShift 4.21", manifests=manifests)["auditValidationBrief"]
+    assert (brief["platformVersion"], brief["kubernetesVersion"]) == ("4.21", "1.34")
+    brief = run_protocol("Review this for ROSA HCP 4.20", manifests=manifests)["auditValidationBrief"]
+    assert brief["kubernetesVersion"] == "1.33"
+    brief = run_protocol("Review this for Kubernetes 1.33", manifests=manifests)["auditValidationBrief"]
+    assert brief["kubernetesVersion"] == "1.33"

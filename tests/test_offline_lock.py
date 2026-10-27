@@ -33,7 +33,7 @@ def test_lock_beats_web_enabled_everywhere(monkeypatch: pytest.MonkeyPatch) -> N
 def test_lock_allows_only_local_models(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KUBE_NOOB_OFFLINE", "1")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-    s = load_settings()
+    s = load_settings(overrides={"llm": {"provider": "anthropic"}})
     with pytest.raises(ProviderError, match="offline"):
         build_provider(s.llm, s)
     local = load_settings(overrides={"llm": {"provider": "openai-compatible", "baseUrl": "http://127.0.0.1:8000/v1"}})

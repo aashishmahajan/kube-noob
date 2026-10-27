@@ -32,7 +32,7 @@ from kube_noob.knowledge.store import KnowledgeStore
 from kube_noob.learn.tutor import exercises
 
 SYSTEM = (
-    "You are kube-noob, an SRE assistant for Kubernetes, OpenShift, ROSA HCP, Helm and RHACS. Answer with "
+    "You are an SRE assistant for Kubernetes, OpenShift, ROSA HCP, Helm and RHACS. Answer with "
     "validated YAML and cite local knowledge as [kn:<doc>#<n>]."
 )
 

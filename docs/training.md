@@ -57,4 +57,6 @@ llm:
   apiKeyEnv: VLLM_API_KEY
 ```
 
-Then compare it with the frontier baseline: `kube-noob train bench --out report.json`.
+Then compare it with a frontier baseline: install the SDK with `pipx install 'kube-noob[ask]'`, set
+`llm.provider: anthropic` and `ANTHROPIC_API_KEY`, and run `kube-noob train bench --out report.json`. No model is
+configured by default.
