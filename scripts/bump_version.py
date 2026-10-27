@@ -68,8 +68,8 @@ def bump(root: Path, new: str, note: str) -> list[str]:
     text = log.read_text()
     header = f"## {new} - {dt.date.today().isoformat()}\n\n- {note.strip()}\n"
     if "\n## Unreleased\n\n" in text:
-        # The notes gathered under "Unreleased" become this version's entry, after the release note.
-        log.write_text(text.replace("\n## Unreleased\n\n", "\n" + header, 1))
+        # The notes gathered under "Unreleased" already describe the release: they become its entry as written.
+        log.write_text(text.replace("\n## Unreleased\n\n", f"\n## {new} - {dt.date.today().isoformat()}\n\n", 1))
     else:
         first = text.index("\n## ") + 1
         log.write_text(text[:first] + header + "\n" + text[first:])

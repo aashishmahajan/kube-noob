@@ -69,8 +69,11 @@ def test_bump_updates_every_reference(repo: Path) -> None:
     assert chart["version"] == new and chart["appVersion"] == new
     assert f"kube-noob:{new}" in (repo / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()
     changelog = (repo / "CHANGELOG.md").read_text()
-    assert changelog.index(f"## {new}") < changelog.index(f"## {old}") and "patched UBI" in changelog
-    assert "## Unreleased" not in changelog, "the Unreleased notes become the new version's entry"
+    assert changelog.index(f"## {new}") < changelog.index(f"## {old}")
+    if "## Unreleased" in (ROOT / "CHANGELOG.md").read_text():
+        assert "## Unreleased" not in changelog, "the Unreleased notes become the new version's entry"
+    else:
+        assert "patched UBI" in changelog
     for f in FILES:
         # CHANGELOG keeps history; uv.lock may hold dependency versions that contain the old string (checked above).
         assert old not in (repo / f).read_text() or f in {"CHANGELOG.md", "plugin/kube-noob/uv.lock"}, f

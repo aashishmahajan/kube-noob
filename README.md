@@ -65,7 +65,7 @@ In claude.ai or the desktop app: **Customize > Plugins > Add > Add marketplace**
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.2.3", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.3.0", "kube-noob", "mcp"]}}}
 ```
 
 Cluster and web tools appear only when enabled.

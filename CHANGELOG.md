@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-27
 
 Is this a known bug? kube-noob now answers from the OpenShift release notes, and says how current its knowledge is.
 
