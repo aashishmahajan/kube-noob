@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.2.0 - 2026-10-27
+## 0.2.1 - 2026-10-27
 
-Enterprise self-help release: safe by construction, provable in your environment, and grounded in your own runbooks.
+No AI inside, said and enforced; safer to run for a whole team; easier to install.
 
 - No AI inside, said plainly: README, plugin, docs and video copy explain that Claude, OpenShift Lightspeed or any MCP
   client does the talking and kube-noob supplies deterministic tools; only the optional `kube-noob ask` calls a model.
@@ -11,6 +11,26 @@ Enterprise self-help release: safe by construction, provable in your environment
   by hash in `uv.lock` (`uv run --frozen`), installs no LLM SDK, keeps its environment in the plugin data folder, and
   reports no model in its posture. CI checks the copy, the lock, a vulnerability audit and an end-to-end start.
 - PRIVACY.md lists what kube-noob reads, stores and sends, per destination; the plugin manifest links it.
+- No model is configured by default (`llm.provider: none`); the Anthropic SDK moved to the optional
+  `kube-noob[ask]` extra, so the core install, the image, the plugin and Homebrew carry no LLM SDK.
+- `kube-noob diagnose` takes the error text itself: quoted, as `-f "<text>"`, from a file or from stdin.
+- Security, from a second red-team review: tool failures never log the caller's content; the HTTP token is checked
+  before any body is read; caller-supplied grading patterns are literal text (no regex denial of service); HTTP
+  servers do not offer learning-file writes; notes reject download-and-run commands and log lines; the plugin runs
+  Python isolated (`-I -B`); `kube-noob --config X <command>` is honoured (it was ignored, failing open).
+- Chart: generated bearer token when none is given (lints clean for the OpenShift Helm catalog), RBAC limited to
+  the release namespace plus `rbac.namespaces` by default, web egress only to public addresses or a set proxy,
+  optional OVN-Kubernetes EgressFirewall, and an OCI chart signed with cosign on every release.
+- OpenShift 4.20, 4.21, 4.22 and the newest Kubernetes in CI (kind with Pod Security restricted), including the
+  sidecar example; sizing measured (`scripts/measure_footprint.py`) and documented with retention and egress.
+- Homebrew formula (Apple silicon and Linux) built offline from hash-checked wheels.
+- Diagnose and search: client-side x509, RBAC subject, nginx permission errors, kubectl for `--platform
+  kubernetes`, scheduling and TLS knowledge; the protocol reads "OpenShift 4.21" from the request.
+
+## 0.2.0 - 2026-10-27
+
+Enterprise self-help release: safe by construction, provable in your environment, and grounded in your own runbooks.
+
 - Admin offline lock (`offline: true`, `KUBE_NOOB_OFFLINE=1`, Helm `config.offline`): overrides `webEnabled`, blocks
   corpus downloads, allows only loopback or `*.svc` model endpoints (no redirects, no proxy environment), and no
   later config source can lift it. `kube-noob doctor` reports the posture and exits 1 on contradictions.
