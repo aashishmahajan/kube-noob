@@ -20,6 +20,10 @@ Why was this denied, and can pod A reach pod B? Policy debugging, offline and re
   propose the smallest NetworkPolicy that allows exactly that traffic (tests apply it and re-check). Exits 1 when
   denied, for CI. AdminNetworkPolicy, EgressFirewall and CNI-specific policies are reported as not evaluated.
 - `examples/netpol-shop.yaml`: a default-deny namespace with an allowed and a blocked path, for trying `policy reach`.
+- Compliance: every audit finding names the NIST SP 800-53 Rev. 5 controls it is evidence about (all 60 rules
+  mapped), reports add a `controlSummary`, and `kube-noob explain` shows the control titles. `kube-noob doctor`
+  reports FIPS mode (kernel flag and OpenSSL). `docs/compliance.md`: how to run kube-noob inside a FedRAMP High
+  boundary, control by control, and what is not covered yet.
 - Homebrew CI: right after a release, the public-tap check waits for PyPI's index to show the new version (it is
   cached for a few minutes) instead of failing; it still fails when PyPI has a newer version than the formula.
 - Red-team hardening for both: names that reach a copy-paste command (policy, binding, namespace, subject, labels)

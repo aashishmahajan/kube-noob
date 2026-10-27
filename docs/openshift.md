@@ -131,6 +131,11 @@ to the allowlisted domains (when web access is on), then denies everything else 
 whole namespace, so keep kube-noob in its own. In sidecar mode kube-noob needs no egress; the example's NetworkPolicy
 allows DNS only, and you add your app's own destinations.
 
+## Regulated environments
+
+For FedRAMP High and other NIST SP 800-53 based programs (FIPS mode, identity, audit logs, image verification):
+[compliance.md](compliance.md).
+
 ## Data retention
 
 kube-noob processes requests in memory and keeps nothing from them. It stores only what a user saves on purpose:

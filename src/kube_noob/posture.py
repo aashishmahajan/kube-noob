@@ -20,6 +20,43 @@ def _model_posture(provider: str, base_url: str | None) -> dict[str, Any]:
     return {"provider": provider, "endpoint": base_url, "local": is_local_url(base_url)}
 
 
+def crypto_posture() -> dict[str, Any]:
+    """FIPS 140 state of the process (SC-13): the kernel flag on RHEL / CoreOS nodes and OpenSSL's FIPS mode.
+
+    kube-noob itself only uses SHA-256 and the system OpenSSL for TLS, so on a FIPS-enabled node with the UBI image
+    every cryptographic operation goes through the FIPS-validated module.
+    """
+    import ssl
+    from pathlib import Path
+
+    kernel: bool | None = None
+    flag = Path("/proc/sys/crypto/fips_enabled")
+    try:
+        kernel = flag.read_text(encoding="ascii").strip() == "1"
+    except OSError:
+        kernel = None
+    openssl: bool | None = None
+    try:
+        import _hashlib
+
+        openssl = bool(_hashlib.get_fips_mode())
+    except (ImportError, AttributeError, ValueError):
+        openssl = None
+    if openssl or (kernel and openssl is None):
+        mode = "on"
+    elif kernel is None and openssl is None:
+        mode = "unknown"
+    else:
+        mode = "off"
+    return {
+        "fipsMode": mode,
+        "kernelFipsEnabled": kernel,
+        "opensslFipsMode": openssl,
+        "openssl": ssl.OPENSSL_VERSION,
+        "algorithms": "SHA-256 for integrity checks; TLS through the system OpenSSL; no MD5, SHA-1 or custom crypto",
+    }
+
+
 def posture(s: Settings) -> dict[str, Any]:
     from kube_noob import __version__
     from kube_noob.toolkit import READABLE_CONTENT_TYPES
@@ -76,6 +113,7 @@ def posture(s: Settings) -> dict[str, Any]:
         "judge": judge,
         "dataDir": {"path": str(s.data_dir), "exists": s.data_dir.is_dir(), "learningFile": str(learning)},
         "telemetry": "none",
+        "crypto": crypto_posture(),
         "conflicts": conflicts,
         "warnings": warnings,
         "status": "conflict" if conflicts else "ok",
@@ -96,6 +134,7 @@ def render_text(p: dict[str, Any]) -> str:
         + (" (local)" if p["model"]["local"] else " (remote)"),
         f"  data dir       {p['dataDir']['path']}",
         f"  telemetry      {p['telemetry']}",
+        f"  FIPS mode      {p['crypto']['fipsMode']} ({p['crypto']['openssl']})",
         f"  config file    {p['configFile'] or 'none (defaults + environment)'}",
     ]
     lines += [f"CONFLICT: {c}" for c in p["conflicts"]]

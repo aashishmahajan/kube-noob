@@ -6,6 +6,8 @@ import enum
 from dataclasses import dataclass, field
 from typing import Any
 
+from kube_noob.audit.controls import controls_for
+from kube_noob.audit.controls import summary as control_summary
 from kube_noob.catalog import SOURCES, Citation
 
 
@@ -69,6 +71,7 @@ class Finding:
             "remediation": self.remediation,
             "citations": [c.as_dict() for c in self.citation_objects()],
             "stackroxPolicies": self.stackrox_policies,
+            "controls": controls_for(self.rule_id),
         }
 
 
@@ -134,6 +137,7 @@ class Report:
             },
             "assumptions": self.assumptions,
             "findings": [f.as_dict() for f in sorted(self.findings, key=_sort_key)],
+            "controlSummary": control_summary([f.rule_id for f in self.findings]),
             "redTeam": [s.as_dict() for s in self.scenarios],
         }
 

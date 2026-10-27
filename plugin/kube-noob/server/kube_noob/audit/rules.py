@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from kube_noob.audit.controls import controls_for
 from kube_noob.audit.model import Finding, Severity, Stage
 from kube_noob.audit.podspec import (
     LONG_RUNNING_KINDS,
@@ -120,6 +121,7 @@ class Rule:
             "remediation": self.remediation,
             "citations": list(self.citations),
             "stackroxPolicies": list(self.stackrox_policies),
+            "controls": controls_for(self.rule_id),
         }
 
 

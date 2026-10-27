@@ -38,6 +38,12 @@ when cluster access is enabled; the maintainer CLI commands `corpus build --onli
 | Egress on OpenShift | Chart NetworkPolicy allows DNS only by default; optional OVN-Kubernetes EgressFirewall allows only the API server and allowlisted HTTPS domains, then denies all. |
 | Homebrew | The formula installs the release wheel and wheels-only dependencies pinned by hash from the release's `requirements.lock`. |
 
+## Compliance
+
+Audit findings name the NIST SP 800-53 Rev. 5 controls they are evidence about, and `kube-noob doctor` reports FIPS
+mode. How to deploy kube-noob inside a FedRAMP High boundary, and what is not covered yet:
+[docs/compliance.md](docs/compliance.md).
+
 ## Verifying releases
 
 ```bash

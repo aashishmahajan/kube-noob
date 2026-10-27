@@ -61,10 +61,13 @@ def explain_rule(rule_id: str) -> dict[str, object]:
     r = RULES.get(rule_id.upper())
     if r is None:
         raise KeyError(f"Unknown rule {rule_id!r}. Known rules: {', '.join(sorted(RULES))}")
+    from kube_noob.audit.controls import CATALOG, describe
     from kube_noob.catalog import SOURCES
 
     out = r.as_dict()
     out["citations"] = [SOURCES[c].as_dict() for c in r.citations if c in SOURCES]
+    out["controls"] = describe(r.rule_id)
+    out["controlCatalog"] = CATALOG
     return out
 
 
