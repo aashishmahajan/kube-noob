@@ -151,3 +151,16 @@ def test_crd_schema_validation() -> None:
     assert not ids(analyze(good_fw, "openshift")) & {"KN-V007", "KN-V015", "KN-N006"}
     sc = "apiVersion: platform.stackrox.io/v1alpha1\nkind: SecuredCluster\nmetadata: {name: s}\nspec: {clusterNam: x}\n"
     assert "KN-V007" in ids(analyze(sc, "openshift"))
+
+
+def test_legacy_bundle_migrates_to_current_apis() -> None:
+    legacy = fixture_text("legacy-bundle.yaml")
+    before = analyze(legacy, "kubernetes", "1.35")
+    assert sum(1 for f in before.findings if f.rule_id == "KN-V005") == 7
+    res = fix_manifests(legacy, platform="kubernetes", k8s_version="1.35")
+    after = analyze(res.yaml(), "kubernetes", "1.35")
+    blocking = {f.rule_id for f in after.findings if f.severity >= Severity.HIGH}
+    assert not blocking, blocking
+    assert not {"KN-V005", "KN-V007", "KN-V010", "KN-C009"} & ids(after)
+    hpa = next(d for d in res.documents if d["kind"] == "HorizontalPodAutoscaler")
+    assert hpa["spec"]["metrics"][0]["resource"]["target"] == {"type": "Utilization", "averageUtilization": 70}

@@ -1,0 +1,80 @@
+# A bundle that applied on Kubernetes 1.15-1.20 and is rejected on 1.25+: removed APIs and no hardening.
+# `kube-noob fix` must migrate it so it passes `kubectl apply --dry-run=server` on a current cluster (CI: kind).
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata: {name: legacy-api, namespace: shop}
+spec:
+  replicas: 2
+  template:
+    metadata: {labels: {app: legacy-api}}
+    spec:
+      containers:
+      - name: api
+        image: registry.example.com/shop/legacy-api:3.2.1
+        ports: [{containerPort: 8080, name: http}]
+        resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: legacy-api, namespace: shop}
+spec:
+  selector: {app: legacy-api}
+  ports: [{port: 80, targetPort: http}]
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata: {name: legacy-api, namespace: shop}
+spec:
+  rules:
+  - host: legacy.example.com
+    http:
+      paths:
+      - path: /
+        backend: {serviceName: legacy-api, servicePort: 80}
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata: {name: legacy-api, namespace: shop}
+spec:
+  minAvailable: 2
+  selector: {matchLabels: {app: legacy-api}}
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata: {name: cleanup, namespace: shop}
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: registry.example.com/tools/cleanup:1.0.4
+            resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: autoscaling/v2beta1
+kind: HorizontalPodAutoscaler
+metadata: {name: legacy-api, namespace: shop}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: legacy-api}
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource: {name: cpu, targetAverageUtilization: 70}
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata: {name: legacy-reader, namespace: shop}
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata: {name: legacy-reader, namespace: shop}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: legacy-reader}
+subjects: [{kind: ServiceAccount, name: default, namespace: shop}]

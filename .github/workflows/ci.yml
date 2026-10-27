@@ -108,24 +108,24 @@ jobs:
       - run: pip install -e .
       - name: Server-side dry-run of generated manifests
         run: |
+          set -o pipefail
+          dry() { kubectl apply --dry-run=server -f "$1" 2>&1 | tee /tmp/dry.out || { sed 's/^/::error title=dry-run::/' /tmp/dry.out; exit 1; }; }
           kubectl create namespace demo
           kube-noob generate --name web --namespace demo --image nginxinc/nginx-unprivileged:1.27.2 \
             --replicas 2 --expose ingress --host web.example.com -o /tmp/gen.yaml
-          kubectl apply --dry-run=server -f /tmp/gen.yaml
+          dry /tmp/gen.yaml
           kube-noob generate --name db --namespace demo --image registry.example.com/db:1.0.0 --workload statefulset \
             --storage-size 1Gi -o /tmp/sts.yaml
-          kubectl apply --dry-run=server -f /tmp/sts.yaml
-      - name: Fixed manifests apply server-side
+          dry /tmp/sts.yaml
+      - name: Legacy (removed-API) bundle is migrated by `kube-noob fix` and accepted server-side
         run: |
-          kube-noob fix -f tests/fixtures/bad-bundle.yaml --platform kubernetes -o /tmp/fixed.yaml || true
-          python - <<'PY'
-          import yaml
-          docs = [d for d in yaml.safe_load_all(open("/tmp/fixed.yaml")) if d]
-          keep = [d for d in docs if not d["apiVersion"].endswith("openshift.io/v1") and d["apiVersion"] != "k8s.ovn.org/v1"]
-          open("/tmp/fixed-k8s.yaml", "w").write(yaml.safe_dump_all(keep))
-          PY
+          set -o pipefail
           kubectl create namespace shop
-          kubectl apply --dry-run=server -f /tmp/fixed-k8s.yaml
+          if kubectl apply --dry-run=server -f tests/fixtures/legacy-bundle.yaml > /tmp/legacy.out 2>&1; then
+            echo "::error::legacy bundle unexpectedly applied before migration"; exit 1; fi
+          kube-noob fix -f tests/fixtures/legacy-bundle.yaml --platform kubernetes --version 1.35 -o /tmp/migrated.yaml
+          kubectl apply --dry-run=server -f /tmp/migrated.yaml 2>&1 | tee /tmp/migrated.out \
+            || { sed 's/^/::error title=migrated dry-run::/' /tmp/migrated.out; exit 1; }
       - name: Build image and load into kind
         run: |
           docker build -f Containerfile -t kube-noob:ci .
@@ -141,7 +141,8 @@ jobs:
             --set auth.existingSecret=kn-token --set config.clusterEnabled=true \
             --set config.defaultPlatform=kubernetes --set networkPolicy.allowRouter=false \
             --set networkPolicy.egress.dnsNamespace=kube-system --set networkPolicy.egress.dnsPort=53 \
-            --set "networkPolicy.egress.apiServerCIDRs={${EP}/32,${SVC}/32}" --wait --timeout 4m
+            --set "networkPolicy.egress.apiServerCIDRs={${EP}/32,${SVC}/32}" --wait --timeout 4m \
+            || { kubectl -n kube-noob get events --sort-by=.lastTimestamp | tail -30 | sed 's/^/::error title=install::/'; exit 1; }
       - name: Deploy a crashing workload to debug
         run: |
           kubectl -n demo create deployment crasher --image=busybox:1.36 -- sh -c 'echo starting; echo password=hunter2; exit 3'
@@ -152,11 +153,13 @@ jobs:
         run: |
           kubectl -n kube-noob port-forward svc/kn-kube-noob 18080:8080 &
           sleep 5
+          set -o pipefail
           python scripts/e2e_mcp_http.py --url http://127.0.0.1:18080/mcp --token ci-token \
-            --cluster-namespace demo --cluster-deployment crasher
+            --cluster-namespace demo --cluster-deployment crasher 2>&1 | tee /tmp/e2e.out \
+            || { tail -40 /tmp/e2e.out | sed 's/^/::error title=e2e::/'; exit 1; }
       - name: Diagnostics on failure
         if: failure()
         run: |
-          kubectl get pods -A
-          kubectl -n kube-noob describe pods
-          kubectl -n kube-noob logs deploy/kn-kube-noob --tail=200
+          kubectl get pods -A || true
+          kubectl -n kube-noob describe pods 2>&1 | tail -60 | sed 's/^/::warning title=describe::/' || true
+          kubectl -n kube-noob logs deploy/kn-kube-noob --tail=80 2>&1 | sed 's/^/::warning title=logs::/' || true

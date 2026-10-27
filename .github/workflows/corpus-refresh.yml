@@ -46,6 +46,15 @@ jobs:
           print(json.dumps({k: s[k] for k in ("records", "scanned", "requests", "retries", "strategy", "errors",
                                               "versionsConsidered", "gaFloor")}, indent=1))
           print(json.dumps(s["insights"], indent=1))
+          by_version = ", ".join(f"{v}={n}" for v, n in s["insights"]["byVersion"][:12])
+          print(f"::notice title=ROX Jira pull::kept={s['records']} scanned={s['scanned']} requests={s['requests']} "
+                f"retries={s['retries']} strategy={s['strategy']} errors={len(s['errors'])}")
+          print(f"::notice title=ROX versions::{by_version}")
+          print(f"::notice title=ROX components::{dict(s['insights']['byComponent'][:10])}")
+          minimum = int("${{ inputs.jira_target || '1200' }}") * 5 // 6
+          if s["records"] < minimum:
+              print(f"::error title=ROX Jira pull::only {s['records']} issues kept (< {minimum})")
+              raise SystemExit(1)
           with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as fh:
               fh.write(f"### ROX issues kept: {s['records']} (scanned {s['scanned']}, strategy {s['strategy']})\n")
               fh.write("| version | issues |\n|---|---|\n")
@@ -53,11 +62,16 @@ jobs:
                   fh.write(f"| {v} | {n} |\n")
           PY
       - name: Git documentation sources
-        run: kube-noob corpus build --online --sources "${{ inputs.git_sources || 'all' }}" --format json | tee git-summary.json
+        run: |
+          kube-noob corpus build --online --sources "${{ inputs.git_sources || 'all' }}" --format json | tee git-summary.json
+          python -c "import json; s=json.load(open('git-summary.json'))['sources']; print('::notice title=Git sources::' + ', '.join(f'{k}={v}' for k, v in s.items()))"
       - name: Release history
         run: kube-noob corpus history --online --format json | tee history-summary.json
       - name: Verify corpus integrity
-        run: kube-noob corpus verify && kube-noob corpus stats --format json | tee stats.json
+        run: |
+          kube-noob corpus verify
+          kube-noob corpus stats --format json | tee stats.json
+          python -c "import json; s=json.load(open('stats.json'))['index']; print(f'::notice title=Corpus index::chunks={s[\"chunks\"]} documents={s[\"documents\"]} bySource={s[\"bySource\"]}')"
       - name: Package redistributable corpus
         run: |
           mkdir -p public
