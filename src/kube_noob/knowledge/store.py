@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import threading
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from importlib import resources
@@ -67,6 +68,7 @@ _STOP = frozenset(
     ]
 )
 MAX_CHUNK_CHARS = 1600
+_log = logging.getLogger(__name__)
 CITATION_RE = re.compile(r"\[(kn:[A-Za-z0-9._/-]+#\d+)\]")
 
 
@@ -321,10 +323,17 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
         return out
     for f in sorted(cdir.glob("*.jsonl")):
         with f.open(encoding="utf-8") as fh:
-            for line in fh:
+            for lineno, line in enumerate(fh, 1):
                 if not line.strip():
                     continue
-                rec = json.loads(line)
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    _log.warning("skipping malformed JSON in %s line %d", f.name, lineno)
+                    continue
+                if not isinstance(rec, dict) or not isinstance(rec.get("id"), str) or not rec["id"]:
+                    _log.warning("skipping corpus record without an id in %s line %d", f.name, lineno)
+                    continue
                 out.extend(
                     chunk_document(
                         rec["id"],
@@ -357,30 +366,39 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
 
 
 _lock = threading.Lock()
-_store: KnowledgeStore | None = None
-_store_key: str | None = None
+_stores: OrderedDict[str, KnowledgeStore] = OrderedDict()
+_MAX_STORES = 4
+
+
+def _store_key(data_dir: Path | None) -> str:
+    if data_dir is None:
+        return "builtin"
+    cdir = data_dir / "corpus"
+    h = hashlib.sha256(str(data_dir.resolve()).encode())
+    if cdir.is_dir():
+        for f in sorted(cdir.glob("*.jsonl")):
+            st = f.stat()
+            h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns}".encode())
+    return h.hexdigest()
 
 
 def get_store(data_dir: Path | None = None) -> KnowledgeStore:
-    """Process-wide store; rebuilt when the corpus directory changes."""
-    global _store, _store_key  # noqa: PLW0603
-    key = "builtin"
-    if data_dir is not None:
-        cdir = data_dir / "corpus"
-        if cdir.is_dir():
-            h = hashlib.sha256()
-            for f in sorted(cdir.glob("*.jsonl")):
-                st = f.stat()
-                h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns}".encode())
-            key = h.hexdigest()
+    """Store for the built-in docs plus the corpus under ``data_dir``; cached per corpus state (small LRU) so callers
+    using different data dirs never evict each other on every call. Rebuilt when corpus files change."""
+    key = _store_key(data_dir)
     with _lock:
-        if _store is None or _store_key != key:
+        store = _stores.get(key)
+        if store is None:
             chunks = builtin_chunks()
             if data_dir is not None:
                 chunks.extend(corpus_chunks(data_dir))
-            _store = KnowledgeStore(chunks)
-            _store_key = key
-        return _store
+            store = KnowledgeStore(chunks)
+            _stores[key] = store
+            while len(_stores) > _MAX_STORES:
+                _stores.popitem(last=False)
+        else:
+            _stores.move_to_end(key)
+        return store
 
 
 def extract_citations(text: str) -> list[str]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from typing import Literal
 
@@ -14,6 +15,16 @@ _NAME = re.compile(r"^[a-z]([-a-z0-9]{0,51}[a-z0-9])?$")
 _PATH = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*$")
 _HOST = re.compile(r"^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$")
 _QTY = re.compile(r"^\d+(\.\d+)?(m|Ki|Mi|Gi|Ti|k|M|G|T)?$")
+# IANA_SVC_NAME (container/service port names): <= 15 chars, lowercase alphanumerics and '-', at least one letter,
+# no leading/trailing or consecutive hyphens.
+_PORT_NAME = re.compile(r"^(?=.*[a-z])(?!.*--)[a-z0-9]([-a-z0-9]{0,13}[a-z0-9])?$")
+
+
+def _cidr(v: str) -> str:
+    try:
+        return str(ipaddress.ip_network(v, strict=False))
+    except ValueError as exc:
+        raise ValueError(f"invalid CIDR {v!r}: {exc}") from exc
 
 
 class _Base(BaseModel):
@@ -62,6 +73,11 @@ class Exposure(_Base):
     lb_source_ranges: list[str] = Field(default_factory=list)
     internal_lb: bool = True
 
+    @field_validator("lb_source_ranges")
+    @classmethod
+    def _ranges(cls, v: list[str]) -> list[str]:
+        return [_cidr(x) for x in v]
+
     @field_validator("host")
     @classmethod
     def _host(cls, v: str | None) -> str | None:
@@ -108,12 +124,27 @@ class Blueprint(_Base):
     allow_monitoring: bool = True
     create_namespace: bool = False
 
-    @field_validator("name", "namespace", "port_name")
+    @field_validator("name", "namespace")
     @classmethod
     def _dns(cls, v: str) -> str:
         if not _NAME.match(v) or len(v) > 53:
             raise ValueError(f"{v!r} must be a lowercase DNS-1123 label (max 53 chars), e.g. 'orders-api'")
         return v
+
+    @field_validator("port_name")
+    @classmethod
+    def _port_name(cls, v: str) -> str:
+        if not _PORT_NAME.match(v):
+            raise ValueError(
+                f"portName {v!r} must be an IANA service name: max 15 lowercase letters/digits/'-', at least one "
+                "letter, no leading, trailing or double hyphens (e.g. 'http', 'grpc-api')"
+            )
+        return v
+
+    @field_validator("egress_cidrs")
+    @classmethod
+    def _egress_cidrs(cls, v: list[str]) -> list[str]:
+        return [_cidr(x) for x in v]
 
     @field_validator("image")
     @classmethod
@@ -144,6 +175,12 @@ class Blueprint(_Base):
     def _platform_rules(self) -> Blueprint:
         if self.run_as_user is not None and self.platform in OPENSHIFT_FAMILY:
             raise ValueError("runAsUser must not be fixed on OpenShift/ROSA: restricted-v2 assigns UIDs per namespace")
+        if self.exposure.type == "route" and self.exposure.host and self.exposure.host.startswith("*."):
+            raise ValueError(
+                "Route hosts cannot contain '*'. Wildcard Routes need wildcardPolicy: Subdomain with a concrete host "
+                "(e.g. 'wildcard.apps.example.com') and an IngressController that allows wildcards; use a normal host "
+                "or exposure.type 'ingress'/'gateway' for a '*.' host."
+            )
         return self
 
 

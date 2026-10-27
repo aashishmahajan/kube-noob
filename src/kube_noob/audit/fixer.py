@@ -11,7 +11,13 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any
 
-from kube_noob.audit.podspec import containers, pod_template, replicas, selector_matches
+from kube_noob.audit.podspec import (
+    containers,
+    pdb_allows_no_disruption,
+    pod_template,
+    replicas,
+    selector_matches,
+)
 from kube_noob.catalog import (
     DEFAULT_STORAGE_CLASS,
     KIND_API_VERSIONS,
@@ -190,9 +196,10 @@ class _Fixer:
         pt = pod_template(tmp)
         if pt is None:
             return
-        psc = pt.spec.setdefault("securityContext", {})
+        psc = _ensure_dict(pt.spec, "securityContext")
         if self.openshift_ids:
-            for f in ("runAsUser", "runAsGroup", "fsGroup"):
+            # SCCs govern runAsUser (MustRunAsRange) and fsGroup (MustRunAs); runAsGroup has no SCC strategy.
+            for f in ("runAsUser", "fsGroup"):
                 if isinstance(psc.get(f), int) and psc[f] != 0:
                     self.change(
                         "KN-S004",
@@ -213,41 +220,70 @@ class _Fixer:
                 {"type": "RuntimeDefault"},
                 "Pod Security restricted requires RuntimeDefault seccomp.",
             )
-        if psc.get("runAsNonRoot") is None and psc.get("runAsUser") != 0:
-            psc["runAsNonRoot"] = True
-            self.change(
-                "KN-S003",
-                doc.ref(),
-                (*pt.path, "securityContext", "runAsNonRoot"),
-                None,
-                True,
-                "Refuse to start as root.",
-            )
+        all_containers = list(containers(pt))
+        for c in all_containers:
+            _ensure_dict(c.container, "securityContext")
+        pod_uid = psc.get("runAsUser")
+        root_containers = [c for c in all_containers if c.container["securityContext"].get("runAsUser", pod_uid) == 0]
+        added_non_root = False
+        if psc.get("runAsNonRoot") is None and pod_uid != 0:
+            if not root_containers:
+                added_non_root = True
+                psc["runAsNonRoot"] = True
+                self.change(
+                    "KN-S003",
+                    doc.ref(),
+                    (*pt.path, "securityContext", "runAsNonRoot"),
+                    None,
+                    True,
+                    "Refuse to start as root.",
+                )
+            else:
+                # A pod-level runAsNonRoot would make the kubelet refuse the explicit runAsUser: 0 containers
+                # (CreateContainerConfigError); harden the other containers individually instead.
+                for c in all_containers:
+                    csc = c.container["securityContext"]
+                    if c in root_containers or csc.get("runAsNonRoot") is not None:
+                        continue
+                    csc["runAsNonRoot"] = True
+                    added_non_root = True
+                    self.change(
+                        "KN-S003",
+                        doc.ref(),
+                        (*c.path, "securityContext", "runAsNonRoot"),
+                        None,
+                        True,
+                        "Refuse to start as root (container level: other containers run as UID 0).",
+                    )
+        if added_non_root:
             self.result.manual.append(
                 f"{doc.ref()}: runAsNonRoot: true was added. Images whose USER is root will now fail with "
                 "CreateContainerConfigError ('container has runAsNonRoot and image will run as root'); use an "
                 "unprivileged image variant or set a numeric non-root USER in the Dockerfile."
             )
-        for c in containers(pt):
-            sc = c.container.setdefault("securityContext", {})
-            if self.openshift_ids:
-                for f in ("runAsUser", "runAsGroup"):
-                    if isinstance(sc.get(f), int) and sc[f] != 0:
-                        self.change(
-                            "KN-S004",
-                            doc.ref(),
-                            (*c.path, "securityContext", f),
-                            sc[f],
-                            None,
-                            "restricted-v2 assigns IDs from the namespace range.",
-                        )
-                        del sc[f]
-            if sc.get("runAsUser") == 0:
+        for c in all_containers:
+            sc = c.container["securityContext"]
+            if self.openshift_ids and isinstance(sc.get("runAsUser"), int) and sc["runAsUser"] != 0:
+                self.change(
+                    "KN-S004",
+                    doc.ref(),
+                    (*c.path, "securityContext", "runAsUser"),
+                    sc["runAsUser"],
+                    None,
+                    "restricted-v2 assigns IDs from the namespace range.",
+                )
+                del sc["runAsUser"]
+            if sc.get("runAsUser", pod_uid) == 0:
                 self.result.manual.append(
                     f"{doc.ref()} container '{c.name}' runs as UID 0; rebuild the image "
                     "with a non-root USER and remove runAsUser: 0."
                 )
-            if "allowPrivilegeEscalation" not in sc:
+            caps = _ensure_dict(sc, "capabilities")
+            added = {str(x).upper().removeprefix("CAP_") for x in (caps.get("add") or []) if isinstance(x, str)}
+            # The API server rejects allowPrivilegeEscalation: false together with privileged: true or an added
+            # CAP_SYS_ADMIN, and a privileged container ignores capability drops: leave those to a manual fix.
+            privileged = sc.get("privileged") is True or "SYS_ADMIN" in added
+            if "allowPrivilegeEscalation" not in sc and not privileged:
                 sc["allowPrivilegeEscalation"] = False
                 self.change(
                     "KN-S002",
@@ -257,9 +293,10 @@ class _Fixer:
                     False,
                     "Block setuid privilege escalation.",
                 )
-            caps = sc.setdefault("capabilities", {})
-            drop = caps.setdefault("drop", [])
-            if isinstance(drop, list) and not any(str(x).upper() == "ALL" for x in drop):
+            if caps.get("drop") is None:
+                caps["drop"] = []
+            drop = caps["drop"]
+            if not privileged and isinstance(drop, list) and not any(str(x).upper() == "ALL" for x in drop):
                 drop.append("ALL")
                 self.change(
                     "KN-S006",
@@ -269,6 +306,10 @@ class _Fixer:
                     ["ALL"],
                     "Drop all Linux capabilities.",
                 )
+            if not caps.get("drop"):
+                caps.pop("drop", None)
+            if not caps:
+                sc.pop("capabilities", None)
             if sc.get("privileged") is True:
                 self.result.manual.append(
                     f"{doc.ref()} container '{c.name}' is privileged; remove it and add only "
@@ -323,7 +364,7 @@ class _Fixer:
                 continue
             reps = replicas(wdoc) or 1
             ma, mu = spec.get("minAvailable"), spec.get("maxUnavailable")
-            if (isinstance(ma, int) and ma >= reps) or ma == "100%" or mu in (0, "0", "0%"):
+            if pdb_allows_no_disruption(spec, reps):
                 spec.pop("minAvailable", None)
                 spec["maxUnavailable"] = 1
                 self.change(
@@ -336,9 +377,17 @@ class _Fixer:
                 )
                 return
 
-    def fix_egressfirewall(self, doc: Document, obj: dict[str, Any]) -> None:
-        meta = obj.setdefault("metadata", {})
-        if meta.get("name") != "default":
+    def fix_egressfirewall(self, doc: Document, obj: dict[str, Any], taken: set[str]) -> None:
+        """``taken``: namespaces that already have an EgressFirewall named 'default' in this bundle."""
+        meta = _ensure_dict(obj, "metadata")
+        ns = str(meta.get("namespace") or "")
+        if meta.get("name") != "default" and ns in taken:
+            self.result.manual.append(
+                f"{doc.ref()}: namespace '{ns or '<unset>'}' already has an EgressFirewall named 'default'. Only one "
+                "is allowed per namespace: merge these rules into it (keeping the catch-all Deny last) and delete "
+                "this object."
+            )
+        elif meta.get("name") != "default":
             self.change(
                 "KN-V015",
                 doc.ref(),
@@ -348,6 +397,8 @@ class _Fixer:
                 "OVN-Kubernetes only honours an EgressFirewall named 'default'.",
             )
             meta["name"] = "default"
+        if meta.get("name") == "default":
+            taken.add(ns)
         egress = (obj.get("spec") or {}).get("egress")
         if isinstance(egress, list):
             catch = [
@@ -419,6 +470,15 @@ class _Fixer:
                 )
 
 
+def _ensure_dict(parent: dict[str, Any], key: str) -> dict[str, Any]:
+    """``parent[key]`` as a dict; ``null`` or a missing key becomes ``{}`` (YAML ``securityContext:`` with no value)."""
+    value = parent.get(key)
+    if not isinstance(value, dict):
+        value = {}
+        parent[key] = value
+    return value
+
+
 def fix_manifests(
     text: str,
     platform: str = "kubernetes",
@@ -433,6 +493,14 @@ def fix_manifests(
     for o in objs:
         if isinstance(o, dict) and o.get("kind") == "StorageClass" and o.get("provisioner"):
             classes[str((o.get("metadata") or {}).get("name"))] = str(o["provisioner"])
+    firewall_namespaces = {
+        str((o.get("metadata") or {}).get("namespace") or "")
+        for o in objs
+        if isinstance(o, dict)
+        and o.get("kind") == "EgressFirewall"
+        and isinstance(o.get("metadata"), dict)
+        and o["metadata"].get("name") == "default"
+    }
     for d, o in zip(docs, objs, strict=True):
         if not isinstance(o, dict):
             continue
@@ -445,7 +513,7 @@ def fix_manifests(
         elif kind == "PodDisruptionBudget":
             fx.fix_pdb(d, o, [x for x in objs if isinstance(x, dict)])
         elif kind == "EgressFirewall":
-            fx.fix_egressfirewall(d, o)
+            fx.fix_egressfirewall(d, o, firewall_namespaces)
         if kind in {"StorageClass", "PersistentVolumeClaim", "StatefulSet"}:
             fx.fix_storage(d, o, classes)
         image_issue = _image_manual(d, o)

@@ -7,6 +7,7 @@ updated: 2026-10-27
 license: Apache-2.0
 sources:
   - {title: "Managing security context constraints", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/authentication_and_authorization/managing-pod-security-policies", license: CC-BY-SA-3.0}
+  - {title: "OpenShift docs: About security context constraints (default SCCs)", url: "https://github.com/openshift/openshift-docs/blob/main/modules/security-context-constraints-about.adoc", license: Apache-2.0}
 ---
 # SecurityContextConstraints
 
@@ -20,12 +21,14 @@ satisfies; if none fits the pod is rejected with `unable to validate against any
 - `allowPrivilegeEscalation` must be unset or false.
 - No privileged containers, host namespaces or hostPath volumes.
 - `runAsUser: MustRunAsRange` - the UID comes from the namespace annotation `openshift.io/sa.scc.uid-range`;
-  `fsGroup` and supplemental groups likewise. A pod that hard-codes `runAsUser: 1000` is rejected.
+  `fsGroup: MustRunAs` - from `openshift.io/sa.scc.supplemental-groups`. Supplemental groups are `RunAsAny` (any
+  value allowed). SCCs have no `runAsGroup` strategy. A pod that hard-codes `runAsUser: 1000` is rejected.
 Clusters upgraded from 4.10 or earlier keep the legacy `restricted` SCC for existing users. `restricted-v3`
 (user namespaces, `hostUsers: false`) is documented from 4.20 onward.
 
 ## Practical rules
-1. Do not set runAsUser/runAsGroup/fsGroup on OpenShift; set `runAsNonRoot: true` and let the SCC assign IDs.
+1. Do not set runAsUser/fsGroup on OpenShift; set `runAsNonRoot: true` and let the SCC assign IDs (runAsGroup is
+   not governed by SCCs).
 2. Build images that work as an arbitrary UID in group 0 (`chgrp -R 0 /app && chmod -R g=u /app`).
 3. If a workload truly needs more, grant the least permissive SCC to its ServiceAccount only:
    `oc adm policy add-scc-to-user nonroot-v2 -z <sa> -n <ns>`. Never grant `privileged` or `anyuid` to app workloads

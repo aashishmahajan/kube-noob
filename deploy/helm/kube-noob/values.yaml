@@ -53,6 +53,11 @@ persistence:
   storageClass: ""
   accessMode: ReadWriteOnce
 
+podSecurityContext:
+  # Leave empty on OpenShift (restricted-v2 assigns fsGroup). On vanilla Kubernetes with persistence the chart sets
+  # fsGroup 1001 automatically; override here if your image runs as another UID.
+  fsGroup: null
+
 resources:
   requests: {cpu: 100m, memory: 256Mi}
   limits: {memory: 512Mi}

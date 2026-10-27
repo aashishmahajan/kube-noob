@@ -10,6 +10,7 @@ from kube_noob.agent.loop import Agent
 from kube_noob.config import Settings
 from kube_noob.evals.judge import build_judge
 from kube_noob.evals.reward import benchmark, grade
+from kube_noob.knowledge.store import get_store
 
 
 def run_benchmark(settings: Settings, task_ids: list[str] | None = None, use_tools: bool = True) -> dict[str, Any]:
@@ -23,7 +24,7 @@ def run_benchmark(settings: Settings, task_ids: list[str] | None = None, use_too
     for task in selected:
         t0 = time.monotonic()
         res = agent.ask(task["prompt"])
-        g = grade(task, res.answer).as_dict()
+        g = grade(task, res.answer, get_store(settings.data_dir)).as_dict()
         row: dict[str, Any] = {
             "taskId": task["id"],
             "type": task.get("type", "manifest"),

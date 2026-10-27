@@ -89,6 +89,8 @@ def _wrapper(spec: ToolSpec) -> Any:
             raise ToolError(f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from exc
         except (KubeNoobError, ValueError) as exc:
             raise ToolError(str(exc)[:MAX_ERROR_CHARS]) from exc
+        except KeyError as exc:  # unknown task / chunk / lesson ids
+            raise ToolError(str(exc.args[0] if exc.args else exc)[:MAX_ERROR_CHARS]) from exc
         return result
 
     tool.__name__ = TOOL_PREFIX + spec.name
@@ -246,10 +248,16 @@ def http_app(settings: Settings, *, allow_unauthenticated: bool = False) -> ASGI
             f"Refusing to serve MCP over HTTP on {srv.host} without authentication. Set {srv.auth_token_env}, bind "
             "to 127.0.0.1 (sidecar mode), or pass --allow-unauthenticated if a mesh/proxy authenticates callers."
         )
-    allowed_hosts = srv.allowed_hosts or ["127.0.0.1", "localhost", "127.0.0.1:*", "localhost:*", "[::1]:*"]
-    security = TransportSecuritySettings(
-        enable_dns_rebinding_protection=True, allowed_hosts=allowed_hosts, allowed_origins=srv.allowed_origins
-    )
+    if token is not None and not loopback and not srv.allowed_hosts:
+        # Remote service with bearer auth and no Host allowlist configured (e.g. `docker run` with the image's default
+        # command): a DNS-rebinding page cannot attach the bearer token, so Host/Origin checks would only turn every
+        # request addressed by a DNS name into a 421. Configure server.allowedHosts to re-enable them.
+        security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    else:
+        allowed_hosts = srv.allowed_hosts or ["127.0.0.1", "localhost", "127.0.0.1:*", "localhost:*", "[::1]:*"]
+        security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True, allowed_hosts=allowed_hosts, allowed_origins=srv.allowed_origins
+        )
     mcp = build_server(settings)
     app = mcp.streamable_http_app(
         streamable_http_path=srv.path,

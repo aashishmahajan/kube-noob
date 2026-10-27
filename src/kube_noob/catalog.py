@@ -221,7 +221,7 @@ ADDON_GROUPS_ON_VANILLA: dict[str, str] = {
     "monitoring.coreos.com": "Prometheus Operator (bundled with OpenShift monitoring)",
     "operators.coreos.com": "Operator Lifecycle Manager (bundled with OpenShift)",
     "platform.stackrox.io": "RHACS / StackRox Operator",
-    "gateway.networking.k8s.io": "Gateway API CRDs (install separately on vanilla Kubernetes)",
+    "gateway.networking.k8s.io": "Gateway API CRDs (install separately on vanilla Kubernetes and OpenShift < 4.19)",
     "snapshot.storage.k8s.io": "CSI external-snapshotter CRDs",
 }
 
@@ -589,7 +589,7 @@ KNOWN_STORAGE_CLASSES: dict[str, str] = {
     "azurefile-csi": "file.csi.azure.com",
     "lvms-vg1": "topolvm.io",
     "local-path": "rancher.io/local-path",
-    "standard": "rancher.io/local-path",
+    # "standard" is deliberately absent: it is local-path on kind, GCE PD on GKE and hostPath on minikube.
 }
 
 # Recommended StorageClass per platform and access mode for the generator.

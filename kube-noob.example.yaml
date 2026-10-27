@@ -1,4 +1,5 @@
-# kube-noob configuration (copy to ./kube-noob.yaml or ~/.config/kube-noob/config.yaml)
+# kube-noob configuration (copy to ~/.config/kube-noob/config.yaml, or pass --config <file> / KUBE_NOOB_CONFIG;
+# the current directory is not searched implicitly)
 webEnabled: false              # true = allow allowlisted web lookups (agent web search + kubenoob_web_fetch)
 web:
   allowedDomains: [kubernetes.io, helm.sh, docs.redhat.com, cloud.redhat.com, docs.aws.amazon.com, github.com]
@@ -13,7 +14,8 @@ llm:                           # used by `kube-noob ask` / `train bench`, never 
   model: claude-fable-5-1
   apiKeyEnv: ANTHROPIC_API_KEY
   # provider: openai-compatible
-  # baseUrl: http://localhost:8000/v1   # vLLM / Ollama / your fine-tuned kube-noob model
+  # baseUrl: http://localhost:8000/v1   # vLLM / Ollama / your fine-tuned kube-noob model (https, loopback or *.svc;
+  #                                     # set allowInsecureBaseUrl: true for other plain-http endpoints)
 judge:
   provider: none               # eval-only LLM judge; never exported as training labels
 server:

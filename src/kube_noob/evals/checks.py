@@ -9,10 +9,17 @@ A check spec is a mapping (YAML/JSON):
     maxSeverity: medium          # no finding above this severity
     forbidRules: [KN-S001]       # these rule ids must not fire (INFO-level advisories are ignored)
     minScore: 80                 # audit posture score threshold (0-100)
-    assertions:                  # field assertions on the first object of a kind
+    assertions:                  # field assertions (see _assert for every operator)
       - {kind: Deployment, path: spec.replicas, gte: 2}
       - {kind: Route, path: spec.tls.termination, in: [edge, reencrypt]}
       - {kind: PodDisruptionBudget, exists: true}
+      - {kind: EgressFirewall, path: "spec.egress[-1]", equals: {type: Deny, to: {cidrSelector: 0.0.0.0/0}}}
+      - {kind: EgressFirewall, path: spec.egress, containsItem: {type: Allow, to: {dnsName: s3.amazonaws.com}}}
+      - {kind: ClusterRole, all: true, path: "rules[*].verbs", subsetOf: [get, list, watch]}
+
+Paths: dotted keys, ``[n]`` indexes (negative allowed), ``[*]`` fans out over a list. By default an assertion passes if
+the first object of the kind that has the path satisfies it; ``all: true`` requires every object of the kind and every
+value the path fans out to (a missing path then fails).
 """
 
 from __future__ import annotations
@@ -27,7 +34,11 @@ from kube_noob.errors import ManifestError
 from kube_noob.yamlio import Document, load_documents
 
 _FENCE = re.compile(r"```(?:ya?ml|yml)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
-_PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+_PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(-?\d+|\*)\]")
+_MISSING = object()
+
+
+GATE_CAP = 0.4
 
 
 @dataclass
@@ -36,9 +47,16 @@ class CheckOutcome:
     passed: bool
     detail: str
     weight: float = 1.0
+    gating: bool = False
 
     def as_dict(self) -> dict[str, Any]:
-        return {"check": self.name, "passed": self.passed, "detail": self.detail, "weight": self.weight}
+        return {
+            "check": self.name,
+            "passed": self.passed,
+            "detail": self.detail,
+            "weight": self.weight,
+            "gating": self.gating,
+        }
 
 
 @dataclass
@@ -49,8 +67,13 @@ class Evaluation:
 
     @property
     def score(self) -> float:
+        """Weighted share of passed checks. Gating checks (field assertions and forbidden rules encode the task's
+        intent) cap the score at GATE_CAP when any of them fails, so a valid-but-wrong answer cannot score high."""
         total = sum(o.weight for o in self.outcomes)
-        return 0.0 if total == 0 else sum(o.weight for o in self.outcomes if o.passed) / total
+        raw = 0.0 if total == 0 else sum(o.weight for o in self.outcomes if o.passed) / total
+        if any(o.gating and not o.passed for o in self.outcomes):
+            return min(raw, GATE_CAP)
+        return raw
 
     @property
     def passed(self) -> bool:
@@ -76,54 +99,119 @@ def extract_yaml(answer: str) -> str:
     return answer
 
 
-def get_dotted(obj: Any, path: str) -> tuple[bool, Any]:
-    cur = obj
+def get_values(obj: Any, path: str) -> list[Any]:
+    """All values at ``path``; ``[*]`` fans out, negative indexes count from the end. Missing branches are dropped."""
+    current: list[Any] = [obj]
     for m in _PATH_TOKEN.finditer(path):
         key, idx = m.group(1), m.group(2)
-        if idx is not None:
-            if not isinstance(cur, list) or int(idx) >= len(cur):
-                return False, None
-            cur = cur[int(idx)]
-        else:
-            if not isinstance(cur, dict) or key not in cur:
-                return False, None
-            cur = cur[key]
-    return True, cur
+        nxt: list[Any] = []
+        for cur in current:
+            if idx == "*":
+                if isinstance(cur, list):
+                    nxt.extend(cur)
+            elif idx is not None:
+                i = int(idx)
+                if isinstance(cur, list) and -len(cur) <= i < len(cur):
+                    nxt.append(cur[i])
+            elif isinstance(cur, dict) and key in cur:
+                nxt.append(cur[key])
+        current = nxt
+    return current
+
+
+def get_dotted(obj: Any, path: str) -> tuple[bool, Any]:
+    values = get_values(obj, path)
+    return (True, values[0]) if values else (False, None)
+
+
+def _subset_match(item: Any, pattern: Any) -> bool:
+    """``pattern`` is a partial description of ``item`` (dict keys recursively, scalars by equality)."""
+    if isinstance(pattern, dict):
+        return isinstance(item, dict) and all(k in item and _subset_match(item[k], v) for k, v in pattern.items())
+    return bool(item == pattern)
+
+
+def _flatten(values: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    for v in values:
+        out.extend(v if isinstance(v, list) else [v])
+    return out
+
+
+def _check_value(a: dict[str, Any], val: Any) -> tuple[bool, str] | None:
+    """Evaluate one operator against one value. None means no operator was given."""
+    if "equals" in a:
+        return val == a["equals"], f"== {a['equals']!r}"
+    if "notEquals" in a:
+        return val != a["notEquals"], f"!= {a['notEquals']!r}"
+    if "in" in a:
+        return val in a["in"], f"in {a['in']!r}"
+    if "gte" in a:
+        return isinstance(val, int | float) and not isinstance(val, bool) and val >= a["gte"], f">= {a['gte']}"
+    if "lte" in a:
+        return isinstance(val, int | float) and not isinstance(val, bool) and val <= a["lte"], f"<= {a['lte']}"
+    if "contains" in a:
+        return isinstance(val, list | str) and a["contains"] in val, f"contains {a['contains']!r}"
+    if "notContains" in a:
+        return not (isinstance(val, list | str) and a["notContains"] in val), f"does not contain {a['notContains']!r}"
+    if "containsItem" in a:
+        ok = isinstance(val, list) and any(_subset_match(x, a["containsItem"]) for x in val)
+        return ok, f"has item {a['containsItem']!r}"
+    if "notContainsItem" in a:
+        ok = not (isinstance(val, list) and any(_subset_match(x, a["notContainsItem"]) for x in val))
+        return ok, f"has no item {a['notContainsItem']!r}"
+    if "subsetOf" in a:
+        items = val if isinstance(val, list) else [val]
+        extra = [x for x in items if x not in a["subsetOf"]]
+        return not extra, f"subset of {a['subsetOf']!r}" + (f" (extra: {extra!r})" if extra else "")
+    if "lenLte" in a:
+        return isinstance(val, list | str | dict) and len(val) <= a["lenLte"], f"len <= {a['lenLte']}"
+    if "lenGte" in a:
+        return isinstance(val, list | str | dict) and len(val) >= a["lenGte"], f"len >= {a['lenGte']}"
+    if "matches" in a:
+        return isinstance(val, str) and re.search(str(a["matches"]), val) is not None, f"matches {a['matches']!r}"
+    return None
 
 
 def _assert(docs: list[Document], a: dict[str, Any]) -> CheckOutcome:
     kind = a.get("kind")
     path = a.get("path")
-    name = f"{kind}{('.' + path) if path else ''}"
+    every = bool(a.get("all"))
+    name = f"{'all ' if every else ''}{kind}{('.' + path) if path else ''}"
     cands = [d for d in docs if d.kind == kind]
     if not cands:
         return CheckOutcome(f"assert {name}", False, f"no {kind} object found")
     if not path:
         return CheckOutcome(f"assert {name}", bool(a.get("exists", True)), f"{kind} present")
-    found, val = False, None
-    for d in cands:
-        found, val = get_dotted(d.data, path)
-        if found:
-            break
+    per_doc = [get_values(d.data, path) for d in cands]
     if "exists" in a:
-        ok = found == bool(a["exists"])
-        return CheckOutcome(f"assert {name} exists={a['exists']}", ok, f"found={found}")
-    if not found:
+        want = bool(a["exists"])
+        found = [bool(v) for v in per_doc]
+        ok = all(f == want for f in found) if every else (any(found) == want)
+        return CheckOutcome(f"assert {name} exists={want}", ok, f"found={found if every else any(found)}")
+    if every:
+        if not all(per_doc):
+            return CheckOutcome(f"assert {name}", False, f"{path} not set on every {kind}")
+        values = [v for vs in per_doc for v in vs]
+        # subsetOf over fanned-out lists judges the union of all items
+        if "subsetOf" in a:
+            res = _check_value(a, _flatten(values))
+            assert res is not None  # noqa: S101
+            return CheckOutcome(f"assert {name} {res[1]}", res[0], f"got {_flatten(values)!r}"[:300])
+        results = [(v, _check_value(a, v)) for v in values]
+        if results and results[0][1] is None:
+            return CheckOutcome(f"assert {name}", True, "present")
+        bad = [v for v, r in results if r is not None and not r[0]]
+        label = results[0][1][1] if results and results[0][1] else ""
+        return CheckOutcome(f"assert {name} {label}", not bad, f"failing values {bad!r}"[:300] if bad else "ok")
+    vals = next((v for v in per_doc if v), None)
+    if vals is None:
         return CheckOutcome(f"assert {name}", False, f"{path} not set")
-    if "equals" in a:
-        return CheckOutcome(f"assert {name} == {a['equals']!r}", val == a["equals"], f"got {val!r}")
-    if "in" in a:
-        return CheckOutcome(f"assert {name} in {a['in']!r}", val in a["in"], f"got {val!r}")
-    if "gte" in a:
-        ok = isinstance(val, int | float) and val >= a["gte"]
-        return CheckOutcome(f"assert {name} >= {a['gte']}", ok, f"got {val!r}")
-    if "contains" in a:
-        ok = isinstance(val, list | str) and a["contains"] in val
-        return CheckOutcome(f"assert {name} contains {a['contains']!r}", ok, f"got {val!r}")
-    if "matches" in a:
-        ok = isinstance(val, str) and re.search(str(a["matches"]), val) is not None
-        return CheckOutcome(f"assert {name} matches {a['matches']!r}", ok, f"got {val!r}")
-    return CheckOutcome(f"assert {name}", True, "present")
+    target: Any = _flatten(vals) if "[*]" in path else vals[0]
+    res = _check_value(a, target)
+    if res is None:
+        return CheckOutcome(f"assert {name}", True, "present")
+    return CheckOutcome(f"assert {name} {res[1]}", res[0], f"got {target!r}"[:300])
 
 
 def evaluate(answer: str, spec: dict[str, Any]) -> Evaluation:
@@ -141,7 +229,7 @@ def evaluate(answer: str, spec: dict[str, Any]) -> Evaluation:
     for k in spec.get("kinds") or []:
         outcomes.append(CheckOutcome(f"kind {k}", k in present, "present" if k in present else "missing"))
     if spec.get("schemaValid"):
-        errs = [f for f in report.findings if f.rule_id in {"KN-V007", "KN-V001", "KN-V002", "KN-V010"}]
+        errs = [f for f in report.findings if f.rule_id in {"KN-V007", "KN-V001", "KN-V002", "KN-V010", "KN-V018"}]
         outcomes.append(
             CheckOutcome("schema valid", not errs, "; ".join(f.message for f in errs[:3]) or "ok", weight=2.0)
         )
@@ -159,7 +247,9 @@ def evaluate(answer: str, spec: dict[str, Any]) -> Evaluation:
     for rid in spec.get("forbidRules") or []:
         hits = [f for f in report.findings if f.rule_id == rid and f.severity >= Severity.LOW]
         outcomes.append(
-            CheckOutcome(f"rule {rid} not triggered", not hits, hits[0].message if hits else "ok", weight=1.5)
+            CheckOutcome(
+                f"rule {rid} not triggered", not hits, hits[0].message if hits else "ok", weight=1.5, gating=True
+            )
         )
     if "minScore" in spec:
         outcomes.append(
@@ -171,5 +261,7 @@ def evaluate(answer: str, spec: dict[str, Any]) -> Evaluation:
             )
         )
     for a in spec.get("assertions") or []:
-        outcomes.append(_assert(docs, a))
+        outcome = _assert(docs, a)
+        outcome.weight, outcome.gating = 2.0, True
+        outcomes.append(outcome)
     return Evaluation(outcomes, report, parsed=True)

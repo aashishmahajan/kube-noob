@@ -134,7 +134,14 @@ _LOG_REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     ),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "***PRIVATE KEY***"),
     (re.compile(r"(?i)(://[^:/\s]+:)[^@/\s]+@"), r"\1***@"),
+    (re.compile(r"\bhv[sbr]\.[A-Za-z0-9_-]{20,}"), "***VAULT_TOKEN***"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), "***GITHUB_TOKEN***"),
+    (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "***SLACK_TOKEN***"),
+    (re.compile(r"(?i)(--?[a-z0-9_.-]*(?:password|passwd|secret|token|api[-_]?key)[=\s]+)[^\s\"',;]+"), r"\1***"),
 ]
+
+
+_BARE_SECRET_FLAG = re.compile(r"(?i)^--?[a-z0-9_.-]*(?:password|passwd|secret|token|api[-_]?key)$")
 
 
 def redact_text(text: str) -> str:
@@ -154,9 +161,13 @@ def _kind_for(plural: str) -> str | None:
 
 
 def _redact_obj(obj: Any, kind_hint: str | None = None) -> Any:
+    """Redact everything that could carry a credential before it reaches a model: ConfigMap payloads, sensitive env
+    values and annotations, last-applied configs, and credential-looking substrings in every other string."""
     if isinstance(obj, dict):
         out: dict[str, Any] = {}
-        kind = obj.get("kind", kind_hint)
+        own = obj.get("kind")
+        # A resource-derived hint wins over a generic or missing echo ("List" from kubectl, nothing on list items).
+        kind = kind_hint if (kind_hint and own in (None, "", "List")) else (own if isinstance(own, str) else kind_hint)
         for k, v in obj.items():
             if k == "managedFields":
                 continue
@@ -164,13 +175,22 @@ def _redact_obj(obj: Any, kind_hint: str | None = None) -> Any:
                 out[k] = {key: f"<redacted {len(str(val))} bytes>" for key, val in v.items()}
                 continue
             if k == "annotations" and isinstance(v, dict):
-                out[k] = {ak: ("<redacted>" if "last-applied-configuration" in ak else av) for ak, av in v.items()}
+                out[k] = {
+                    ak: (
+                        "<redacted>"
+                        if "last-applied-configuration" in ak or SENSITIVE_ENV.search(str(ak))
+                        else redact_text(av)
+                        if isinstance(av, str)
+                        else av
+                    )
+                    for ak, av in v.items()
+                }
                 continue
             if k == "env" and isinstance(v, list):
                 out[k] = [
                     {**e, "value": "***"}
                     if isinstance(e, dict) and "value" in e and SENSITIVE_ENV.search(str(e.get("name", "")))
-                    else e
+                    else _redact_obj(e, kind)
                     for e in v
                 ]
                 continue
@@ -178,7 +198,18 @@ def _redact_obj(obj: Any, kind_hint: str | None = None) -> Any:
             out[k] = _redact_obj(v, _element_kind(kind) if k == "items" else kind)
         return out
     if isinstance(obj, list):
-        return [_redact_obj(x, kind_hint) for x in obj]
+        out_list = [_redact_obj(x, kind_hint) for x in obj]
+        # argv style ["--token", "abc"]: the value follows a bare secret flag
+        for i in range(len(out_list) - 1):
+            if (
+                isinstance(out_list[i], str)
+                and isinstance(out_list[i + 1], str)
+                and _BARE_SECRET_FLAG.match(out_list[i])
+            ):
+                out_list[i + 1] = "***"
+        return out_list
+    if isinstance(obj, str):
+        return redact_text(obj)
     return obj
 
 

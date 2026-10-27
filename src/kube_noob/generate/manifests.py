@@ -56,7 +56,9 @@ def _probe(bp: Blueprint, path: str, *, liveness: bool) -> dict[str, Any]:
     if bp.probe == "tcp":
         handler = {"tcpSocket": {"port": bp.port_name}}
     else:
-        scheme = "HTTPS" if bp.exposure.tls == "reencrypt" and bp.exposure.type == "route" else "HTTP"
+        # reencrypt and passthrough Routes both mean the pod itself serves TLS on its port.
+        tls_in_pod = bp.exposure.type == "route" and bp.exposure.tls in {"reencrypt", "passthrough"}
+        scheme = "HTTPS" if tls_in_pod else "HTTP"
         handler = {"httpGet": {"path": path, "port": bp.port_name, "scheme": scheme}}
     timing = (
         {"periodSeconds": 10, "timeoutSeconds": 3, "failureThreshold": 3}
@@ -469,7 +471,19 @@ def generate(bp: Blueprint) -> Generated:
                 "adjust the namespaceSelector for other controllers."
             )
     if bp.exposure.type == "gateway":
-        prereq.append("Gateway API CRDs and a Gateway that allows routes from this namespace.")
+        if bp.platform in OPENSHIFT_FAMILY:
+            prereq.append(
+                "A Gateway that allows routes from this namespace, backed by a GatewayClass with controllerName "
+                "openshift.io/gateway-controller/v1 (OpenShift 4.19+ manages the Gateway API CRDs; earlier versions "
+                "need them installed)."
+            )
+        else:
+            prereq.append("Gateway API CRDs and a Gateway that allows routes from this namespace.")
+    if bp.exposure.type == "route" and bp.exposure.tls == "passthrough":
+        prereq.append(
+            "passthrough: the router forwards encrypted traffic untouched, so the app must serve TLS on port "
+            f"{bp.port} with a certificate valid for the Route host (probes use HTTPS; no path-based routing)."
+        )
     if _reencrypt(bp):
         prereq.append(
             f"The app must serve TLS on port {bp.port} using /etc/tls/private/tls.crt and tls.key (the "

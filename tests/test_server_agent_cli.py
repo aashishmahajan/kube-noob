@@ -240,3 +240,25 @@ def test_export_datasets(tmp_path: Path) -> None:
     assert all(r["metadata"]["labelSource"] == "deterministic" for r in lines)
     grpo = export_grpo(tmp_path / "grpo.jsonl")
     assert grpo["records"] == 16
+
+
+def test_http_host_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from starlette.testclient import TestClient
+
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}},
+    }
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    # Loopback sidecar without a token: DNS-rebinding protection rejects foreign Host headers.
+    with TestClient(http_app(load_settings()), base_url="http://evil.example") as client:
+        assert client.post("/mcp", json=init, headers=headers).status_code == 421
+    # Token-authenticated remote bind without an allowlist: reachable by its Service DNS name.
+    monkeypatch.setenv("KUBE_NOOB_HTTP_TOKEN", "s3cret-token")
+    remote = load_settings(overrides={"server": {"host": "0.0.0.0"}})  # noqa: S104
+    with TestClient(http_app(remote), base_url="http://kube-noob.ns.svc:8080") as client:
+        r = client.post("/mcp", json=init, headers={**headers, "Authorization": "Bearer s3cret-token"})
+        assert r.status_code == 200, r.text
+        assert client.post("/mcp", json=init, headers=headers).status_code == 401

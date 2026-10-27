@@ -9,6 +9,7 @@ sources:
   - {title: "Red Hat OpenShift Service on AWS documentation", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_service_on_aws/", license: CC-BY-SA-3.0}
   - {title: "openshift/hypershift", url: "https://github.com/openshift/hypershift", license: Apache-2.0}
   - {title: "Red Hat Cloud Experts - ROSA", url: "https://cloud.redhat.com/experts/rosa/", license: Apache-2.0}
+  - {title: "OpenShift docs: pod and service CIDR defaults (ROSA / ROSA HCP)", url: "https://github.com/openshift/openshift-docs/blob/main/modules/pod-cidr-description.adoc", license: Apache-2.0}
 ---
 # ROSA: Classic vs Hosted Control Planes
 
@@ -28,7 +29,9 @@ dedicated control plane and infra nodes).
   run a newer version than the control plane and must stay within two minor versions of it.
 - Networking: machine CIDR at least /25 for single-AZ and /24 for multi-AZ (default 10.0.0.0/16, immutable after
   install); VPC must have DNS hostnames and DNS resolution enabled; public clusters need a public subnet with a NAT
-  gateway, private clusters do not. Default cluster network 10.132.0.0/14 and service network 172.31.0.0/16.
+  gateway, private clusters do not. Defaults: pod (cluster) network 10.128.0.0/14, service network 172.30.0.0/16,
+  host prefix /23 (the 10.132.0.0/14 / 172.31.0.0/16 defaults belong to self-managed hosted control planes, not
+  ROSA).
 - Node configuration: use the managed interfaces - `rosa create kubeletconfig` for kubelet tuning and machine pools
   (`rosa create|edit machinepool`) for instance type, labels, taints and autoscaling. The Machine Config Operator does
   not run in the hosted cluster (HyperShift applies node config from the management side via NodePool), so

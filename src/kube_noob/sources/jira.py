@@ -40,6 +40,7 @@ _ACCOUNT = re.compile(r"\[~accountid:[^\]]+\]|accountId[\"=:]\s*\"?[0-9a-f:-]{10
 MAX_COMMENTS = 20
 MAX_TEXT = 20_000
 LONG_JQL = 1500  # characters; above this the search request is sent as POST
+MAX_RETRY_AFTER = 120.0  # seconds; a larger Retry-After is capped so a pull cannot hang for hours
 
 
 class JiraError(KubeNoobError):
@@ -140,8 +141,12 @@ class JiraClient:
         max_retries: int = 6,
         sleep: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
+        auth: tuple[str, str] | None = None,
     ) -> None:
+        if auth is not None and not base_url.startswith("https://"):
+            raise JiraError("Jira credentials are only sent over https; use an https:// base URL")
         self.http = client
+        self.auth = httpx.BasicAuth(*auth) if auth else None
         self.base = base_url.rstrip("/")
         self.min_delay = min_delay
         self.jitter = jitter
@@ -168,9 +173,11 @@ class JiraClient:
             self.stats.requests += 1
             try:
                 if method == "POST":
-                    resp = self.http.post(url, json=body, headers={**headers, "Content-Type": "application/json"})
+                    resp = self.http.post(
+                        url, json=body, headers={**headers, "Content-Type": "application/json"}, auth=self._auth()
+                    )
                 else:
-                    resp = self.http.get(url, params=params, headers=headers)
+                    resp = self.http.get(url, params=params, headers=headers, auth=self._auth())
             except httpx.TransportError as exc:
                 if attempt == self.max_retries:
                     raise JiraError(f"{method} {path} failed: {exc}") from exc
@@ -189,13 +196,16 @@ class JiraClient:
             raise JiraError(f"{method} {path}: HTTP {resp.status_code}: {resp.text[:400]}")
         raise JiraError(f"{method} {path}: retries exhausted")
 
+    def _auth(self) -> Any:
+        return self.auth if self.auth is not None else httpx.USE_CLIENT_DEFAULT
+
     def _backoff(self, attempt: int, retry_after: str | None) -> None:
         self.stats.retries += 1
         delay = min(60.0, (2**attempt) * 1.0)
         delay = self.rng.uniform(0, delay)  # full jitter
         if retry_after:
             with contextlib.suppress(ValueError):
-                delay = max(delay, float(retry_after))
+                delay = max(delay, min(float(retry_after), MAX_RETRY_AFTER))
         self.sleep(delay)
 
     def versions(self, project: str) -> list[dict[str, Any]]:

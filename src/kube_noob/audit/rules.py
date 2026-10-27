@@ -20,6 +20,7 @@ from kube_noob.audit.podspec import (
     PodTemplate,
     containers,
     effective_security,
+    pdb_allows_no_disruption,
     pod_template,
     replicas,
     selector_matches,
@@ -265,6 +266,13 @@ def _v004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         if g in ADDON_GROUPS_ON_VANILLA:
             if ctx.is_openshift and g in {"k8s.ovn.org", "monitoring.coreos.com", "operators.coreos.com"}:
                 continue
+            # OpenShift 4.19+ ships the standard-channel Gateway API CRDs, managed by the Ingress Operator.
+            if (
+                ctx.is_openshift
+                and g == "gateway.networking.k8s.io"
+                and (ctx.platform_version is None or parse_minor(ctx.platform_version) >= (4, 19))
+            ):
+                continue
             yield r.finding(d, ("apiVersion",), f"{d.kind} needs: {ADDON_GROUPS_ON_VANILLA[g]}.")
 
 
@@ -350,8 +358,14 @@ def _v009(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         name = d.name
         if not name:
             continue
-        limit = 63 if d.kind in {"Service", "Namespace", "Project"} else 253
-        if len(name) > limit or not DNS1123_SUBDOMAIN.match(name) or (d.kind == "Service" and "." in name):
+        label_only = d.kind in {"Service", "Namespace", "Project"}  # DNS label (Service: DNS-1035, must start a-z)
+        limit = 63 if label_only else 253
+        if (
+            len(name) > limit
+            or not DNS1123_SUBDOMAIN.match(name)
+            or (label_only and "." in name)
+            or (d.kind == "Service" and not name[0].isalpha())
+        ):
             yield r.finding(d, ("metadata", "name"), f"'{name}' is not a valid name for {d.kind} (limit {limit}).")
 
 
@@ -553,6 +567,24 @@ def _v017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         yield r.finding(d, ("kind",), f"{d.kind} is not a supported customer lever on {ctx.platform}.")
 
 
+@rule(
+    "KN-V018",
+    "Duplicate key in a YAML mapping",
+    Stage.VALIDATE,
+    "schema",
+    Severity.CRITICAL,
+    "Remove the duplicate key and merge its fields into a single mapping.",
+    "YAML parsers keep the last value silently, so the object you review is not the one you wrote; kubectl's strict "
+    "field validation (the default) rejects duplicate fields outright.",
+)
+def _v018(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.docs:
+        for path, line in d.duplicate_keys:
+            f = r.finding(d, path, f"Duplicate key '{fmt_path(path)}' (second occurrence on line {line}).")
+            f.line = line
+            yield f
+
+
 # =====================================================================================================
 # AUDIT - security
 # =====================================================================================================
@@ -585,6 +617,30 @@ SENSITIVE_ENV = re.compile(
     r"(PASS(WORD|WD)?|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL|ACCESS[_-]?KEY)", re.IGNORECASE
 )
 RUNTIME_SOCKETS = ("docker.sock", "containerd.sock", "crio.sock", "cri-dockerd.sock")
+# --password=x / --token x / password=x style arguments (group 1: dashes, group 3: inline value)
+_SECRET_FLAG = re.compile(
+    r"(?i)^(-{1,2})?([a-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|credentials?))"
+    r"(?:[=:](.+))?$"
+)
+_EMBEDDED_SECRET = re.compile(
+    r"://[^:/\s@]+:[^@/\s$]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"
+    r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+)
+
+
+def _is_reference(value: str) -> bool:
+    v = value.strip()
+    return v.startswith(("$(", "${")) or v in {"", "-", "***", "<redacted>"}
+
+
+def _secret_flag_value(arg: str) -> bool:
+    m = _SECRET_FLAG.match(arg.strip())
+    return bool(m and m.group(3) and not _is_reference(m.group(3)))
+
+
+def _bare_secret_flag(arg: str) -> bool:
+    m = _SECRET_FLAG.match(arg.strip())
+    return bool(m and m.group(1) and m.group(3) is None)
 
 
 def _containers(ctx: AuditContext) -> Iterator[tuple[Document, PodTemplate, ContainerRef]]:
@@ -679,15 +735,16 @@ def _s003(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 
 @rule(
     "KN-S004",
-    "Fixed UID/GID conflicts with OpenShift restricted-v2 SCC",
+    "Fixed UID/fsGroup conflicts with OpenShift restricted-v2 SCC",
     Stage.AUDIT,
     "platform",
     Severity.HIGH,
-    "Remove runAsUser/runAsGroup/fsGroup and let OpenShift assign IDs from the namespace range; keep "
-    "runAsNonRoot: true. If a fixed UID is truly required, bind the ServiceAccount to the nonroot-v2 SCC.",
-    "restricted-v2 uses MustRunAsRange: pods requesting a UID outside the namespace's "
-    "openshift.io/sa.scc.uid-range annotation are rejected ('unable to validate against any security context "
-    "constraint').",
+    "Remove runAsUser/fsGroup and let OpenShift assign IDs from the namespace range; keep runAsNonRoot: true. If a "
+    "fixed UID is truly required, bind the ServiceAccount to the nonroot-v2 SCC. (runAsGroup is not governed by "
+    "SCCs and is left alone.)",
+    "restricted-v2 uses MustRunAsRange for UIDs and MustRunAs for fsGroup: pods requesting IDs outside the "
+    "namespace's openshift.io/sa.scc.uid-range / supplemental-groups annotations are rejected ('unable to validate "
+    "against any security context constraint').",
     ("ocp-scc",),
 )
 def _s004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
@@ -696,7 +753,7 @@ def _s004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, pt in ctx.workloads():
         psc = pt.spec.get("securityContext")
         if isinstance(psc, dict):
-            for f in ("runAsUser", "runAsGroup", "fsGroup"):
+            for f in ("runAsUser", "fsGroup"):
                 if isinstance(psc.get(f), int) and psc[f] != 0:
                     yield r.finding(
                         d,
@@ -706,7 +763,7 @@ def _s004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         for c in containers(pt):
             csc = c.container.get("securityContext")
             if isinstance(csc, dict):
-                for f in ("runAsUser", "runAsGroup"):
+                for f in ("runAsUser",):
                     if isinstance(csc.get(f), int) and csc[f] != 0:
                         yield r.finding(
                             d,
@@ -941,10 +998,36 @@ def _s012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 def _s013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, _pt, c in _containers(ctx):
         for i, e in enumerate(c.container.get("env") or []):
-            if isinstance(e, dict) and SENSITIVE_ENV.search(str(e.get("name", ""))) and e.get("value"):
+            if not isinstance(e, dict) or not isinstance(e.get("value"), str) or _is_reference(e["value"]):
+                continue
+            if SENSITIVE_ENV.search(str(e.get("name", ""))):
                 yield r.finding(
                     d, (*c.path, "env", i, "value"), f"Container '{c.name}' sets {e['name']} as a literal value."
                 )
+            elif _EMBEDDED_SECRET.search(e["value"]):
+                yield r.finding(
+                    d,
+                    (*c.path, "env", i, "value"),
+                    f"Container '{c.name}' env {e.get('name')} embeds a credential (URL password, key or token).",
+                )
+        for field_name in ("command", "args"):
+            items = c.container.get(field_name)
+            if not isinstance(items, list):
+                continue
+            strs = [x if isinstance(x, str) else "" for x in items]
+            for i, arg in enumerate(strs):
+                nxt = strs[i + 1] if i + 1 < len(strs) else ""
+                if (
+                    _secret_flag_value(arg)
+                    or _EMBEDDED_SECRET.search(arg)
+                    or (_bare_secret_flag(arg) and nxt and not nxt.startswith("-") and not _is_reference(nxt))
+                ):
+                    yield r.finding(
+                        d,
+                        (*c.path, field_name, i),
+                        f"Container '{c.name}' passes a literal credential in {field_name}[{i}] (visible in the pod "
+                        "spec and the process list).",
+                    )
 
 
 @rule(
@@ -1180,6 +1263,19 @@ def _n003(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             yield r.finding(d, ("spec",), "Ingress has no spec.tls.")
 
 
+# Annotation -> values that make a cloud load balancer internal-only (documented by each provider / controller).
+INTERNAL_LB_ANNOTATIONS: dict[str, frozenset[str]] = {
+    "service.beta.kubernetes.io/aws-load-balancer-internal": frozenset({"true", "0.0.0.0/0"}),
+    "service.beta.kubernetes.io/aws-load-balancer-scheme": frozenset({"internal"}),  # AWS Load Balancer Controller
+    "service.beta.kubernetes.io/azure-load-balancer-internal": frozenset({"true"}),
+    "networking.gke.io/load-balancer-type": frozenset({"internal"}),
+    "cloud.google.com/load-balancer-type": frozenset({"internal"}),
+    "service.beta.kubernetes.io/openstack-internal-load-balancer": frozenset({"true"}),
+    "service.beta.kubernetes.io/oci-load-balancer-internal": frozenset({"true"}),
+    "service.kubernetes.io/ibm-load-balancer-cloud-provider-ip-type": frozenset({"private"}),
+}
+
+
 @rule(
     "KN-N004",
     "LoadBalancer Service open to the internet",
@@ -1197,10 +1293,21 @@ def _n004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         if get_path(d.data, ("spec", "type")) != "LoadBalancer":
             continue
         ann = get_path(d.data, ("metadata", "annotations")) or {}
-        internal = any("internal" in str(k) and str(v).lower() in {"true", "0.0.0.0/0"} for k, v in ann.items())
-        if not get_path(d.data, ("spec", "loadBalancerSourceRanges")) and not internal:
+        internal = isinstance(ann, dict) and any(
+            str(ann.get(k, "")).strip().lower() in vals for k, vals in INTERNAL_LB_ANNOTATIONS.items()
+        )
+        ranges = get_path(d.data, ("spec", "loadBalancerSourceRanges")) or []
+        if internal:
+            continue
+        if not ranges:
             yield r.finding(
                 d, ("spec", "type"), "type: LoadBalancer without loadBalancerSourceRanges or an internal annotation."
+            )
+        elif isinstance(ranges, list) and any(str(x).strip() in {"0.0.0.0/0", "::/0"} for x in ranges):
+            yield r.finding(
+                d,
+                ("spec", "loadBalancerSourceRanges"),
+                "loadBalancerSourceRanges includes 0.0.0.0/0 or ::/0, which allows the whole internet.",
             )
 
 
@@ -1266,8 +1373,30 @@ def _n006(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 def _n007(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d in ctx.by_kind("NetworkPolicy"):
         for i, rule_ in enumerate(get_path(d.data, ("spec", "ingress")) or []):
-            if rule_ == {} or (isinstance(rule_, dict) and not rule_.get("from") and not rule_.get("ports")):
-                yield r.finding(d, ("spec", "ingress", i), "Ingress rule admits all sources on all ports.")
+            if not isinstance(rule_, dict):
+                continue
+            peers = rule_.get("from")
+            if not peers:
+                if not rule_.get("ports"):
+                    yield r.finding(d, ("spec", "ingress", i), "Ingress rule admits all sources on all ports.")
+                continue
+            for j, peer in enumerate(peers if isinstance(peers, list) else []):
+                if not isinstance(peer, dict):
+                    continue
+                ipb = peer.get("ipBlock")
+                if isinstance(ipb, dict) and str(ipb.get("cidr", "")).strip() in _ANY_CIDR and not ipb.get("except"):
+                    yield r.finding(
+                        d,
+                        ("spec", "ingress", i, "from", j, "ipBlock"),
+                        f"ipBlock {ipb.get('cidr')} admits every source address.",
+                    )
+                ns_sel, pod_sel = peer.get("namespaceSelector"), peer.get("podSelector")
+                if ns_sel == {} and pod_sel in (None, {}):
+                    yield r.finding(
+                        d,
+                        ("spec", "ingress", i, "from", j, "namespaceSelector"),
+                        "namespaceSelector: {} without a podSelector admits every pod in every namespace.",
+                    )
 
 
 # =====================================================================================================
@@ -1334,9 +1463,24 @@ def _st001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                         "default StorageClass supports ReadWriteMany (most block classes do not).",
                         severity=Severity.MEDIUM,
                     )
+            elif sc != "":  # "" = static binding to a pre-created PV, no provisioner involved
+                yield r.finding(
+                    d,
+                    (*path, "storageClassName"),
+                    f"StorageClass '{sc}' is neither defined in this bundle nor a known platform class: cannot verify "
+                    "that its provisioner supports ReadWriteMany. Include the StorageClass or use a known RWX class.",
+                    severity=Severity.MEDIUM,
+                )
             continue
         p = PROVISIONERS.get(prov)
         if p is None:
+            yield r.finding(
+                d,
+                (*path, "storageClassName"),
+                f"Provisioner '{prov}' of StorageClass '{sc}' is not in kube-noob's catalog: verify it supports "
+                "ReadWriteMany before relying on it.",
+                severity=Severity.MEDIUM,
+            )
             continue
         block = spec.get("volumeMode") == "Block"
         if not (p.rwx_filesystem or (block and p.rwx_block)):
@@ -1651,9 +1795,7 @@ def _c009(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         reps = replicas(d) or 1
         for p in _pdbs_for(ctx, d, pt.labels()):
             spec = p.data.get("spec") or {}
-            mu, ma = spec.get("maxUnavailable"), spec.get("minAvailable")
-            blocked = mu in (0, "0", "0%") or (isinstance(ma, int) and ma >= reps) or ma == "100%"
-            if blocked:
+            if pdb_allows_no_disruption(spec, reps):
                 yield r.finding(p, ("spec",), f"{p.ref()} allows no disruptions for {d.ref()} ({reps} replicas).")
 
 

@@ -63,10 +63,20 @@ def test_toolkit_all_offline_tools(tmp_path: Path) -> None:
     assert kit.quiz(tk.QuizIn(question_id="k8s-q-exit137"))["choices"]
     assert kit.quiz(tk.QuizIn(question_id="k8s-q-exit137", choice=0))["correct"] is False
     assert kit.progress(tk.LearnerIn(learner="t"))["credits"] == 0
-    g = kit.grade(tk.GradeIn(completion="helm history then rollback the pending release", task_id="bench-qa-helm-lock"))
+    g = kit.grade(
+        tk.GradeIn(
+            completion=(
+                "The release is stuck in a pending-upgrade state from an interrupted operation. Run helm history to "
+                "find the last deployed revision, then helm rollback to it and retry the upgrade."
+            ),
+            task_id="bench-qa-helm-lock",
+        )
+    )
     assert g["components"]["task"] == 1.0
-    inline = kit.grade(tk.GradeIn(completion="x", task={"id": "t", "type": "qa", "mustMention": ["x"]}))
+    inline = kit.grade(tk.GradeIn(completion="x", task={"id": "t", "type": "qa", "mustMention": ["x"], "minWords": 1}))
     assert inline["components"]["task"] == 1.0
+    short = kit.grade(tk.GradeIn(completion="x", task={"id": "t", "type": "qa", "mustMention": ["x"]}))
+    assert short["components"]["task"] == pytest.approx(1 / 20)
     with pytest.raises(ValueError):
         kit.grade(tk.GradeIn(completion="x"))
     assert kit.config_status(tk.EmptyIn())["config"]["webEnabled"] is False
@@ -158,7 +168,10 @@ class FakeProvider:
 
     def turn(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> providers.Turn:
         return providers.Turn(
-            "helm history, then rollback the pending release [kn:helm-troubleshooting#0]",
+            (
+                "The release is stuck in a pending-upgrade state from an interrupted operation. Run helm history to "
+                "find the last deployed revision, then helm rollback to it and retry [kn:helm-troubleshooting#0]."
+            ),
             [],
             "end_turn",
             self.model,

@@ -78,6 +78,21 @@ jobs:
             --set route.enabled=true --set config.clusterEnabled=true \
             --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" \
             | kube-noob audit -f - --platform openshift --version 4.22 --fail-on medium
+      - name: Chart guards (fail-closed NetworkPolicy, fsGroup only off-OpenShift, web flag wired to env)
+        run: |
+          set -euo pipefail
+          base="--set auth.existingSecret=kn-token"
+          if helm template kn deploy/helm/kube-noob $base --set networkPolicy.allowSameNamespace=false \
+               --set networkPolicy.allowRouter=false >/dev/null 2>&1; then
+            echo "::error title=chart::NetworkPolicy with no allowed source must fail to render"; exit 1
+          fi
+          helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true | grep -q "fsGroup: 1001"
+          if helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true \
+               --api-versions security.openshift.io/v1 | grep -q "fsGroup"; then
+            echo "::error title=chart::fsGroup must not be set on OpenShift"; exit 1
+          fi
+          helm template kn deploy/helm/kube-noob $base --set config.webEnabled=true \
+            | grep -A1 "name: KUBE_NOOB_WEB_ENABLED" | grep -q '"true"'
       - name: Audit the sidecar example
         run: kube-noob audit -f deploy/sidecar/app-with-kube-noob-sidecar.yaml --platform openshift --fail-on medium
       - name: Generated Helm charts render and audit clean

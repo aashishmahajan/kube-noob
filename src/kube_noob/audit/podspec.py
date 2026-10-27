@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -122,3 +123,27 @@ def selector_matches(selector: dict[str, Any] | None, labels: dict[str, str]) ->
         if op == "DoesNotExist" and key in labels:
             return False
     return True
+
+
+def _scaled(value: Any, total: int) -> int | None:
+    """IntOrString as the disruption controller scales it (percentages round up)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        v = value.strip()
+        if v.endswith("%") and v[:-1].isdigit():
+            return math.ceil(int(v[:-1]) * total / 100)
+        if v.isdigit():
+            return int(v)
+    return None
+
+
+def pdb_allows_no_disruption(spec: dict[str, Any], replica_count: int) -> bool:
+    """True when a PDB with this spec permits zero voluntary evictions for ``replica_count`` healthy pods."""
+    mu = _scaled(spec.get("maxUnavailable"), replica_count)
+    if mu is not None:
+        return mu <= 0
+    ma = _scaled(spec.get("minAvailable"), replica_count)
+    return ma is not None and ma >= replica_count

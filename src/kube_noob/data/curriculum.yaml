@@ -395,7 +395,7 @@ tracks:
         source: kn:rosa-hcp#0
       - id: rosa-q-upgrade
         question: How are ROSA HCP upgrades sequenced?
-        choices: [Workers first, Control plane first, then machine pools separately, Everything at once, Only by Red Hat]
+        choices: ["Workers first", "Control plane first, then machine pools separately", "Everything at once", "Only by Red Hat"]
         answer: 1
         explanation: The hosted control plane is upgraded first; machine pools follow and must stay within two minors.
         source: kn:rosa-hcp#0

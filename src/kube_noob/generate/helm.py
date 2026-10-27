@@ -108,7 +108,9 @@ def generate_chart(bp: Blueprint, out_dir: str | Path, chart_version: str = "0.1
         raise KubeNoobError(f"chart version {chart_version!r} must be SemVer 2 (e.g. 0.1.0)")
     gen = generate(bp)
     repo, tag = _split_image(bp.image)
-    app_version = tag.lstrip(":") if tag and not tag.startswith("@") else "0.0.0"
+    if not tag:
+        tag = "latest"  # an untagged reference means :latest; keep that explicit (and audited) instead of 0.0.0
+    app_version = tag.lstrip(":") if not tag.startswith("@") else "0.0.0"
     out = Path(out_dir) / bp.name
     if out.exists() and any(out.iterdir()):
         raise KubeNoobError(f"{out} already exists and is not empty; choose another output directory")

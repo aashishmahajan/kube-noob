@@ -27,9 +27,10 @@ COPY --from=build /opt/kube-noob /opt/kube-noob
 RUN mkdir -p /var/lib/kube-noob /etc/kube-noob \
  && chgrp -R 0 /var/lib/kube-noob /etc/kube-noob \
  && chmod -R g=u /var/lib/kube-noob /etc/kube-noob
+# webEnabled / cluster.enabled are deliberately not baked in as env vars: env overrides the config file, so an image
+# default would silently ignore `webEnabled: true` in a mounted config. Both default to false in code.
 ENV PATH="/opt/kube-noob/bin:${PATH}" \
     KUBE_NOOB_DATA_DIR=/var/lib/kube-noob \
-    KUBE_NOOB_WEB_ENABLED=false \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/tmp

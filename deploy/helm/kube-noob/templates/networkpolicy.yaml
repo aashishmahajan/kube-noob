@@ -1,4 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if not (or .Values.networkPolicy.allowSameNamespace .Values.networkPolicy.allowRouter .Values.networkPolicy.allowIngressNamespace) }}
+{{- fail "networkPolicy needs at least one allowed source (allowSameNamespace, allowRouter or allowIngressNamespace); an empty 'from' would admit every source" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

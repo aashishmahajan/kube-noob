@@ -7,6 +7,7 @@ updated: 2026-10-27
 license: Apache-2.0
 sources:
   - {title: "stackrox secured-cluster Helm templates (admission-controller.yaml)", url: "https://github.com/stackrox/stackrox/tree/master/image/templates/helm/stackrox-secured-cluster/templates", license: Apache-2.0}
+  - {title: "stackrox CHANGELOG 4.9.0 (ROX-30278, ROX-30279) and SecuredCluster API", url: "https://github.com/stackrox/stackrox/blob/master/CHANGELOG.md", license: Apache-2.0}
 ---
 # RHACS admission control
 
@@ -31,5 +32,8 @@ Only policies that have deploy-time **enforcement** enabled block admission; oth
    cluster-wide or delete the webhook.
 
 ## Enforcement settings
-From RHACS 4.9 the secured cluster uses `admissionControl.enforce` (default true on fresh installs); the older
-`enforceOnCreates` / `enforceOnUpdates` fields are deprecated and ignored except for upgrade defaulting.
+From RHACS 4.9 enforcement is one switch, spelled differently per install method:
+- Helm (secured-cluster-services): `admissionControl.enforce` (enabled by default); the older
+  `admissionControl.dynamic.enforceOn*` values are deprecated and ignored.
+- Operator (SecuredCluster CR): `spec.admissionControl.enforcement: Enabled | Disabled` (defaults to Enabled for new
+  installations); `listenOn*`, `contactImageScanners` and `timeoutSeconds` are deprecated.

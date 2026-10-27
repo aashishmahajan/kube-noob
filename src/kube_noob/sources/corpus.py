@@ -119,6 +119,17 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
                 continue  # e.g. redistributable-only bundles omit restricted shards
             if hashlib.sha256(src.read_bytes()).hexdigest() != entry.get("sha256"):
                 raise ValueError(f"{fname}: checksum mismatch, refusing to import")
+            with src.open(encoding="utf-8") as fh:  # a checksum proves integrity, not well-formedness
+                for lineno, line in enumerate(fh, 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(f"{fname} line {lineno}: invalid JSON ({exc.msg})") from exc
+                    if not isinstance(rec, dict):
+                        raise ValueError(f"{fname} line {lineno}: record must be a JSON object")
+                    _validate(rec)
             shutil.copyfile(src, target / fname)
             current.setdefault("shards", {})[name] = entry
             imported.append(name)

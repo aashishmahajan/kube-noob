@@ -22,5 +22,5 @@ sources:
 readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
 livenessProbe:  {httpGet: {path: /healthz, port: http}, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 3}
 ```
-Apps must listen on 0.0.0.0 (not 127.0.0.1) so the kubelet can reach them. `timeoutSeconds` must be smaller than
-`periodSeconds`.
+Apps must listen on 0.0.0.0 (not 127.0.0.1) so the kubelet can reach them. Keep `timeoutSeconds` below
+`periodSeconds` as a convention so probes do not overlap (Kubernetes does not enforce it).

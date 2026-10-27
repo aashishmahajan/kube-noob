@@ -3,20 +3,27 @@
 Precedence (lowest -> highest): built-in defaults < config file < environment variables < explicit
 overrides passed by the CLI.
 
-Config file lookup order: ``$KUBE_NOOB_CONFIG``, ``./kube-noob.yaml``, ``$XDG_CONFIG_HOME/kube-noob/config.yaml``
+Config file lookup order: ``--config``, ``$KUBE_NOOB_CONFIG``, ``$XDG_CONFIG_HOME/kube-noob/config.yaml``
 (``~/.config/kube-noob/config.yaml``), ``/etc/kube-noob/config.yaml`` (the path the Helm chart mounts).
+
+The current directory is deliberately NOT searched: a ``kube-noob.yaml`` inside a cloned repository could otherwise
+enable web/cluster access or point the agent's API key at an attacker's endpoint. Pass ``--config ./kube-noob.yaml``
+to use a project file explicitly.
 
 Keys are camelCase in YAML (``webEnabled: true``) and snake_case in Python.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from kube_noob.errors import ConfigError
@@ -54,10 +61,16 @@ class WebSettings(_Base):
     @field_validator("allowed_domains")
     @classmethod
     def _lower(cls, v: list[str]) -> list[str]:
-        cleaned = [d.strip().lower().lstrip(".") for d in v if d.strip()]
-        for d in cleaned:
-            if "/" in d or ":" in d or " " in d:
-                raise ValueError(f"allowedDomains entries must be bare host names, got {d!r}")
+        cleaned = []
+        for raw in v:
+            d = raw.strip().lower()
+            if not d:
+                continue
+            # Entries already match their subdomains, so '*.example.com' means 'example.com'.
+            d = d.removeprefix("*.").lstrip(".")
+            if "/" in d or ":" in d or " " in d or "*" in d or "." not in d:
+                raise ValueError(f"allowedDomains entries must be bare host names like 'docs.redhat.com', got {raw!r}")
+            cleaned.append(d)
         return cleaned
 
 
@@ -69,23 +82,73 @@ class ClusterSettings(_Base):
     max_log_lines: int = Field(default=200, ge=1, le=5000)
 
 
-class LLMSettings(_Base):
-    provider: Literal["anthropic", "openai-compatible", "none"] = "anthropic"
-    model: str = DEFAULT_MODEL
+# The API key is sent to base_url, so only variables that are plainly LLM API keys may be named here: never
+# AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN or similar.
+_API_KEY_ENV = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)$")
+_CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
+
+
+def _check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> None:
+    if base_url is None:
+        return
+    parts = urlsplit(base_url)
+    if parts.scheme not in {"https", "http"} or not parts.hostname:
+        raise ValueError(f"{what}.baseUrl must be an http(s) URL with a host, got {base_url!r}")
+    if parts.username or parts.password:
+        raise ValueError(f"{what}.baseUrl must not embed credentials; use apiKeyEnv")
+    if parts.scheme == "http" and not allow_insecure:
+        host = parts.hostname.lower()
+        try:
+            local = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            local = host == "localhost" or host.endswith(_CLUSTER_LOCAL_SUFFIXES)
+        if not local:
+            raise ValueError(
+                f"{what}.baseUrl {base_url!r} uses plain http to a non-local host: the API key would travel in "
+                "clear text. Use https, a loopback / cluster-local (*.svc) endpoint, or set "
+                f"{what}.allowInsecureBaseUrl: true."
+            )
+
+
+class _LLMEndpoint(_Base):
     base_url: str | None = None
     api_key_env: str = "ANTHROPIC_API_KEY"
+    allow_insecure_base_url: bool = False
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _key_env(cls, v: str) -> str:
+        if not _API_KEY_ENV.match(v):
+            raise ValueError(
+                f"apiKeyEnv {v!r} must name an LLM API key variable (*_API_KEY or KUBE_NOOB_*); its value is sent to "
+                "the configured endpoint"
+            )
+        return v
+
+
+class LLMSettings(_LLMEndpoint):
+    provider: Literal["anthropic", "openai-compatible", "none"] = "anthropic"
+    model: str = DEFAULT_MODEL
     max_tokens: int = Field(default=4096, ge=256, le=64000)
     max_tool_rounds: int = Field(default=12, ge=1, le=50)
     timeout_seconds: float = Field(default=120.0, gt=0, le=900)
 
+    @model_validator(mode="after")
+    def _endpoint(self) -> LLMSettings:
+        _check_endpoint(self.base_url, self.allow_insecure_base_url, "llm")
+        return self
 
-class JudgeSettings(_Base):
+
+class JudgeSettings(_LLMEndpoint):
     """Optional LLM judge. Eval-only: judge outputs are never exported as training labels by default."""
 
     provider: Literal["none", "anthropic", "openai-compatible"] = "none"
     model: str = DEFAULT_MODEL
-    base_url: str | None = None
-    api_key_env: str = "ANTHROPIC_API_KEY"
+
+    @model_validator(mode="after")
+    def _endpoint(self) -> JudgeSettings:
+        _check_endpoint(self.base_url, self.allow_insecure_base_url, "judge")
+        return self
 
 
 class ServerSettings(_Base):
@@ -130,7 +193,7 @@ def _candidate_files() -> list[Path]:
         return [Path(env)]
     xdg = os.environ.get("XDG_CONFIG_HOME")
     cfg_home = Path(xdg) if xdg else Path.home() / ".config"
-    return [Path.cwd() / "kube-noob.yaml", cfg_home / "kube-noob" / "config.yaml", Path("/etc/kube-noob/config.yaml")]
+    return [cfg_home / "kube-noob" / "config.yaml", Path("/etc/kube-noob/config.yaml")]
 
 
 _TRUE = {"1", "true", "yes", "on"}

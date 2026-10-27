@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -533,8 +534,12 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         from kube_noob.net import Purpose, http_client
         from kube_noob.sources.jira import JiraClient, insights, insights_markdown, pull_project
 
+        email, api_token = os.environ.get("JIRA_EMAIL"), os.environ.get("JIRA_API_TOKEN")
+        if bool(email) != bool(api_token):
+            raise ConfigError("Set both JIRA_EMAIL and JIRA_API_TOKEN for an authenticated pull, or neither")
+        auth = (email, api_token) if email and api_token else None
         with http_client(s, Purpose.SOURCES, allow_sources=True, timeout=60) as http:
-            client = JiraClient(http, a.base_url)
+            client = JiraClient(http, a.base_url, auth=auth)
             res = pull_project(client, a.project, a.min_version, a.target, a.max_scan, a.base_url)
         entry = write_shard(s.data_dir, f"jira-{a.project.lower()}", res.records)
         ins = insights(res.records, a.project)
@@ -615,8 +620,9 @@ def _train(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         return 0
     if tc == "grade":
         from kube_noob.evals.reward import grade_by_id
+        from kube_noob.knowledge.store import get_store
 
-        _emit(grade_by_id(a.task, _read(a.file)).as_dict(), fmt)
+        _emit(grade_by_id(a.task, _read(a.file), get_store(s.data_dir)).as_dict(), fmt)
         return 0
     if tc == "tasks":
         from kube_noob.evals.reward import benchmark

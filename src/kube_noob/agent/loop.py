@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,6 +15,7 @@ from kube_noob.errors import KubeNoobError
 from kube_noob.knowledge.store import extract_citations, get_store
 from kube_noob.toolkit import Toolkit, ToolSpec
 
+_log = logging.getLogger(__name__)
 MAX_TOOL_OUTPUT = 60_000
 
 SYSTEM_PROMPT = """You are kube-noob, an elite SRE / platform architect and patient teacher for Kubernetes, Helm,
@@ -94,6 +96,9 @@ class Agent:
             return f"Invalid arguments for {name}: {exc.errors(include_url=False)}", True
         except (KubeNoobError, KeyError, ValueError) as exc:
             return f"{type(exc).__name__}: {exc}", True
+        except Exception as exc:  # noqa: BLE001 - a tool bug must not abort the conversation; details are logged
+            _log.exception("tool %s crashed", name)
+            return f"Tool {name} failed unexpectedly ({type(exc).__name__}); try different input.", True
         text = json.dumps(out, default=str)
         if len(text) > MAX_TOOL_OUTPUT:
             text = text[:MAX_TOOL_OUTPUT] + "... [truncated; narrow the request]"

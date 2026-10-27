@@ -41,7 +41,9 @@ kube-noob maps its audit rules to these policy names so a clean `kube-noob audit
 
 ## Release history
 4.7.0 2025-03-13, 4.8.0 2025-07-07, 4.9.0 2025-10-30, 4.10.0 2026-03-03, 4.11.0 2026-06-12 (latest patch 4.11.6,
-2026-10-20). The next release is **5.0** (there is no 4.12: the 4.12.x branch was renamed 5.0.x in August 2026);
-5.0.0 was at release-candidate stage in October 2026 and is planned in Jira for 2026-11-04. 5.0 removes the legacy
-StackRox Scanner (v2) and adds a `central-worker` deployment. In the Helm/operator configuration, 4.9 introduced
-`admissionControl.enforce`, replacing the deprecated `enforceOnCreates` / `enforceOnUpdates` settings.
+2026-10-20). The next release is **5.0**: there is no 4.12 (no 4.12 tag, branch or Jira version; the line after
+release-4.11 is release-5.0). 5.0.0 was at release-candidate stage in October 2026 and is planned in Jira for
+2026-11-04. 5.0 removes the legacy
+StackRox Scanner (v2) and adds a `central-worker` deployment. 4.9 introduced a single enforcement switch: Helm value
+`admissionControl.enforce` (replacing `enforceOnCreates` / `enforceOnUpdates`) and operator field
+`admissionControl.enforcement: Enabled|Disabled` on the SecuredCluster CR.

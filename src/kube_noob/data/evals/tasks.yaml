@@ -1,6 +1,10 @@
 # kube-noob benchmark. Held out from the curriculum exercises (which feed SFT export) to avoid train/test leakage.
-# type: manifest -> graded with the check DSL; type: qa -> graded with mustMention / mustNotMention regexes.
-# requireCitations: answer must cite local knowledge chunks as [kn:<doc>#<n>].
+# type: manifest -> graded with the check DSL (kube_noob/evals/checks.py), including positive field assertions.
+# type: qa -> mustMention claims must be stated affirmatively (a negated match does not count), any mustNotMention
+#   claim (a known wrong statement) zeroes the task score, and answers under minWords (default 20) are scaled down.
+#   A claim is a regex or {pattern, negationCheck: false} for patterns that carry the negation themselves.
+# requireCitations: answer must cite local knowledge chunks as [kn:<doc>#<n>]; citeDocs lists the docs that count as
+#   relevant support (top BM25 hits for the prompt and lexically supporting chunks count too).
 version: 1
 tasks:
   - id: bench-k8s-secure-api
@@ -49,6 +53,8 @@ tasks:
       forbidRules: [KN-ST001, KN-ST002]
       assertions:
         - {kind: PersistentVolumeClaim, path: "spec.accessModes[0]", equals: ReadWriteMany}
+        - {kind: PersistentVolumeClaim, path: spec.resources.requests.storage, equals: 100Gi}
+        - {kind: Deployment, path: spec.replicas, gte: 3}
   - id: bench-fix-removed-apis
     type: manifest
     platform: kubernetes
@@ -88,6 +94,14 @@ tasks:
       kinds: [EgressFirewall]
       schemaValid: true
       forbidRules: [KN-V015, KN-N006]
+      assertions:
+        - {kind: EgressFirewall, path: metadata.name, equals: default}
+        - {kind: EgressFirewall, path: "spec.egress[-1]", equals: {type: Deny, to: {cidrSelector: 0.0.0.0/0}}}
+        - {kind: EgressFirewall, path: spec.egress, containsItem: {type: Allow, to: {dnsName: s3.amazonaws.com}}}
+        - {kind: EgressFirewall, path: spec.egress, containsItem: {type: Allow, to: {cidrSelector: 172.16.0.0/12}}}
+        - {kind: EgressFirewall, path: spec.egress, notContainsItem: {type: Allow, to: {cidrSelector: 0.0.0.0/0}}}
+        - {kind: EgressFirewall, path: "spec.egress[*].type", subsetOf: [Allow, Deny]}
+        - {kind: EgressFirewall, path: spec.egress, lenLte: 3}
   - id: bench-rbac-readonly
     type: manifest
     platform: kubernetes
@@ -99,34 +113,58 @@ tasks:
       kinds: [ClusterRole, ClusterRoleBinding, ServiceAccount]
       schemaValid: true
       forbidRules: [KN-S015, KN-S016, KN-S017]
+      assertions:
+        - {kind: ClusterRole, all: true, path: "rules[*].verbs", subsetOf: [get, list, watch]}
+        - {kind: ClusterRole, all: true, path: "rules[*].resources", subsetOf: [pods, deployments, events]}
+        - {kind: ClusterRole, path: "rules[*].resources", contains: pods}
+        - {kind: ClusterRole, path: "rules[*].resources", contains: deployments}
+        - {kind: ClusterRole, path: "rules[*].resources", contains: events}
+        - {kind: ClusterRoleBinding, path: roleRef.kind, equals: ClusterRole}
+        - {kind: ClusterRoleBinding, path: subjects, containsItem: {kind: ServiceAccount, name: auditor, namespace: sec}}
   - id: bench-qa-rwx-gp3
     type: qa
     requireCitations: true
     prompt: >-
       Our ROSA HCP PVC with accessModes ReadWriteMany and storageClassName gp3-csi is stuck Pending. Why, and what is
       the fix? Cite local knowledge as [kn:<id>#<n>].
-    mustMention: ["EBS", "ReadWriteOnce|RWO", "EFS", "efs\\.csi\\.aws\\.com|efs-sc"]
-    mustNotMention: ["gp3-csi (supports|provides) (RWX|ReadWriteMany)"]
+    citeDocs: [storage-access-modes, rosa-efs, rosa-hcp]
+    mustMention:
+      - "EBS"
+      - "ReadWriteOnce|RWO"
+      - "EFS"
+      - "efs\\.csi\\.aws\\.com|efs-sc"
+    mustNotMention:
+      - "(gp3-csi|gp3|EBS)[^.\\n]{0,40}(supports?|provides?|offers?|handles?|allows?) (RWX|ReadWriteMany)"
+      - "(EFS|efs-sc)[^.\\n]{0,40}(does not|doesn't|cannot|can't|won't) (support |provide )?(RWX|ReadWriteMany)"
   - id: bench-qa-route-group
     type: qa
     requireCitations: true
     prompt: "Is 'apiVersion: apps.openshift.io/v1' correct for a Route? Answer and cite [kn:<id>#<n>]."
+    citeDocs: [ocp-routes, openshift]
     mustMention: ["route\\.openshift\\.io/v1", "DeploymentConfig"]
-    mustNotMention: ["apps\\.openshift\\.io/v1 is (correct|the right)"]
+    mustNotMention:
+      - "apps\\.openshift\\.io/v1 is (correct|right|fine|valid|the right)"
+      - {pattern: "^\\W*(yes|correct|that's right|that is right)\\b", negationCheck: false}
   - id: bench-qa-scc-uid
     type: qa
     requireCitations: true
     prompt: >-
       Pods with securityContext.runAsUser 1000 fail on OpenShift 4.22 with 'unable to validate against any security
       context constraint'. Explain and fix without granting anyuid. Cite [kn:<id>#<n>].
+    citeDocs: [ocp-scc, ocp-arbitrary-uid]
     mustMention: ["restricted-v2", "range|MustRunAsRange", "runAsNonRoot"]
-    mustNotMention: ["add-scc-to-user (anyuid|privileged)"]
+    mustNotMention:
+      - "add-scc-to-user (anyuid|privileged)"
+      - "(grant|use|bind|add)[^.\\n]{0,30}\\banyuid\\b"
   - id: bench-qa-hcp-machineconfig
     type: qa
     requireCitations: true
     prompt: On ROSA HCP, how should we change kubelet settings for worker nodes? Cite [kn:<id>#<n>].
+    citeDocs: [rosa-hcp]
     mustMention: ["kubeletconfig", "machine pool|machinepool"]
-    mustNotMention: ["oc (apply|create) .*MachineConfig"]
+    mustNotMention:
+      - "oc (apply|create) .*MachineConfig\\b"
+      - "(create|apply|use|write)[^.\\n]{0,30}\\bMachineConfig\\b(?!Pool)"
   - id: bench-qa-helm-lock
     type: qa
     requireCitations: false
@@ -136,19 +174,39 @@ tasks:
     type: qa
     requireCitations: true
     prompt: We run RHACS 4.11. What is the next minor release and is there a 4.12? Cite [kn:<id>#<n>].
-    mustMention: ["5\\.0", "no 4\\.12|not? .*4\\.12|4\\.12.*renamed"]
+    citeDocs: [stackrox, version-history]
+    mustMention:
+      - "5\\.0"
+      - pattern: "(\\bno\\b|\\bnot\\b|isn't|won't|never)[^.\\n]{0,40}4\\.12|4\\.12[^.\\n]{0,80}(renamed|rebranded|became|replaced|re-?versioned)"
+        negationCheck: false
+    mustNotMention:
+      - "there (is|will be|'s) (a|an) (RHACS )?4\\.12"
+      - "4\\.12 (is|will be) (the )?(next|coming|planned|released)"
+      - "4\\.12 (ships|will ship|releases|is released)"
+      - "5\\.0[^.\\n]{0,20}(is not|isn't|not) (planned|next|coming)"
   - id: bench-qa-oom
     type: qa
     requireCitations: false
     prompt: A pod restarts with Last State Terminated, Reason OOMKilled, Exit Code 137. Diagnose and fix.
     mustMention: ["memory limit|limits", "137|SIGKILL"]
+    mustNotMention:
+      - "(increase|raise|add)[^.\\n]{0,20}\\bcpu\\b[^.\\n]{0,20}(limit|request)[^.\\n]{0,40}(fix|solve|resolve)"
   - id: bench-qa-pdb-upgrade
     type: qa
     requireCitations: true
     prompt: Our cluster upgrade is stuck draining a node. The app has replicas 3 and a PDB minAvailable 3. Why? Cite.
-    mustMention: ["disruption", "maxUnavailable: ?1|minAvailable.*(lower|less|2)"]
+    citeDocs: [k8s-pdb]
+    mustMention: ["disruption", "maxUnavailable: ?1|minAvailable[^.\\n]*(lower|less|reduce|2)"]
+    mustNotMention:
+      - "(increase|raise)[^.\\n]{0,20}minAvailable"
   - id: bench-qa-ocp-k8s-map
     type: qa
     requireCitations: true
     prompt: Which Kubernetes versions do OpenShift 4.20 and 4.22 run? Cite.
-    mustMention: ["1\\.33", "1\\.35"]
+    citeDocs: [version-history, openshift]
+    mustMention:
+      - "4\\.20[^\\n]{0,60}?1\\.33"
+      - "4\\.22[^\\n]{0,60}?1\\.35"
+    mustNotMention:
+      - "4\\.20\\s*(\\)|runs|uses|ships|is|=|:|\\||->|\\u2192)?\\s*(on\\s*|with\\s*)?(Kubernetes\\s*|k8s\\s*)?1\\.3[0-24-9]\\b"
+      - "4\\.22\\s*(\\)|runs|uses|ships|is|=|:|\\||->|\\u2192)?\\s*(on\\s*|with\\s*)?(Kubernetes\\s*|k8s\\s*)?1\\.3[0-46-9]\\b"

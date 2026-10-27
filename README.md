@@ -15,7 +15,7 @@ Hosted Control Planes) and RHACS / StackRox.** Use it as an **MCP server** (Clau
 MCP client), a **CLI**, a **Claude plugin**, or a **sidecar / service on OpenShift**.
 
 - **7-step engineering protocol** on every request: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
-- **Deterministic engine**: 60 audit rules (security, network exposure, storage access modes, reliability, platform
+- **Deterministic engine**: 60 audit rules plus strict schema validation (security, network exposure, storage access modes, reliability, platform
   correctness, removed APIs), strict schema validation (Kubernetes 1.35 + Route, SCC, EgressFirewall, Gateway API,
   StackRox CRDs), 9 red-team scenarios, safe auto-fixes, mapping to RHACS default policy names.
 - **Generator**: hardened manifests or Helm charts for `kubernetes`, `openshift`, `rosa-classic`, `rosa-hcp`; every
@@ -86,8 +86,10 @@ Read-only live cluster tools: `--set config.clusterEnabled=true --set "networkPo
 
 ## Configuration
 
-`kube-noob.yaml` (lookup: `$KUBE_NOOB_CONFIG`, `./kube-noob.yaml`, `~/.config/kube-noob/config.yaml`,
-`/etc/kube-noob/config.yaml`). See [`kube-noob.example.yaml`](kube-noob.example.yaml).
+Config file lookup: `--config <file>`, `$KUBE_NOOB_CONFIG`, `~/.config/kube-noob/config.yaml`,
+`/etc/kube-noob/config.yaml`. The current directory is never searched implicitly (a `kube-noob.yaml` in a cloned repo
+must not be able to turn on web or cluster access); pass `--config ./kube-noob.yaml` to use one. See
+[`kube-noob.example.yaml`](kube-noob.example.yaml).
 
 | Key | Default | Env override |
 |---|---|---|
@@ -95,7 +97,8 @@ Read-only live cluster tools: `--set config.clusterEnabled=true --set "networkPo
 | `web.allowedDomains` | kubernetes.io, helm.sh, docs.redhat.com, ... | |
 | `cluster.enabled` / `cluster.backend` | `false` / `auto` (in-cluster, oc, kubectl) | `KUBE_NOOB_CLUSTER_ENABLED`, `KUBE_NOOB_CLUSTER_BACKEND` |
 | `llm.provider` / `llm.model` | `anthropic` / `claude-fable-5-1` | `KUBE_NOOB_LLM_PROVIDER`, `KUBE_NOOB_LLM_MODEL` |
-| `llm.baseUrl` | - (set for `openai-compatible`: vLLM, Ollama, your fine-tuned model) | `KUBE_NOOB_LLM_BASE_URL` |
+| `llm.baseUrl` | - (set for `openai-compatible`: vLLM, Ollama, your fine-tuned model; https, loopback or `*.svc` unless `llm.allowInsecureBaseUrl: true`) | `KUBE_NOOB_LLM_BASE_URL` |
+| `llm.apiKeyEnv` | `ANTHROPIC_API_KEY` (must be `*_API_KEY` or `KUBE_NOOB_*`; its value is sent to the endpoint) | |
 | `judge.provider` | `none` (LLM judge is eval-only) | |
 | `defaultPlatform` | `kubernetes` | `KUBE_NOOB_DEFAULT_PLATFORM` |
 | `dataDir` | `~/.local/share/kube-noob` | `KUBE_NOOB_DATA_DIR` |
@@ -110,6 +113,7 @@ the requested model's classifier declines, or any OpenAI-compatible endpoint. Th
 kube-noob corpus build --online              # public Git docs with license + commit provenance
 kube-noob corpus history --online            # release timelines from Git tags
 kube-noob corpus jira --online --project ROX --min-version 4.10 --target 1200   # jittered, rate-limited pull
+# optional for non-public projects: export JIRA_EMAIL=... JIRA_API_TOKEN=...  (sent over https only)
 kube-noob corpus verify && kube-noob corpus stats
 ```
 Licenses are recorded per record. Non-commercial, copyleft or unlicensed sources (and Jira issue text) are marked
@@ -123,8 +127,11 @@ kube-noob train export --out dataset/        # sft.jsonl (chat format) + grpo_pr
 kube-noob train grade --task bench-qa-rwx-gp3 -f answer.md
 kube-noob train bench --out report.json      # runs the configured model through the held-out benchmark
 ```
-Reward = 0.70 task correctness (audit engine / QA rules) + 0.20 source-attribution credit (valid `[kn:...]` citations)
-+ 0.10 format, minus penalties for fabricated citations and non-answers. Plug into TRL:
+Reward = 0.70 task correctness + 0.20 source-attribution credit (scaled by correctness) + 0.10 format, minus penalties
+for fabricated citations and non-answers. Manifest tasks are graded by the audit engine plus field assertions that
+encode the task's intent (a failed assertion caps the task score at 0.4); QA tasks need affirmative claims (negated
+mentions do not count, known-wrong claims zero the task) and a minimum length; citations earn credit only when they
+exist and support the answer. Plug into TRL:
 `GRPOTrainer(reward_funcs=[kube_noob.evals.reward.trl_reward], ...)` with a `task_id` dataset column.
 Exports contain no LLM-generated labels. If you add Claude-generated data yourself, check Anthropic's terms first.
 
