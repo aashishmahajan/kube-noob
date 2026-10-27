@@ -143,6 +143,16 @@ def redact_text(text: str) -> str:
     return text
 
 
+def _element_kind(kind: Any) -> str | None:
+    if isinstance(kind, str) and kind.endswith("List") and kind != "List":
+        return kind[: -len("List")]
+    return kind if isinstance(kind, str) else None
+
+
+def _kind_for(plural: str) -> str | None:
+    return {"configmaps": "ConfigMap"}.get(plural)
+
+
 def _redact_obj(obj: Any, kind_hint: str | None = None) -> Any:
     if isinstance(obj, dict):
         out: dict[str, Any] = {}
@@ -164,11 +174,20 @@ def _redact_obj(obj: Any, kind_hint: str | None = None) -> Any:
                     for e in v
                 ]
                 continue
-            out[k] = _redact_obj(v, kind)
+            # API-server lists ("ConfigMapList") omit kind on each item: carry the element kind down explicitly.
+            out[k] = _redact_obj(v, _element_kind(kind) if k == "items" else kind)
         return out
     if isinstance(obj, list):
         return [_redact_obj(x, kind_hint) for x in obj]
     return obj
+
+
+def _list_hint(data: Any, plural: str) -> str | None:
+    """Kind hint from the requested resource, so redaction never depends on the server echoing ``kind``."""
+    kind = _kind_for(plural)
+    if kind and isinstance(data, dict) and "items" in data:
+        return f"{kind}List"
+    return kind
 
 
 def resolve_resource(resource: str) -> tuple[str, ResourceDef]:
@@ -257,7 +276,8 @@ class KubectlBackend:
         if field_selector:
             args += ["--field-selector", field_selector]
         args += ["--output", "json"]
-        return _redact_obj(json.loads(self._run(args) or "{}"))  # type: ignore[no-any-return]
+        data = json.loads(self._run(args) or "{}")
+        return _redact_obj(data, _list_hint(data, plural))  # type: ignore[no-any-return]
 
     def logs(self, namespace: str, pod: str, container: str | None, tail: int, previous: bool) -> str:
         _check(namespace, _NAME, "namespace")
@@ -315,7 +335,7 @@ class InClusterBackend:
         selector: str | None = None,
         field_selector: str | None = None,
     ) -> dict[str, Any]:
-        _plural, rdef = resolve_resource(resource)
+        plural, rdef = resolve_resource(resource)
         _check(name, _NAME, "name")
         _check(namespace, _NAME, "namespace")
         _check(selector, _SELECTOR, "label selector")
@@ -325,7 +345,8 @@ class InClusterBackend:
             params["labelSelector"] = selector
         if field_selector:
             params["fieldSelector"] = field_selector
-        return _redact_obj(self._get(rdef.path(namespace, name), params))  # type: ignore[no-any-return]
+        data = self._get(rdef.path(namespace, name), params)
+        return _redact_obj(data, _list_hint(data, plural))  # type: ignore[no-any-return]
 
     def logs(self, namespace: str, pod: str, container: str | None, tail: int, previous: bool) -> str:
         _check(namespace, _NAME, "namespace")

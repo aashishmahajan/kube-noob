@@ -267,6 +267,12 @@ def test_in_cluster_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
             return httpx.Response(200, text="token=abc123 boom")
         if "forbidden" in req.url.path:
             return httpx.Response(403, text="no")
+        if req.url.path.endswith("/configmaps"):  # API-server list: items carry no kind of their own
+            return httpx.Response(
+                200, json={"kind": "ConfigMapList", "items": [{"metadata": {"name": "a"}, "data": {"pw": "hunter2"}}]}
+            )
+        if req.url.path.endswith("/configmaps/nokind"):
+            return httpx.Response(200, json={"metadata": {"name": "nokind"}, "binaryData": {"b": "aHVudGVyMg=="}})
         return httpx.Response(
             200, json={"kind": "ConfigMap", "data": {"k": "secret-ish"}, "metadata": {"managedFields": [1]}}
         )
@@ -289,3 +295,6 @@ def test_in_cluster_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     assert paths[1].startswith("/apis/route.openshift.io/v1/namespaces/ns/routes?labelSelector=app")
     with pytest.raises(cluster.ClusterAccessError, match="Forbidden"):
         b.get("pods", name="forbidden", namespace="ns")
+    listed = b.get("configmaps", namespace="ns")
+    assert "hunter2" not in json.dumps(listed) and listed["items"][0]["data"]["pw"].startswith("<redacted")
+    assert "aHVudGVyMg" not in json.dumps(b.get("cm", name="nokind", namespace="ns"))
