@@ -81,6 +81,35 @@ kube-noob corpus known-issues --online
 The bundled index is dated (`kube-noob doctor` prints it, and every MCP result carries `knowledgeAsOf`);
 `corpus known-issues --online` refreshes it from the release notes on GitHub.
 
+### Why was this denied?
+
+`policy explain` reads a denial and explains it policy by policy: Kyverno, OPA Gatekeeper, ValidatingAdmissionPolicy,
+Pod Security Admission, OpenShift SCC, RHACS, ResourceQuota, LimitRange and RBAC. You get the policy and rule, the
+field that failed, read-only commands with the names filled in, the change that satisfies the policy (a ready patch
+for Pod Security and RBAC, scoped to exactly the missing permission) and the audit rules that would have caught it
+before deploy. Exceptions, quota increases and new permissions are marked as the policy owner's decision. `diagnose`,
+`debug` and `bundle` add the same explanation when a denial is in the text.
+
+```bash
+kubectl apply -f deploy.yaml 2>&1 | kube-noob policy explain
+kube-noob policy explain -f examples/events-scc.txt --platform openshift
+```
+
+### Can pod A reach pod B?
+
+`policy reach` evaluates NetworkPolicies the way Kubernetes does: egress from the source and ingress to the
+destination must both allow the port. It names the policy and rule that decide each direction, says for every other
+rule whether the peer or the port did not match, and proposes the smallest NetworkPolicy that would allow the traffic.
+It exits 1 when the traffic is denied, so CI can assert the paths an application needs. `--live` reads the policies,
+namespace labels and workloads from the cluster (read-only). AdminNetworkPolicy, EgressFirewall and CNI-specific
+policies are listed as not evaluated.
+
+```bash
+kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-shop.yaml
+kube-noob policy reach --from shop/orders-api --to shop/payments --port 9090 -f examples/netpol-shop.yaml
+kube-noob policy reach --from shop/orders-api --to shop/payments --port grpc --live --cluster-enabled
+```
+
 ## Platform admin: run it inside the cluster, locked down
 
 ```bash

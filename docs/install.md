@@ -10,7 +10,7 @@ pipx installed with Homebrew uses Homebrew's.
 | uv (downloads a Python if yours is too old) | `uv tool install kube-noob` | `uv tool upgrade kube-noob` |
 | pipx | `pipx install kube-noob` | `pipx upgrade kube-noob` |
 | pip, in a virtual environment | `python3.13 -m venv ~/.venvs/kube-noob`, then `~/.venvs/kube-noob/bin/pip install kube-noob` | `~/.venvs/kube-noob/bin/pip install -U kube-noob` |
-| Container | `podman run --rm ghcr.io/aashishmahajan/kube-noob:0.2 --version` | pull the new tag |
+| Container | `podman run --rm ghcr.io/aashishmahajan/kube-noob:0.3 --version` | pull the new tag |
 | Claude Code plugin | `/plugin marketplace add aashishmahajan/kube-noob`, then `/plugin install kube-noob@kube-noob` | `/plugin marketplace update kube-noob` |
 
 The tap is needed because kube-noob is not in Homebrew's main catalogue; after `brew tap`, `brew install kube-noob`

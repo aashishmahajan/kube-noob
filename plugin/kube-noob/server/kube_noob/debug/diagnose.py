@@ -321,6 +321,7 @@ def debug_workload(
     backend: Backend, namespace: str, kind: str, name: str, platform: str | None = None, log_lines: int = 100
 ) -> dict[str, Any]:
     from kube_noob.debug.cluster import cluster_info
+    from kube_noob.debug.policy import explain as explain_denials
     from kube_noob.known_issues import match as known_issue_match
 
     ev = collect_evidence(backend, namespace, kind, name, log_lines)
@@ -335,6 +336,7 @@ def debug_workload(
     if "pod" not in result.context:
         result.context["name"] = name
     reported = known_issue_match(blob, platform, info.get("openshift"), 3)
+    denials = explain_denials(blob, platform)["denials"]
     return {
         "backend": backend.name,
         "target": f"{kind}/{namespace}/{name}",
@@ -343,6 +345,7 @@ def debug_workload(
         "logs": {k: v[-6000:] for k, v in ev["logs"].items()},
         **result.as_dict(),
         "knownIssues": reported["matches"],
+        **({"policyDenials": denials} if denials else {}),
     }
 
 
@@ -360,6 +363,14 @@ def bundle_markdown(result: dict[str, Any]) -> str:
         lines += ["", f"## Reported issue {m['id']}", "", m["status"], "", m["summary"], "", f"- Issue: {m['url']}"]
         lines += [f"- Workaround: {m['workaround']}"] if m.get("workaround") else []
         lines += [f"- Release notes: {m['source']}"]
+    for p in result.get("policyDenials", []):
+        title = f"{p['engineName']} {p.get('policy') or ''}".strip() + (f" / {p['rule']}" if p.get("rule") else "")
+        lines += ["", f"## Denied by {title}", "", p["meaning"], "", "Read-only next steps:"]
+        lines += [_step_line(s) for s in p.get("readOnlyNextSteps", [])]
+        lines += ["", "Proposed changes (require approval):"]
+        lines += [f"- {c['change']}" for c in p.get("proposedChanges", [])]
+        if p.get("patch"):
+            lines += ["", "```yaml", p["patch"].rstrip(), "```"]
     for d in result.get("diagnoses", []):
         lines += ["", f"## {d['id']}: {d['title']} (confidence {d['confidence']})", "", "Likely causes:"]
         lines += [f"- {c}" for c in d["rootCauses"]]

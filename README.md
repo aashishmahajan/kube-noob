@@ -17,9 +17,10 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
 
 - **Audit**: 60 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, 9 red-team scenarios, RHACS policy mapping.
-- **Generate**: hardened manifests and Helm charts, re-audited before they are returned.
-- **Debug**: 38 offline playbooks, read-only steps first; reported OpenShift bugs matched with their fix version;
-  opt-in, read-only cluster evidence (never Secrets).
+- **Generate**: hardened manifests and Helm charts, re-audited before return.
+- **Debug**: 38 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
+  denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
+  evidence (never Secrets).
 - **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed fixes locally.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
@@ -47,8 +48,8 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (needs Python 3.11+, newer than macOS's
-built-in one). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+, not macOS's
+built-in 3.9). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
 
 ## Use with Claude or any MCP client
@@ -65,10 +66,10 @@ In claude.ai or the desktop app: **Customize > Plugins > Add > Add marketplace**
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.3.0", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.3.1", "kube-noob", "mcp"]}}}
 ```
 
-Cluster and web tools appear only when enabled.
+Cluster and web tools appear when enabled.
 
 ## Run on OpenShift
 
@@ -86,9 +87,7 @@ NetworkPolicies and runs under `restricted-v2`.
 | Local learning file (profile, confirmed notes) | on | `learningEnabled: false` |
 | Model for `kube-noob ask` only | none | `llm.provider: anthropic` (`kube-noob[ask]`) or `openai-compatible` |
 
-`kube-noob doctor` prints what the process can reach.
-
-Config never comes from the current directory implicitly. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
+`kube-noob doctor` shows what it can reach. Config never comes from the current directory implicitly. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
 
 ## Docs
 

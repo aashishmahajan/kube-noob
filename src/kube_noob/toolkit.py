@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from kube_noob.audit.engine import analyze, explain_rule, list_rules
 from kube_noob.audit.fixer import fix_manifests
@@ -25,6 +25,8 @@ from kube_noob.catalog import OCP_TO_K8S, REMOVED_APIS, k8s_version_for, parse_m
 from kube_noob.config import Settings
 from kube_noob.debug.cluster import cluster_info, get_backend, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
+from kube_noob.debug.netpol import Inventory, check_reachability, inventory_from_cluster
+from kube_noob.debug.policy import explain as explain_denials
 from kube_noob.errors import ClarificationNeeded, WebContentRejectedError
 from kube_noob.evals.reward import benchmark, grade
 from kube_noob.generate.blueprint import Blueprint, clarify
@@ -149,6 +151,58 @@ class KnownIssuesIn(_In):
         description="The cluster's OpenShift version (4.20 or 4.20.8): keeps only issues that can affect it.",
     )
     limit: int = Field(3, ge=1, le=10)
+
+
+class PolicyExplainIn(_In):
+    text: str = Field(
+        ...,
+        min_length=3,
+        max_length=200_000,
+        description="The denial as printed: `kubectl apply` or `oc apply` output, a FailedCreate event or a Warning.",
+    )
+    platform: PlatformT | None = None
+
+
+_ENDPOINT_HELP = (
+    "namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod "
+    "labels, or an IP address / CIDR outside the cluster."
+)
+
+
+class TrafficIn(_In):
+    source: str = Field(..., min_length=1, max_length=300, description="Where the connection starts: " + _ENDPOINT_HELP)
+    destination: str = Field(..., min_length=1, max_length=300, description="Where it goes: " + _ENDPOINT_HELP)
+    port: int | str = Field(..., description="Destination port number (1-65535) or a named container port.")
+    protocol: Literal["TCP", "UDP", "SCTP"] = "TCP"
+    platform: PlatformT | None = None
+
+    @field_validator("port")
+    @classmethod
+    def _port(cls, v: int | str) -> int | str:
+        import re
+
+        if isinstance(v, int):
+            if not 1 <= v <= 65535:
+                raise ValueError("port must be 1-65535")
+            return v
+        if v.isdigit():
+            return cls._port(int(v))
+        if not re.fullmatch(r"[a-z0-9]([-a-z0-9]{0,13}[a-z0-9])?", v):
+            raise ValueError("a named port is 1-15 lowercase letters, digits and dashes")
+        return v
+
+
+class NetpolCheckIn(TrafficIn):
+    manifests: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MANIFEST_CHARS,
+        description="The NetworkPolicies and the workloads they apply to (Deployments, Pods ...); add Namespace "
+        "objects when policies select namespaces by label.",
+    )
+    default_namespace: str = Field(
+        "default", max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", description="For objects without one."
+    )
 
 
 class LearningNoteIn(_In):
@@ -428,11 +482,40 @@ class Toolkit:
         out["knownIssues"] = reported["matches"]
         if reported["matches"]:
             self._observe([f"known-issue:{m['id']}" for m in reported["matches"]])
+        denials = explain_denials(p.text, p.platform)["denials"]
+        if denials:
+            out["policyDenials"] = denials
+            self._observe([f"policy:{d['engine']}" for d in denials])
         return out
 
     def known_issues(self, p: KnownIssuesIn) -> dict[str, Any]:
         out = known_issue_match(p.text, p.platform, p.version, p.limit, self.settings.data_dir)
         self._observe([f"known-issue:{m['id']}" for m in out["matches"]])
+        return out
+
+    def explain_denial(self, p: PolicyExplainIn) -> dict[str, Any]:
+        out = explain_denials(p.text, p.platform)
+        self._observe([f"policy:{d['engine']}" for d in out["denials"]])
+        return out
+
+    def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
+        inv = Inventory.from_yaml(p.manifests, p.default_namespace)
+        cli = "oc" if p.platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
+        out = check_reachability(inv, p.source, p.destination, p.port, p.protocol, cli)
+        self._observe([f"netpol:{out['verdict']}"])
+        return out
+
+    def cluster_check_traffic(self, p: TrafficIn) -> dict[str, Any]:
+        backend = get_backend(self.settings)
+        inv = inventory_from_cluster(backend, p.source, p.destination)
+        platform = p.platform
+        if platform is None:
+            with contextlib.suppress(Exception):  # the platform only picks oc or kubectl in the commands
+                platform = "openshift" if cluster_info(backend).get("openshift") else "kubernetes"
+        cli = "oc" if platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
+        out = check_reachability(inv, p.source, p.destination, p.port, p.protocol, cli)
+        out["readFrom"] = f"live cluster via {backend.name} (read-only)"
+        self._observe([f"netpol:{out['verdict']}"])
         return out
 
     def cluster_get(self, p: ClusterGetIn) -> dict[str, Any]:
@@ -712,6 +795,25 @@ class Toolkit:
                 self.known_issues,
             ),
             ToolSpec(
+                "explain_denial",
+                "Why was this denied?",
+                "Explain an admission denial policy by policy: Kyverno, OPA Gatekeeper, ValidatingAdmissionPolicy, Pod "
+                "Security Admission, OpenShift SCC, RHACS, ResourceQuota, LimitRange or RBAC. Returns the policy and "
+                "rule, the failing field, read-only commands with names filled in, the fix (with a patch for Pod "
+                "Security and RBAC) and the audit rules that catch it before deploy.",
+                PolicyExplainIn,
+                self.explain_denial,
+            ),
+            ToolSpec(
+                "check_network_policy",
+                "Would this traffic be allowed?",
+                "Evaluate NetworkPolicies offline: can the source reach the destination on this port? Checks egress "
+                "from the source and ingress to the destination, names the policy and rule that decide each, says why "
+                "the other rules did not match, and proposes the smallest NetworkPolicy that would allow it.",
+                NetpolCheckIn,
+                self.check_network_policy,
+            ),
+            ToolSpec(
                 "learn_tracks",
                 "List learning tracks",
                 "Tracks, lessons, exercises and the learner's progress.",
@@ -810,6 +912,15 @@ class Toolkit:
                     "Collect status, events and recent logs for a workload and diagnose it.",
                     ClusterDebugIn,
                     self.cluster_debug,
+                    open_world=True,
+                ),
+                ToolSpec(
+                    "cluster_check_traffic",
+                    "Would this traffic be allowed? (live, read-only)",
+                    "Read the NetworkPolicies, namespace labels and workloads for the two endpoints from the cluster "
+                    "and evaluate them like check_network_policy.",
+                    TrafficIn,
+                    self.cluster_check_traffic,
                     open_world=True,
                 ),
                 ToolSpec(

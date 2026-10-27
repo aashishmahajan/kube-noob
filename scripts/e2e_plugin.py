@@ -121,6 +121,22 @@ async def main() -> None:
         top = dx["diagnoses"][0]
         check(top["readOnlyNextSteps"], f"diagnosis {top['id']} has no read-only first steps")
 
+        check(dx.get("policyDenials", [{}])[0].get("engine") == "openshift-scc", "the SCC denial was not explained")
+        why = _json(await s.call_tool("kubenoob_explain_denial", {"text": events, "platform": "openshift"}))
+        check("KN-S004" in why["denials"][0]["relatedRules"], f"explain_denial: {why['denials'][0]}")
+        reach = _json(
+            await s.call_tool(
+                "kubenoob_check_network_policy",
+                {
+                    "manifests": (ROOT / "examples" / "netpol-shop.yaml").read_text(),
+                    "source": "shop/orders-api",
+                    "destination": "shop/payments",
+                    "port": 9090,
+                },
+            )
+        )
+        check(reach["verdict"] == "denied" and reach["proposedChanges"], f"check_network_policy: {reach['summary']}")
+
         hits = _json(await s.call_tool("kubenoob_search_knowledge", {"query": "restricted-v2 SCC runAsUser range"}))
         check(hits["results"] and hits["results"][0]["chunkId"].startswith("kn:"), "search returned no citation")
 
@@ -128,7 +144,7 @@ async def main() -> None:
     shutil.rmtree(plugin_data, ignore_errors=True)
     print(
         f"plugin e2e OK: server {init.server_info.name} {init.server_info.version}, {len(tools)} tools, "
-        f"audit score {audit['summary']['score']}, top diagnosis {top['id']}, "
+        f"audit score {audit['summary']['score']}, top diagnosis {top['id']}, reach {reach['verdict']}, "
         f"first citation {hits['results'][0]['chunkId']}"
     )
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.1 - 2026-10-27
+
+Why was this denied, and can pod A reach pod B? Policy debugging, offline and read-only. This is the first published
+0.3 release: it also carries everything listed under 0.3.0.
+
+- `kube-noob policy explain` and the MCP tool `kubenoob_explain_denial`: explain a denial policy by policy for Kyverno
+  (including rules Kyverno generates for Deployments and other controllers), OPA Gatekeeper (deny and warn),
+  ValidatingAdmissionPolicy, Pod Security Admission, OpenShift SCC (which fields restricted-v2 rejected, the
+  namespace UID range, which SCCs the ServiceAccount may not use), RHACS (policy, violations, remediation), ResourceQuota
+  (what is left), LimitRange and RBAC. Each comes with read-only commands with the names filled in, the change that
+  satisfies the policy, the audit rules that catch it before deploy, and, for Pod Security and RBAC, a patch: the
+  restricted securityContext, or a Role and RoleBinding for exactly the missing verb and resource. Exceptions, quota
+  increases and new permissions are marked as the policy owner's decision.
+- `diagnose`, `debug` and `bundle` add `policyDenials` when the text holds a denial.
+- `kube-noob policy reach` and the MCP tools `kubenoob_check_network_policy` (manifests) and
+  `kubenoob_cluster_check_traffic` (live, read-only): evaluate NetworkPolicies for a connection (pod selectors,
+  namespace selectors, matchExpressions, ipBlock with except, named ports, endPort, default policyTypes), name the
+  policy and rule that decide egress and ingress, say for every other rule whether the peer or the port missed, and
+  propose the smallest NetworkPolicy that allows exactly that traffic (tests apply it and re-check). Exits 1 when
+  denied, for CI. AdminNetworkPolicy, EgressFirewall and CNI-specific policies are reported as not evaluated.
+- `examples/netpol-shop.yaml`: a default-deny namespace with an allowed and a blocked path, for trying `policy reach`.
+
 ## 0.3.0 - 2026-10-27
 
 Is this a known bug? kube-noob now answers from the OpenShift release notes, and says how current its knowledge is.

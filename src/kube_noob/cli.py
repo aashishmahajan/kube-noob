@@ -255,6 +255,39 @@ def build_parser() -> argparse.ArgumentParser:
     kis.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
     kis.add_argument("--limit", type=int, default=3)
 
+    pol = sub.add_parser(
+        "policy",
+        help="Why was this denied? Would a NetworkPolicy allow this traffic?",
+        description="Explain admission denials (Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, "
+        "OpenShift SCC, RHACS, quota, LimitRange, RBAC) and check NetworkPolicy reachability. Read-only and offline "
+        "unless --live is given.",
+    )
+    psub = pol.add_subparsers(dest="policy_cmd", required=True)
+    _patch(psub, common)
+    pex = psub.add_parser(
+        "explain",
+        help="Explain an admission denial, policy by policy",
+        description="Pass the error in quotes, a file with -f, or pipe it in. Example: kubectl apply -f deploy.yaml "
+        "2>&1 | kube-noob policy explain",
+    )
+    pex.add_argument("text", nargs="*", help="the denial text; quote it (single quotes avoid $ expansion)")
+    pex.add_argument("-f", "--file", default=None, help="a file, '-' for stdin, or the text itself")
+    pex.add_argument("--platform", choices=PLATFORMS)
+    prc = psub.add_parser(
+        "reach",
+        help="Would NetworkPolicies let the source reach the destination on a port? (exit 1 when denied)",
+        description="Endpoints: namespace/name, namespace/kind/name, namespace:key=value,... or an IP/CIDR. Example: "
+        "kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f k8s/",
+    )
+    prc.add_argument("--from", dest="source", required=True, help="source endpoint")
+    prc.add_argument("--to", dest="destination", required=True, help="destination endpoint")
+    prc.add_argument("--port", required=True, help="port number or named container port")
+    prc.add_argument("--protocol", default="TCP", choices=["TCP", "UDP", "SCTP"])
+    prc.add_argument("-f", "--file", action="append", default=[], help="YAML file or directory; repeat for several")
+    prc.add_argument("--namespace", dest="default_namespace", default="default", help="for objects without one")
+    prc.add_argument("--live", action="store_true", help="read the policies from the cluster (read-only)")
+    prc.add_argument("--platform", choices=PLATFORMS)
+
     dbg = sub.add_parser("debug", help="Collect live read-only evidence for a workload and diagnose it")
     dbg.add_argument("target", help="kind/name, e.g. deployment/orders-api")
     dbg.add_argument("-n", "--namespace", required=True)
@@ -549,6 +582,9 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _emit(out, fmt)
         return 0
 
+    if a.cmd == "policy":
+        return _policy(a, s, kit, fmt)
+
     if a.cmd == "bundle":
         from kube_noob.debug.diagnose import bundle_markdown
 
@@ -717,6 +753,100 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _emit({**report, "knowledge": status(s.data_dir)}, fmt)
         return 1 if report["conflicts"] else 0
     raise ConfigError(f"unknown command {a.cmd}")
+
+
+def _print_denials(out: dict[str, Any]) -> None:
+    for d in out["denials"]:
+        name = " / ".join(x for x in (d.get("policy"), d.get("rule")) if x)
+        head = (
+            f"{d['engineName']}" + (f"  {name}" if name else "") + (f"  ({d['resource']})" if d.get("resource") else "")
+        )
+        print(("WARN " if d["mode"] == "warn" else "DENY ") + head)
+        print(f"  {d['meaning']}")
+        if d.get("path"):
+            print(f"  at {d['path']}")
+        if d.get("readOnlyNextSteps"):
+            print("  check (read-only):")
+            for step in d["readOnlyNextSteps"]:
+                print(f"    {step.get('command') or step.get('instruction')}")
+        if d.get("proposedChanges"):
+            print("  fix (needs approval):")
+            for c in d["proposedChanges"]:
+                print(f"    - {c['change']}")
+        if d.get("patch"):
+            print("  patch:")
+            for line in d["patch"].rstrip().splitlines():
+                print(f"    {line}")
+        if d.get("relatedRules"):
+            print(f"  caught before deploy by: {', '.join(d['relatedRules'])} (kube-noob audit)")
+        print()
+    print(out.get("summary") or out.get("note", ""))
+
+
+def _print_reach(out: dict[str, Any]) -> None:
+    print(f"{out['verdict'].upper()}  {out['source']} -> {out['destination']}  {out['protocol']} {out['port']}")
+    for direction in ("egress", "ingress"):
+        r = out[direction]
+        print(f"  {direction:7} {'allowed' if r['allowed'] else 'DENIED '}  {r['reason']}")
+        for pol in [] if r["allowed"] else r.get("policies", []):
+            for rule in pol.get("rules", []):
+                if not rule["allows"]:
+                    miss = [x for x, ok in (("peer", rule["peerMatches"]), ("port", rule["portMatches"])) if not ok]
+                    print(
+                        f"          {pol['policy']} rule {rule['rule']}: allows {rule['peer']} on {rule['ports']} "
+                        f"(no match: {', '.join(miss)})"
+                    )
+    if out.get("warning"):
+        print(f"  warning: {out['warning']}")
+    for c in out.get("proposedChanges", []):
+        print(f"\n  fix (needs approval): {c['change']}")
+        for line in (c.get("manifest") or "").rstrip().splitlines():
+            print(f"    {line}")
+    print("\n  check (read-only):")
+    for step in out.get("readOnlyNextSteps", []):
+        print(f"    {step['command']}")
+    print("\n  not evaluated: " + "; ".join(out.get("notEvaluated", [])))
+
+
+def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
+    from kube_noob import toolkit as tk
+
+    if a.policy_cmd == "explain":
+        if a.text and a.file is not None:
+            raise ConfigError("pass the text or -f, not both")
+        text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
+        if len(text.strip()) < 3:
+            raise ConfigError("nothing to explain: pass the denial in quotes, a file with -f, or pipe it in")
+        out = kit.explain_denial(tk.PolicyExplainIn(text=text, platform=getattr(a, "platform", None)))
+        _print_denials(out) if a.format == "text" else _emit(out, fmt)
+        return 0
+    port: int | str = int(a.port) if str(a.port).isdigit() else a.port
+    platform = getattr(a, "platform", None)
+    if a.live:
+        if a.file:
+            raise ConfigError("pass -f manifests or --live, not both")
+        if not s.cluster.enabled:
+            raise ConfigError("--live needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
+        out = kit.cluster_check_traffic(
+            tk.TrafficIn(source=a.source, destination=a.destination, port=port, protocol=a.protocol, platform=platform)
+        )
+    else:
+        if not a.file:
+            raise ConfigError("pass the NetworkPolicies and workloads with -f (repeat for several), or use --live")
+        manifests = "\n---\n".join(_read(f) for f in a.file)
+        out = kit.check_network_policy(
+            tk.NetpolCheckIn(
+                manifests=manifests,
+                source=a.source,
+                destination=a.destination,
+                port=port,
+                protocol=a.protocol,
+                platform=platform,
+                default_namespace=a.default_namespace,
+            )
+        )
+    _print_reach(out) if a.format == "text" else _emit(out, fmt)
+    return 0 if out["verdict"] == "allowed" else 1
 
 
 def _learning(a: argparse.Namespace, kit: Any, fmt: str) -> int:
