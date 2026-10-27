@@ -246,6 +246,8 @@ def build_parser() -> argparse.ArgumentParser:
     ch.add_argument("--online", action="store_true")
     csub.add_parser("stats")
     csub.add_parser("verify")
+    ci = csub.add_parser("import", help="Import a corpus directory or .tgz (e.g. the corpus-refresh artifact)")
+    ci.add_argument("path")
 
     t = sub.add_parser("train", help="Training enforcer, credit system and dataset export")
     tsub = t.add_subparsers(dest="train_cmd", required=True)
@@ -587,6 +589,11 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         from kube_noob.knowledge.store import get_store
 
         _emit({"manifest": read_manifest(s.data_dir), "index": get_store(s.data_dir).stats()}, fmt)
+        return 0
+    if cc == "import":
+        from kube_noob.sources.corpus import import_corpus
+
+        _emit(import_corpus(Path(a.path), s.data_dir), fmt)
         return 0
     problems = verify(s.data_dir)
     _emit({"ok": not problems, "problems": problems}, fmt)

@@ -225,3 +225,28 @@ def test_clean_text_adoc_and_md() -> None:
     assert title == "Configuring {product-title}" and "# Configuring OpenShift" in text and "include::" not in text
     title2, text2 = clean_text("docs/a.md", '---\ntitle: "Pods"\n---\nSome {{< note >}}text{{< /note >}}\n')
     assert title2 == "Pods" and "{{<" not in text2
+
+
+def test_corpus_import_directory_and_tarball(tmp_path: Path) -> None:
+    import tarfile
+
+    from kube_noob.sources.corpus import import_corpus
+
+    src = tmp_path / "src"
+    rec = {"id": "a", "title": "t", "text": "x", "sourceId": "s", "license": "MIT", "redistributable": True}
+    write_shard(src, "one", [rec])
+    dest = tmp_path / "dest"
+    assert import_corpus(src / "corpus", dest)["imported"] == ["one"]
+    assert verify(dest) == []
+    tgz = tmp_path / "c.tgz"
+    with tarfile.open(tgz, "w:gz") as tf:
+        tf.add(src / "corpus", arcname="corpus")
+    dest2 = tmp_path / "dest2"
+    assert import_corpus(tgz, dest2)["imported"] == ["one"]
+    (src / "corpus" / "one.jsonl").write_text("tampered\n")
+    with pytest.raises(ValueError, match="checksum"):
+        import_corpus(src / "corpus", tmp_path / "dest3")
+    evil = src / "corpus" / "MANIFEST.json"
+    evil.write_text(json.dumps({"shards": {"x": {"file": "../../etc/passwd.jsonl", "sha256": "0"}}}))
+    with pytest.raises(ValueError, match="suspicious"):
+        import_corpus(src / "corpus", tmp_path / "dest4")

@@ -9,7 +9,7 @@ description = "Offline-first learning, manifest-audit and debugging agent for Ku
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 authors = [{ name = "kube-noob maintainers" }]
 keywords = [
   "kubernetes", "openshift", "rosa", "hypershift", "helm", "stackrox", "rhacs",

@@ -86,6 +86,46 @@ def iter_records(data_dir: Path, include_restricted: bool = True) -> list[dict[s
     return out
 
 
+def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
+    """Import shards from a directory or .tgz produced by ``corpus build`` / the corpus-refresh workflow.
+
+    Only files listed in the source MANIFEST.json are copied, names are validated, and every checksum must match.
+    """
+    import shutil
+    import tarfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = source
+        if source.is_file():
+            with tarfile.open(source, "r:gz") as tf:
+                tf.extractall(tmp, filter="data")  # rejects absolute paths, '..', links outside, devices
+            candidates = list(Path(tmp).rglob("MANIFEST.json"))
+            if not candidates:
+                raise ValueError(f"{source}: no MANIFEST.json inside the archive")
+            root = candidates[0].parent
+        manifest_file = root / "MANIFEST.json"
+        if not manifest_file.is_file():
+            raise ValueError(f"{root}: MANIFEST.json not found")
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        target = corpus_dir(data_dir)
+        current = read_manifest(data_dir)
+        imported: list[str] = []
+        for name, entry in manifest.get("shards", {}).items():
+            fname = str(entry.get("file", ""))
+            if not fname.endswith(".jsonl") or "/" in fname or "\\" in fname or fname.startswith("."):
+                raise ValueError(f"refusing suspicious shard file name {fname!r}")
+            src = root / fname
+            if not src.is_file():
+                continue  # e.g. redistributable-only bundles omit restricted shards
+            if hashlib.sha256(src.read_bytes()).hexdigest() != entry.get("sha256"):
+                raise ValueError(f"{fname}: checksum mismatch, refusing to import")
+            shutil.copyfile(src, target / fname)
+            current.setdefault("shards", {})[name] = entry
+            imported.append(name)
+        (target / "MANIFEST.json").write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {"imported": imported, "dataDir": str(data_dir)}
+
+
 def verify(data_dir: Path) -> list[str]:
     """Return problems: checksum mismatches, shards missing from the manifest, invalid records."""
     problems: list[str] = []
