@@ -33,7 +33,7 @@ prompt as one generation, then cut the clips together and add the voice-over.
 | 2 | 10 s | A short glowing cable loops between the two containers inside the pod only. Outside the pod, other glowing cubes try to reach the rocket and bounce off a transparent shield. | 127.0.0.1 only | It listens on 127.0.0.1, so only containers in that pod can call it. |
 | 3 | 10 s | The pod's outer wall shows a single small door marked with a padlock; arrows to the outside world fade out before reaching it. | No egress. No token to manage. | It needs no network access at all, and there's no Service, Route or token to manage. |
 | 4 | 12 s | Blank glowing terminal window over the isometric scene (overlay the real `kube-noob-sidecar.mp4` segment: audit, rollout, MCP calls, closed port). | Pod Security restricted | We deploy it on a cluster that enforces Pod Security restricted. The app asks it to audit a Deployment and diagnose a crash, over loopback. |
-| 5 | 8 s | A small gauge on the rocket's container settles at a low level, green. | About 85 MiB | It uses about eighty-five mebibytes of memory with its built-in knowledge. |
+| 5 | 8 s | A small gauge on the rocket's container settles at a low level, green. | 68 MiB peak · 256 MiB limit | In our test cluster it peaked at sixty-eight mebibytes, well under its limit. |
 | 6 | 12 s | Pull back to show many pods on the grid, each with a tiny rocket beside its app. | deploy/sidecar/app-with-kube-noob-sidecar.yaml | One example manifest, audited for OpenShift 4.20 and later. Link below. |
 
 ## Video 3: kube-noob as tools for Claude (MCP, 60 seconds)

@@ -107,7 +107,10 @@ seccomp and a read-only root filesystem. The only APIs used are stable `v1` ones
 
 Measured with `scripts/measure_footprint.py` (Python 3.13): about 80 MiB resident at start and 85 MiB peak after
 search, audit, diagnose and a full protocol run, the same for stdio and HTTP. Each MB of indexed text (team runbooks,
-a corpus) adds about 25 MiB; 3,000 issue-sized documents (11 MB) peaked at 340 MiB.
+a corpus) adds about 25 MiB; 3,000 issue-sized documents (11 MB) peaked at 340 MiB. On a cluster, the sidecar
+container's cgroup reported 66 MiB current and 68 MiB peak after audit, diagnose and search calls (CI job `e2e-kind`,
+Kubernetes 1.35, image built from the `Containerfile` on UBI 9 Python 3.12). The two sets of figures differ in Python
+version and in what is counted (process resident memory versus the container's cgroup).
 
 | Mode | Request | Limit |
 |---|---|---|

@@ -19,20 +19,8 @@ OpenShift Lightspeed has no catalog: a cluster admin adds kube-noob in `OLSConfi
 1. Tag a release. The release workflow lints and packages the chart, pushes it to `oci://ghcr.io/aashishmahajan/charts`,
    signs it, and attaches `kube-noob-<version>.tgz` to the GitHub release.
 2. Fork `openshift-helm-charts/charts` and open a first pull request that adds only
-   `charts/community/kube-noob/kube-noob/OWNERS`:
-
-   ```yaml
-   chart:
-     name: kube-noob
-     shortDescription: Kubernetes, OpenShift and ROSA audit, debugging and learning tools as an MCP server
-   publicPgpKey: null
-   users:
-     - githubUsername: aashishmahajan
-   vendor:
-     label: kube-noob
-     name: kube-noob
-   ```
-
+   `charts/community/kube-noob/kube-noob/OWNERS`, a copy of
+   [deploy/openshift-catalog/OWNERS](../deploy/openshift-catalog/OWNERS). Sign off the commit (`git commit -s`).
 3. After it merges, open a second pull request that adds `charts/community/kube-noob/kube-noob/<version>/` with the
    release's `kube-noob-<version>.tgz`. The pipeline runs chart-verifier with the community profile (helm-lint is the
    one mandatory check) and then waits for a manual approval.
