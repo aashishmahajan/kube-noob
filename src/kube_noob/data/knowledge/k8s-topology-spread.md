@@ -10,6 +10,10 @@ sources:
 ---
 # Topology spread
 
+To keep an app available when a node or a whole availability zone fails, run at least 3 replicas, spread them
+across zones and nodes, and protect them with a PodDisruptionBudget ([kn:k8s-pdb#0]).
+
+
 ```yaml
 topologySpreadConstraints:
 - maxSkew: 1

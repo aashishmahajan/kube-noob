@@ -72,12 +72,63 @@ _log = logging.getLogger(__name__)
 CITATION_RE = re.compile(r"\[(kn:[A-Za-z0-9._/-]+#\d+)\]")
 
 
+# Two-word spellings of one Kubernetes term, and common abbreviations, map to one token so "service account",
+# "ServiceAccount" and "sa" all meet in the index.
+_JOINS = {
+    ("service", "account"): "serviceaccount",
+    ("config", "map"): "configmap",
+    ("egress", "ip"): "egressip",
+    ("network", "policy"): "networkpolicy",
+    ("cluster", "role"): "clusterrole",
+    ("role", "binding"): "rolebinding",
+    ("persistent", "volume"): "persistentvolume",
+    ("stateful", "set"): "statefulset",
+    ("daemon", "set"): "daemonset",
+    ("deployment", "config"): "deploymentconfig",
+    ("ingress", "class"): "ingressclass",
+    ("storage", "class"): "storageclass",
+    ("machine", "pool"): "machinepool",
+    ("name", "space"): "namespace",
+}
+_ABBREVIATIONS = {
+    "sa": "serviceaccount",
+    "pvc": "persistentvolumeclaim",
+    "pv": "persistentvolume",
+    "pdb": "poddisruptionbudget",
+    "hpa": "horizontalpodautoscaler",
+    "scc": "securitycontextconstraints",
+    "dc": "deploymentconfig",
+    "rwx": "readwritemany",
+    "rwo": "readwriteonce",
+    "cm": "configmap",
+    "ns": "namespace",
+    "hcp": "hostedcontrolplane",
+}
+
+
+def _singular(tok: str) -> str | None:
+    if len(tok) > 3 and tok.isalpha() and tok.endswith("s") and not tok.endswith(("ss", "us", "is")):
+        return tok[:-1]
+    return None
+
+
 def tokenize(text: str) -> list[str]:
     out: list[str] = []
+    prev: str | None = None
     for tok in _TOKEN.findall(text.lower()):
+        if prev is not None:
+            joined = _JOINS.get((prev, _singular(tok) or tok))
+            if joined:
+                out.append(joined)
+        prev = tok
         if tok in _STOP:
             continue
         out.append(tok)
+        if tok in _ABBREVIATIONS:
+            out.append(_ABBREVIATIONS[tok])
+        single = _singular(tok)
+        if single:
+            out.append(single)
         if any(ch in tok for ch in "-./"):
             out.extend(p for p in re.split(r"[-./]", tok) if p and p not in _STOP)
     return out
@@ -125,23 +176,59 @@ def _split_markdown(body: str) -> Iterator[tuple[str, str]]:
         yield heading, "\n".join(buf).strip()
 
 
+_ITEM_START = re.compile(r"^(\s{0,1}[-*+] |\s{0,1}\d+\. |\||#)")
+MIN_TAIL_CHARS = 240
+
+
+def _sentence_cut(text: str, limit: int) -> int:
+    """Index to cut ``text`` at: the last sentence end before ``limit``, else ``limit``."""
+    window = text[:limit]
+    best = max(window.rfind(". "), window.rfind(".\n"), window.rfind("; "))
+    return best + 1 if best > limit // 2 else limit
+
+
+def _units(paragraph: str) -> list[str]:
+    """Break an over-long paragraph at list items and table rows (continuation lines stay with their item), and only
+    then at sentence ends, so a fact is never split mid-sentence when it can be avoided."""
+    if len(paragraph) <= MAX_CHUNK_CHARS:
+        return [paragraph]
+    items: list[str] = []
+    for line in paragraph.splitlines():
+        if items and not _ITEM_START.match(line):
+            items[-1] += "\n" + line
+        else:
+            items.append(line)
+    out: list[str] = []
+    for item in items:
+        while len(item) > MAX_CHUNK_CHARS:
+            cut = _sentence_cut(item, MAX_CHUNK_CHARS)
+            out.append(item[:cut].rstrip())
+            item = item[cut:].lstrip()
+        if item.strip():
+            out.append(item)
+    return out
+
+
 def _size_split(text: str) -> Iterator[str]:
     if len(text) <= MAX_CHUNK_CHARS:
         yield text
         return
-    paras = re.split(r"\n\s*\n", text)
+    units = [u for p in re.split(r"\n\s*\n", text) for u in _units(p)]
+    chunks: list[str] = []
     cur = ""
-    for p in paras:
-        if len(cur) + len(p) + 2 > MAX_CHUNK_CHARS and cur:
-            yield cur.strip()
+    for u in units:
+        sep = "\n" if cur and _ITEM_START.match(u) and _ITEM_START.match(cur.rsplit("\n", 1)[-1]) else "\n\n"
+        if cur and len(cur) + len(sep) + len(u) > MAX_CHUNK_CHARS:
+            chunks.append(cur.strip())
             cur = ""
-        rest = p
-        while len(rest) > MAX_CHUNK_CHARS:
-            yield rest[:MAX_CHUNK_CHARS]
-            rest = rest[MAX_CHUNK_CHARS:]
-        cur += rest + "\n\n"
+        cur = f"{cur}{sep}{u}" if cur else u
     if cur.strip():
-        yield cur.strip()
+        chunks.append(cur.strip())
+    # A short tail reads better with the text before it than as a fragment of its own.
+    if len(chunks) > 1 and len(chunks[-1]) < MIN_TAIL_CHARS:
+        tail = chunks.pop()
+        chunks[-1] = f"{chunks[-1]}\n{tail}"
+    yield from chunks
 
 
 def parse_front_matter(raw: str) -> tuple[dict[str, Any], str]:
@@ -251,9 +338,13 @@ class KnowledgeStore:
                 idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
                 s += idf * (f * 2.5) / (f + 1.5 * (1 - 0.75 + 0.75 * self._len[i] / (self._avg or 1)))
             if s > 0:
-                scores.append((s, i))
+                scores.append((s * c.extra.get("searchWeight", 1.0), i))
         scores.sort(reverse=True)
         return [Hit(self.chunks[i], s) for s, i in scores[:limit]]
+
+    def doc_frequency(self, token: str) -> float:
+        """Share of chunks containing ``token`` (0..1); rare tokens carry the meaning of a claim."""
+        return self._df.get(token, 0) / len(self.chunks) if self.chunks else 0.0
 
     def get(self, chunk_id: str) -> Chunk | None:
         return self.by_id.get(chunk_id)
@@ -294,7 +385,12 @@ def builtin_chunks() -> list[Chunk]:
                 origin="builtin",
                 source_id=f"builtin:{doc_id}",
                 version=str(meta.get("updated")) if meta.get("updated") else None,
-                extra={"sources": srcs, "tags": meta.get("tags") or [], "platforms": meta.get("platforms") or []},
+                extra={
+                    "sources": srcs,
+                    "tags": meta.get("tags") or [],
+                    "platforms": meta.get("platforms") or [],
+                    "searchWeight": float(meta.get("searchWeight", 1.0)),
+                },
             )
         )
     return out

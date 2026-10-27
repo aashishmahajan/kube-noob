@@ -77,3 +77,27 @@ def test_citation_extraction() -> None:
         "kn:ocp-scc#0",
         "kn:rosa-hcp#2",
     ]
+
+
+def test_citations_inside_knowledge_docs_resolve() -> None:
+    import re
+    from importlib import resources
+
+    store = get_store()
+    root = resources.files("kube_noob").joinpath("data", "knowledge")
+    missing = [
+        (f.name, cid)
+        for f in root.iterdir()
+        if f.name.endswith(".md")
+        for cid in re.findall(r"\[(kn:[\w.-]+#\d+)\]", f.read_text(encoding="utf-8"))
+        if store.get(cid) is None
+    ]
+    assert missing == []
+
+
+def test_no_fragment_chunks_before_the_last() -> None:
+    store = get_store()
+    for doc_id in {c.doc_id for c in store.chunks}:
+        chunks = store.doc(doc_id)
+        for c in chunks[:-1]:
+            assert len(c.text) >= 80, (c.chunk_id, c.text)

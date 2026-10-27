@@ -164,3 +164,18 @@ def test_grader_credits_corpus_citations_via_toolkit(tmp_path: Path) -> None:
     assert g["components"]["credit"] == 1.0 and not g["penalties"]
     # one cache slot per corpus state: grading must not evict the toolkit's store
     assert get_store(tmp_path) is kit.store()
+
+
+def test_citation_to_the_right_doc_but_wrong_chunk_earns_no_credit() -> None:
+    from kube_noob.evals.reward import benchmark, grade
+
+    task = benchmark()["bench-qa-hcp-machineconfig"]
+    answer = (
+        "On ROSA with HCP the Machine Config Operator does not run in the hosted cluster, so MachineConfig objects are "
+        "not a supported lever {c}. Tune the kubelet with `rosa create kubeletconfig` and change nodes through "
+        "machine pools {c}."
+    )
+    right = grade(task, answer.format(c="[kn:rosa-hcp#2]"))
+    wrong = grade(task, answer.format(c="[kn:rosa-hcp#3]"))
+    assert right.credit == 1.0 and wrong.credit == 0.0
+    assert right.reward > wrong.reward

@@ -897,6 +897,107 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         knowledge=("ocp-arbitrary-uid",),
         weight=0.9,
     ),
+    Playbook(
+        "DBG-IMMUTABLE-SELECTOR",
+        "Workload selector cannot change ('field is immutable')",
+        (
+            r"spec\.selector.*field is immutable",
+            r"field is immutable.*selector",
+            r"LabelSelector.*field is immutable",
+        ),
+        (
+            "In apps/v1 the label selector of a Deployment, StatefulSet or DaemonSet is fixed at creation; the new "
+            "manifest changes it (often a renamed `app` label).",
+        ),
+        (
+            "oc get deployment -n {ns} -o custom-columns=NAME:.metadata.name,SELECTOR:.spec.selector.matchLabels",
+            "oc get pods -n {ns} --show-labels",
+        ),
+        (
+            "Keep the existing selector and only add new pod labels.",
+            "Or create the workload under a new name, move the Service to it, then delete the old one.",
+        ),
+        knowledge=("k8s-common-errors",),
+        weight=1.3,
+    ),
+    Playbook(
+        "DBG-NS-TERMINATING",
+        "Namespace stuck in Terminating",
+        (
+            r"Namespace(DeletionDiscoveryFailure|FinalizersRemaining|ContentRemaining|DeletionContentFailure)",
+            r"namespace\s+\S+\s+.*\bTerminating\b",
+            r"namespace .* stuck",
+        ),
+        (
+            "An aggregated APIService is unavailable, so the namespace controller cannot list every resource type.",
+            "Objects in the namespace carry finalizers whose controller is gone or failing.",
+        ),
+        (
+            "oc get namespace {ns} -o yaml   # status.conditions name the blocker",
+            "oc get apiservice   # any Available=False blocks namespace deletion",
+            "oc api-resources --verbs=list --namespaced -o name"
+            " | xargs -n 1 oc get --show-kind --ignore-not-found -n {ns}",
+        ),
+        (
+            "Fix or remove the unavailable APIService (for example a removed metrics adapter).",
+            "Fix the controller that owns the remaining finalizers so it can finish its cleanup.",
+            "Removing finalizers by hand skips that cleanup (cloud load balancers, volumes); do it only knowingly.",
+        ),
+        knowledge=("k8s-common-errors",),
+        weight=1.2,
+    ),
+    Playbook(
+        "DBG-POD-TERMINATING",
+        "Pod stuck in Terminating",
+        (
+            r"pod\s+\S+\s+.*stuck.*Terminating",
+            r"stuck in Terminating",
+            r"\bTerminating\b.*\b(\d+[hd]|[2-9]\d+m)\b",
+        ),
+        (
+            "A finalizer on the pod is waiting for a controller that is gone.",
+            "The node is NotReady or gone, so the kubelet cannot confirm the container stopped.",
+        ),
+        (
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.metadata.finalizers}}'",
+            "oc get pod {pod} -n {ns} -o wide",
+            "oc get nodes",
+        ),
+        (
+            "Recover or remove the node; the pod then finishes terminating.",
+            "Force deletion (--grace-period=0 --force) only removes the API object; never do it for StatefulSet pods "
+            "unless the node is confirmed down.",
+        ),
+        knowledge=("k8s-common-errors",),
+    ),
+    Playbook(
+        "DBG-EGRESSIP",
+        "EgressIP not assigned to any node",
+        (
+            r"egress ?ip.*(no|not) assigned",
+            r"egress ?ip.*unassigned",
+            r"EgressIP .* (no assigned node|not assigned)",
+            r"egress-assignable",
+        ),
+        (
+            "No worker node carries the label k8s.ovn.org/egress-assignable.",
+            "The IP is outside the subnets of the labelled nodes.",
+            "The labelled nodes have no free IP capacity (AWS limits IPs per instance type).",
+        ),
+        (
+            "oc get egressip -o wide",
+            "oc get nodes -l k8s.ovn.org/egress-assignable= -o wide",
+            "oc get nodes -l k8s.ovn.org/egress-assignable= -o yaml | grep egress-ipconfig",
+        ),
+        (
+            "[ROSA] label a machine pool: rosa edit machinepool -c <cluster> <pool> "
+            "--labels k8s.ovn.org/egress-assignable= (this replaces the pool's labels; repeat the ones you need).",
+            "Pick egress IPs inside the worker subnets and spread them across zones.",
+        ),
+        platforms=("openshift", "rosa-classic", "rosa-hcp"),
+        knowledge=("ocp-egressip",),
+        weight=1.3,
+    ),
 )
 
 EXIT_CODES: dict[int, str] = {

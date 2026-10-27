@@ -37,8 +37,9 @@ W_TASK, W_CREDIT, W_FORMAT = 0.70, 0.20, 0.10
 MAX_COMPLETION_CHARS = 24_000
 _REFUSAL = re.compile(r"(?i)\b(i can(no|')t help|as an ai|i am unable to|i'm unable to)\b")
 DEFAULT_MIN_WORDS = 20
-RELEVANT_TOP_K = 8
 MIN_SHARED_TERMS = 3
+MIN_DISTINCTIVE_TERMS = 2
+DISTINCTIVE_DF = 0.05  # a term found in at most 5% of chunks
 _NEGATORS = frozenset(
     [
         "not",
@@ -136,26 +137,26 @@ def _credit(
     text: str,
     required: bool,
     store: KnowledgeStore,
-    prompt: str | None = None,
     cite_docs: list[str] | None = None,
 ) -> tuple[float, dict[str, Any], list[str]]:
     cites = extract_citations(text)
     valid = [c for c in cites if store.get(c) is not None]
     invalid = [c for c in cites if c not in valid]
     penalties = [f"fabricated citation {c}" for c in invalid]
-    # Tasks that declare their supporting docs do not also get the looser "top hits for the prompt" allowance.
-    top = {h.chunk.chunk_id for h in store.search(prompt, limit=RELEVANT_TOP_K)} if prompt and not cite_docs else set()
+    # A citation earns credit only when the cited chunk itself supports the sentence that cites it (shared terms).
+    # Tasks that declare supporting docs additionally require the chunk to come from one of them; a citation to the
+    # right document but the wrong chunk is not support.
     relevant: list[str] = []
     for c in valid:
         chunk = store.get(c)
         assert chunk is not None  # noqa: S101
-        if (cite_docs and chunk.doc_id in cite_docs) or c in top:
-            relevant.append(c)
+        if cite_docs and chunk.doc_id not in cite_docs:
             continue
         shared = {t for t in tokenize(_citing_context(text, c)) if len(t) > 2} & set(
             tokenize(f"{chunk.title} {chunk.heading} {chunk.text}")
         )
-        if len(shared) >= MIN_SHARED_TERMS:
+        distinctive = {t for t in shared if store.doc_frequency(t) <= DISTINCTIVE_DF}
+        if len(shared) >= MIN_SHARED_TERMS and len(distinctive) >= MIN_DISTINCTIVE_TERMS:
             relevant.append(c)
     if not cites:
         score = 0.0 if required else 0.5
@@ -245,7 +246,6 @@ def grade(task: dict[str, Any], completion: Any, store: KnowledgeStore | None = 
         text,
         bool(task.get("requireCitations")),
         store if store is not None else _default_store(),
-        prompt=task.get("prompt"),
         cite_docs=task.get("citeDocs"),
     )
     details["attribution"] = cdetails

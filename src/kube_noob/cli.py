@@ -298,6 +298,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("config", help="Show the effective configuration")
     sub.add_parser("doctor", help="Show what kube-noob can reach (network, cluster, model); exit 1 on conflicts")
+    st = sub.add_parser("selftest", help="Answer a battery of real questions offline and score the results")
+    st.add_argument("--category", choices=["kubernetes", "helm", "openshift", "rosa-hcp", "rhacs", "everyday"])
     dm = sub.add_parser("demo", help="Offline walkthroughs of common use cases (no network, no cluster)")
     dm.add_argument("scenario", nargs="?", help="scenario name or 'all' (see --list)")
     dm.add_argument("--list", action="store_true", dest="list_demos")
@@ -559,6 +561,19 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "config":
         _emit(kit.config_status(tk.EmptyIn()), fmt)
         return 0
+    if a.cmd == "selftest":
+        from kube_noob.evals.selftest import run as run_selftest
+
+        rep = run_selftest(s, a.category)
+        if a.format == "text":
+            print(f"kube-noob self-test: {rep['passed']}/{rep['total']} passed")
+            for cat, r in rep["byCategory"].items():
+                print(f"  {cat:11} {r['passed']}/{r['total']}")
+            for f in rep["failures"]:
+                print(f"FAIL {f['id']} ({f['kind']}): {f['detail']}")
+        else:
+            _emit(rep, fmt)
+        return 0 if not rep["failures"] else 1
     if a.cmd == "demo":
         from kube_noob import demo
 

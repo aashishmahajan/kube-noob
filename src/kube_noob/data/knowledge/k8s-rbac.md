@@ -20,3 +20,12 @@ sources:
 - Verify: `kubectl auth can-i --list --as=system:serviceaccount:<ns>:<sa>`.
 - Errors look like `User "system:serviceaccount:ns:sa" cannot list resource "pods" in API group "" in the namespace
   "ns"`: the message names the exact verb, resource and API group to grant.
+
+## Role or ClusterRole for a read-only ServiceAccount
+
+- A Role grants permissions in one namespace; a ClusterRole defines permissions that can be granted in one
+  namespace (bound with a RoleBinding) or cluster-wide (bound with a ClusterRoleBinding).
+- For a read-only service account in one namespace, bind the built-in `view` ClusterRole with a RoleBinding:
+  `kubectl create rolebinding app-view --clusterrole=view --serviceaccount=<ns>:<sa> -n <ns>`. `view` excludes
+  Secrets.
+- Cluster-wide read access (`ClusterRoleBinding` to `view`) is rarely needed; prefer one RoleBinding per namespace.

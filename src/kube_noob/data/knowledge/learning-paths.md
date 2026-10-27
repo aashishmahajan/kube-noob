@@ -1,4 +1,5 @@
 ---
+searchWeight: 0.5
 id: learning-paths
 title: Curated learning paths and practice environments (link-checked 2026-10-27)
 tags: [learning, resources]

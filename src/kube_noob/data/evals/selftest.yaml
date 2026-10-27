@@ -1,0 +1,74 @@
+# kube-noob self-test: realistic questions across Kubernetes, Helm, OpenShift 4.22, ROSA HCP, RHACS and everyday
+# StackOverflow-style errors. Run with `kube-noob selftest`; CI requires every case to pass.
+#   search:   one of `expect` must be among the top 3 documents
+#   diagnose: `expect` must be among the top 2 playbooks
+#   audit:    every rule in `expect` must fire on the bundled example
+#   protocol: the run must end with status `expect`
+cases:
+  # Kubernetes
+  - {id: k8s-nonroot, category: kubernetes, kind: search, query: "run pod as non-root and pass Pod Security restricted profile", expect: [k8s-pss]}
+  - {id: k8s-no-endpoints, category: kubernetes, kind: search, query: "service has no endpoints selector does not match pod labels", expect: [k8s-services]}
+  - {id: k8s-slow-start, category: kubernetes, kind: search, query: "app restarts during slow start liveness probe kills it", expect: [k8s-probes]}
+  - {id: k8s-zones, category: kubernetes, kind: search, query: "spread replicas across availability zones", expect: [k8s-topology-spread]}
+  - {id: k8s-zone-failure, category: kubernetes, kind: search, query: "keep app available if an availability zone fails", expect: [k8s-topology-spread, k8s-pdb]}
+  - {id: k8s-pdb-drain, category: kubernetes, kind: search, query: "PodDisruptionBudget blocks node drain", expect: [k8s-pdb]}
+  - {id: k8s-netpol-dns, category: kubernetes, kind: search, query: "default deny NetworkPolicy but still allow DNS", expect: [k8s-networkpolicy, k8s-dns]}
+  - {id: k8s-removed-apis, category: kubernetes, kind: search, query: "which APIs were removed in Kubernetes 1.32 flowcontrol v1beta3", expect: [k8s-deprecations]}
+  - {id: k8s-throttling, category: kubernetes, kind: search, query: "CPU throttling limits versus requests", expect: [k8s-resources]}
+  - {id: k8s-readonly-sa, category: kubernetes, kind: search, query: "read-only service account Role vs ClusterRole", expect: [k8s-rbac]}
+  - {id: k8s-ingress-404, category: kubernetes, kind: search, query: "Ingress returns 404 wrong ingressClassName", expect: [k8s-ingress]}
+  - {id: dx-imagepull, category: kubernetes, kind: diagnose, text: "Warning Failed kubelet Failed to pull image \"quay.io/acme/api:1.2\": rpc error: code = Unknown desc = unauthorized: access to the requested resource is not authorized", expect: DBG-IMAGEPULL}
+  - {id: dx-oom, category: kubernetes, kind: diagnose, text: "Reason: CrashLoopBackOff\nLast State: Terminated\n  Reason: OOMKilled\n  Exit Code: 137", expect: DBG-OOM}
+  - {id: dx-insufficient-cpu, category: kubernetes, kind: diagnose, text: "0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available", expect: DBG-PENDING-RESOURCES}
+  - {id: dx-rbac, category: kubernetes, kind: diagnose, text: "Error from server (Forbidden): pods is forbidden: User \"system:serviceaccount:shop:api\" cannot list resource \"pods\" in API group \"\" in the namespace \"shop\"", expect: DBG-RBAC}
+  - {id: dx-readiness, category: kubernetes, kind: diagnose, text: "Readiness probe failed: HTTP probe failed with statuscode: 503", expect: DBG-PROBE}
+  - {id: dx-dns, category: kubernetes, kind: diagnose, text: "dial tcp: lookup db.shop.svc.cluster.local on 172.30.0.10:53: read udp 10.128.2.5:40000->172.30.0.10:53: i/o timeout", expect: DBG-DNS}
+  - {id: audit-k8s, category: kubernetes, kind: audit, example: insecure-deployment.yaml, platform: kubernetes, expect: [KN-S013, KN-S002, KN-C004]}
+  # Helm
+  - {id: helm-lock, category: helm, kind: search, query: "helm upgrade failed another operation install upgrade rollback is in progress", expect: [helm-troubleshooting]}
+  - {id: helm-rollback, category: helm, kind: search, query: "how to roll back a Helm release to a previous revision", expect: [helm, helm-troubleshooting]}
+  - {id: helm-4-vs-3, category: helm, kind: search, query: "Helm 4 vs Helm 3 differences", expect: [helm]}
+  - {id: helm-lookup, category: helm, kind: search, query: "helm lookup function returns empty during helm template", expect: [helm-troubleshooting, helm]}
+  - {id: helm-values, category: helm, kind: search, query: "values precedence --set versus -f values file", expect: [helm-troubleshooting, helm]}
+  - {id: dx-helm-lock, category: helm, kind: diagnose, text: "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress", expect: DBG-HELM-LOCK}
+  - {id: dx-helm-kind, category: helm, kind: diagnose, text: "Error: INSTALLATION FAILED: unable to build kubernetes objects from release manifest: resource mapping not found for name: \"x\" namespace: \"\" from \"\": no matches for kind \"PodSecurityPolicy\" in version \"policy/v1beta1\"", expect: DBG-NO-MATCHES-KIND}
+  # OpenShift 4.22
+  - {id: ocp-version, category: openshift, kind: search, query: "which Kubernetes version is OpenShift 4.22", expect: [openshift, version-history]}
+  - {id: ocp-route-503, category: openshift, kind: search, query: "route returns 503 application is not available", expect: [ocp-routes]}
+  - {id: ocp-arbitrary-uid, category: openshift, kind: search, query: "writable directory for arbitrary UID container image", expect: [ocp-arbitrary-uid]}
+  - {id: ocp-egressfirewall, category: openshift, kind: search, query: "EgressFirewall allow only specific DNS names", expect: [ocp-egressfirewall]}
+  - {id: ocp-dc, category: openshift, kind: search, query: "DeploymentConfig deprecated migrate to Deployment", expect: [ocp-deploymentconfig]}
+  - {id: ocp-olm, category: openshift, kind: search, query: "install operator Subscription InstallPlan manual approval", expect: [ocp-operators]}
+  - {id: ocp-tls, category: openshift, kind: search, query: "edge reencrypt passthrough route TLS termination", expect: [ocp-routes]}
+  - {id: dx-scc, category: openshift, kind: diagnose, text: "Error creating: pods \"api-\" is forbidden: unable to validate against any security context constraint", expect: DBG-SCC}
+  - {id: dx-x509, category: openshift, kind: diagnose, text: "x509: certificate signed by unknown authority", expect: DBG-X509}
+  - {id: dx-route-503, category: openshift, kind: diagnose, text: "Application is not available. The application is currently not serving requests at this endpoint.", expect: DBG-ROUTE-503}
+  - {id: audit-ocp, category: openshift, kind: audit, example: insecure-deployment.yaml, platform: openshift, version: "4.22", expect: [KN-S004, KN-S013, KN-S002]}
+  # ROSA HCP
+  - {id: rosa-egressip, category: rosa-hcp, kind: search, query: "configure egress IP on ROSA HCP EgressIP", expect: [ocp-egressip]}
+  - {id: rosa-control-plane, category: rosa-hcp, kind: search, query: "ROSA HCP where does the control plane run can I access master nodes", expect: [rosa-hcp]}
+  - {id: rosa-rwx, category: rosa-hcp, kind: search, query: "ReadWriteMany storage on ROSA EFS", expect: [rosa-efs, storage-access-modes]}
+  - {id: rosa-autoscaling, category: rosa-hcp, kind: search, query: "ROSA HCP machine pool autoscaling", expect: [rosa-hcp]}
+  - {id: rosa-upgrades, category: rosa-hcp, kind: search, query: "ROSA HCP upgrade control plane and machine pools separately", expect: [rosa-hcp]}
+  - {id: rosa-egress-zero, category: rosa-hcp, kind: search, query: "ROSA HCP egress zero cluster without internet access", expect: [rosa-egress-zero]}
+  - {id: rosa-private, category: rosa-hcp, kind: search, query: "ROSA HCP private cluster PrivateLink", expect: [rosa-hcp, rosa-egress-zero]}
+  - {id: dx-egressip, category: rosa-hcp, kind: diagnose, text: "oc get egressip shows payments-egress with no assigned node", expect: DBG-EGRESSIP}
+  - {id: dx-efs, category: rosa-hcp, kind: diagnose, text: "Normal ExternalProvisioning persistentvolume-controller waiting for a volume to be created, either by external provisioner \"efs.csi.aws.com\"", expect: DBG-PVC-PENDING}
+  - {id: protocol-rosa-hcp, category: rosa-hcp, kind: protocol, example: blueprint.yaml, expect: ready}
+  # RHACS / StackRox
+  - {id: acs-roxctl, category: rhacs, kind: search, query: "roxctl image check in CI pipeline", expect: [stackrox]}
+  - {id: acs-admission, category: rhacs, kind: search, query: "RHACS admission controller blocks deployment policy enforcement", expect: [stackrox-admission]}
+  - {id: acs-upgrade, category: rhacs, kind: search, query: "RHACS 4.11 to 5.0 upgrade", expect: [stackrox, version-history]}
+  - {id: acs-privileged, category: rhacs, kind: search, query: "which RHACS policy flags privileged containers", expect: [stackrox, stackrox-admission]}
+  - {id: dx-acs-admission, category: rhacs, kind: diagnose, text: "admission webhook \"policyeval.stackrox.io\" denied the request: The attempted operation violated 1 enforced policy", expect: DBG-STACKROX-ADMISSION}
+  # Everyday errors (StackOverflow-style)
+  - {id: so-immutable, category: everyday, kind: search, query: "spec.selector field is immutable kubectl apply error", expect: [k8s-common-errors]}
+  - {id: so-configmap, category: everyday, kind: search, query: "configmap change not reflected in running pod", expect: [k8s-common-errors]}
+  - {id: so-restart, category: everyday, kind: search, query: "restart a deployment without changing the yaml", expect: [k8s-common-errors]}
+  - {id: so-pod-terminating, category: everyday, kind: search, query: "pod stuck in Terminating state finalizers", expect: [k8s-common-errors]}
+  - {id: so-ns-terminating, category: everyday, kind: search, query: "namespace stuck in Terminating", expect: [k8s-common-errors]}
+  - {id: so-wffc, category: everyday, kind: search, query: "PVC pending waiting for first consumer", expect: [k8s-common-errors, storage-access-modes]}
+  - {id: so-dns, category: everyday, kind: search, query: "DNS resolution fails inside pod nslookup timeout", expect: [k8s-dns]}
+  - {id: dx-immutable, category: everyday, kind: diagnose, text: "The Deployment \"api\" is invalid: spec.selector: Invalid value: v1.LabelSelector{...}: field is immutable", expect: DBG-IMMUTABLE-SELECTOR}
+  - {id: dx-ns-terminating, category: everyday, kind: diagnose, text: "namespace \"old\" is stuck in Terminating: NamespaceDeletionDiscoveryFailure", expect: DBG-NS-TERMINATING}
+  - {id: dx-wffc, category: everyday, kind: diagnose, text: "persistentvolumeclaim \"data\" Pending: waiting for first consumer to be created before binding", expect: DBG-PVC-PENDING}

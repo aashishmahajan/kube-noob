@@ -1,4 +1,5 @@
 ---
+searchWeight: 0.5
 id: master-controller
 title: Master Controller - the 7-step engineering protocol
 tags: [protocol, sre, architecture]
