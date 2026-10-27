@@ -273,6 +273,10 @@ def build_parser() -> argparse.ArgumentParser:
     ch.add_argument("--online", action="store_true")
     csub.add_parser("stats")
     csub.add_parser("verify")
+    cad = csub.add_parser("add-docs", help="Index your own runbooks (Markdown/AsciiDoc/text folder), offline")
+    cad.add_argument("path", help="folder with .md, .adoc, .txt or .rst files (for example a cloned wiki)")
+    cad.add_argument("--source", required=True, help="short name, e.g. platform-runbooks")
+    cad.add_argument("--base-url", help="link prefix for citations, e.g. https://git.example.com/runbooks/blob/main")
     ci = csub.add_parser("import", help="Import a corpus directory or .tgz (e.g. the corpus-refresh artifact)")
     ci.add_argument("path")
 
@@ -720,6 +724,11 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         from kube_noob.knowledge.store import get_store
 
         _emit({"manifest": read_manifest(s.data_dir), "index": get_store(s.data_dir).stats()}, fmt)
+        return 0
+    if cc == "add-docs":
+        from kube_noob.sources.org_docs import ingest_org_docs
+
+        _emit(ingest_org_docs(Path(a.path), s.data_dir, a.source, a.base_url), fmt)
         return 0
     if cc == "import":
         from kube_noob.sources.corpus import import_corpus

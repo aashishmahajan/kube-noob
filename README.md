@@ -33,6 +33,7 @@ kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
 kube-noob diagnose -f events.txt
 kube-noob doctor
+kube-noob selftest
 ```
 
 Pick your role in [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md); every demo runs offline.
@@ -100,6 +101,7 @@ never implicitly from the current directory. All keys: [kube-noob.example.yaml](
 ## Docs
 
 - [Use cases by role](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning with kube-noob](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
+- [Run it on OpenShift: service, sidecar, Lightspeed](https://github.com/aashishmahajan/kube-noob/blob/main/docs/openshift.md) and the [enterprise roadmap](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md)
 - [Architecture and trust boundaries](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
 - [Corpus, training and the reward](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
 - [Operations: weekly risk review and releases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)

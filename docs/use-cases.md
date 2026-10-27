@@ -59,7 +59,10 @@ kube-noob doctor
 - nothing later in the config chain can lift it;
 - the chart refuses to render if web access is also requested.
 
-`doctor` prints what the process can reach and exits 1 if the configuration contradicts the lock.
+`doctor` prints what the process can reach and exits 1 if the configuration contradicts the lock. To add kube-noob
+as a tool in OpenShift Lightspeed, or to run it as a sidecar, follow [openshift.md](openshift.md). Index your own
+runbooks with `kube-noob corpus add-docs <folder> --source platform-runbooks`, and prove the answers on your
+machine with `kube-noob selftest`.
 
 ## Security: policy-aligned reviews and red-team scenarios
 

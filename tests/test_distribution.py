@@ -58,3 +58,29 @@ def test_image_build_context_has_every_wheel_input() -> None:
     for src in list(wheel.get("force-include", {})) + [p.split("/")[0] for p in wheel["packages"]]:
         assert re.search(rf"^COPY .*\b{re.escape(src)}\b", containerfile, re.MULTILINE), src
         assert src not in ignored, src
+
+
+def test_scheduled_cadences_and_rox_corpus_scope() -> None:
+    """Weekly risk review, weekly corpus refresh, and a ROX Jira pull of 1000+ issues from 4.10 onward."""
+    import yaml
+
+    wf = ROOT / ".github" / "workflows"
+    risk = yaml.safe_load((wf / "risk-review.yml").read_text())
+    corpus_text = (wf / "corpus-refresh.yml").read_text()
+    corpus = yaml.safe_load(corpus_text)
+    triggers = risk.get("on") or risk.get(True)
+    assert re.fullmatch(r"\d+ \d+ \* \* \d", triggers["schedule"][0]["cron"])
+    ctriggers = corpus.get("on") or corpus.get(True)
+    assert re.fullmatch(r"\d+ \d+ \* \* \d", ctriggers["schedule"][0]["cron"])
+    assert "--project ROX" in corpus_text and "'4.10'" in corpus_text
+    assert int(re.search(r"jira_target \|\| '(\d+)'", corpus_text).group(1)) >= 1000
+
+
+def test_ships_as_mcp_plugin_cli_and_openshift_service() -> None:
+    import tomllib
+
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert cfg["project"]["scripts"]["kube-noob"] == "kube_noob.cli:main"
+    assert (ROOT / "plugin/kube-noob/.mcp.json").is_file() and (ROOT / ".claude-plugin/marketplace.json").is_file()
+    assert (ROOT / "deploy/helm/kube-noob/Chart.yaml").is_file()
+    assert "kube-noob" in (ROOT / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()

@@ -15,7 +15,7 @@ Jobs to be done:
 |---|---|---|
 | Walkthrough videos | Scripted demos (`kube-noob demo <scenario>`) plus VHS tapes rendered to GIFs in CI on every release | hand-made videos go stale every release; scripted demos are always current and double as smoke tests |
 | Educating on use cases | `docs/use-cases.md` (one page, by role) and `examples/` with ready-to-run inputs | one source of truth beats a separate help repo; split later only if community scenarios grow |
-| Help / instruction set | in-product first: `kube-noob tour` and an MCP prompt `getting_started` | users ask the tool, not a wiki |
+| Help / instruction set | in-product first: `kube-noob demo --list` and an MCP prompt `getting_started` | users ask the tool, not a wiki |
 | Training case | `docs/learning.md`: a flight simulator for Kubernetes objects (offline, graded, credited) | the deterministic grader is the differentiator over reading docs |
 | No egress by default | add an admin lock (`offline: true` / `KUBE_NOOB_OFFLINE=1`) that overrides `webEnabled`; web stays HTTPS GET-only, allowlisted, text content types only, size-capped, never written to disk, never executed; `kube-noob doctor` proves the posture | "off by default" protects users; an enforced lock protects platform teams |
 | Diagnose before change | every playbook splits read-only checks from changes; diagnose/debug output lists read-only next steps first and labels changes "requires approval"; `kube-noob bundle` collects a redacted read-only evidence bundle | makes the safe path the default path, not a prompt instruction |

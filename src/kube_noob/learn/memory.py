@@ -100,6 +100,28 @@ def _looks_like_secret_token(text: str) -> bool:
     return False
 
 
+def contains_credential(text: str) -> bool:
+    """True when ``text`` holds anything that looks like a credential (shared by learning notes and org docs)."""
+    return redact_text(text) != text or any(p.search(text) for p in _EXTRA_SECRETS) or _looks_like_secret_token(text)
+
+
+def mask_credentials(text: str) -> tuple[str, int]:
+    """Replace credential-looking content with ``***``; returns the masked text and the number of replacements."""
+    masked = redact_text(text)
+    count = int(masked != text)
+    for pat in _EXTRA_SECRETS:
+        masked, n = pat.subn("***", masked)
+        count += n
+
+    def _tok(m: re.Match[str]) -> str:
+        return "***" if _looks_like_secret_token(m.group(0)) else m.group(0)
+
+    before = masked
+    masked = _TOKENISH.sub(_tok, masked)
+    count += int(masked != before)
+    return masked, count
+
+
 def check_text(field: str, value: str, limit: int) -> str:
     """Reject anything that is not a short human summary: credentials, manifests, raw log excerpts."""
     v = value.strip()
@@ -107,7 +129,7 @@ def check_text(field: str, value: str, limit: int) -> str:
         raise ValueError(f"{field} is empty")
     if len(v) > limit:
         raise ValueError(f"{field} is longer than {limit} characters; store a summary, not raw output")
-    if redact_text(v) != v or any(p.search(v) for p in _EXTRA_SECRETS) or _looks_like_secret_token(v):
+    if contains_credential(v):
         raise ValueError(f"{field} looks like it contains a credential; learning notes never store secrets")
     if len(_MANIFEST_KEYS.findall(v)) >= 2 or (_API_VERSION.search(v) and _KIND.search(v)):
         raise ValueError(f"{field} looks like a manifest; describe the fix in words and keep manifests in Git")
