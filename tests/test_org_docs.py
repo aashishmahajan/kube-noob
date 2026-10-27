@@ -44,7 +44,7 @@ def test_runbooks_are_indexed_masked_and_cited(tmp_path: Path) -> None:
     out = ingest_org_docs(docs, s.data_dir, "platform-runbooks", "https://git.example.com/wiki/blob/main")
     assert out["records"] == 2 and out["maskedFiles"] == ["oncall/payments.md"]
     shard = (s.data_dir / "corpus" / "org-platform-runbooks.jsonl").read_text()
-    assert "hvs.CAES" not in shard and "redistributable\": false" in shard
+    assert "hvs.CAES" not in shard and 'redistributable": false' in shard
     hits = get_store(s.data_dir).search("payments readiness vault-agent sidecar escalate", limit=3)
     top = hits[0].chunk
     assert top.source_id == "org:platform-runbooks" and top.url.endswith("oncall/payments.md")
