@@ -281,7 +281,8 @@ class KubeNoob < Formula
                 securityContext:
                   privileged: true
     YAML
-    audit = shell_output("#{bin}/kube-noob audit -f #{testpath}/deploy.yaml --platform openshift --format json "                          "--fail-on never")
+    audit_cmd = "#{bin}/kube-noob audit -f #{testpath}/deploy.yaml --platform openshift --fail-on never"
+    audit = shell_output("#{audit_cmd} --format json")
     assert_match "\"score\"", audit
     (testpath/"events.txt").write "Last State: Terminated\nReason: OOMKilled\nExit Code: 137\n"
     assert_match "DBG-OOM", shell_output("#{bin}/kube-noob diagnose -f #{testpath}/events.txt --format json")
