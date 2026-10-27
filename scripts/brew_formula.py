@@ -13,6 +13,7 @@ Install is then `pip install --no-index --no-deps` of those files into a private
 fetched.
 Users install it with:
   brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob
+  brew trust --formula aashishmahajan/kube-noob/kube-noob
   brew install kube-noob
 The release workflow runs `VERSION --write` once PyPI has the release and pushes the result to main.
 Needs the `packaging` library (installed with kube-noob's dev extras).

@@ -37,6 +37,7 @@ Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit,
 
 ```bash
 brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob
+brew trust --formula aashishmahajan/kube-noob/kube-noob
 brew install kube-noob
 kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
@@ -46,7 +47,7 @@ kube-noob selftest
 ```
 
 No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (needs Python 3.11+, newer than macOS's
-built-in one). Upgrades and install errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+built-in one). Upgrades, errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
 
 ## Use with Claude or any MCP client

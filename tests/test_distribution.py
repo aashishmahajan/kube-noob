@@ -137,6 +137,7 @@ def test_homebrew_install_is_documented_tested_and_never_ahead_of_the_package() 
     brew_wf = (ROOT / ".github/workflows/brew.yml").read_text()
     for text in ((ROOT / "README.md").read_text(), (ROOT / "docs/install.md").read_text(), brew_wf):
         assert tap in text and "brew install kube-noob" in text
+        assert "brew trust --formula aashishmahajan/kube-noob/kube-noob" in text, "Homebrew 6 needs tap trust"
     jobs = yaml.safe_load(brew_wf)["jobs"]
     assert "public-tap" in jobs and "kube-noob --version" in str(jobs["public-tap"])
     formula = (ROOT / "Formula/kube-noob.rb").read_text()

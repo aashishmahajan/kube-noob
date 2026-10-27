@@ -3,8 +3,9 @@ name: brew
 # Installs Formula/kube-noob.rb with Homebrew on Apple silicon macOS and on Linux, inside Homebrew's network-free
 # build sandbox, then runs the formula's own test. Runs when the formula changes, weekly, on demand, and from the
 # release workflow after it writes the formula for a new version.
-# The public-tap job then installs exactly the way the README says (tap the GitHub repository, `brew install
-# kube-noob`) and checks that the installed version is the formula's version and the newest on PyPI.
+# The public-tap job then installs exactly the way the README says (tap the GitHub repository, trust the formula as
+# Homebrew 6 requires for third-party taps, `brew install kube-noob`) and checks that the installed version is the
+# formula's version and the newest on PyPI.
 on:
   push:
     branches: [main]
@@ -72,7 +73,7 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Install the way users do (brew tap, then brew install kube-noob)
+      - name: Install the way users do (brew tap, brew trust, brew install kube-noob)
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
@@ -81,6 +82,7 @@ jobs:
           set -euo pipefail
           if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
           brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob
+          brew trust --formula aashishmahajan/kube-noob/kube-noob
           brew install kube-noob
           formula="$(brew --repository aashishmahajan/kube-noob)/Formula/kube-noob.rb"
           want="$(sed -n 's#^  url ".*/kube_noob-\([0-9][0-9.]*\)\.tar\.gz"#\1#p' "$formula")"
