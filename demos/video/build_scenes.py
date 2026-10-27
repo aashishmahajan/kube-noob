@@ -43,7 +43,7 @@ WALKTHROUGH_META = {
 }
 MCP_META = {
     "titleSub": "kube-noob in Claude, end to end.<br>Claude does the thinking; kube-noob supplies the rules.",
-    "brand": "Claude Code + kube-noob plugin · real session",
+    "brand": "real Claude Code session",
     "endTitle": "Add it to Claude",
     "endCodes": ["/plugin marketplace add aashishmahajan/kube-noob", "/plugin install kube-noob@kube-noob"],
     "endSub": "Runs on your machine. No AI inside kube-noob, no network calls of its own.<br>"
@@ -162,7 +162,11 @@ def mcp(stream: Path) -> list[dict[str, Any]]:
                         "output": _tool_summary(tool, json.loads(raw)),
                     }
                 )
-    answer_lines = [line for line in _wrap(answer) if not line.startswith("```")]
+    # The prose part of the answer (before any YAML), without Markdown markup.
+    prose = answer.split("```")[0]
+    prose = "\n".join(ln for ln in prose.splitlines() if not ln.lstrip().startswith("## Fixed"))
+    prose = prose.replace("**", "").replace("`", "").replace("## ", "")
+    answer_lines = _wrap(prose.strip())
     return [
         {
             "id": "connect",
@@ -193,8 +197,24 @@ def mcp(stream: Path) -> list[dict[str, Any]]:
                 {
                     "caption": "The answer comes from the rules kube-noob returned",
                     "prompt": "Claude ›",
-                    "command": "Top 3 problems",
-                    "output": answer_lines[2:24],
+                    "command": answer_lines[0] if answer_lines else "",
+                    "output": answer_lines[1:22],
+                }
+            ],
+        },
+        {
+            "id": "who",
+            "chapter": "5. Who did what",
+            "steps": [
+                {
+                    "caption": "No AI inside kube-noob: the model is Claude; the checks are kube-noob's",
+                    "prompt": "#",
+                    "command": "this session",
+                    "output": [
+                        f"model:     {init.get('model', 'Claude')} (Anthropic), reading your prompt and writing the answer",
+                        f"kube-noob: {len(tool_steps)} tool calls, rules and fixes computed on your machine",
+                        "network:   kube-noob made none (web off); your prompt went to Claude as in any chat",
+                    ],
                 }
             ],
         },

@@ -34,12 +34,13 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
         run: |
           set -euo pipefail
           if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
           brew tap-new --no-git kube-noob/ci
           cp Formula/kube-noob.rb "$(brew --repository kube-noob/ci)/Formula/kube-noob.rb"
-          brew install --verbose kube-noob/ci/kube-noob
+          brew install --verbose --formula kube-noob/ci/kube-noob
           brew test kube-noob/ci/kube-noob
           kube-noob --version
           kube-noob diagnose -f examples/events-crashloop.txt --format json | python3 -c "import json,sys; print(json.load(sys.stdin)['diagnoses'][0]['id'])"

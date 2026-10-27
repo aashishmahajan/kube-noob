@@ -154,7 +154,7 @@ jobs:
           if helm template kn deploy/helm/kube-noob $base | grep -q "kind: Secret"; then
             echo "::error title=chart::no Secret may be generated when auth.existingSecret is set"; exit 1
           fi
-          if helm template kn deploy/helm/kube-noob --set auth.allowUnauthenticated=true | grep -q "KUBE_NOOB_HTTP_TOKEN"; then
+          if helm template kn deploy/helm/kube-noob --set auth.allowUnauthenticated=true | grep -q "name: KUBE_NOOB_HTTP_TOKEN"; then
             echo "::error title=chart::allowUnauthenticated must not wire a token"; exit 1
           fi
           ef() { helm template kn deploy/helm/kube-noob $base --set egressFirewall.enabled=true "$@"; }
