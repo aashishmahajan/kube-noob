@@ -94,7 +94,7 @@ async function main() {
     'base64');
   const ff = spawn('ffmpeg', [
     '-y', '-v', 'error', '-f', 'image2pipe', '-framerate', String(a.fps), '-c:v', 'mjpeg', '-i', '-',
-    '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-tune', 'animation', '-profile:v', 'high', '-level', '5.1',
+    '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-tune', 'animation', '-x264-params', 'rc-lookahead=20', '-profile:v', 'high', '-level', '5.1',
     '-pix_fmt', 'yuv420p', '-r', String(a.fps), '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709',
     '-an', '-movflags', '+faststart', outFile,
   ], { stdio: ['pipe', 'inherit', 'inherit'] });

@@ -70,7 +70,7 @@ async function main() {
     '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
     '-ss', String(a.from), '-t', String(end - a.from), '-i', path.join(a.dir, 'audio.wav'),
     '-map', '0:v', '-map', '1:a',
-    '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-tune', 'animation', '-profile:v', 'high', '-level', '5.1',
+    '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-tune', 'animation', '-x264-params', 'rc-lookahead=20', '-profile:v', 'high', '-level', '5.1',
     '-pix_fmt', 'yuv420p', '-r', String(fps), '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709',
     '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-c:a', 'aac', '-b:a', '320k', '-ar', '48000',
     '-shortest', '-movflags', '+faststart', out,

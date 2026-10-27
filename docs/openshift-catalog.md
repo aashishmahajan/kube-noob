@@ -26,6 +26,36 @@ OpenShift Lightspeed has no catalog: a cluster admin adds kube-noob in `OLSConfi
    one mandatory check) and then waits for a manual approval.
 4. Once merged, the chart is in the index the OpenShift console reads, under Helm charts, source "Community".
 
+Commands for steps 2 and 3 (GitHub CLI; replace the version in step 3 with the newest release):
+
+```bash
+gh repo fork openshift-helm-charts/charts --clone=false
+gh repo clone aashishmahajan/charts ~/openshift-helm-charts -- --depth 1
+cd ~/openshift-helm-charts
+git switch -c kube-noob-owners
+mkdir -p charts/community/kube-noob/kube-noob
+curl -fsSL https://raw.githubusercontent.com/aashishmahajan/kube-noob/main/deploy/openshift-catalog/OWNERS -o charts/community/kube-noob/kube-noob/OWNERS
+git add charts/community/kube-noob/kube-noob/OWNERS
+git commit -s -m "Add OWNERS for the kube-noob community chart"
+git push -u origin kube-noob-owners
+gh pr create --repo openshift-helm-charts/charts --head aashishmahajan:kube-noob-owners --title "Add OWNERS for the kube-noob community chart" --body "Adds the OWNERS file for the kube-noob community chart (Apache-2.0, https://github.com/aashishmahajan/kube-noob). The chart follows in a separate pull request."
+```
+
+After the OWNERS pull request merges:
+
+```bash
+cd ~/openshift-helm-charts
+git switch main
+git pull --ff-only https://github.com/openshift-helm-charts/charts main
+git switch -c kube-noob-0.3.0
+mkdir -p charts/community/kube-noob/kube-noob/0.3.0
+gh release download v0.3.0 --repo aashishmahajan/kube-noob --pattern "kube-noob-0.3.0.tgz" --dir charts/community/kube-noob/kube-noob/0.3.0
+git add charts/community/kube-noob/kube-noob/0.3.0
+git commit -s -m "Add kube-noob 0.3.0 community chart"
+git push -u origin kube-noob-0.3.0
+gh pr create --repo openshift-helm-charts/charts --head aashishmahajan:kube-noob-0.3.0 --title "Add kube-noob 0.3.0 community chart" --body "kube-noob 0.3.0: audit, debugging and learning tools for Kubernetes and OpenShift as an MCP server. Runs under restricted-v2 with NetworkPolicies; signed OCI copy at oci://ghcr.io/aashishmahajan/charts/kube-noob."
+```
+
 To check locally before submitting, run chart-verifier with the community profile on the packaged chart (command in
 the action items of the release checklist, [release-readiness.md](release-readiness.md)).
 
