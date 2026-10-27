@@ -200,12 +200,13 @@ def _units(paragraph: str) -> list[str]:
             items.append(line)
     out: list[str] = []
     for item in items:
-        while len(item) > MAX_CHUNK_CHARS:
-            cut = _sentence_cut(item, MAX_CHUNK_CHARS)
-            out.append(item[:cut].rstrip())
-            item = item[cut:].lstrip()
-        if item.strip():
-            out.append(item)
+        rest = item
+        while len(rest) > MAX_CHUNK_CHARS:
+            cut = _sentence_cut(rest, MAX_CHUNK_CHARS)
+            out.append(rest[:cut].rstrip())
+            rest = rest[cut:].lstrip()
+        if rest.strip():
+            out.append(rest)
     return out
 
 
