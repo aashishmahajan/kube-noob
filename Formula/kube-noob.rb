@@ -2,15 +2,15 @@
 class KubeNoob < Formula
   desc "Kubernetes, OpenShift, ROSA HCP, Helm and RHACS audit, debugging and learning tools"
   homepage "https://github.com/aashishmahajan/kube-noob"
-  url "https://files.pythonhosted.org/packages/f1/4f/a679d86351ca69f0dc37129a4cdea4dd4613d9aac7bdc12a2dfd076375e5/kube_noob-0.2.2.tar.gz"
-  sha256 "974f6cafbf900b43c2c9894d474ad9064487557a19e2788ecafd59f74e26ddd8"
+  url "https://files.pythonhosted.org/packages/11/15/a1cfbdcb375c16bd97b62c11b7107c2e058c5b44f58ba271762f488494b1/kube_noob-0.2.3.tar.gz"
+  sha256 "2ca7f36d36ae9d53bf68c632f4a511de4050ea65f05d070e13af7fd1d4df89fe"
   license "Apache-2.0"
 
   depends_on "python@3.13"
 
   resource "kube-noob" do
-    url "https://files.pythonhosted.org/packages/f9/4c/cbf57b10db5bd91e5a7a67584dd12614ab3585012c0be1a803ccb8b5b12a/kube_noob-0.2.2-py3-none-any.whl"
-    sha256 "8bbc9677b8772a74d477322eb0f6622c38ed439d63c4f9c882bc2e676942eecb"
+    url "https://files.pythonhosted.org/packages/d3/08/d84a3ab8995a4c4f489fc61a844b5ecdbcf4eabbe4b5e0c5313ac992b393/kube_noob-0.2.3-py3-none-any.whl"
+    sha256 "be049082628ede658b7bb430a65428ae5fbbf8ac1675ff70bda1e6ea24b0fafa"
   end
 
   resource "annotated-types" do
@@ -230,10 +230,12 @@ class KubeNoob < Formula
            *wheels.children
     system libexec/"bin/python", "-m", "pip", "--disable-pip-version-check", "check"
     bin.install_symlink libexec/"bin/kube-noob"
+    bin.install_symlink libexec/"bin/noob"
   end
 
   test do
     assert_match version.to_s, shell_output("#{bin}/kube-noob --version")
+    assert_match version.to_s, shell_output("#{bin}/noob --version")
     (testpath/"deploy.yaml").write <<~YAML
       apiVersion: apps/v1
       kind: Deployment
