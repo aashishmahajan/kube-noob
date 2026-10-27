@@ -104,12 +104,13 @@ GIT_SOURCES: tuple[GitSource, ...] = (
     GitSource(
         "helm-docs",
         "helm/helm-www",
-        ("content/en/docs",),
-        ("content/en/docs/*.md",),
+        ("docs",),
+        ("docs/*.md", "docs/*.mdx"),
         "MIT",
         True,
         "Helm documentation (c) The Helm Authors, MIT, https://helm.sh/docs/",
         "helm",
+        exclude=("docs/_*", "*/_*"),
     ),
     GitSource(
         "stackrox-policies",

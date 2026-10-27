@@ -30,6 +30,8 @@ _ADOC_COMMENT = re.compile(r"^//.*$", re.MULTILINE)
 _ADOC_INCLUDE = re.compile(r"^include::.*$", re.MULTILINE)
 _ADOC_BLOCK_ATTR = re.compile(r"^\[[\w\s,.=\"'#-]*\]\s*$", re.MULTILINE)
 _FRONT = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
+_MDX_IMPORT_EXPORT = re.compile(r"^(?:import|export)\s.+$", re.MULTILINE)
+_MDX_SELF_CLOSING = re.compile(r"^\s*<[A-Z][A-Za-z0-9.]*(?:\s[^>]*)?/>\s*$", re.MULTILINE)
 
 
 def _git(args: list[str], cwd: Path | None = None, timeout: int = 600) -> str:
@@ -52,6 +54,14 @@ def _git(args: list[str], cwd: Path | None = None, timeout: int = 600) -> str:
     return proc.stdout
 
 
+def _strip_mdx(text: str) -> str:
+    """Drop MDX import/export lines and self-closing JSX components outside fenced code blocks."""
+    parts = re.split(r"(^```.*?^```[^\n]*$)", text, flags=re.MULTILINE | re.DOTALL)
+    for i in range(0, len(parts), 2):  # even indexes are prose, odd are fenced code
+        parts[i] = _MDX_SELF_CLOSING.sub("", _MDX_IMPORT_EXPORT.sub("", parts[i]))
+    return "".join(parts)
+
+
 def clean_text(path: str, raw: str) -> tuple[str, str]:
     """Return (title, cleaned text)."""
     text = raw
@@ -72,11 +82,13 @@ def clean_text(path: str, raw: str) -> tuple[str, str]:
         text = _ADOC_BLOCK_ATTR.sub("", text)
         text = re.sub(r"^(=+)\s", lambda mm: "#" * len(mm.group(1)) + " ", text, flags=re.MULTILINE)
         text = text.replace("{product-title}", "OpenShift").replace("{rosa-short}", "ROSA")
-    elif path.endswith(".md"):
+    elif path.endswith((".md", ".mdx")):
         m = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
         if m and not fm:
             title = m.group(1).strip()
         text = _HUGO_SHORTCODE.sub("", text)
+        if path.endswith(".mdx"):
+            text = _strip_mdx(text)
     elif path.endswith(".json"):
         try:
             obj = json.loads(raw)

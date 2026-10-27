@@ -39,6 +39,7 @@ _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _ACCOUNT = re.compile(r"\[~accountid:[^\]]+\]|accountId[\"=:]\s*\"?[0-9a-f:-]{10,}\"?", re.IGNORECASE)
 MAX_COMMENTS = 20
 MAX_TEXT = 20_000
+LONG_JQL = 1500  # characters; above this the search request is sent as POST
 
 
 class JiraError(KubeNoobError):
@@ -153,14 +154,26 @@ class JiraClient:
         self.sleep(self.min_delay + self.rng.random() * self.jitter)
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        return self._request("GET", path, params=params)
+
+    def post(self, path: str, body: dict[str, Any]) -> Any:
+        return self._request("POST", path, body=body)
+
+    def _request(
+        self, method: str, path: str, params: dict[str, Any] | None = None, body: dict[str, Any] | None = None
+    ) -> Any:
         url = f"{self.base}{path}"
+        headers = {"Accept": "application/json"}
         for attempt in range(self.max_retries + 1):
             self.stats.requests += 1
             try:
-                resp = self.http.get(url, params=params, headers={"Accept": "application/json"})
+                if method == "POST":
+                    resp = self.http.post(url, json=body, headers={**headers, "Content-Type": "application/json"})
+                else:
+                    resp = self.http.get(url, params=params, headers=headers)
             except httpx.TransportError as exc:
                 if attempt == self.max_retries:
-                    raise JiraError(f"GET {path} failed: {exc}") from exc
+                    raise JiraError(f"{method} {path} failed: {exc}") from exc
                 self._backoff(attempt, None)
                 continue
             if resp.status_code == 200:
@@ -170,11 +183,11 @@ class JiraClient:
                 continue
             if resp.status_code in {401, 403}:
                 raise JiraError(
-                    f"GET {path}: HTTP {resp.status_code}. The project may not allow anonymous "
+                    f"{method} {path}: HTTP {resp.status_code}. The project may not allow anonymous "
                     "access; set JIRA_EMAIL and JIRA_API_TOKEN for authenticated pulls."
                 )
-            raise JiraError(f"GET {path}: HTTP {resp.status_code}: {resp.text[:400]}")
-        raise JiraError(f"GET {path}: retries exhausted")
+            raise JiraError(f"{method} {path}: HTTP {resp.status_code}: {resp.text[:400]}")
+        raise JiraError(f"{method} {path}: retries exhausted")
 
     def _backoff(self, attempt: int, retry_after: str | None) -> None:
         self.stats.retries += 1
@@ -190,12 +203,20 @@ class JiraClient:
         return data if isinstance(data, list) else []
 
     def search(self, jql: str, fields: str = DEFAULT_FIELDS, page_size: int = 100) -> Iterator[dict[str, Any]]:
+        """Enhanced JQL search. Long JQL goes in a POST body so it never hits URL length limits."""
         token: str | None = None
+        use_post = len(jql) > LONG_JQL
         while True:
-            params: dict[str, Any] = {"jql": jql, "fields": fields, "maxResults": page_size}
-            if token:
-                params["nextPageToken"] = token
-            data = self.get("/rest/api/3/search/jql", params)
+            if use_post:
+                body: dict[str, Any] = {"jql": jql, "fields": fields.split(","), "maxResults": page_size}
+                if token:
+                    body["nextPageToken"] = token
+                data = self.post("/rest/api/3/search/jql", body)
+            else:
+                params: dict[str, Any] = {"jql": jql, "fields": fields, "maxResults": page_size}
+                if token:
+                    params["nextPageToken"] = token
+                data = self.get("/rest/api/3/search/jql", params)
             self.stats.pages += 1
             issues = data.get("issues") or []
             yield from issues
@@ -361,22 +382,31 @@ def pull_project(
                 return
 
     if names:
-        quoted = ", ".join(json.dumps(n) for n in names)
-        clauses = [f"fixVersion in ({quoted})", f"affectedVersion in ({quoted})"]
+        # 1) Compact range JQL: version fields compare by the project's version order (verified on ROX, 2026-10-27).
+        #    classify() re-checks every issue numerically, so out-of-order versions cannot leak in.
+        lowest = min(names, key=lambda n: parse_version(n) or (0, 0, 0))
+        fields_cmp = ["fixVersion", "affectedVersion"]
         if target_field.startswith("customfield_"):
-            clauses.append(f"cf[{target_field.removeprefix('customfield_')}] in ({quoted})")
+            fields_cmp.append(f"cf[{target_field.removeprefix('customfield_')}]")
+        ranged = " OR ".join(f"{f} >= {json.dumps(lowest)}" for f in fields_cmp)
+        range_failed = False
         try:
-            consume(f"project = {project} AND ({' OR '.join(clauses)}) ORDER BY updated DESC", "version-jql")
+            consume(f"project = {project} AND ({ranged}) ORDER BY updated DESC", "version-range")
         except JiraError as exc:
-            client.stats.errors.append(f"version-jql: {exc}")
-            if len(clauses) == 3 and not records:
+            client.stats.errors.append(f"version-range: {exc}")
+            range_failed = True
+        # 2) Explicit version list (POSTed when long) only if the range query was rejected.
+        if range_failed and len(records) < target and client.stats.scanned < max_scan:
+            quoted = ", ".join(json.dumps(n) for n in names)
+            clauses = [f"{f} in ({quoted})" for f in fields_cmp]
+            for label, cl in (("version-list", clauses), ("version-list-no-target", clauses[:2])):
                 try:
-                    consume(
-                        f"project = {project} AND ({' OR '.join(clauses[:2])}) ORDER BY updated DESC",
-                        "version-jql-no-target",
-                    )
-                except JiraError as exc2:
-                    client.stats.errors.append(f"version-jql-no-target: {exc2}")
+                    consume(f"project = {project} AND ({' OR '.join(cl)}) ORDER BY updated DESC", label)
+                    break
+                except JiraError as exc:
+                    client.stats.errors.append(f"{label}: {exc}")
+                    if len(cl) == 2:
+                        break
     if len(records) < target and client.stats.scanned < max_scan:
         consume(f"project = {project} ORDER BY updated DESC", "recent-scan")
     client.stats.kept = len(records)

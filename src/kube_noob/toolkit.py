@@ -21,7 +21,7 @@ from kube_noob.audit.model import Severity, Stage
 from kube_noob.audit.protocol import run_protocol
 from kube_noob.catalog import OCP_TO_K8S, REMOVED_APIS, k8s_version_for, parse_minor
 from kube_noob.config import Settings
-from kube_noob.debug.cluster import get_backend
+from kube_noob.debug.cluster import get_backend, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
 from kube_noob.errors import ClarificationNeeded
 from kube_noob.evals.reward import benchmark, grade
@@ -317,6 +317,7 @@ class Toolkit:
         return diagnose(p.text, platform=p.platform, limit=p.limit).as_dict()
 
     def cluster_get(self, p: ClusterGetIn) -> dict[str, Any]:
+        resolve_resource(p.resource)  # refuse Secrets / non-allowlisted kinds before touching any backend
         backend = get_backend(self.settings)
         data = backend.get(p.resource, name=p.name, namespace=p.namespace, selector=p.selector)
         items = data.get("items")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +87,26 @@ def test_mcp_in_process(settings: Settings) -> None:
     assert out["gen"].structured_content["status"] == "ok"
     assert {"master_controller", "debug_session", "tutor"} <= out["prompts"]
     assert "restricted-v2" in out["res"].contents[0].text
+
+
+def test_mcp_guard_errors_reach_the_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guard failures must surface their message (not an opaque crash) so the calling model can act on them."""
+    from tests.test_debug import _fake_kubectl
+
+    _fake_kubectl(tmp_path)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("KUBE_NOOB_DATA_DIR", str(tmp_path))
+    server = build_server(load_settings(overrides={"cluster": {"enabled": True, "backend": "kubectl"}}))
+
+    async def run() -> tuple[Any, Any]:
+        async with Client(server) as c:
+            secrets = await c.call_tool("kubenoob_cluster_get", {"resource": "secrets", "namespace": "a"})
+            bad_name = await c.call_tool("kubenoob_cluster_get", {"resource": "pods", "name": "x; rm -rf /"})
+            return secrets, bad_name
+
+    secrets, bad_name = anyio.run(run)
+    assert secrets.is_error and "not permitted" in secrets.content[0].text
+    assert bad_name.is_error and "Invalid name" in bad_name.content[0].text
 
 
 def test_http_app_auth_and_health(monkeypatch: pytest.MonkeyPatch) -> None:

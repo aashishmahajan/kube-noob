@@ -156,10 +156,11 @@ jobs:
           set -o pipefail
           python scripts/e2e_mcp_http.py --url http://127.0.0.1:18080/mcp --token ci-token \
             --cluster-namespace demo --cluster-deployment crasher 2>&1 | tee /tmp/e2e.out \
-            || { tail -40 /tmp/e2e.out | sed 's/^/::error title=e2e::/'; exit 1; }
+            || { echo "::error title=e2e::$(tail -60 /tmp/e2e.out | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"; exit 1; }
       - name: Diagnostics on failure
         if: failure()
         run: |
           kubectl get pods -A || true
-          kubectl -n kube-noob describe pods 2>&1 | tail -60 | sed 's/^/::warning title=describe::/' || true
-          kubectl -n kube-noob logs deploy/kn-kube-noob --tail=80 2>&1 | sed 's/^/::warning title=logs::/' || true
+          enc() { sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g'; }
+          echo "::warning title=describe::$(kubectl -n kube-noob describe pods 2>&1 | tail -60 | enc)" || true
+          echo "::warning title=logs::$(kubectl -n kube-noob logs deploy/kn-kube-noob --tail=80 2>&1 | enc)" || true

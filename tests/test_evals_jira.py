@@ -13,7 +13,15 @@ from kube_noob.generate.blueprint import Blueprint
 from kube_noob.generate.manifests import generate
 from kube_noob.sources.corpus import iter_records, verify, write_shard
 from kube_noob.sources.git_ingest import clean_text
-from kube_noob.sources.jira import JiraClient, adf_to_text, classify, insights, pull_project, scrub
+from kube_noob.sources.jira import (
+    LONG_JQL,
+    JiraClient,
+    adf_to_text,
+    classify,
+    insights,
+    pull_project,
+    scrub,
+)
 
 GOOD_RWX_ANSWER = (
     "gp3-csi is AWS EBS block storage and only supports ReadWriteOnce (RWO) [kn:storage-access-modes#0]. Install the "
@@ -195,14 +203,55 @@ def test_pull_project_paginates_retries_and_scrubs() -> None:
     keys = [r["id"] for r in res.records]
     assert keys == ["jira-ROX-1", "jira-ROX-3"]
     assert res.stats.retries == 1 and res.stats.pages == 2 and len(sleeps) >= 2
-    jql = next(c for c in calls if "search/jql" in c)
-    assert "cf%5B10855%5D" in jql or "cf[10855]" in httpx.URL(jql).params["jql"]
+    jql = httpx.URL(next(c for c in calls if "search/jql" in c)).params["jql"]
+    assert 'cf[10855] >= "4.10.0"' in jql and 'fixVersion >= "4.10.0"' in jql
+    assert res.stats.strategy == "version-range"
     blob = json.dumps(res.records)
     assert "bob@example.com" not in blob and "Secret Person" not in blob
     assert all(r["redistributable"] is False for r in res.records)
     assert res.versions_considered == ["4.10.0", "5.0.0"] and res.ga_floor == "2026-03-03"
     ins = insights(res.records, "ROX")
     assert ins["issues"] == 2 and dict(ins["byComponent"])["sensor"] == 2
+
+
+def test_pull_project_falls_back_to_posted_version_list() -> None:
+    """If the range JQL is rejected, the explicit version list is sent as a POST body (no URL length limit)."""
+    names = [f"4.{m}.{p}" for m in range(10, 12) for p in range(0, 120)]
+    seen: list[tuple[str, str]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/versions"):
+            return httpx.Response(200, json=[{"name": n} for n in names])
+        if req.method == "GET":
+            jql = req.url.params["jql"]
+            seen.append(("GET", jql))
+            if ">=" in jql:
+                return httpx.Response(400, json={"errorMessages": ["range not supported"]})
+            return httpx.Response(200, json={"issues": [], "isLast": True})
+        body = json.loads(req.content)
+        seen.append(("POST", body["jql"]))
+        assert isinstance(body["fields"], list) and "summary" in body["fields"]
+        return httpx.Response(200, json={"issues": [_issue("ROX-9", fix=["4.11.3"])], "isLast": True})
+
+    client = JiraClient(
+        httpx.Client(transport=httpx.MockTransport(handler)), "https://jira.example", sleep=lambda _: None
+    )
+    res = pull_project(client, "ROX", "4.10", target=1, max_scan=50, base_url="https://jira.example")
+    assert [r["id"] for r in res.records] == ["jira-ROX-9"]
+    assert res.stats.strategy == "version-range+version-list"
+    assert res.stats.errors and "range not supported" in res.stats.errors[0]
+    method, jql = seen[-1]
+    assert method == "POST" and len(jql) > LONG_JQL and "fixVersion in (" in jql
+
+
+def test_clean_text_mdx_keeps_code() -> None:
+    raw = (
+        '---\ntitle: Deps\n---\nimport X from "/docs/_x.mdx"\n\n<X/>\n\nProse.\n\n'
+        '```go\nimport (\n    "fmt"\n)\n```\n\nexport const y = 1\n<Tabs groupId="a" />\nEnd.\n'
+    )
+    title, text = clean_text("docs/deps.mdx", raw)
+    assert title == "Deps" and "<X/>" not in text and "export const" not in text and "<Tabs" not in text
+    assert 'import (\n    "fmt"\n)' in text and not text.startswith("import")
 
 
 def test_corpus_shards_and_verify(tmp_path: Path) -> None:

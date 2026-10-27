@@ -32,6 +32,8 @@ MCP client), a **CLI**, a **Claude plugin**, or a **sidecar / service on OpenShi
 - **Web is off by default** (`webEnabled: false`). Turn it on explicitly and only allowlisted documentation domains are
   reachable.
 
+How the pieces fit together and where the trust boundaries are: [docs/architecture.md](docs/architecture.md).
+
 ## Quick start
 
 ```bash

@@ -14,9 +14,10 @@ from typing import Annotated, Any, cast
 
 import anyio
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import Icon, ToolAnnotations
-from pydantic import Field
+from pydantic import Field, ValidationError
 from pydantic_core import PydanticUndefined
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -26,12 +27,14 @@ from kube_noob import __version__
 from kube_noob.agent.loop import system_prompt
 from kube_noob.audit.engine import list_rules
 from kube_noob.config import Settings
+from kube_noob.errors import KubeNoobError
 from kube_noob.knowledge.store import get_store
 from kube_noob.learn.tutor import curriculum
 from kube_noob.toolkit import Toolkit, ToolSpec
 
 TOOL_PREFIX = "kubenoob_"
 PUBLIC_PATHS = frozenset({"/healthz", "/readyz"})
+MAX_ERROR_CHARS = 2000
 
 
 def _icons() -> list[Icon]:
@@ -77,8 +80,15 @@ def _wrapper(spec: ToolSpec) -> Any:
         annotations[arg] = ann
 
     async def tool(**kwargs: Any) -> dict[str, Any]:
-        validated = model.model_validate(kwargs)
-        result: dict[str, Any] = await anyio.to_thread.run_sync(spec.fn, validated)
+        # Anticipated failures (guards, bad input, disabled features) become ToolError so the calling model sees the
+        # actionable message; anything else stays an opaque crash whose details remain in the server log.
+        try:
+            validated = model.model_validate(kwargs)
+            result: dict[str, Any] = await anyio.to_thread.run_sync(spec.fn, validated)
+        except ValidationError as exc:
+            raise ToolError(f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from exc
+        except (KubeNoobError, ValueError) as exc:
+            raise ToolError(str(exc)[:MAX_ERROR_CHARS]) from exc
         return result
 
     tool.__name__ = TOOL_PREFIX + spec.name

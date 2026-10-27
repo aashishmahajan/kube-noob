@@ -51,6 +51,8 @@ jobs:
                 f"retries={s['retries']} strategy={s['strategy']} errors={len(s['errors'])}")
           print(f"::notice title=ROX versions::{by_version}")
           print(f"::notice title=ROX components::{dict(s['insights']['byComponent'][:10])}")
+          for err in s["errors"][:5]:
+              print("::warning title=ROX Jira strategy error::" + str(err)[:900].replace("%", "%25").replace("\n", " "))
           minimum = int("${{ inputs.jira_target || '1200' }}") * 5 // 6
           if s["records"] < minimum:
               print(f"::error title=ROX Jira pull::only {s['records']} issues kept (< {minimum})")
