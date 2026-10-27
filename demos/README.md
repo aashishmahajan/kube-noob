@@ -8,8 +8,15 @@ match the shipped version. The demos are offline and use a throwaway data direct
 vhs demos/diagnose.tape
 ```
 
-## YouTube walkthrough
+## Videos
 
-`demos/video/render.sh <out-dir>` records a 2-minute 1920x1080 walkthrough and a 1280x720 thumbnail from real
-`kube-noob` output (needs Node with Playwright and Chromium, and ffmpeg). The voice-over, title options, chapters and
-a longer scene list for other video tools are in [youtube-walkthrough.md](youtube-walkthrough.md).
+All three are rendered from real output (needs Node with Playwright and Chromium, and ffmpeg):
+
+| Video | Command | Source |
+|---|---|---|
+| 2-minute walkthrough + YouTube thumbnail | `demos/video/render.sh <out-dir>` | `kube-noob demo` and `selftest` |
+| kube-noob as tools for Claude (MCP), 70 s | `demos/video/render.sh <out-dir> mcp <session.jsonl>` | a `claude -p --plugin-dir plugin/kube-noob --output-format stream-json --verbose` session, with its prompt in `<session>.prompt.txt` |
+| kube-noob as a sidecar on a cluster | `demos/video/render.sh <out-dir> sidecar <transcript.txt>` | the transcript `scripts/demo_sidecar_kind.sh` records in CI (job `e2e-kind`, OpenShift 4.22 leg) |
+
+The voice-over, title options and chapters are in [youtube-walkthrough.md](youtube-walkthrough.md). Prompts for an
+AI-generated teaser, sidecar and MCP explainer are in [ai-video-prompts.md](ai-video-prompts.md).

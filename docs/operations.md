@@ -32,12 +32,15 @@ label `risk-review`, plus `release-needed` when a patch release is recommended.
    - image: no code change needed; the release rebuilds on the current UBI digest
    - drift: re-verify the affected facts against the source, update knowledge, catalog and tests, then bump
      `scripts/risk_baseline.json`
-3. Verify locally: `ruff check src tests scripts && mypy && pytest`.
+3. Verify locally: `scripts/check.sh` (plugin copy, lint, types, tests, self-test).
 4. Bump and changelog: `python scripts/bump_version.py <next> "<one-line reason>"`.
 5. Commit, push, and wait for CI to pass on `main`.
 6. Tag and push: `git tag v<next> && git push origin v<next>`. The release workflow publishes to PyPI (trusted
-   publishing), pushes the signed multi-arch image to GHCR, publishes to the MCP Registry and creates the GitHub release.
-7. Close the weekly issue with the release link.
+   publishing), pushes the signed multi-arch image and the signed OCI Helm chart to GHCR, publishes to the MCP
+   Registry and creates the GitHub release with the chart `.tgz` and demo GIFs.
+7. After PyPI shows the version: `python scripts/brew_formula.py <next> --write`, commit and push; the brew workflow
+   installs it on macOS and Linux.
+8. Close the weekly issue with the release link.
 
 Tags must be pushed by a person or the scheduled agent: tags pushed with the workflow `GITHUB_TOKEN` do not trigger
 other workflows.
