@@ -3,7 +3,7 @@
 Goal: a platform team deploys kube-noob once. Every developer and SRE then gets answers that are safe, cited and
 read-only first, about their own clusters and their own runbooks, so the platform team's ticket queue shrinks.
 kube-noob has no AI inside: Claude, OpenShift Lightspeed or any MCP client does the talking, and the CLI works with no
-model at all. Updated 2026-10-27, after 0.2.1.
+model at all. Updated 2026-10-27, after 0.2.2.
 
 ## Who it serves
 
@@ -29,7 +29,9 @@ model at all. Updated 2026-10-27, after 0.2.1.
 | CI on Kubernetes 1.33 to 1.37 (OpenShift 4.20, 4.21, 4.22, next); sidecar under Pod Security restricted | Done | 0.2.1 |
 | Chart: generated token, namespace-scoped RBAC, optional EgressFirewall, signed OCI chart | Done | 0.2.1 |
 | Homebrew (Apple silicon, Linux); `diagnose` takes pasted text | Done | 0.2.1 |
-| OpenShift Helm catalog (community) submission | Not started: needs the owner's fork and pull requests ([openshift-catalog.md](openshift-catalog.md)) | after 0.2.1 |
+| Claude plugin passes the plugin directory's checks (one policy hold: dependencies download at install) | Done | 0.2.2 |
+| Release writes the Homebrew formula; CI installs it the way users do (tap, `brew install kube-noob`) | Done | after 0.2.2 |
+| OpenShift Helm catalog (community) submission | Not started: needs the owner's fork and pull requests ([openshift-catalog.md](openshift-catalog.md)) | after 0.2.2 |
 | Admission under a real `restricted-v2` SCC in CI | At risk: needs an OpenShift cluster for CI | Next |
 
 ## Now (0.3.0): lightweight wins that reuse what exists
@@ -38,6 +40,8 @@ Each reuses the existing rules, playbooks and counters. None needs new infrastru
 
 | Capability | Why it matters | Effort |
 |---|---|---|
+| Known issues: match an error to a reported bug (OCPBUGS, ROX, Kubernetes, release-note known issues) with its link and fixed-in version | "Is this a known bug, and which version fixes it?" is the first question on every escalation | Medium |
+| Policy debugging: explain Kyverno and Gatekeeper denials; check whether a NetworkPolicy lets pod A reach pod B | Policy denials are the most common "it worked on my laptop" ticket | Medium |
 | `audit --format sarif` plus a GitHub Action and a pre-commit hook | Findings show as code-scanning alerts on the pull request: the cheapest way into every team's workflow | Small |
 | Runbook links: map playbook and rule ids to the company's own URLs (`runbooks.yaml`) | Answers point at "our runbook for this", in the company's terms | Small |
 | `upgrade-check --to 4.22`: removed APIs, DeploymentConfig, Pod Security and SCC changes for the target version | Every OpenShift upgrade starts with this question | Small |
@@ -62,7 +66,21 @@ Each reuses the existing rules, playbooks and counters. None needs new infrastru
 
 Set aside: Slack or Teams bots (Lightspeed and Claude already give the chat surface), embeddings (BM25 with term joins
 passes the self-test, 24 of 25 on unseen paraphrases), a hosted SaaS (it conflicts with the no-egress promise), and a
-built-in model.
+model inside the kube-noob package (a trained model ships separately: next section).
+
+## Trained-model track (proposed)
+
+A model trained on kube-noob's rules, playbooks, known issues and the team's approved fixes ships as its own signed
+artifact, served on OpenShift AI and used by OpenShift Lightspeed, with kube-noob as its MCP tools. kube-noob itself
+stays model-free. Each phase ships only when its gate passes.
+
+| Phase | Ships | Gate |
+|---|---|---|
+| 0.3 | Known-issue matching and policy debugging (above) | Every match cites a Red Hat or upstream page; no false matches on the evaluation set |
+| 0.4 | Chart registers kube-noob in `OLSConfig` (`MCPServer` gate); approved team fixes and runbooks from Git or a ConfigMap, read-only to callers | Lightspeed passes the 61-question selftest through the tools on a test cluster |
+| 0.5 | Training pipeline on OpenShift AI from `kube-noob train export`; runs in the model registry; scored with the reward, selftest and safety checks | Beats the base model on the frozen set; no answer changes the cluster first |
+| 0.6 | Signed ModelCar image and model card; KServe + vLLM `InferenceService`; `OLSConfig` points at it | Installs on a disconnected cluster within the agreed latency |
+| 1.0 | Approved fixes feed scheduled retraining; weekly top-issues report | No regression on the frozen set; a person approves each model release |
 
 ## Riskiest assumptions and the cheapest test
 

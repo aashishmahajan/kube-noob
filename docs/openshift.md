@@ -144,7 +144,8 @@ contents); your cluster's logging decides how long that is kept. Details: [PRIVA
 - PyPI: `kube-noob` is published with Trusted Publishing and provenance on every tag.
 - MCP Registry: `io.github.aashishmahajan/kube-noob` is published by the release workflow.
 - Homebrew: `brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob`, then
-  `brew install aashishmahajan/kube-noob/kube-noob`. CI installs the formula on macOS and Linux every week.
+  `brew install kube-noob`. The release workflow writes the formula once PyPI has the version, and CI installs it
+  that way on macOS and Linux after every release and every week. Other ways and fixes: [install.md](install.md).
 - Container image: `ghcr.io/aashishmahajan/kube-noob:<version>` is multi-arch and signed with cosign. Verify it
   with the commands in [SECURITY.md](../SECURITY.md).
 - Claude plugin: `/plugin marketplace add aashishmahajan/kube-noob`. It runs the bundled server source with

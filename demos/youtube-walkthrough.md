@@ -2,7 +2,7 @@
 
 There are two cuts:
 
-- The **rendered cut** (2:02, 1920x1080, silent) is recorded from real `kube-noob` 0.2.0 output by
+- The **rendered cut** (about 2 minutes, 3840x2160, silent) is recorded from the installed `kube-noob`'s real output by
   `demos/video/render.sh <out-dir>`. Lay the voice-over below on top of it.
 - The **long cut** (about 5 minutes) is a scene list for a video tool such as Astra. It uses the same commands, so
   every on-screen number is real.

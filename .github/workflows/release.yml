@@ -260,6 +260,45 @@ jobs:
           name: demos
           path: demos/out/*.gif
 
+  homebrew:
+    # The formula pins this release's PyPI files by sha256, so it is written only after PyPI has them, then pushed to
+    # main (the branch the public tap follows) and installed on macOS and Linux by the brew workflow.
+    needs: publish-pypi
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install packaging
+      - name: Write Formula/kube-noob.rb for this release and push it to main
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            python scripts/brew_formula.py "$version" --write && break
+            if [ "$attempt" = 10 ]; then echo "::error title=homebrew::PyPI files for $version not available"; exit 1; fi
+            sleep 30
+          done
+          if git diff --quiet -- Formula/kube-noob.rb; then echo "formula already at $version"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Homebrew formula for kube-noob $version" -- Formula/kube-noob.rb
+          git push origin HEAD:main
+
+  brew:
+    needs: homebrew
+    permissions:
+      contents: read
+    uses: ./.github/workflows/brew.yml
+    with:
+      ref: main
+
   github-release:
     needs: [publish-pypi, image, demos, chart]
     if: github.event_name == 'push'

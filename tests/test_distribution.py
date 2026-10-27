@@ -124,3 +124,25 @@ def test_homebrew_formula_installs_hash_pinned_wheels() -> None:
     assert {"kube-noob", "mcp", "pydantic", "pydantic-core", "pyyaml"} <= {name for name, _, _ in resources}
     assert '"install", "--no-index", "--no-deps"' in formula and '"check"' in formula
     assert 'depends_on "python@3.13"' in formula and "depends_on arch: :arm64" in formula and "test do" in formula
+
+
+def test_homebrew_install_is_documented_tested_and_never_ahead_of_the_package() -> None:
+    """Users run `brew tap ...` then `brew install kube-noob`: the README, the install guide and the CI job that
+    installs from the public tap use those exact commands, and the formula is never newer than the package."""
+    from packaging.version import Version
+
+    import kube_noob
+
+    tap = "brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob"
+    brew_wf = (ROOT / ".github/workflows/brew.yml").read_text()
+    for text in ((ROOT / "README.md").read_text(), (ROOT / "docs/install.md").read_text(), brew_wf):
+        assert tap in text and "brew install kube-noob" in text
+    jobs = yaml.safe_load(brew_wf)["jobs"]
+    assert "public-tap" in jobs and "kube-noob --version" in str(jobs["public-tap"])
+    formula = (ROOT / "Formula/kube-noob.rb").read_text()
+    m = re.search(r'^  url ".*/kube_noob-([0-9][0-9.]*)\.tar\.gz"', formula, re.MULTILINE)
+    assert m, "formula has no sdist url"
+    assert Version(m.group(1)) <= Version(kube_noob.__version__)
+    release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())["jobs"]
+    assert release["homebrew"]["needs"] == "publish-pypi"
+    assert release["brew"]["uses"] == "./.github/workflows/brew.yml"

@@ -25,7 +25,7 @@ AI-generated teaser, sidecar and MCP explainer are in [ai-video-prompts.md](ai-v
 
 The same three scripts, rendered locally in the look of the Grok teaser (navy server room, glass terminal, rocket
 mascot) with a Piper voice-over and generated music. Every terminal line in them is copied from a real run: the
-0.2.1 CLI, the CI sidecar transcript and the recorded Claude session.
+0.2.2 CLI, the CI sidecar transcript and the recorded Claude session.
 
 | Video | Length | Command |
 |---|---|---|

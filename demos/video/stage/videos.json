@@ -1,5 +1,5 @@
 {
-  "_comment": "Scripts for the three animated videos (demos/ai-video-prompts.md, rendered without a video model). 'vo' is spoken by Piper TTS; 'say' overrides it for pronunciation. Terminal lines are copied from real runs: kube-noob 0.2.1 CLI output, the CI sidecar transcript, and the recorded Claude session (demos/video/render.sh).",
+  "_comment": "Scripts for the three animated videos (demos/ai-video-prompts.md, rendered without a video model). 'vo' is spoken by Piper TTS; 'say' overrides it for pronunciation. Terminal lines are copied from real runs: kube-noob 0.2.2 CLI output, the CI sidecar transcript, and the recorded Claude session (demos/video/render.sh).",
   "end": {
     "tagline": "No AI inside. Works with yours.",
     "platforms": "Kubernetes · OpenShift · ROSA HCP · Helm · RHACS",
@@ -103,7 +103,7 @@
           "vo": "On a test cluster that enforces Pod Security restricted, the app asks it to audit a Deployment and diagnose a crash, over localhost.",
           "term": [
             "$ kubectl -n team-tools exec -i deploy/assistant -c assistant -- python3 - < scripts/sidecar_client.py",
-            "connected to kube_noob_mcp 0.2.1 at http://127.0.0.1:8080/mcp: 23 tools",
+            "connected to kube_noob_mcp 0.2.2 at http://127.0.0.1:8080/mcp: 23 tools",
             "audit: score 41.0/100, high=3 medium=6",
             "  [HIGH] KN-S002: Container 'api' explicitly allows privilege escalation.",
             "  [HIGH] KN-S004: Container 'api' sets runAsUser: 1000; restricted-v2 will reject IDs outside the namespace range.",

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Homebrew: the formula is at 0.2.2. The release workflow now writes it once PyPI has the new version and pushes it to
+  main, and a new CI job installs it exactly as documented (`brew tap aashishmahajan/kube-noob
+  https://github.com/aashishmahajan/kube-noob`, then `brew install kube-noob`) on macOS and Linux and fails if the
+  installed version differs from the formula or from PyPI.
+- `docs/install.md`: every install method with its upgrade command, and the fix for each common error (no tap, Python
+  older than 3.11, `externally-managed-environment`, no `pip` command, an older copy earlier on `PATH`).
+- Demo copy and the sidecar video show 0.2.2; the roadmap adds known-issue matching, policy debugging and a proposed
+  trained-model track for OpenShift.
+
 ## 0.2.2 - 2026-10-27
 
 The Claude plugin passes the plugin directory's checks; releases finish even when the chart push fails; three

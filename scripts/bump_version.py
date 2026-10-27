@@ -66,9 +66,13 @@ def bump(root: Path, new: str, note: str) -> list[str]:
             changed.append(rel)
     log = root / "CHANGELOG.md"
     text = log.read_text()
-    entry = f"## {new} - {dt.date.today().isoformat()}\n\n- {note.strip()}\n\n"
-    first = text.index("\n## ") + 1
-    log.write_text(text[:first] + entry + text[first:])
+    header = f"## {new} - {dt.date.today().isoformat()}\n\n- {note.strip()}\n"
+    if "\n## Unreleased\n\n" in text:
+        # The notes gathered under "Unreleased" become this version's entry, after the release note.
+        log.write_text(text.replace("\n## Unreleased\n\n", "\n" + header, 1))
+    else:
+        first = text.index("\n## ") + 1
+        log.write_text(text[:first] + header + "\n" + text[first:])
     changed.append("CHANGELOG.md")
     return changed
 

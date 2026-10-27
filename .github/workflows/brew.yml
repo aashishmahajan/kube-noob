@@ -1,7 +1,10 @@
 name: brew
 
 # Installs Formula/kube-noob.rb with Homebrew on Apple silicon macOS and on Linux, inside Homebrew's network-free
-# build sandbox, then runs the formula's own test. Runs when the formula changes, weekly, and on demand.
+# build sandbox, then runs the formula's own test. Runs when the formula changes, weekly, on demand, and from the
+# release workflow after it writes the formula for a new version.
+# The public-tap job then installs exactly the way the README says (tap the GitHub repository, `brew install
+# kube-noob`) and checks that the installed version is the formula's version and the newest on PyPI.
 on:
   push:
     branches: [main]
@@ -11,6 +14,12 @@ on:
   schedule:
     - cron: "23 7 * * 3"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to check out (the release workflow passes main, where it pushed the new formula)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -29,6 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
       - name: Install and test the formula from a local tap
         env:
@@ -51,4 +61,32 @@ jobs:
           brew test kube-noob/ci/kube-noob > /tmp/brew.log 2>&1 || report test
           kube-noob --version
           kube-noob diagnose -f examples/events-crashloop.txt --format json | python3 -c "import json,sys; print(json.load(sys.stdin)['diagnoses'][0]['id'])"
+          kube-noob selftest
+
+  public-tap:
+    # Pull requests are skipped: the public tap is the default branch, not the pull request.
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install the way users do (brew tap, then brew install kube-noob)
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+        run: |
+          set -euo pipefail
+          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
+          brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob
+          brew install kube-noob
+          formula="$(brew --repository aashishmahajan/kube-noob)/Formula/kube-noob.rb"
+          want="$(sed -n 's#^  url ".*/kube_noob-\([0-9][0-9.]*\)\.tar\.gz"#\1#p' "$formula")"
+          pypi="$(curl -fsS https://pypi.org/pypi/kube-noob/json | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])')"
+          got="$(kube-noob --version)"
+          echo "formula $want, PyPI $pypi, installed: $got"
+          if [ "$got" != "kube-noob $want" ]; then echo "::error title=brew::installed '$got', formula says $want"; exit 1; fi
+          if [ "$want" != "$pypi" ]; then echo "::error title=brew::the formula is $want but PyPI has $pypi: run scripts/brew_formula.py $pypi --write"; exit 1; fi
           kube-noob selftest

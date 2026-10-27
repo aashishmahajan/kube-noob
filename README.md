@@ -36,7 +36,8 @@ Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit,
 ## Quick start
 
 ```bash
-pipx install kube-noob
+brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob
+brew install kube-noob
 kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
 kube-noob diagnose 'paste events or errors'
@@ -44,8 +45,9 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-Homebrew (Apple silicon, Linux): `brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob`,
-then `brew install aashishmahajan/kube-noob/kube-noob`. Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
+No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (needs Python 3.11+, newer than macOS's
+built-in one). Upgrades and install errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
 
 ## Use with Claude or any MCP client
 
@@ -88,12 +90,12 @@ Config is never read from the current directory implicitly. All keys: [kube-noob
 
 ## Docs
 
-- [Use cases by role](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning with kube-noob](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
+- [Use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
 - [Enterprise roadmap](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md)
-- [Architecture and trust boundaries](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
+- [Architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
 - [Corpus, training and the reward](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
-- [Operations: weekly risk review and releases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
-- [Guidance traceability (every rule and its test)](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md) and [release readiness](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
+- [Operations and releases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
+- [Guidance traceability](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md) and [release readiness](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
 - [Privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security policy](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md) and [contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md)
 
 ## Credits
