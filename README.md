@@ -60,7 +60,7 @@ Claude plugin (skills plus the bundled server; runs in Claude Code and Cowork):
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.2.1", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.2.2", "kube-noob", "mcp"]}}}
 ```
 
 Cluster and web tools appear only when enabled.

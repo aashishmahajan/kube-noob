@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.2 - 2026-10-27
+
+The Claude plugin passes the plugin directory's checks; releases finish even when the chart push fails; three
+animated videos rendered without a video model.
+
+- Claude plugin: `.mcp.json` sets no package-manager variable; the server runs with `uv run --frozen --isolated`
+  (a throwaway environment in uv's cache, nothing written to the plugin folder). The plugin ships only the modules
+  the stdio server imports: no CLI, model agent, HTTP service or cluster backend, and no code that names or reads a
+  credential. Every file is UTF-8 text under 256 KiB (the Kubernetes schema ships as plain JSON parts instead of
+  gzip), and `plugin.json` keeps only fields the plugin reference defines. Tests and the sync check enforce all of it.
+- Learning notes reject any command pipeline (`|`); describe a fix in words.
+- `llm.apiKeyEnv` and `server.authTokenEnv` default to unset; the model client and the HTTP service fall back to
+  `ANTHROPIC_API_KEY` and `KUBE_NOOB_HTTP_TOKEN` as before, and `apiKeyEnv` is still validated when the configuration
+  loads.
+- Release: the chart push to GHCR and its cosign signature run in their own job (cosign now logs in to GHCR itself),
+  so a registry problem no longer blocks the GitHub release; each step reports its error as an annotation.
+- Homebrew formula updated to 0.2.1 (43 hash-checked wheels, no LLM SDK).
+- `demos/video/stage`: the teaser, sidecar and MCP videos in the look of the Grok teaser, with a Piper voice-over
+  (LibriTTS voice, CC BY 4.0), generated music and terminal lines copied from real runs.
+
 ## 0.2.1 - 2026-10-27
 
 No AI inside, said and enforced; safer to run for a whole team; easier to install.
@@ -7,13 +27,9 @@ No AI inside, said and enforced; safer to run for a whole team; easier to instal
 - No AI inside, said plainly: README, plugin, docs and video copy explain that Claude, OpenShift Lightspeed or any MCP
   client does the talking and kube-noob supplies deterministic tools; only the optional `kube-noob ask` calls a model.
   A test keeps copy from calling kube-noob an AI, assistant or agent.
-- The Claude plugin runs the readable stdio server bundled in `plugin/kube-noob/server` with every dependency pinned
-  by hash in `uv.lock` (`uv run --frozen --isolated`, a throwaway environment in uv's cache), installs no LLM SDK,
-  sets no package-manager variables and reports no model in its posture. It ships only the modules the stdio server
-  imports, so nothing in it reads a credential; every file is readable text under 256 KiB (the Kubernetes schema
-  ships as plain JSON parts instead of gzip). CI checks the copy, the limits, the lock, a vulnerability audit and an
-  end-to-end start. Credential variable names (the model key, the HTTP token) and the in-cluster API client live only
-  in the modules the plugin leaves out, and learning notes reject any command pipeline.
+- The Claude plugin runs the readable server source bundled in `plugin/kube-noob/server` with every dependency pinned
+  by hash in `uv.lock` (`uv run --frozen`), installs no LLM SDK, keeps its environment in the plugin data folder, and
+  reports no model in its posture. CI checks the copy, the lock, a vulnerability audit and an end-to-end start.
 - PRIVACY.md lists what kube-noob reads, stores and sends, per destination; the plugin manifest links it.
 - No model is configured by default (`llm.provider: none`); the Anthropic SDK moved to the optional
   `kube-noob[ask]` extra, so the core install, the image, the plugin and Homebrew carry no LLM SDK.

@@ -2,25 +2,20 @@
 class KubeNoob < Formula
   desc "Kubernetes, OpenShift, ROSA HCP, Helm and RHACS audit, debugging and learning tools"
   homepage "https://github.com/aashishmahajan/kube-noob"
-  url "https://files.pythonhosted.org/packages/db/37/6aed6c77cc61b13fd08d6ee9aa748a5bceccdb28527424999bd710c09af6/kube_noob-0.2.0.tar.gz"
-  sha256 "0be728c7ebb57e225473dc7570914755ce52eace22f89b47325d813f753c45cc"
+  url "https://files.pythonhosted.org/packages/e7/d0/d682fbd25d7b580843bdeb01eedba768ccc4a8d715fb8cbca52009ec8531/kube_noob-0.2.1.tar.gz"
+  sha256 "3575a05c46088cbd62dbb3b596f811e37a2fa8b4481e90b1d6524638811c6941"
   license "Apache-2.0"
 
   depends_on "python@3.13"
 
   resource "kube-noob" do
-    url "https://files.pythonhosted.org/packages/49/3e/c18e02b416fcd54a0a5ad945ef085a8f37fa2ab5ea263393e78f6b42f095/kube_noob-0.2.0-py3-none-any.whl"
-    sha256 "8fa198596181f4fbe3544c3f1085e416e054135023d276c1904c4c688bef9715"
+    url "https://files.pythonhosted.org/packages/ed/33/28763a2e456fbed6c095db2ac6be207736a423cc93513da585fa818e4692/kube_noob-0.2.1-py3-none-any.whl"
+    sha256 "3f3d8609a6e5ff5ddb03f3e1fa280941ebae1ef99d0d2d8c46590a2e479f673e"
   end
 
   resource "annotated-types" do
     url "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl"
     sha256 "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"
-  end
-
-  resource "anthropic" do
-    url "https://files.pythonhosted.org/packages/3f/29/eb3558ab6bf252a07ac41c76ac5b0ea24a0aa0c23f87a40aaf31a5f8dba4/anthropic-2.3.0-py3-none-any.whl"
-    sha256 "aa6a3984f9276f307933d42dc6f58b6efc821a5ecafbc8d1bb5993a066767622"
   end
 
   resource "anyio" do
@@ -41,11 +36,6 @@ class KubeNoob < Formula
   resource "click" do
     url "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl"
     sha256 "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360"
-  end
-
-  resource "docstring-parser" do
-    url "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl"
-    sha256 "b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b"
   end
 
   resource "h11" do
@@ -128,11 +118,6 @@ class KubeNoob < Formula
     sha256 "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231"
   end
 
-  resource "sniffio" do
-    url "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl"
-    sha256 "2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2"
-  end
-
   resource "sse-starlette" do
     url "https://files.pythonhosted.org/packages/cf/49/35053078cdfcf639237e8bee6dc6f34f1b3a3cc8d01800a1e213e1660ff6/sse_starlette-3.6.0-py3-none-any.whl"
     sha256 "e4dfa4d237d2712cb2b4d4918eda9b457cd6b44bbecdc838af75de836565bafd"
@@ -174,10 +159,6 @@ class KubeNoob < Formula
       url "https://files.pythonhosted.org/packages/e5/56/d194340cc4a57535e82e1bee9e89667ac4b7c13b5d3f59686deae3094dd5/cryptography-50.0.2-cp311-abi3-macosx_11_0_arm64.whl"
       sha256 "fa8f5efb344d6908a1ce62f4a24e2e5780f825d6f53f5f50ec5ffacac72936cb"
     end
-    resource "jiter" do
-      url "https://files.pythonhosted.org/packages/8d/30/3eaf67279c6183393d3608b6713c93668ae82ea59f0589ea59d8176d8741/jiter-0.18.0-cp313-cp313-macosx_11_0_arm64.whl"
-      sha256 "7161217e2190b9b2c8c79b81699be29d67010f6f77e09a53a3b62261792d5489"
-    end
     resource "pydantic-core" do
       url "https://files.pythonhosted.org/packages/f7/b9/c720e56858d4e1539503297ed37063e0c08e0f3541c41b777f6a800f75fa/pydantic_core-2.50.1-cp313-cp313-macosx_11_0_arm64.whl"
       sha256 "0c003c3b7f49debb893d2d85ae099ac5959c9839e2f330fadb1fcdf7a6594482"
@@ -202,10 +183,6 @@ class KubeNoob < Formula
         url "https://files.pythonhosted.org/packages/71/37/6202e488cc1eb625ea110c292c6bda92823176e023f427d8d5660ce8d632/cryptography-50.0.2-cp311-abi3-manylinux_2_34_aarch64.whl"
         sha256 "87e9ce85beb6b328ba370cc6e6aea483c92617b4c95b1d33a49297eb662bfb04"
       end
-      resource "jiter" do
-        url "https://files.pythonhosted.org/packages/f8/2b/d18adcfec3516b97b24c0d5cd1b0ced22cada8ea9806f21bece75af49ffe/jiter-0.18.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
-        sha256 "9623fc90f1a4754452a525383ce70476476c16556098944709b8cdbd9ad905f0"
-      end
       resource "pydantic-core" do
         url "https://files.pythonhosted.org/packages/4d/b8/fbfc25875219cc060e613170ff10e850c6d8924beb4910da57c2ee3ba1d2/pydantic_core-2.50.1-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
         sha256 "409e0ea40ec30d9158f33574fd758e689f6045a0f2596701828c27816ca9687d"
@@ -227,10 +204,6 @@ class KubeNoob < Formula
       resource "cryptography" do
         url "https://files.pythonhosted.org/packages/d3/69/2c833a049475e0a3444e94c7d0aca0aa51d166374a449b09e92ac98138de/cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl"
         sha256 "9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079"
-      end
-      resource "jiter" do
-        url "https://files.pythonhosted.org/packages/64/11/babc8d3c004bb2f11b7e3adfe27a5bc7c1e13cdfc6360d424c57355c55ff/jiter-0.18.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
-        sha256 "6e3350b7431f7b8315b925d9ca0f29a44e8fb6ed45c1fe552392cb6297966bb9"
       end
       resource "pydantic-core" do
         url "https://files.pythonhosted.org/packages/1c/bc/d79d000e5203ebef39af839f2ce77a777fcad6e08ad26af9a2fcd114ffc8/pydantic_core-2.50.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"

@@ -1,7 +1,9 @@
 # Prompts for a text-to-video model
 
-Three short videos to generate with a text-to-video model (for example Sora or a similar tool). Paste each scene's
-prompt as one generation, then cut the clips together and add the voice-over.
+Three short videos to generate with a text-to-video model (for example Sora, Grok or a similar tool). Paste each
+scene's prompt as one generation, then cut the clips together and add the voice-over. To skip the video model, render
+all three locally with `demos/video/stage/build.sh` (same scenes and voice-over, real terminal text; see
+[README.md](README.md)).
 
 ## Before you generate
 
