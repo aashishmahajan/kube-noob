@@ -7,12 +7,20 @@ Research, Audit, Calibrate, Generate, Red Team.
 
 ## Install
 
+In Claude Code:
+
 ```
 /plugin marketplace add aashishmahajan/kube-noob
 /plugin install kube-noob@kube-noob
 ```
 
-Runs in Claude Code and Cowork. Requires [uv](https://docs.astral.sh/uv/).
+In claude.ai or the Claude desktop app: **Customize > Plugins > Add > Add marketplace**, enter
+`aashishmahajan/kube-noob`, then add **kube-noob** from the list. It is saved to your account and also reaches
+Claude Code.
+
+The tools run on your computer, so they work in Claude Code and in Cowork sessions on your computer; in a chat
+conversation only the skills load. The server needs [uv](https://docs.astral.sh/uv/) (`brew install uv` or
+`pipx install uv`).
 
 ## How to use it
 

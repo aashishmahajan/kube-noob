@@ -20,7 +20,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 #world { transform-origin: 960px 540px; }
 
 /* room */
-#room { background: radial-gradient(ellipse 1300px 820px at 50% 40%, #17325e 0%, #0c1a35 50%, #060d1c 100%); }
+#room { background: radial-gradient(ellipse 1300px 820px at 50% 40%, #17325e 0%, #0c1a35 50%, #060d1c 100%); will-change: opacity; }
 #wall { position: absolute; left: 0; top: 0; width: 1920px; height: 660px;
   background: repeating-linear-gradient(90deg, rgba(140,180,255,.04) 0 2px, transparent 2px 240px),
               linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.28)); }
@@ -34,7 +34,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
   background: radial-gradient(closest-side, rgba(var(--moodc), .34), transparent); }
 .rack { position: absolute; top: 170px; width: 190px; height: 660px; border-radius: 8px;
   background: linear-gradient(90deg, #0a1428, #10203e); border: 1px solid rgba(120,160,230,.14); }
-.rack::after { content: ""; position: absolute; inset: 18px; opacity: var(--led, .35);
+.rack::after { content: ""; position: absolute; inset: 18px; opacity: var(--led, .35); will-change: opacity;
   background: radial-gradient(circle, rgba(74,222,128,.85) 0 2.5px, transparent 3.5px) 0 0 / 36px 28px; }
 #rackL { left: 30px; transform: perspective(900px) rotateY(40deg); }
 #rackR { right: 30px; transform: perspective(900px) rotateY(-40deg); }
@@ -61,7 +61,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .term .hd .r { margin-left: auto; display: flex; gap: 10px; align-items: center; }
 .term .hd .r b { width: 8px; height: 8px; border-radius: 50%; background: rgba(var(--tx), .35); display: block; }
 .term .bd { position: absolute; left: 34px; right: 34px; top: 66px; bottom: 26px; overflow: hidden; }
-.term .sc { position: absolute; left: 0; right: 0; top: 0; font: 400 var(--fs, 22px)/1.5 var(--mono); color: rgb(var(--tx)); }
+.term .sc { position: absolute; left: 0; right: 0; top: 0; font: 400 var(--fs, 22px)/1.5 var(--mono); color: rgb(var(--tx)); will-change: transform; }
 .term .ln { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 2ch; text-indent: -2ch; min-height: 1.5em; }
 .term .bars i { display: block; height: 13px; border-radius: 7px; margin: 0 0 22px; background: rgba(var(--tc), .62);
   box-shadow: 0 0 14px rgba(var(--tc), .35); }
@@ -885,7 +885,6 @@ function renderAt(t) {
   $('cubes').style.opacity = 1;
   const sc = sceneAt(t);
   const L = t - sc.start;
-  $('world').style.transform = `scale(${1 + 0.025 * clamp(L / sc.dur)})`;
   KINDS[sc.kind](L, sc.dur, sc, t);
   caption(sc, L);
   const b = $('black');

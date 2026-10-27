@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Render a demo video (1920x1080 MP4) from real kube-noob output, plus the YouTube thumbnail for the walkthrough.
+# Render a demo video from real kube-noob output, plus the YouTube thumbnail for the walkthrough.
+# Videos are 3840x2160 (4K UHD) at 30 fps; set KN_VIDEO_SCALE=1 for a quick 1920x1080 draft.
 # Needs: Node with the `playwright` package and Chromium, ffmpeg; kube-noob on PATH for the walkthrough.
 # Usage:
 #   demos/video/render.sh <out-dir>                                  the 2-minute walkthrough + thumbnail
@@ -18,9 +19,4 @@ else
   python3 "$here/build_scenes.py" "$kind" "$3" "$out"
   video="kube-noob-$kind.mp4"
 fi
-rm -f "$out"/page@*.webm
-node "$here/record.js" "$out" "$kind.html" >/dev/null
-webm="$(ls -t "$out"/page@*.webm | head -1)"
-ffmpeg -y -loglevel error -i "$webm" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -r 30 -movflags +faststart "$out/$video"
-rm -f "$webm"
-echo "$out/$video"
+node "$here/capture_page.js" "$out" "$kind.html" "$out/$video" --scale "${KN_VIDEO_SCALE:-2}"

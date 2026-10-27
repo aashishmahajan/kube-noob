@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/aashishmahajan/kube-noob/main/docs/brand/social-preview.png" alt="kube-noob - Learn. Audit. Debug. Offline." width="720">
+  <img src="https://raw.githubusercontent.com/aashishmahajan/kube-noob/main/docs/brand/social-preview.png" alt="kube-noob - No AI inside. Works with yours." width="720">
 </p>
 
 # kube-noob
@@ -17,8 +17,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
 
 - **Audit**: 60 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, 9 red-team scenarios, RHACS policy mapping.
-- **Generate**: hardened manifests and Helm charts for Kubernetes, OpenShift and ROSA, re-audited before they are
-  returned.
+- **Generate**: hardened manifests and Helm charts, re-audited before they are returned.
 - **Debug**: 33 offline playbooks, read-only steps first; opt-in, read-only cluster evidence (Secrets are never read).
 - **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed fixes locally.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
@@ -50,12 +49,14 @@ then `brew install aashishmahajan/kube-noob/kube-noob`. Roles, demos: [use cases
 
 ## Use with Claude or any MCP client
 
-Claude plugin (skills plus the bundled server; runs in Claude Code and Cowork):
+Claude plugin, in Claude Code (needs [uv](https://docs.astral.sh/uv/)):
 
 ```
 /plugin marketplace add aashishmahajan/kube-noob
 /plugin install kube-noob@kube-noob
 ```
+
+In claude.ai or the desktop app: **Customize > Plugins > Add > Add marketplace**, `aashishmahajan/kube-noob`.
 
 Any MCP client:
 
@@ -81,7 +82,7 @@ NetworkPolicies and runs under `restricted-v2`.
 | Local learning file (profile, confirmed notes) | on | `learningEnabled: false` |
 | Model for `kube-noob ask` only | none | `llm.provider: anthropic` (`kube-noob[ask]`) or `openai-compatible` |
 
-`kube-noob doctor` prints what the process can reach and exits 1 when the configuration contradicts the lock.
+`kube-noob doctor` prints what the process can reach.
 
 Config is never read from the current directory implicitly. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
 
