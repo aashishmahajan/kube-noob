@@ -119,16 +119,16 @@ _CONTAINER = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 _LOG_REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]+"), r"\1***"),
     (re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "***JWT***"),
-    (re.compile(r"\b(AKIA|ASIA)[A-Z0-9]{16}\b"), "***AWS_KEY_ID***"),
+    (re.compile(r"\b(AKIA|ASIA)[A-Z0-9]{16}\b"), "***aws-key-id***"),
     (
         re.compile(r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)(\"?\s*[:=]\s*\"?)[^\s\"',;]+"),
         r"\1\2***",
     ),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "***PRIVATE KEY***"),
     (re.compile(r"(?i)(://[^:/\s]+:)[^@/\s]+@"), r"\1***@"),
-    (re.compile(r"\bhv[sbr]\.[A-Za-z0-9_-]{20,}"), "***VAULT_TOKEN***"),
-    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), "***GITHUB_TOKEN***"),
-    (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "***SLACK_TOKEN***"),
+    (re.compile(r"\bhv[sbr]\.[A-Za-z0-9_-]{20,}"), "***vault-token***"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), "***github-token***"),
+    (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "***slack-token***"),
     (re.compile(r"(?i)(--?[a-z0-9_.-]*(?:password|passwd|secret|token|api[-_]?key)[=\s]+)[^\s\"',;]+"), r"\1***"),
 ]
 

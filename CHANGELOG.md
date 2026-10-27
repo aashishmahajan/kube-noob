@@ -12,7 +12,8 @@ No AI inside, said and enforced; safer to run for a whole team; easier to instal
   sets no package-manager variables and reports no model in its posture. It ships only the modules the stdio server
   imports, so nothing in it reads a credential; every file is readable text under 256 KiB (the Kubernetes schema
   ships as plain JSON parts instead of gzip). CI checks the copy, the limits, the lock, a vulnerability audit and an
-  end-to-end start.
+  end-to-end start. Credential variable names (the model key, the HTTP token) and the in-cluster API client live only
+  in the modules the plugin leaves out, and learning notes reject any command pipeline.
 - PRIVACY.md lists what kube-noob reads, stores and sends, per destination; the plugin manifest links it.
 - No model is configured by default (`llm.provider: none`); the Anthropic SDK moved to the optional
   `kube-noob[ask]` extra, so the core install, the image, the plugin and Homebrew carry no LLM SDK.

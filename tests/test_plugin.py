@@ -156,3 +156,15 @@ def test_bundle_has_no_download_and_execute_pattern() -> None:
     )
     found = {path: m.group(0)[:80] for path, text in _bundled_text().items() if (m := pattern.search(text))}
     assert found == {}
+
+
+def test_bundle_names_no_credential_variables() -> None:
+    """The directory holds a plugin whose code names credential variables (GITHUB_TOKEN-style) for a reviewer."""
+    names = re.compile(r"\b[A-Z][A-Z0-9_]*_(?:TOKEN|API_KEY|SECRET_ACCESS_KEY|ACCESS_KEY_ID)\b")
+    allowed = {"PATH_TOKEN"}  # a path-segment constant in the grader, not a credential
+    found: dict[str, list[str]] = {}
+    for path, text in _bundled_text().items():
+        hits = sorted(set(names.findall(text)) - allowed)
+        if hits:
+            found[path] = hits
+    assert found == {}

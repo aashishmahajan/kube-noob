@@ -16,6 +16,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from kube_noob.config import Settings
 from kube_noob.debug.cluster import (
     _CONTAINER,
@@ -30,9 +32,22 @@ from kube_noob.debug.cluster import (
     resolve_resource,
 )
 from kube_noob.errors import ClusterAccessError
-from kube_noob.net import cluster_client
+from kube_noob.net import USER_AGENT
 
 SA_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+
+
+def cluster_client(base_url: str, token: str, ca_file: str, timeout: float) -> httpx.Client:
+    """Client for the in-cluster Kubernetes API (sidecar mode). Not web access: it only talks to the API server
+    the pod runs against, verifies it with the ServiceAccount CA, never follows redirects and ignores proxy env."""
+    return httpx.Client(
+        base_url=base_url,
+        timeout=timeout,
+        verify=ca_file,
+        follow_redirects=False,
+        trust_env=False,
+        headers={"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
 
 
 class KubectlBackend:

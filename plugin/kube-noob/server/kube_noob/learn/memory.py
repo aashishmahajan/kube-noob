@@ -57,13 +57,7 @@ _NOTE_ID = re.compile(r"^local-\d{1,6}$")
 _MANIFEST_KEYS = re.compile(r"(?m)^\s*[\"']?(apiVersion|kind|metadata|spec|data|stringData)[\"']?\s*:")
 _API_VERSION = re.compile(r"[\"']?\bapiVersion\b[\"']?\s*[:=]")
 _KIND = re.compile(r"[\"']?\bkind\b[\"']?\s*[:=]")
-# A note may say "re-ran the job", never hand readers a command that runs piped-in code. Each line is checked stage by
-# stage (split on "|"): no stage after the first may start a shell, no PowerShell evaluator may appear, and no
-# decoded payload may be piped on.
-_SHELL_PROGRAMS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
-_EVAL_PROGRAMS = frozenset({"iex", "invoke-expression"})
-_DECODE_FLAGS = frozenset({"-d", "--decode"})
-_WORD = re.compile(r"[a-z0-9][a-z0-9.-]*")
+# A note is a summary in words, so a pipeline ("|") is rejected: a note never carries a command to paste.
 # `kubectl get events` / `describe` rows: "Warning  BackOff  3m  kubelet  Back-off restarting ..."
 _EVENT_ROW = re.compile(r"(?m)^\s*(Normal|Warning)\s{2,}\S+\s{2,}")
 _LOG_LINE = re.compile(r"(?m)^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|[IWEF]\d{4} \d{2}:\d{2}|\[\d+\.\d+\])")
@@ -131,26 +125,6 @@ def mask_credentials(text: str) -> tuple[str, int]:
     return masked, count
 
 
-def _program(stage: str) -> str:
-    words = _WORD.findall(stage)
-    if words[:1] == ["sudo"]:
-        words = words[1:]
-    return words[0] if words else ""
-
-
-def runs_piped_code(text: str) -> bool:
-    """True when a line pipes into a shell, calls a PowerShell evaluator, or pipes a decoded payload onwards."""
-    for line in text.lower().splitlines():
-        if any(word in _EVAL_PROGRAMS for word in _WORD.findall(line)):
-            return True
-        stages = line.split("|")
-        if any(_program(stage) in _SHELL_PROGRAMS for stage in stages[1:]):
-            return True
-        if any(_program(stage) == "base64" and _DECODE_FLAGS & set(stage.split()) for stage in stages[:-1]):
-            return True
-    return False
-
-
 def check_text(field: str, value: str, limit: int) -> str:
     """Reject anything that is not a short human summary: credentials, manifests, raw log excerpts."""
     v = value.strip()
@@ -160,8 +134,8 @@ def check_text(field: str, value: str, limit: int) -> str:
         raise ValueError(f"{field} is longer than {limit} characters; store a summary, not raw output")
     if contains_credential(v):
         raise ValueError(f"{field} looks like it contains a credential; learning notes never store secrets")
-    if runs_piped_code(v):
-        raise ValueError(f"{field} pipes a download into a shell; describe the fix in words instead")
+    if "|" in v:
+        raise ValueError(f"{field} contains a command pipeline ('|'); describe the fix in words instead")
     if len(_MANIFEST_KEYS.findall(v)) >= 2 or (_API_VERSION.search(v) and _KIND.search(v)):
         raise ValueError(f"{field} looks like a manifest; describe the fix in words and keep manifests in Git")
     if v.count("\n") >= _MAX_LINES or _LOG_LINE.search(v) or _EVENT_ROW.search(v) or _STACK.search(v):

@@ -88,9 +88,10 @@ class ClusterSettings(_Base):
     max_log_lines: int = Field(default=200, ge=1, le=5000)
 
 
-# The API key is sent to base_url, so only variables that are plainly LLM API keys may be named here: never
-# AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN or similar.
-_API_KEY_ENV = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)$")
+# apiKeyEnv may only name a model provider's key variable (ending in _API_KEY, or starting with KUBE_NOOB_), so a
+# configuration file cannot point the model client at an unrelated variable. The default per provider is set in
+# kube_noob.agent.providers, which is the only code that reads it.
+_KEY_VAR = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)$")
 _CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
 
 
@@ -134,17 +135,14 @@ def _check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> No
 
 class _LLMEndpoint(_Base):
     base_url: str | None = None
-    api_key_env: str = "ANTHROPIC_API_KEY"
+    api_key_env: str | None = None
     allow_insecure_base_url: bool = False
 
     @field_validator("api_key_env")
     @classmethod
-    def _key_env(cls, v: str) -> str:
-        if not _API_KEY_ENV.match(v):
-            raise ValueError(
-                f"apiKeyEnv {v!r} must name an LLM API key variable (*_API_KEY or KUBE_NOOB_*); its value is sent to "
-                "the configured endpoint"
-            )
+    def _key_env(cls, v: str | None) -> str | None:
+        if v is not None and not _KEY_VAR.match(v):
+            raise ValueError(f"apiKeyEnv {v!r} must name a model provider key variable (*_API_KEY or KUBE_NOOB_*)")
         return v
 
 
@@ -178,7 +176,7 @@ class ServerSettings(_Base):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
     path: str = "/mcp"
-    auth_token_env: str = "KUBE_NOOB_HTTP_TOKEN"  # noqa: S105 - env var *name*, not a secret
+    auth_token_env: str | None = None  # default set in kube_noob.server.http, the only code that reads it
     allowed_hosts: list[str] = Field(default_factory=list)
     allowed_origins: list[str] = Field(default_factory=list)
 

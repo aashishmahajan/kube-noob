@@ -53,12 +53,20 @@ class Provider(Protocol):
     def complete_text(self, prompt: str, max_tokens: int = 1024) -> str: ...
 
 
+DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY"
+
+
+def key_env(llm: LLMSettings) -> str:
+    """The variable holding the provider's API key: apiKeyEnv when set (validated in config), else the default."""
+    return llm.api_key_env or DEFAULT_KEY_ENV
+
+
 def _api_key(llm: LLMSettings) -> str:
-    key = os.environ.get(llm.api_key_env, "")
+    name = key_env(llm)
+    key = os.environ.get(name, "")
     if not key:
         raise ProviderError(
-            f"Environment variable {llm.api_key_env} is not set; the agent needs an API key for "
-            f"provider '{llm.provider}'."
+            f"Environment variable {name} is not set; the agent needs an API key for provider '{llm.provider}'."
         )
     return key
 
@@ -180,7 +188,7 @@ class OpenAICompatibleProvider:
         self.llm = llm
         self.settings = settings
         self.base = llm.base_url.rstrip("/")
-        self.key = os.environ.get(llm.api_key_env, "")
+        self.key = os.environ.get(key_env(llm), "")
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}

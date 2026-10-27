@@ -18,6 +18,7 @@ from kube_noob.config import Settings
 from kube_noob.server.mcp_app import build_server
 
 PUBLIC_PATHS = frozenset({"/healthz", "/readyz"})
+DEFAULT_TOKEN_ENV = "KUBE_NOOB_HTTP_TOKEN"  # noqa: S105 - the variable's name, not a secret
 MAX_BODY_BYTES = 8 * 1024 * 1024  # manifests are capped at 5 MB; JSON-RPC framing needs some headroom
 
 
@@ -89,11 +90,12 @@ class BearerAuth:
 
 def http_app(settings: Settings, *, allow_unauthenticated: bool = False) -> ASGIApp:
     srv = settings.server
-    token = os.environ.get(srv.auth_token_env) or None
+    token_env = srv.auth_token_env or DEFAULT_TOKEN_ENV
+    token = os.environ.get(token_env) or None
     loopback = srv.host in {"127.0.0.1", "::1", "localhost"}
     if token is None and not loopback and not allow_unauthenticated:
         raise RuntimeError(
-            f"Refusing to serve MCP over HTTP on {srv.host} without authentication. Set {srv.auth_token_env}, bind "
+            f"Refusing to serve MCP over HTTP on {srv.host} without authentication. Set {token_env}, bind "
             "to 127.0.0.1 (sidecar mode), or pass --allow-unauthenticated if a mesh/proxy authenticates callers."
         )
     if token is not None and not loopback and not srv.allowed_hosts:

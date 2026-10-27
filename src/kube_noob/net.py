@@ -8,7 +8,9 @@
                         LLM provider is configured. Under the offline lock every request (and no redirect, no proxy
                         from the environment) must target loopback or an in-cluster ``*.svc`` host.
 
-No other module may construct an ``httpx`` client directly.
+No other module may construct an ``httpx`` client directly, except the in-cluster API client in
+``kube_noob.debug.backends`` (ServiceAccount token, cluster CA, no redirects, no proxy), which is used only when cluster
+access is enabled.
 """
 
 from __future__ import annotations
@@ -93,17 +95,4 @@ def http_client(
         event_hooks=hooks,
         transport=transport,
         trust_env=not locked_llm,
-    )
-
-
-def cluster_client(base_url: str, token: str, ca_file: str, timeout: float) -> httpx.Client:
-    """Client for the in-cluster Kubernetes API (sidecar mode). Not web access: it only talks to the API server
-    the pod runs against, verifies it with the ServiceAccount CA, never follows redirects and ignores proxy env."""
-    return httpx.Client(
-        base_url=base_url,
-        timeout=timeout,
-        verify=ca_file,
-        follow_redirects=False,
-        trust_env=False,
-        headers={"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}", "Accept": "application/json"},
     )
