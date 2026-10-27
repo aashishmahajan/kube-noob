@@ -11,7 +11,7 @@ import pytest
 from kube_noob.evals.reward import benchmark, grade, grade_by_id, trl_reward
 from kube_noob.generate.blueprint import Blueprint
 from kube_noob.generate.manifests import generate
-from kube_noob.sources.corpus import iter_records, verify, write_shard
+from kube_noob.sources.corpus import verify, write_shard
 from kube_noob.sources.git_ingest import clean_text
 from kube_noob.sources.jira import (
     LONG_JQL,
@@ -257,7 +257,6 @@ def test_clean_text_mdx_keeps_code() -> None:
 def test_corpus_shards_and_verify(tmp_path: Path) -> None:
     rec = {"id": "x", "title": "t", "text": "hello", "sourceId": "s", "license": "MIT", "redistributable": True}
     write_shard(tmp_path, "test", [rec, {**rec, "id": "y", "redistributable": False}])
-    assert len(iter_records(tmp_path)) == 2 and len(iter_records(tmp_path, include_restricted=False)) == 1
     assert verify(tmp_path) == []
     (tmp_path / "corpus" / "test.jsonl").write_text("tampered\n")
     assert verify(tmp_path)

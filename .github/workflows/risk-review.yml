@@ -1,0 +1,86 @@
+name: risk-review
+
+# Weekly risk re-review (docs/operations.md). Runs after the Sunday corpus refresh; opens or updates one issue per
+# ISO week labelled `risk-review`, plus `release-needed` when a patch release is recommended.
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Python dependency audit
+        run: |
+          python -m pip install "pip-audit==2.10.1"
+          pip-audit -r requirements.lock --require-hashes --disable-pip --format json -o pip-audit.json || true
+          test -s pip-audit.json
+      - name: Latest released image
+        id: img
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // ""')
+          if [ -n "$tag" ]; then echo "ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/kube-noob:${tag#v}" >> "$GITHUB_OUTPUT"; fi
+          echo "latest release: ${tag:-none}"
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: steps.img.outputs.ref != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan the released image
+        if: steps.img.outputs.ref != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.img.outputs.ref }}
+          format: json
+          output: trivy.json
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+      - name: Decide
+        id: decide
+        run: |
+          trivy=""; [ -s trivy.json ] && trivy="--trivy trivy.json"
+          python scripts/risk_review.py --pip-audit pip-audit.json $trivy --out report | tee decision.txt
+          cat decision.txt >> "$GITHUB_OUTPUT"
+          cat report/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Open or update the weekly issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ steps.decide.outputs.release_recommended }}
+        run: |
+          set -euo pipefail
+          gh label create risk-review --repo "$GITHUB_REPOSITORY" --color 5319e7 --force >/dev/null
+          gh label create release-needed --repo "$GITHUB_REPOSITORY" --color d93f0b --force >/dev/null
+          title=$(head -1 report/report.md | sed 's/^# //')
+          labels="risk-review"; [ "$RELEASE" = "true" ] && labels="risk-review,release-needed"
+          num=$(gh issue list --repo "$GITHUB_REPOSITORY" --label risk-review --state open --search "\"$title\" in:title" \
+                --json number --jq '.[0].number // ""')
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --repo "$GITHUB_REPOSITORY" --body-file report/report.md --add-label "$labels"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file report/report.md --label "$labels"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: risk-review
+          path: |
+            report/
+            pip-audit.json
+            trivy.json
+          if-no-files-found: ignore

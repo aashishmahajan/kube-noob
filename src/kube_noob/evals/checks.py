@@ -119,11 +119,6 @@ def get_values(obj: Any, path: str) -> list[Any]:
     return current
 
 
-def get_dotted(obj: Any, path: str) -> tuple[bool, Any]:
-    values = get_values(obj, path)
-    return (True, values[0]) if values else (False, None)
-
-
 def _subset_match(item: Any, pattern: Any) -> bool:
     """``pattern`` is a partial description of ``item`` (dict keys recursively, scalars by equality)."""
     if isinstance(pattern, dict):

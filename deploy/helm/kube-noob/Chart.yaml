@@ -11,3 +11,4 @@ sources:
 keywords: [kubernetes, openshift, rosa, mcp, security, learning]
 annotations:
   artifacthub.io/license: Apache-2.0
+  charts.openshift.io/name: kube-noob

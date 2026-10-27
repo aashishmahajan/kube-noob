@@ -174,7 +174,6 @@ class ToolSpec:
     fn: Callable[[Any], Any]
     read_only: bool = True
     open_world: bool = False
-    requires: Literal["none", "web", "cluster"] = "none"
 
 
 class Toolkit:
@@ -588,7 +587,6 @@ class Toolkit:
                     ClusterGetIn,
                     self.cluster_get,
                     open_world=True,
-                    requires="cluster",
                 ),
                 ToolSpec(
                     "cluster_debug_workload",
@@ -597,7 +595,6 @@ class Toolkit:
                     ClusterDebugIn,
                     self.cluster_debug,
                     open_world=True,
-                    requires="cluster",
                 ),
                 ToolSpec(
                     "cluster_version",
@@ -606,7 +603,6 @@ class Toolkit:
                     EmptyIn,
                     self.cluster_version,
                     open_world=True,
-                    requires="cluster",
                 ),
             ]
         if self.settings.web_enabled:
@@ -619,7 +615,6 @@ class Toolkit:
                     WebFetchIn,
                     self.web_fetch,
                     open_world=True,
-                    requires="web",
                 )
             )
         return s

@@ -15,3 +15,7 @@ Ground rules:
 - Sign off commits (`git commit -s`) to certify the Developer Certificate of Origin.
 
 Refresh vendored schemas: `python scripts/vendor_schemas.py --k8s v1.35.0` (updates `PROVENANCE.json`).
+
+Releases and the weekly risk review: [docs/operations.md](docs/operations.md). Bump versions only with
+`python scripts/bump_version.py <version> "<reason>"` (it updates PyPI, MCP Registry, plugin, chart and image metadata
+together; `tests/test_distribution.py` enforces it).

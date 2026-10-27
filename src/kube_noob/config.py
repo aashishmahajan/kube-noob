@@ -280,18 +280,3 @@ def load_settings(path: str | Path | None = None, overrides: dict[str, Any] | No
         raise ConfigError(f"Invalid kube-noob configuration: {exc}") from exc
     settings.source_path = source
     return settings
-
-
-_settings: Settings | None = None
-
-
-def get_settings() -> Settings:
-    global _settings  # noqa: PLW0603 - process-wide cached settings
-    if _settings is None:
-        _settings = load_settings()
-    return _settings
-
-
-def set_settings(settings: Settings) -> None:
-    global _settings  # noqa: PLW0603
-    _settings = settings

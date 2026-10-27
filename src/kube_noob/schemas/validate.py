@@ -75,11 +75,6 @@ def _drop_nulls(node: Any) -> Any:
     return node
 
 
-def has_schema(api_version: str, kind: str) -> bool:
-    group, _, version = api_version.rpartition("/")
-    return _validator_for(group, version, kind) is not None
-
-
 def _message(err: ValidationError) -> str:
     if err.validator == "additionalProperties":
         return f"unknown field: {err.message.split('(')[-1].rstrip(')')}" if "(" in err.message else err.message

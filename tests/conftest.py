@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kube_noob.config import Settings, load_settings, set_settings
+from kube_noob.config import Settings, load_settings
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -29,7 +29,6 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     s = load_settings()
-    set_settings(s)
     return s
 
 

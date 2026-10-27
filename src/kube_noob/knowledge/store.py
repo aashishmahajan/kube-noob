@@ -261,22 +261,6 @@ class KnowledgeStore:
     def doc(self, doc_id: str) -> list[Chunk]:
         return [c for c in self.chunks if c.doc_id == doc_id]
 
-    def doc_ids(self) -> list[dict[str, Any]]:
-        seen: dict[str, dict[str, Any]] = {}
-        for c in self.chunks:
-            if c.doc_id not in seen:
-                seen[c.doc_id] = {
-                    "docId": c.doc_id,
-                    "title": c.title,
-                    "origin": c.origin,
-                    "sourceId": c.source_id,
-                    "url": c.url,
-                    "license": c.license,
-                    "chunks": 0,
-                }
-            seen[c.doc_id]["chunks"] += 1
-        return list(seen.values())
-
     def stats(self) -> dict[str, Any]:
         by_origin = Counter(c.origin for c in self.chunks)
         by_source = Counter(c.source_id.split(":")[0] for c in self.chunks)

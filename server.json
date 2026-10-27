@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.aashishmahajan/kube-noob",
+  "title": "kube-noob",
+  "description": "Offline-first Kubernetes, OpenShift, ROSA HCP, Helm and RHACS learning, audit and debugging",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/aashishmahajan/kube-noob",
+  "repository": {
+    "url": "https://github.com/aashishmahajan/kube-noob",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "kube-noob",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "KUBE_NOOB_WEB_ENABLED",
+          "description": "Allow allowlisted web lookups (default false: offline)",
+          "isRequired": false,
+          "default": "false"
+        },
+        {
+          "name": "KUBE_NOOB_CLUSTER_ENABLED",
+          "description": "Enable read-only live cluster tools using your kubectl/oc context (default false)",
+          "isRequired": false,
+          "default": "false"
+        }
+      ]
+    }
+  ]
+}

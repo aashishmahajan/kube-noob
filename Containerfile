@@ -16,7 +16,19 @@ RUN python3 -m pip install --no-cache-dir --upgrade "pip>=24.3" "build>=1.2" \
  && /opt/kube-noob/bin/kube-noob --version
 
 FROM ${BASE_IMAGE}
-LABEL org.opencontainers.image.title="kube-noob" \
+ARG VERSION=0.1.0
+# Red Hat container certification (preflight HasRequiredLabel) needs name, vendor, version, release, summary,
+# description and maintainer; the MCP Registry verifies ownership of OCI images through io.modelcontextprotocol.*.
+LABEL name="kube-noob" \
+      vendor="kube-noob project" \
+      version="${VERSION}" \
+      release="1" \
+      summary="Offline-first Kubernetes/OpenShift/ROSA learning, audit and debugging MCP server" \
+      description="kube-noob audits, generates and debugs Kubernetes, OpenShift, ROSA HCP, Helm and RHACS configuration with a deterministic engine and local knowledge; web and cluster access are opt-in and read-only." \
+      maintainer="kube-noob maintainers (https://github.com/aashishmahajan/kube-noob)" \
+      io.modelcontextprotocol.server.name="io.github.aashishmahajan/kube-noob" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.title="kube-noob" \
       org.opencontainers.image.description="Offline-first Kubernetes/OpenShift/ROSA/Helm/RHACS learning, audit and debugging MCP server" \
       org.opencontainers.image.source="https://github.com/aashishmahajan/kube-noob" \
       org.opencontainers.image.licenses="Apache-2.0" \
@@ -24,6 +36,7 @@ LABEL org.opencontainers.image.title="kube-noob" \
       io.openshift.tags="kubernetes,openshift,mcp,security"
 USER 0
 COPY --from=build /opt/kube-noob /opt/kube-noob
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /licenses/
 RUN mkdir -p /var/lib/kube-noob /etc/kube-noob \
  && chgrp -R 0 /var/lib/kube-noob /etc/kube-noob \
  && chmod -R g=u /var/lib/kube-noob /etc/kube-noob

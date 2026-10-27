@@ -19,7 +19,6 @@ class GitSource:
     license: str
     redistributable: bool
     attribution: str
-    topic: str
     exclude: tuple[str, ...] = ()
     ref: str | None = None
     min_chars: int = 200
@@ -34,7 +33,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "CC-BY-4.0",
         True,
         "Kubernetes Documentation (c) The Kubernetes Authors, CC BY 4.0, https://kubernetes.io/docs/",
-        "kubernetes",
     ),
     GitSource(
         "ocp-docs",
@@ -57,7 +55,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         True,
         "OpenShift documentation source (c) Red Hat, Inc. and contributors, Apache-2.0, "
         "https://github.com/openshift/openshift-docs",
-        "openshift",
     ),
     GitSource(
         "rosa-experts",
@@ -67,7 +64,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "Red Hat Cloud Experts / MOBB documentation, Apache-2.0, https://cloud.redhat.com/experts/",
-        "rosa",
     ),
     GitSource(
         "hypershift-docs",
@@ -77,7 +73,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "HyperShift (Hosted Control Planes) documentation, Apache-2.0, https://github.com/openshift/hypershift",
-        "rosa-hcp",
     ),
     GitSource(
         "rosa-cli",
@@ -87,7 +82,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "ROSA CLI, Apache-2.0, https://github.com/openshift/rosa",
-        "rosa",
         min_chars=100,
     ),
     GitSource(
@@ -99,7 +93,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         True,
         "Terraform RHCS ROSA HCP module (c) Red Hat, Apache-2.0, "
         "https://github.com/terraform-redhat/terraform-rhcs-rosa-hcp",
-        "rosa-hcp",
     ),
     GitSource(
         "helm-docs",
@@ -109,7 +102,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "MIT",
         True,
         "Helm documentation (c) The Helm Authors, MIT, https://helm.sh/docs/",
-        "helm",
         exclude=("docs/_*", "*/_*"),
     ),
     GitSource(
@@ -120,7 +112,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "StackRox default policies (c) StackRox / Red Hat, Apache-2.0, https://github.com/stackrox/stackrox",
-        "stackrox",
         min_chars=50,
     ),
     GitSource(
@@ -131,7 +122,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "StackRox CHANGELOG, Apache-2.0, https://github.com/stackrox/stackrox",
-        "stackrox",
     ),
     GitSource(
         "gitops-catalog",
@@ -141,7 +131,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "Red Hat CoP GitOps catalog, Apache-2.0, https://github.com/redhat-cop/gitops-catalog",
-        "openshift",
     ),
     GitSource(
         "efs-csi",
@@ -151,7 +140,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "AWS EFS CSI driver, Apache-2.0, https://github.com/kubernetes-sigs/aws-efs-csi-driver",
-        "storage",
     ),
     GitSource(
         "k8s-examples",
@@ -161,7 +149,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "Kubernetes examples, Apache-2.0, https://github.com/kubernetes/examples",
-        "kubernetes",
     ),
     GitSource(
         "ckad-exercises",
@@ -171,7 +158,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "MIT",
         True,
         "CKAD exercises (c) Dimitris-Ilias Gkanatsios, MIT, https://github.com/dgkanatsios/CKAD-exercises",
-        "kubernetes",
     ),
     GitSource(
         "k8s-hard-way",
@@ -182,7 +168,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         True,
         "Kubernetes The Hard Way (c) Kelsey Hightower, Apache-2.0, "
         "https://github.com/kelseyhightower/kubernetes-the-hard-way",
-        "kubernetes",
     ),
     GitSource(
         "casl-ansible",
@@ -192,7 +177,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "Apache-2.0",
         True,
         "Red Hat CoP casl-ansible, Apache-2.0, https://github.com/redhat-cop/casl-ansible",
-        "openshift",
     ),
     GitSource(
         "ansible-k8s-core",
@@ -203,7 +187,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         False,
         "kubernetes.core Ansible collection, GPL-3.0 (local retrieval only; not redistributed), "
         "https://github.com/ansible-collections/kubernetes.core",
-        "automation",
     ),
     GitSource(
         "awesome-kubernetes",
@@ -213,7 +196,6 @@ GIT_SOURCES: tuple[GitSource, ...] = (
         "CC-BY-NC-4.0",
         False,
         "Awesome Kubernetes (c) Ramit Surana, CC BY-NC 4.0 (non-commercial: local retrieval only)",
-        "kubernetes",
     ),
 )
 
@@ -225,15 +207,6 @@ HISTORY_REPOS: dict[str, str] = {
     "rosa-cli": "openshift/rosa",
     "hypershift": "openshift/hypershift",
     "terraform-rosa-hcp": "terraform-redhat/terraform-rhcs-rosa-hcp",
-}
-
-JIRA_SOURCES: dict[str, dict[str, str]] = {
-    "rox": {
-        "baseUrl": "https://redhat.atlassian.net",
-        "project": "ROX",
-        "minVersion": "4.10",
-        "description": "Red Hat Advanced Cluster Security (StackRox) public issue tracker",
-    },
 }
 
 

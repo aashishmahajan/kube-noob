@@ -1,17 +1,30 @@
 # kube-noob plugin
 
-Skills + MCP server for Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox: learn, audit (7-step SRE protocol)
-and debug - offline by default.
+Skills and an MCP server to learn, audit and debug Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox, offline
+by default. Design and review requests follow a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate,
+Generate, Red Team.
 
 ## Install
+
 ```
 /plugin marketplace add aashishmahajan/kube-noob
 /plugin install kube-noob@kube-noob
 ```
-The MCP server runs with `uvx kube-noob mcp` (requires [uv](https://docs.astral.sh/uv/)). Web access and live-cluster
-access are disabled and pinned by the `env` block of `.mcp.json`; enable them by changing `KUBE_NOOB_WEB_ENABLED` /
-`KUBE_NOOB_CLUSTER_ENABLED` to `"true"` there. Environment variables take precedence over any config file
-(`~/.config/kube-noob/config.yaml`), so a config-file `webEnabled: true` alone does not override the plugin's pin.
+
+Requires [uv](https://docs.astral.sh/uv/); the server runs as `uvx --from kube-noob==0.1.0 kube-noob mcp`.
+
+## What it accesses
+
+- Network: none by default. `KUBE_NOOB_WEB_ENABLED=true` allows HTTPS reads from allowlisted documentation domains only.
+- Cluster: none by default. `KUBE_NOOB_CLUSTER_ENABLED=true` allows read-only `oc`/`kubectl` get and logs with your
+  current context; it never writes, never reads Secrets and redacts credentials.
+- Files: reads the manifests you give it; stores learning progress in `~/.local/share/kube-noob`.
+- No telemetry, no collected credentials; the server never calls an LLM.
+
+Both switches live in the `env` block of `.mcp.json` and take precedence over config files.
 
 ## Skills
+
 kube-master-controller, kubernetes-core, openshift-platform, rosa-hcp, helm-charts, rhacs-stackrox, kube-debugging.
+
+Docs: https://github.com/aashishmahajan/kube-noob

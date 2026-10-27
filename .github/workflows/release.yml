@@ -99,7 +99,9 @@ jobs:
           file: Containerfile
           push: ${{ github.event_name == 'push' }}
           platforms: linux/amd64,linux/arm64
-          build-args: BASE_IMAGE=${{ steps.base.outputs.ref }}
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.ref }}
+            VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: mode=max
@@ -115,6 +117,44 @@ jobs:
       - name: Keyless-sign the image (Sigstore)
         if: github.event_name == 'push'
         run: cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
+
+  publish-mcp-registry:
+    # The registry verifies ownership by reading 'mcp-name: io.github.aashishmahajan/kube-noob' in the PyPI
+    # description (README), so this runs only after the PyPI upload.
+    needs: publish-pypi
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.5
+      MCP_PUBLISHER_SHA256: 2d151ac57275c9a6684d9d22b1cba81058bab195ea0a162e8fce3c6a5ec32812
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install mcp-publisher (pinned + checksum)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o mcp-publisher.tgz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tgz" | sha256sum -c -
+          tar xzf mcp-publisher.tgz mcp-publisher
+      - name: server.json version must match the tag
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          test "$(jq -r .version server.json)" = "$v" && test "$(jq -r '.packages[0].version' server.json)" = "$v"
+      - name: Wait for PyPI to serve the release
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            curl -fsS "https://pypi.org/pypi/kube-noob/${v}/json" >/dev/null && exit 0
+            sleep 10
+          done
+          echo "::error::kube-noob ${v} not visible on PyPI"; exit 1
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish
 
   github-release:
     needs: [publish-pypi, image]

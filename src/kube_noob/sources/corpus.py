@@ -71,21 +71,6 @@ def read_manifest(data_dir: Path) -> dict[str, Any]:
     return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {"shards": {}}
 
 
-def iter_records(data_dir: Path, include_restricted: bool = True) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    cdir = data_dir / "corpus"
-    if not cdir.is_dir():
-        return out
-    for f in sorted(cdir.glob("*.jsonl")):
-        with f.open(encoding="utf-8") as fh:
-            for line in fh:
-                if line.strip():
-                    rec = json.loads(line)
-                    if include_restricted or rec.get("redistributable"):
-                        out.append(rec)
-    return out
-
-
 def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
     """Import shards from a directory or .tgz produced by ``corpus build`` / the corpus-refresh workflow.
 

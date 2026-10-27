@@ -151,29 +151,6 @@ def rule(
 
 
 DNS1123_SUBDOMAIN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$")
-NAMESPACED_EXEMPT = frozenset(
-    {
-        "Namespace",
-        "ClusterRole",
-        "ClusterRoleBinding",
-        "StorageClass",
-        "PersistentVolume",
-        "CustomResourceDefinition",
-        "PriorityClass",
-        "RuntimeClass",
-        "IngressClass",
-        "CSIDriver",
-        "ValidatingWebhookConfiguration",
-        "MutatingWebhookConfiguration",
-        "SecurityContextConstraints",
-        "MachineConfig",
-        "MachineConfigPool",
-        "KubeletConfig",
-        "ClusterResourceQuota",
-        "GatewayClass",
-        "Project",
-    }
-)
 
 # =====================================================================================================
 # VALIDATE

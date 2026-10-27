@@ -54,18 +54,6 @@ def parse_version(s: str) -> tuple[int, int, int] | None:
     return int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
 
 
-def product_versions(names: list[str]) -> list[tuple[int, int, int]]:
-    """Versions from fixVersion/affectsVersion names or labels, ignoring other products ('OCP 4.16')."""
-    out: list[tuple[int, int, int]] = []
-    for n in names:
-        if _NON_PRODUCT_HINT.search(n):
-            continue
-        v = parse_version(n)
-        if v is not None:
-            out.append(v)
-    return out
-
-
 def scrub(text: str) -> str:
     text = _EMAIL.sub("<email>", text)
     return _ACCOUNT.sub("<account>", text)

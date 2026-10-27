@@ -10,6 +10,15 @@ days and a fix or mitigation plan within 30 days for confirmed issues.
 
 The latest minor release receives security fixes.
 
+## Default posture
+
+kube-noob makes no outbound connections and touches no cluster unless you enable it. This is tested in CI and was
+verified end to end inside a network namespace with no route (docs/release-readiness.md). With web access enabled it
+only performs HTTPS GETs to allowlisted documentation domains, streams at most `web.maxBytes`, never writes the content
+to disk and never executes it. The MCP server's only subprocesses are read-only `oc`/`kubectl` calls (argv, no shell)
+when cluster access is enabled; the maintainer CLI commands `corpus build --online` and `helm-audit` run `git` and
+`helm template` locally.
+
 ## Security design
 
 | Area | Control |

@@ -289,7 +289,6 @@ KIND_API_VERSIONS: dict[str, tuple[str, ...]] = {
 }
 
 # Kinds whose apiVersion is ambiguous across groups: kind names that also exist in another group.
-SHARED_KIND_NAMES: frozenset[str] = frozenset({"Route", "Ingress"})
 
 
 @dataclass(frozen=True)

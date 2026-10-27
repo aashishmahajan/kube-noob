@@ -158,6 +158,8 @@ jobs:
             --set networkPolicy.egress.dnsNamespace=kube-system --set networkPolicy.egress.dnsPort=53 \
             --set "networkPolicy.egress.apiServerCIDRs={${EP}/32,${SVC}/32}" --wait --timeout 4m \
             || { kubectl -n kube-noob get events --sort-by=.lastTimestamp | tail -30 | sed 's/^/::error title=install::/'; exit 1; }
+      - name: Helm test (in-cluster readiness through the Service)
+        run: helm test kn -n kube-noob --timeout 3m --logs
       - name: Deploy a crashing workload to debug
         run: |
           kubectl -n demo create deployment crasher --image=busybox:1.36 -- sh -c 'echo starting; echo password=hunter2; exit 3'

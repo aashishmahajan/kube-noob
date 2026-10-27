@@ -15,7 +15,7 @@ from typing import Any
 import yaml
 
 from kube_noob import __version__
-from kube_noob.config import Settings, load_settings, set_settings
+from kube_noob.config import Settings, load_settings
 from kube_noob.errors import ClarificationNeeded, ConfigError, KubeNoobError
 
 PLATFORMS = ["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
@@ -280,9 +280,7 @@ def _settings(a: argparse.Namespace) -> Settings:
         overrides["webEnabled"] = True
     if a.cluster_enabled:
         overrides["cluster"] = {"enabled": True}
-    s = load_settings(a.config, overrides)
-    set_settings(s)
-    return s
+    return load_settings(a.config, overrides)
 
 
 def main(argv: list[str] | None = None) -> int:

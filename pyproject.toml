@@ -61,6 +61,8 @@ Homepage = "https://github.com/aashishmahajan/kube-noob"
 Source = "https://github.com/aashishmahajan/kube-noob"
 Issues = "https://github.com/aashishmahajan/kube-noob/issues"
 Security = "https://github.com/aashishmahajan/kube-noob/security/policy"
+Documentation = "https://github.com/aashishmahajan/kube-noob/tree/main/docs"
+Changelog = "https://github.com/aashishmahajan/kube-noob/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "src/kube_noob/__init__.py"
@@ -79,6 +81,12 @@ include = [
   "CHANGELOG.md",
   "THIRD_PARTY_NOTICES.md",
   "requirements.lock",
+  "server.json",
+  "Containerfile",
+  "deploy",
+  "plugin",
+  ".claude-plugin",
+  "scripts",
 ]
 
 [tool.ruff]

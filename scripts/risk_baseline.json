@@ -1,0 +1,9 @@
+{
+  "_asOf": "2026-10-27",
+  "_note": "Upstream versions the built-in knowledge, catalog and rules were verified against. Bump after re-verifying.",
+  "kubernetes": "1.37",
+  "openshift": "4.22",
+  "helm4": "4.3.1",
+  "helm3": "3.22.1",
+  "stackrox": "4.11.6"
+}
