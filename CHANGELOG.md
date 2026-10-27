@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-10-27
 
 An incident watch that remembers: always on, read-only, no model.
 
