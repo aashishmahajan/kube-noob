@@ -86,7 +86,7 @@ clusters; kube-noob teaches, audits and diagnoses offline and can sit next to it
 | PyPI pending publisher | done |
 | Private vulnerability reporting enabled | maintainer |
 | ROSA HCP smoke test on a real cluster | maintainer, before announcing ROSA support |
-| Tag `v0.1.0` | ready |
+| Tag `v0.1.1` (v0.1.0 never reached PyPI: publish action bundled twine 6.1.0, which rejects Metadata-Version 2.5; fixed and gated by `scripts/check_publishable.sh`) | ready |
 
 ROSA HCP smoke test (logged in with `oc login`; read-only):
 

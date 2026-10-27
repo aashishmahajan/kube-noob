@@ -11,7 +11,7 @@ Generate, Red Team.
 /plugin install kube-noob@kube-noob
 ```
 
-Requires [uv](https://docs.astral.sh/uv/); the server runs as `uvx --from kube-noob==0.1.0 kube-noob mcp`.
+Requires [uv](https://docs.astral.sh/uv/); the server runs as `uvx --from kube-noob==0.1.1 kube-noob mcp`.
 
 ## What it accesses
 

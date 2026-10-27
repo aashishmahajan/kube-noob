@@ -20,6 +20,7 @@ FILES = [
     "plugin/kube-noob/.claude-plugin/plugin.json",
     "plugin/kube-noob/.mcp.json",
     "plugin/kube-noob/README.md",
+    "README.md",
     "deploy/helm/kube-noob/Chart.yaml",
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml",
     "Containerfile",
@@ -44,24 +45,30 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _next_patch(version: str) -> str:
+    major, minor, patch = (int(x) for x in version.split("."))
+    return f"{major}.{minor}.{patch + 1}"
+
+
 def test_bump_updates_every_reference(repo: Path) -> None:
     bv = _load()
     old = bv.current_version(repo)
-    changed = bv.bump(repo, "0.1.1", "Security: rebuild on patched UBI base image.")
-    assert old == "0.1.0" and set(changed) == set(FILES)
-    assert '__version__ = "0.1.1"' in (repo / "src/kube_noob/__init__.py").read_text()
+    new = _next_patch(old)
+    changed = bv.bump(repo, new, "Security: rebuild on patched UBI base image.")
+    assert set(changed) == set(FILES)
+    assert f'__version__ = "{new}"' in (repo / "src/kube_noob/__init__.py").read_text()
     server = json.loads((repo / "server.json").read_text())
-    assert server["version"] == server["packages"][0]["version"] == "0.1.1"
+    assert server["version"] == server["packages"][0]["version"] == new
     assert json.loads((repo / "plugin/kube-noob/.mcp.json").read_text())["mcpServers"]["kube-noob"]["args"][1] == (
-        "kube-noob==0.1.1"
+        f"kube-noob=={new}"
     )
     chart = yaml.safe_load((repo / "deploy/helm/kube-noob/Chart.yaml").read_text())
-    assert chart["version"] == "0.1.1" and chart["appVersion"] == "0.1.1"
-    assert "kube-noob:0.1.1" in (repo / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()
+    assert chart["version"] == new and chart["appVersion"] == new
+    assert f"kube-noob:{new}" in (repo / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()
     changelog = (repo / "CHANGELOG.md").read_text()
-    assert changelog.index("## 0.1.1") < changelog.index("## 0.1.0") and "patched UBI" in changelog
+    assert changelog.index(f"## {new}") < changelog.index(f"## {old}") and "patched UBI" in changelog
     for f in FILES:
-        assert "0.1.0" not in (repo / f).read_text() or f == "CHANGELOG.md", f
+        assert old not in (repo / f).read_text() or f == "CHANGELOG.md", f
 
 
 def test_bump_rejects_bad_or_non_increasing_versions(repo: Path) -> None:
@@ -71,4 +78,6 @@ def test_bump_rejects_bad_or_non_increasing_versions(repo: Path) -> None:
     with pytest.raises(ValueError):
         bv.bump(repo, "0.0.9", "x")
     with pytest.raises(ValueError):
-        bv.bump(repo, "0.1.1", "")
+        bv.bump(repo, bv.current_version(repo), "x")
+    with pytest.raises(ValueError):
+        bv.bump(repo, _next_patch(bv.current_version(repo)), "")

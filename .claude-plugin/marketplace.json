@@ -12,7 +12,7 @@
       "name": "kube-noob",
       "source": "./plugin/kube-noob",
       "description": "Offline-first Kubernetes / OpenShift / ROSA HCP / Helm / RHACS learning, audit and debugging (MCP server + skills).",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "license": "Apache-2.0",
       "keywords": ["kubernetes", "openshift", "rosa", "helm", "stackrox", "mcp"]
     }

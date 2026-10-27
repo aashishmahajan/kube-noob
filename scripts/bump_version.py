@@ -23,6 +23,7 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "plugin/kube-noob/.claude-plugin/plugin.json": (r'"version": "(?P<v>[^"]+)"',),
     "plugin/kube-noob/.mcp.json": (r'"kube-noob==(?P<v>[^"]+)"',),
     "plugin/kube-noob/README.md": (r"kube-noob==(?P<v>\d+\.\d+\.\d+)",),
+    "README.md": (r"kube-noob==(?P<v>\d+\.\d+\.\d+)",),
     "deploy/helm/kube-noob/Chart.yaml": (r"^version: (?P<v>\S+)$", r'^appVersion: "(?P<v>[^"]+)"$'),
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),
     "Containerfile": (r"^ARG VERSION=(?P<v>\S+)$",),

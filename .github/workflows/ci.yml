@@ -47,6 +47,8 @@ jobs:
       - run: pytest --cov --cov-report=term-missing:skip-covered --cov-fail-under=80
       - name: Build sdist + wheel
         run: python -m build
+      - name: Dists pass the twine bundled in the pinned PyPI publish action
+        run: scripts/check_publishable.sh
       - name: Install wheel in a clean venv and smoke-test
         run: |
           python -m venv /tmp/wheelenv

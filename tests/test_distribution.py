@@ -33,6 +33,9 @@ def test_plugin_pins_the_release() -> None:
     assert plugin["version"] == __version__ == market["plugins"][0]["version"]
     assert (ROOT / "plugin/kube-noob/LICENSE").read_text() == (ROOT / "LICENSE").read_text()
     assert len((ROOT / "plugin/kube-noob/README.md").read_text().split()) >= 40
+    for readme in ("README.md", "plugin/kube-noob/README.md"):
+        pins = re.findall(r"kube-noob==(\d+\.\d+\.\d+)", (ROOT / readme).read_text())
+        assert pins and set(pins) == {__version__}, readme
 
 
 def test_chart_and_image_versions() -> None:

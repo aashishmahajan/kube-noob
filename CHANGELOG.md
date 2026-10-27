@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-10-27
+
+- First PyPI release. 0.1.0 was tagged but never reached PyPI: the pinned pypa/gh-action-pypi-publish v1.13.0 bundles twine 6.1.0, which rejects Metadata-Version 2.5 from current hatchling. Publish action bumped to v1.14.3 (twine 7.0.0) and scorecard-action to v2.5.0; CI and release now check dists with the exact twine the pinned publish action uses (scripts/check_publishable.sh).
+
 ## 0.1.0 - 2026-10-27
 
 First release.
