@@ -94,7 +94,7 @@ never implicitly from the current directory. All keys: [kube-noob.example.yaml](
 - [Architecture and trust boundaries](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
 - [Corpus, training and the reward](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
 - [Operations: weekly risk review and releases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
-- [Release readiness assessment](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
+- [Release readiness assessment](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md) and [0.2.0 scope](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap-0.2.md)
 - [Security policy](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md) and [Contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md)
 
 ## Credits
