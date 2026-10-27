@@ -320,18 +320,29 @@ def collect_evidence(backend: Backend, namespace: str, kind: str, name: str, log
 def debug_workload(
     backend: Backend, namespace: str, kind: str, name: str, platform: str | None = None, log_lines: int = 100
 ) -> dict[str, Any]:
+    from kube_noob.debug.cluster import cluster_info
+    from kube_noob.known_issues import match as known_issue_match
+
     ev = collect_evidence(backend, namespace, kind, name, log_lines)
     blob = "\n".join(ev["summary"]) + "\n" + "\n".join(ev["logs"].values())
     blob += f"\nNamespace: {namespace}\n"
+    try:
+        info: dict[str, Any] = cluster_info(backend)
+    except Exception:  # noqa: BLE001 - the version is a bonus; the diagnosis must not depend on it
+        info = {}
+    platform = platform or ("openshift" if info.get("openshift") else None)
     result = diagnose(blob, platform=platform)
     if "pod" not in result.context:
         result.context["name"] = name
+    reported = known_issue_match(blob, platform, info.get("openshift"), 3)
     return {
         "backend": backend.name,
         "target": f"{kind}/{namespace}/{name}",
+        "cluster": {k: info.get(k) for k in ("kubernetes", "openshift", "newerThanKnowledge", "warnings") if k in info},
         "evidence": ev["summary"],
         "logs": {k: v[-6000:] for k, v in ev["logs"].items()},
         **result.as_dict(),
+        "knownIssues": reported["matches"],
     }
 
 
@@ -345,6 +356,10 @@ def bundle_markdown(result: dict[str, Any]) -> str:
         "## Evidence",
         *(f"- {e}" for e in result.get("evidence", [])),
     ]
+    for m in result.get("knownIssues", []):
+        lines += ["", f"## Reported issue {m['id']}", "", m["status"], "", m["summary"], "", f"- Issue: {m['url']}"]
+        lines += [f"- Workaround: {m['workaround']}"] if m.get("workaround") else []
+        lines += [f"- Release notes: {m['source']}"]
     for d in result.get("diagnoses", []):
         lines += ["", f"## {d['id']}: {d['title']} (confidence {d['confidence']})", "", "Likely causes:"]
         lines += [f"- {c}" for c in d["rootCauses"]]

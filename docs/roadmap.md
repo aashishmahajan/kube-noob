@@ -30,7 +30,9 @@ model at all. Updated 2026-10-27, after 0.2.2.
 | Chart: generated token, namespace-scoped RBAC, optional EgressFirewall, signed OCI chart | Done | 0.2.1 |
 | Homebrew (Apple silicon, Linux); `diagnose` takes pasted text | Done | 0.2.1 |
 | Claude plugin passes the plugin directory's checks (one policy hold: dependencies download at install) | Done | 0.2.2 |
-| Release writes the Homebrew formula; CI installs it the way users do (tap, `brew install kube-noob`) | Done | after 0.2.2 |
+| Release writes the Homebrew formula; CI installs it the way users do (tap, `brew install kube-noob`) | Done | 0.2.3 |
+| Reported issues: errors matched to the OpenShift 4.20 to 4.22 release notes with link, fix version and workaround | Done | 0.3.0 |
+| Every answer states the knowledge date; live checks read the cluster version; web results marked external | Done | 0.3.0 |
 | OpenShift Helm catalog (community) submission | Not started: needs the owner's fork and pull requests ([openshift-catalog.md](openshift-catalog.md)) | after 0.2.2 |
 | Admission under a real `restricted-v2` SCC in CI | At risk: needs an OpenShift cluster for CI | Next |
 
@@ -40,7 +42,7 @@ Each reuses the existing rules, playbooks and counters. None needs new infrastru
 
 | Capability | Why it matters | Effort |
 |---|---|---|
-| Known issues: match an error to a reported bug (OCPBUGS, ROX, Kubernetes, release-note known issues) with its link and fixed-in version | "Is this a known bug, and which version fixes it?" is the first question on every escalation | Medium |
+| Known issues for Kubernetes and RHACS too (OpenShift is done): Kubernetes changelogs and the ROX Jira project | "Is this a known bug, and which version fixes it?" is the first question on every escalation | Medium |
 | Policy debugging: explain Kyverno and Gatekeeper denials; check whether a NetworkPolicy lets pod A reach pod B | Policy denials are the most common "it worked on my laptop" ticket | Medium |
 | `audit --format sarif` plus a GitHub Action and a pre-commit hook | Findings show as code-scanning alerts on the pull request: the cheapest way into every team's workflow | Small |
 | Runbook links: map playbook and rule ids to the company's own URLs (`runbooks.yaml`) | Answers point at "our runbook for this", in the company's terms | Small |
@@ -76,7 +78,7 @@ stays model-free. Each phase ships only when its gate passes.
 
 | Phase | Ships | Gate |
 |---|---|---|
-| 0.3 | Known-issue matching and policy debugging (above) | Every match cites a Red Hat or upstream page; no false matches on the evaluation set |
+| 0.3 | Known-issue matching (OpenShift done), knowledge date on every answer (done), policy debugging | Every match cites a Red Hat or upstream page; no false matches on the evaluation set |
 | 0.4 | Chart registers kube-noob in `OLSConfig` (`MCPServer` gate); approved team fixes and runbooks from Git or a ConfigMap, read-only to callers | Lightspeed passes the 61-question selftest through the tools on a test cluster |
 | 0.5 | Training pipeline on OpenShift AI from `kube-noob train export`; runs in the model registry; scored with the reward, selftest and safety checks | Beats the base model on the frozen set; no answer changes the cluster first |
 | 0.6 | Signed ModelCar image and model card; KServe + vLLM `InferenceService`; `OLSConfig` points at it | Installs on a disconnected cluster within the agreed latency |

@@ -28,6 +28,7 @@ from kube_noob.audit.engine import list_rules
 from kube_noob.config import Settings
 from kube_noob.errors import KubeNoobError
 from kube_noob.knowledge.store import get_store
+from kube_noob.knowledge_status import line as knowledge_line
 from kube_noob.learn.tutor import curriculum
 from kube_noob.prompts import system_prompt
 from kube_noob.toolkit import Toolkit, ToolSpec
@@ -53,6 +54,9 @@ def _instructions(settings: Settings) -> str:
         "Research, Audit, Calibrate, Generate, Red Team). Ground answers with kubenoob_search_knowledge and cite "
         "chunk ids as [kn:<doc>#<n>]. Debug with kubenoob_diagnose"
         + (" and the read-only kubenoob_cluster_* tools." if settings.cluster.enabled else ".")
+        + " For 'is this a known bug?' or any OpenShift error, check kubenoob_known_issues (reported issues from the "
+        "release notes, with the fix version) and give the issue link. Every result carries knowledgeAsOf: say how "
+        "current kube-noob's knowledge is when the answer depends on versions or recent changes."
         + (
             " Web access is ENABLED (kubenoob_web_fetch, allowlisted domains)."
             if settings.web_enabled
@@ -62,7 +66,7 @@ def _instructions(settings: Settings) -> str:
     )
 
 
-def _wrapper(spec: ToolSpec) -> Any:
+def _wrapper(spec: ToolSpec, knowledge: str) -> Any:
     """Build an async function whose signature mirrors the tool's Pydantic model (flat MCP arguments)."""
     model = spec.model
     params: list[inspect.Parameter] = []
@@ -87,6 +91,9 @@ def _wrapper(spec: ToolSpec) -> Any:
         try:
             validated = model.model_validate(kwargs)
             result: dict[str, Any] = await anyio.to_thread.run_sync(spec.fn, validated)
+            if isinstance(result, dict):
+                # Every answer says how current kube-noob's knowledge is, so the model can tell the user.
+                result.setdefault("knowledgeAsOf", knowledge)
         except ValidationError as exc:
             outcome = "invalid-arguments"
             raise ToolError(f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from exc
@@ -154,6 +161,7 @@ def build_server(settings: Settings, *, shared: bool = False) -> MCPServer:
     # The SDK logs each failed call's message at INFO, and messages can quote the caller's input (a YAML error shows
     # the offending line). Our own audit line (tool, argument sizes, outcome) is the record; keep the SDK quiet.
     logging.getLogger("mcp.server.mcpserver.server").setLevel(logging.WARNING)
+    knowledge = knowledge_line(settings.data_dir)
     for spec in toolkit.specs():
         mcp.tool(
             name=TOOL_PREFIX + spec.name,
@@ -166,7 +174,7 @@ def build_server(settings: Settings, *, shared: bool = False) -> MCPServer:
                 idempotent_hint=spec.read_only,
                 open_world_hint=spec.open_world,
             ),
-        )(_wrapper(spec))
+        )(_wrapper(spec, knowledge))
         _forbid_unknown_arguments(mcp, TOOL_PREFIX + spec.name)
 
     @mcp.prompt(

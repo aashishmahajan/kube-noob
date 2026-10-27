@@ -64,6 +64,23 @@ kube-noob bundle deployment/orders-api -n shop --cluster-enabled
 `bundle` writes a redacted, read-only evidence pack (`bundle.md` and `bundle.json`) that you can attach to a ticket.
 Once a fix is confirmed, save it with `kube-noob learning note`. The team finds it next time as `[kn:local-N#0]`.
 
+### Is this a known bug?
+
+`known-issues` matches an error or symptom against the issues Red Hat lists in the OpenShift 4.20, 4.21 and 4.22 release
+notes: known issues, and the issues each update fixed. You get the issue link, whether a fix exists and in which
+version, the workaround, and the release-notes file it came from. Pass your version and issues already fixed there are
+left out. `diagnose` runs the same check, and on a live cluster `debug` and `bundle` read the version themselves.
+A match needs several rare words in common, so everyday errors such as OOMKilled never pull in an unrelated bug.
+
+```bash
+kube-noob known-issues 'could not find any suitable subnets for creating the ELB' --version 4.20.8
+kube-noob diagnose -f events.txt --platform openshift --version 4.21.4
+kube-noob corpus known-issues --online
+```
+
+The bundled index is dated (`kube-noob doctor` prints it, and every MCP result carries `knowledgeAsOf`);
+`corpus known-issues --online` refreshes it from the release notes on GitHub.
+
 ## Platform admin: run it inside the cluster, locked down
 
 ```bash

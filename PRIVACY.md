@@ -39,7 +39,7 @@ By default, nothing. Each destination below is off until you turn it on.
 | Your cluster's API server | `cluster.enabled: true` or `--cluster-enabled` | Read-only get, list and logs requests |
 | Allowlisted documentation sites (listed below) | `webEnabled: true`; refused under the offline lock | HTTPS GET of the page address; nothing is downloaded to disk or run |
 | The model you configure | Only `kube-noob ask`, `kube-noob train bench` and the eval judge | Your question and the tool results; under the offline lock, local models only |
-| Public GitHub repositories and the public Red Hat Jira | Only `kube-noob corpus build`, `jira` and `history` (maintainers and CI); refused under the offline lock | Requests for public data |
+| Public GitHub repositories and the public Red Hat Jira | Only `kube-noob corpus build`, `jira`, `history` and `known-issues` (maintainers and CI); refused under the offline lock | Requests for public data |
 
 The default web allowlist is kubernetes.io, helm.sh, docs.redhat.com, docs.openshift.com, access.redhat.com,
 cloud.redhat.com, developers.redhat.com, redhat.atlassian.net, docs.aws.amazon.com, github.com,

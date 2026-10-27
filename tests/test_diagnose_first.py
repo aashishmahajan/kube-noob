@@ -81,7 +81,7 @@ def test_bundle_writes_redacted_read_only_evidence(tmp_path, monkeypatch) -> Non
     assert "hunter2" not in md and "hunter2" not in json.dumps(data)
     assert md.index("Read-only next steps") < md.index("Proposed changes (require approval)")
     argvs = [json.loads(line) for line in log.read_text().splitlines()]
-    assert all(a[0] in {"get", "logs"} for a in argvs)
+    assert all(a[0] in {"get", "logs", "version"} for a in argvs), "only read-only commands"
 
 
 @pytest.mark.parametrize(

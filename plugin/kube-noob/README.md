@@ -31,6 +31,8 @@ Ask Claude in your own words; the skills route the work to kube-noob's tools.
 - "My pod is in CrashLoopBackOff" and paste `oc describe pod` or the events: the likely cause, then read-only checks
   first; anything that changes the cluster comes last and needs your approval.
 - "Write manifests for orders-api on ROSA HCP with shared storage": audited YAML through the 7-step protocol.
+- "Is this a known bug?" with an OpenShift error: the matching issue from the release notes, its link, the version
+  that fixes it and the workaround.
 - "Teach me Services" or "give me an exercise": lessons and graded exercises.
 
 Commands in an answer are for you to run: the skills tell Claude to hand them to you rather than run them, and

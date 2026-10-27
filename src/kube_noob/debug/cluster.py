@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 from kube_noob.audit.rules import SENSITIVE_ENV
 from kube_noob.config import Settings
-from kube_noob.errors import ClusterAccessError
+from kube_noob.errors import ClusterAccessError, KubeNoobError
 
 
 @dataclass(frozen=True)
@@ -261,3 +261,37 @@ def get_backend(settings: Settings) -> Backend:
             "in-cluster service for read-only cluster checks."
         ) from exc
     return select_backend(settings)
+
+
+def _k8s_minor(server: dict[str, Any]) -> str | None:
+    major, minor = str(server.get("major", "")), str(server.get("minor", "")).rstrip("+")
+    if major.isdigit() and minor.isdigit():
+        return f"{major}.{minor}"
+    m = re.match(r"v?(\d+)\.(\d+)", str(server.get("gitVersion", "")))
+    return f"{m.group(1)}.{m.group(2)}" if m else None
+
+
+def cluster_info(backend: Backend) -> dict[str, Any]:
+    """Versions of the live cluster (read-only), and whether they are newer than kube-noob's knowledge."""
+    from kube_noob.knowledge_status import compare
+
+    raw = backend.version()
+    server = raw.get("serverVersion") or {}
+    out: dict[str, Any] = {
+        "backend": backend.name,
+        "kubernetes": _k8s_minor(server),
+        "serverGitVersion": server.get("gitVersion"),
+        "openshift": None,
+        "channel": None,
+    }
+    try:
+        cv = backend.get("clusterversions", name="version")
+    except (ClusterAccessError, KubeNoobError):
+        cv = {}  # not OpenShift, or the ServiceAccount may not read ClusterVersion
+    desired = (cv.get("status") or {}).get("desired") or {}
+    if desired.get("version"):
+        out["openshift"] = desired["version"]
+        out["channel"] = (cv.get("spec") or {}).get("channel")
+    out["platform"] = "openshift" if out["openshift"] else "kubernetes"
+    out.update(compare(out["kubernetes"], out["openshift"]))
+    return out

@@ -18,7 +18,8 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
 - **Audit**: 60 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, 9 red-team scenarios, RHACS policy mapping.
 - **Generate**: hardened manifests and Helm charts, re-audited before they are returned.
-- **Debug**: 33 offline playbooks, read-only steps first; opt-in, read-only cluster evidence (Secrets are never read).
+- **Debug**: 38 offline playbooks, read-only steps first; reported OpenShift bugs matched with their fix version;
+  opt-in, read-only cluster evidence (never Secrets).
 - **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed fixes locally.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
@@ -94,13 +95,13 @@ Config never comes from the current directory implicitly. All keys: [kube-noob.e
 - [Use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
 - [Enterprise roadmap](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md)
 - [Architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
-- [Corpus, training and the reward](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
-- [Operations and releases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
+- [Training](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
+- [Operations](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
 - [Guidance traceability](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md) and [release readiness](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
 - [Privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security policy](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md) and [contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md)
 
 ## Credits
 
-Built on public, credited sources: see [THIRD_PARTY_NOTICES.md](https://github.com/aashishmahajan/kube-noob/blob/main/THIRD_PARTY_NOTICES.md). Kubernetes, OpenShift, Helm,
+Credited sources: [THIRD_PARTY_NOTICES.md](https://github.com/aashishmahajan/kube-noob/blob/main/THIRD_PARTY_NOTICES.md). Kubernetes, OpenShift, Helm,
 ROSA, RHACS and StackRox are trademarks of their owners; kube-noob is independent and not endorsed by them.
 Licensed under [Apache-2.0](https://github.com/aashishmahajan/kube-noob/blob/main/LICENSE).

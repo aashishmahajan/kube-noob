@@ -117,3 +117,19 @@ def test_privacy_policy_lists_every_destination() -> None:
     for destination in ("API server", "The model you configure", "Public GitHub", "Jira"):
         assert destination in privacy, destination
     assert "no telemetry" in privacy.lower() and "uv.lock" in privacy
+
+
+def test_readme_numbers_match_the_code() -> None:
+    """The counts the README quotes (rules, playbooks, red-team scenarios, tracks, lessons) stay true."""
+    from kube_noob.audit.engine import list_rules
+    from kube_noob.audit.redteam import SCENARIOS
+    from kube_noob.debug.playbooks import PLAYBOOKS
+    from kube_noob.learn.tutor import curriculum
+
+    readme = (ROOT / "README.md").read_text()
+    tracks = curriculum()["tracks"]
+    lessons = sum(len(t.get("lessons", [])) for t in tracks)
+    assert f"{len(list_rules())} rules" in readme
+    assert f"{len(PLAYBOOKS)} offline playbooks" in readme
+    assert f"{len(SCENARIOS)} red-team scenarios" in readme
+    assert f"{len(tracks)} tracks, {lessons} lessons" in readme

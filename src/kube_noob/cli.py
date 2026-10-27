@@ -65,6 +65,20 @@ def _emit(obj: Any, fmt: str) -> None:
         print(yaml.safe_dump(obj, sort_keys=False, width=120, allow_unicode=True), end="")
 
 
+def _print_known_issues(out: dict[str, Any]) -> None:
+    for m in out["matches"]:
+        print(f"{m['id']}  {m['status']}")
+        print(f"  {m['summary']}")
+        if m.get("workaround"):
+            print(f"  workaround: {m['workaround']}")
+        print(f"  issue: {m['url']}")
+        print(f"  release notes: {m['source']}")
+    if out.get("note"):
+        print(out["note"])
+    k = out["knowledge"]
+    print(f"index: release-note issues as of {k['knownIssuesAsOf']} for OpenShift {', '.join(k['openshiftReleases'])}")
+
+
 def _print_report(rep: dict[str, Any]) -> None:
     s = rep["summary"]
     print(
@@ -225,6 +239,21 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("text", nargs="*", help="the error text; quote multi-line text (single quotes avoid $ expansion)")
     d.add_argument("-f", "--file", default=None, help="a file, '-' for stdin, or the text itself")
     d.add_argument("--platform", choices=PLATFORMS)
+    d.add_argument(
+        "--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8: leaves out issues already fixed there"
+    )
+
+    kis = sub.add_parser(
+        "known-issues",
+        help="Is this a reported OpenShift issue? Match an error against the release notes",
+        description="Match an error or symptom against the known and fixed issues in the OpenShift release notes. "
+        "Example: kube-noob known-issues 'could not find any suitable subnets for creating the ELB' --version 4.20.8",
+    )
+    kis.add_argument("text", nargs="*", help="the error text or symptom, in quotes")
+    kis.add_argument("-f", "--file", default=None, help="a file, '-' for stdin, or the text itself")
+    kis.add_argument("--platform", choices=PLATFORMS, default="openshift")
+    kis.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
+    kis.add_argument("--limit", type=int, default=3)
 
     dbg = sub.add_parser("debug", help="Collect live read-only evidence for a workload and diagnose it")
     dbg.add_argument("target", help="kind/name, e.g. deployment/orders-api")
@@ -310,6 +339,9 @@ def build_parser() -> argparse.ArgumentParser:
     cj.add_argument("--online", action="store_true")
     ch = csub.add_parser("history", help="Release timelines from Git tags")
     ch.add_argument("--online", action="store_true")
+    cki = csub.add_parser("known-issues", help="Refresh reported OpenShift issues from the release notes (Git)")
+    cki.add_argument("--minors", default="4.20,4.21,4.22", help="comma-separated OpenShift minor releases")
+    cki.add_argument("--online", action="store_true")
     csub.add_parser("stats")
     csub.add_parser("verify")
     cad = csub.add_parser("add-docs", help="Index your own runbooks (Markdown/AsciiDoc/text folder), offline")
@@ -496,7 +528,25 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
         if len(text.strip()) < 3:
             raise ConfigError("nothing to diagnose: pass the error text in quotes, a file with -f, or pipe it in")
-        _emit(kit.diagnose(tk.DiagnoseIn(text=text, platform=getattr(a, "platform", None))), fmt)
+        _emit(
+            kit.diagnose(
+                tk.DiagnoseIn(text=text, platform=getattr(a, "platform", None), version=getattr(a, "pversion", None))
+            ),
+            fmt,
+        )
+        return 0
+
+    if a.cmd == "known-issues":
+        if a.text and a.file is not None:
+            raise ConfigError("pass the text or -f, not both")
+        text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
+        if len(text.strip()) < 3:
+            raise ConfigError("nothing to match: pass the error text in quotes, a file with -f, or pipe it in")
+        out = kit.known_issues(tk.KnownIssuesIn(text=text, platform=a.platform, version=a.pversion, limit=a.limit))
+        if a.format == "text":
+            _print_known_issues(out)
+        else:
+            _emit(out, fmt)
         return 0
 
     if a.cmd == "bundle":
@@ -656,10 +706,15 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             print()
         return 0
     if a.cmd == "doctor":
+        from kube_noob.knowledge_status import line, status
         from kube_noob.posture import posture, render_text
 
         report = posture(s)
-        print(render_text(report)) if a.format == "text" else _emit(report, fmt)
+        if a.format == "text":
+            print(render_text(report))
+            print(f"Knowledge: {line(s.data_dir)}")
+        else:
+            _emit({**report, "knowledge": status(s.data_dir)}, fmt)
         return 1 if report["conflicts"] else 0
     raise ConfigError(f"unknown command {a.cmd}")
 
@@ -695,13 +750,27 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob.sources.corpus import read_manifest, verify, write_shard
 
     cc = a.corpus_cmd
-    if cc in {"build", "jira", "history"} and s.offline:
+    if cc in {"build", "jira", "history", "known-issues"} and s.offline:
         raise ConfigError(
             "the offline lock is on (offline: true / KUBE_NOOB_OFFLINE); corpus downloads are blocked. "
             "Import a prepared corpus instead: kube-noob corpus import <dir-or-tgz>"
         )
-    if cc in {"build", "jira", "history"} and not (a.online or s.web_enabled):
+    if cc in {"build", "jira", "history", "known-issues"} and not (a.online or s.web_enabled):
         raise ConfigError("corpus ingestion uses the network; pass --online (or set webEnabled: true)")
+    if cc == "known-issues":
+        import tempfile
+
+        from kube_noob.sources.release_notes import fetch, snapshot
+
+        minors = [m.strip() for m in a.minors.split(",") if m.strip()]
+        with tempfile.TemporaryDirectory(prefix="kube-noob-rn-") as tmp:
+            records, commits = fetch(minors, Path(tmp))
+        out_dir = s.data_dir / "known_issues"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        target = out_dir / "openshift-release-notes.json"
+        target.write_text(json.dumps(snapshot(records, commits), ensure_ascii=False) + "\n", encoding="utf-8")
+        _emit({"file": str(target), "issues": len(records), "commits": commits}, fmt)
+        return 0
     if cc == "build":
         from kube_noob.sources.git_ingest import ingest
         from kube_noob.sources.registry import GIT_SOURCES, by_id

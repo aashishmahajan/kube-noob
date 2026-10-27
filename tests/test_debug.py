@@ -148,7 +148,9 @@ def test_kubectl_backend_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert out["diagnoses"][0]["id"] in {"DBG-CRASHLOOP", "DBG-OOM"}
     assert "hunter2" not in json.dumps(out)
     argvs = [json.loads(line) for line in log.read_text().splitlines()]
-    assert all(a[0] in {"get", "logs"} for a in argvs)
+    assert all(a[0] in {"get", "logs", "version"} for a in argvs), "only read-only commands"
+    assert out["cluster"]["kubernetes"] == "1.35" and out["cluster"]["newerThanKnowledge"] is False
+    assert any(a[:3] == ["get", "clusterversions.config.openshift.io", "version"] for a in argvs)
     assert argvs[0][:7] == ["get", "deployments.apps", "api", "--namespace", "orders", "--output", "json"]
     assert any("--previous" in a for a in argvs if a[0] == "logs")
     pods = backend.get("pods", namespace="orders")

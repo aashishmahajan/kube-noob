@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+Is this a known bug? kube-noob now answers from the OpenShift release notes, and says how current its knowledge is.
+
+- `kube-noob known-issues` and the MCP tool `kubenoob_known_issues`: match an error or symptom against 957 issues
+  from the OpenShift 4.20, 4.21 and 4.22 release notes (known issues, and the issues each update fixed), each with
+  its Red Hat issue link, fix version, workaround and the release-notes file it came from. With `--version`, issues
+  already fixed in that version are left out. A match needs at least three words that are rare both among the issues
+  and in general Kubernetes writing, so everyday errors (OOMKilled, ImagePullBackOff, SCC denials) never match an
+  unrelated bug; tests hold both directions.
+- `diagnose`, `debug` and `bundle` add `knownIssues`; on a live cluster they read the Kubernetes and OpenShift
+  versions (`cluster_version` also reports when the cluster is newer than kube-noob's knowledge).
+- Every MCP result carries `knowledgeAsOf`, `doctor` prints it, and web lookups are marked as external and newer than
+  the built-in knowledge.
+- `kube-noob corpus known-issues --online` refreshes the index from github.com/openshift/openshift-docs;
+  `scripts/vendor_known_issues.py` refreshes the bundled copy (every file under 256 KiB).
+- README: the playbook count is 38 (it said 33); a test now keeps the README's counts in step with the code.
+
 ## 0.2.3 - 2026-10-27
 
 Install fixes: the Homebrew formula is kept in step by the release and tested the way users install it; a short
