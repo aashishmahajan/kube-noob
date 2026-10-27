@@ -1,0 +1,92 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>kube-noob walkthrough</title>
+<style>
+  :root { --bg:#0b1020; --panel:#111833; --ink:#e6e9f2; --dim:#8a93b2; --green:#4ade80; --red:#f87171; --amber:#fbbf24; --blue:#60a5fa; --violet:#a78bfa; }
+  html,body { margin:0; width:1920px; height:1080px; background:var(--bg); color:var(--ink); overflow:hidden; font-family:"DejaVu Sans", sans-serif; }
+  .card { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; transition:opacity .5s; }
+  .card h1 { font-size:96px; margin:0 0 24px; letter-spacing:-1px; }
+  .card h2 { font-size:44px; margin:0; color:var(--dim); font-weight:normal; max-width:1500px; line-height:1.3; }
+  .card .accent { color:var(--green); }
+  .card code { font-family:"DejaVu Sans Mono", monospace; background:#1b2447; padding:6px 18px; border-radius:10px; font-size:40px; display:inline-block; margin:10px; color:var(--ink); }
+  #stage { position:absolute; inset:0; opacity:0; transition:opacity .5s; }
+  #chapter { position:absolute; top:44px; left:80px; font-size:40px; font-weight:bold; color:var(--blue); }
+  #brand { position:absolute; top:52px; right:80px; font-size:28px; color:var(--dim); }
+  #term { position:absolute; top:130px; left:80px; right:80px; bottom:190px; background:var(--panel); border-radius:18px; box-shadow:0 20px 60px rgba(0,0,0,.45); padding:36px 44px; font-family:"DejaVu Sans Mono", monospace; font-size:27px; line-height:1.42; white-space:pre-wrap; overflow:hidden; }
+  #term .bar { position:absolute; top:14px; left:20px; }
+  #term .bar span { display:inline-block; width:14px; height:14px; border-radius:50%; margin-right:8px; background:#3b4470; }
+  #lines { margin-top:14px; }
+  .prompt { color:var(--green); }
+  .cmd { color:#fff; }
+  .high { color:var(--red); }
+  .med { color:var(--amber); }
+  .ok { color:var(--green); }
+  .why { color:var(--dim); }
+  .cite { color:var(--violet); }
+  .cursor { display:inline-block; width:14px; height:28px; background:var(--green); vertical-align:-5px; animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  #caption { position:absolute; left:80px; right:80px; bottom:60px; height:100px; display:flex; align-items:center; font-size:38px; color:var(--ink); }
+  #caption b { color:var(--amber); margin-right:18px; }
+</style></head>
+<body>
+<div id="title" class="card" style="opacity:0">
+  <h1>kube-<span class="accent">noob</span></h1>
+  <h2>A Kubernetes, OpenShift and ROSA HCP expert that runs offline,<br>reads before it touches anything, and cites its sources.</h2>
+</div>
+<div id="chapterCard" class="card" style="opacity:0"><h1 id="chapterText" style="font-size:72px"></h1></div>
+<div id="stage">
+  <div id="chapter"></div><div id="brand">kube-noob 0.2.0 · offline · read-only</div>
+  <div id="term"><div class="bar"><span></span><span></span><span></span></div><div id="lines"></div></div>
+  <div id="caption"></div>
+</div>
+<div id="end" class="card" style="opacity:0">
+  <h1>Try it in 30 seconds</h1>
+  <div><code>pipx install kube-noob</code><code>kube-noob demo --list</code></div>
+  <h2 style="margin-top:36px">Claude plugin, MCP server, CLI, or a sidecar on OpenShift<br><span class="accent">github.com/aashishmahajan/kube-noob</span></h2>
+</div>
+<script>
+const SCENES = __SCENES__;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function color(line) {
+  let h = esc(line);
+  if (/^\s*why:/.test(line)) return `<span class="why">${h}</span>`;
+  h = h.replace(/\[HIGH\s*\]|\bhigh=\d+/g, m => `<span class="high">${m}</span>`)
+       .replace(/\bmedium=\d+/g, m => `<span class="med">${m}</span>`)
+       .replace(/(\d+\/\d+ passed|passed: True|status: ready|posture: OK|offline lock\s+ON|score 100\.0\/100)/g, m => `<span class="ok">${m}</span>`)
+       .replace(/\[kn:[^\]]+\]/g, m => `<span class="cite">${m}</span>`)
+       .replace(/(read-only first:|asks before running\):)/g, m => `<span class="ok">${m}</span>`);
+  return h;
+}
+async function show(el, on) { el.style.opacity = on ? 1 : 0; await sleep(550); }
+async function typeCmd(lines, cmd) {
+  const row = document.createElement("div");
+  row.innerHTML = `<span class="prompt">$ </span><span class="cmd"></span><span class="cursor"></span>`;
+  lines.appendChild(row);
+  const target = row.querySelector(".cmd");
+  for (const ch of cmd) { target.textContent += ch; await sleep(cmd.length > 70 ? 18 : 32); }
+  await sleep(350);
+  row.querySelector(".cursor").remove();
+}
+async function run() {
+  const title = document.getElementById("title"), stage = document.getElementById("stage");
+  const cc = document.getElementById("chapterCard"), ct = document.getElementById("chapterText");
+  await sleep(300); await show(title, true); await sleep(3800); await show(title, false);
+  for (const scene of SCENES) {
+    ct.textContent = scene.chapter; await show(cc, true); await sleep(1600); await show(cc, false);
+    document.getElementById("chapter").textContent = scene.chapter;
+    await show(stage, true);
+    for (const step of scene.steps) {
+      const lines = document.getElementById("lines"); lines.innerHTML = "";
+      document.getElementById("caption").innerHTML = `<b>▶</b>${esc(step.caption)}`;
+      await sleep(900);
+      await typeCmd(lines, step.command);
+      for (const l of step.output) { const d = document.createElement("div"); d.innerHTML = color(l) || "&nbsp;"; lines.appendChild(d); await sleep(70); }
+      await sleep(Math.min(5200, 2600 + step.output.length * 140));
+    }
+    await show(stage, false);
+  }
+  await show(document.getElementById("end"), true); await sleep(5500);
+  window.__done = true;
+}
+run();
+</script></body></html>
