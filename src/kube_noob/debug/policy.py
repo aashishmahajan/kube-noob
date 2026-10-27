@@ -35,8 +35,8 @@ ENGINES = {
     "rbac": "RBAC",
 }
 
-_NAME = r"[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?"
-_RESOURCE_REF = re.compile(r"(?P<kind>[a-z][a-z0-9.]*) \"(?P<name>[^\"\s]{1,253})\" is (?:forbidden|invalid)")
+_NAME = r"[a-z0-9](?:[-a-z0-9.]{0,251}[a-z0-9])?"  # bounded: no quadratic scans on long words
+_RESOURCE_REF = re.compile(r"(?P<kind>[a-z][a-z0-9.]{0,62}) \"(?P<name>[^\"\s]{1,253})\" is (?:forbidden|invalid)")
 _NAMESPACE = (
     re.compile(r"(?:-n|--namespace)[ =](" + _NAME + r")"),
     re.compile(r"in the namespace \"(" + _NAME + r")\""),
@@ -214,7 +214,7 @@ def _ns(ns: str | None) -> str:
 # --- Kyverno -----------------------------------------------------------------------------------------------------
 
 _KYV_BLOCK = re.compile(
-    r"resource (?P<kind>[A-Za-z][\w.]*)/(?P<ns>[^/\s]*)/(?P<name>[^\s]+) "
+    r"resource (?P<kind>[A-Za-z][\w.]{0,62})/(?P<ns>(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)?)/(?P<name>[^\s]{1,253}) "
     r"was blocked due to the following polic(?:y|ies)"
 )
 _KYV_POLICY_LINE = re.compile(r"^(?P<policy>" + _NAME + r"):\s*$")
@@ -241,7 +241,7 @@ def _kyverno_entries(rest: str) -> list[tuple[str, str, str]]:
         policy: str | None = None
         current: list[str] | None = None
         for line in lines:
-            if current is not None and not _quote_closed(current[2]):
+            if current is not None and len(current[2]) < 4000 and not _quote_closed(current[2]):
                 current[2] += " " + line.strip()
                 continue
             mp = _KYV_POLICY_LINE.match(line)
@@ -404,11 +404,13 @@ def _gatekeeper(text: str, platform: str | None) -> list[Denial]:
 # --- ValidatingAdmissionPolicy (Kubernetes 1.30+) --------------------------------------------------------------
 
 _VAP = re.compile(
-    r"ValidatingAdmissionPolicy '(?P<policy>[^']+)' with binding '(?P<binding>[^']+)' denied request: (?P<msg>[^\n]+)"
+    r"ValidatingAdmissionPolicy '(?P<policy>" + _NAME + r")' with binding '(?P<binding>" + _NAME + r")' "
+    r"denied request: "
+    r"(?P<msg>[^\n]{1,4000})"
 )
 _VAP_WARN = re.compile(
-    r"Validation failed for ValidatingAdmissionPolicy '(?P<policy>[^']+)' with binding '(?P<binding>[^']+)': "
-    r"(?P<msg>[^\n]+)"
+    r"Validation failed for ValidatingAdmissionPolicy '(?P<policy>" + _NAME + r")' with binding "
+    r"'(?P<binding>" + _NAME + r")': (?P<msg>[^\n]{1,4000})"
 )
 
 
@@ -453,9 +455,10 @@ def _vap(text: str, platform: str | None) -> list[Denial]:
 # --- Pod Security Admission ----------------------------------------------------------------------------------
 
 _PSA = re.compile(
-    r"(?P<mode>would violate|violates) PodSecurity \"(?P<level>[a-z]+):(?P<ver>[^\"]+)\": (?P<list>[^\n]+)"
+    r"(?P<mode>would violate|violates) PodSecurity \"(?P<level>[a-z]{1,20}):(?P<ver>[^\"\n]{1,20})\": "
+    r"(?P<list>[^\n]{1,8000})"
 )
-_PSA_ITEM = re.compile(r"(?P<check>[^,()][^()]*?) \((?P<detail>[^()]*)\)(?:,\s*|$)")
+_PSA_ITEM = re.compile(r"(?P<check>[^,()][^()]{0,200}?) \((?P<detail>[^()]{0,2000})\)(?:,\s*|$)")
 _CONTAINERS = re.compile(r"containers? ((?:\"[^\"]+\"(?:, | and )?)+)")
 _POD_FORBIDDEN = re.compile(r"pods \"(?P<pod>[^\"]+)\" is forbidden")
 _CREATED = re.compile(r"^(?P<kind>[a-z]+(?:\.[a-z.]+)?)/(?P<name>" + _NAME + r") (?:created|configured)", re.MULTILINE)
@@ -618,7 +621,7 @@ def _pod_security(text: str, platform: str | None, ns: str | None) -> list[Denia
 
 # --- OpenShift SecurityContextConstraints ------------------------------------------------------------------------
 
-_SCC = re.compile(r"unable to validate against any security context constraint: \[(?P<body>[^\n]*)\]")
+_SCC = re.compile(r"unable to validate against any security context constraint: \[(?P<body>[^\n]{0,20000})\]")
 _SCC_PROVIDER = re.compile(r"(?:^|, )provider \"?(" + _NAME + r")\"?: ")
 _SCC_ERROR_SPLIT = re.compile(
     r", (?=\.?[A-Za-z]+(?:\[\d+\])?(?:\.[A-Za-z]+(?:\[\d+\])?)*: "
@@ -747,7 +750,7 @@ def _scc(text: str, ns: str | None, sa: str | None) -> list[Denial]:
 
 # --- RHACS (StackRox) admission control --------------------------------------------------------------------------
 
-_ROX_POLICY = re.compile(r"^\s*Policy:\s*(?P<name>.+?)\s*$", re.MULTILINE)
+_ROX_POLICY = re.compile(r"^[ \t]*Policy:[ \t]*(?P<name>[^\n]{1,200}?)[ \t]*$", re.MULTILINE)
 
 
 def _rhacs(text: str, platform: str | None) -> list[Denial]:
@@ -807,18 +810,18 @@ def _rhacs(text: str, platform: str | None) -> list[Denial]:
 # --- ResourceQuota and LimitRange ----------------------------------------------------------------------------
 
 _QUOTA = re.compile(
-    r"exceeded quota: (?P<quota>" + _NAME + r"), requested: (?P<req>.+?), used: (?P<used>.+?), "
-    r"limited: (?P<lim>[^\s\"]+)"
+    r"exceeded quota: (?P<quota>" + _NAME + r"), requested: (?P<req>[^\n]{1,500}?), used: (?P<used>[^\n]{1,500}?), "
+    r"limited: (?P<lim>[^\s\"]{1,500})"
 )
-_QUOTA_SPECIFY = re.compile(r"failed quota: (?P<quota>" + _NAME + r"): must specify (?P<what>[^\n\"]+)")
+_QUOTA_SPECIFY = re.compile(r"failed quota: (?P<quota>" + _NAME + r"): must specify (?P<what>[^\n\"]{1,500})")
 _LIMIT = re.compile(
-    r"(?P<bound>maximum|minimum) (?P<res>[\w.-]+) usage per (?P<scope>Container|Pod|PersistentVolumeClaim) is "
-    r"(?P<allowed>[^\s,]+), but (?P<field>limit|request) is (?P<value>[^\s,\]\"]+)",
+    r"(?P<bound>maximum|minimum) (?P<res>[\w.-]{1,63}) usage per (?P<scope>Container|Pod|PersistentVolumeClaim) is "
+    r"(?P<allowed>[^\s,]{1,30}), but (?P<field>limit|request) is (?P<value>[^\s,\]\"]{1,30})",
     re.IGNORECASE,
 )
 _RATIO = re.compile(
-    r"(?P<res>[\w.-]+) max limit to request ratio per (?P<scope>Container|Pod) is (?P<allowed>[\d.]+), but provided "
-    r"ratio is (?P<value>[\d.]+)",
+    r"(?P<res>[\w.-]{1,63}) max limit to request ratio per (?P<scope>Container|Pod) is (?P<allowed>[\d.]{1,20}), "
+    r"but provided ratio is (?P<value>[\d.]{1,20})",
     re.IGNORECASE,
 )
 _SUFFIX = {
@@ -939,7 +942,8 @@ def _quota(text: str, platform: str | None, ns: str | None) -> list[Denial]:
 # --- RBAC ----------------------------------------------------------------------------------------------------
 
 _RBAC = re.compile(
-    r"User \"(?P<subject>[^\"]{1,253})\" cannot (?P<verb>[a-z]+) resource \"(?P<resource>[a-z0-9./-]{1,253})\" "
+    r"User \"(?P<subject>[^\"\s'`$;&|<>()\\]{1,253})\" cannot (?P<verb>[a-z]+) "
+    r"resource \"(?P<resource>[a-z0-9./-]{1,253})\" "
     r"in API group \"(?P<group>[a-z0-9.-]*)\"(?: in the namespace \"(?P<ns>" + _NAME + r")\"| at the cluster scope)?"
 )
 
@@ -1028,11 +1032,18 @@ def _namespace(text: str) -> str | None:
     return None
 
 
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
 def explain(text: str, platform: str | None = None) -> dict[str, Any]:
-    """Every admission denial in ``text``, explained. Returns ``{"denials": [...], "summary": ..., ...}``."""
+    """Every admission denial in ``text``, explained. Returns ``{"denials": [...], "summary": ..., ...}``.
+
+    Names that end up in a command (policy, rule, namespace, subject) must match Kubernetes name syntax, so text
+    pasted from a log can never smuggle shell syntax into a copy-paste command; control characters are dropped.
+    """
     if len(text) > MAX_INPUT:
         text = text[-MAX_INPUT:]
-    text = redact_text(text)
+    text = redact_text(_CONTROL.sub("", text))
     ns = _namespace(text)
     sa = re.search(r"system:serviceaccount:" + _NAME + r":(" + _NAME + r")", text)
     denials: list[Denial] = []

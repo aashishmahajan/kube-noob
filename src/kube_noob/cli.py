@@ -755,57 +755,65 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     raise ConfigError(f"unknown command {a.cmd}")
 
 
+_TERMINAL_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def _tprint(text: str = "") -> None:
+    """Print text that may echo a manifest or a log: control characters (terminal escapes) are dropped."""
+    print(_TERMINAL_CONTROL.sub("", text))
+
+
 def _print_denials(out: dict[str, Any]) -> None:
     for d in out["denials"]:
         name = " / ".join(x for x in (d.get("policy"), d.get("rule")) if x)
         head = (
             f"{d['engineName']}" + (f"  {name}" if name else "") + (f"  ({d['resource']})" if d.get("resource") else "")
         )
-        print(("WARN " if d["mode"] == "warn" else "DENY ") + head)
-        print(f"  {d['meaning']}")
+        _tprint(("WARN " if d["mode"] == "warn" else "DENY ") + head)
+        _tprint(f"  {d['meaning']}")
         if d.get("path"):
-            print(f"  at {d['path']}")
+            _tprint(f"  at {d['path']}")
         if d.get("readOnlyNextSteps"):
-            print("  check (read-only):")
+            _tprint("  check (read-only):")
             for step in d["readOnlyNextSteps"]:
-                print(f"    {step.get('command') or step.get('instruction')}")
+                _tprint(f"    {step.get('command') or step.get('instruction')}")
         if d.get("proposedChanges"):
-            print("  fix (needs approval):")
+            _tprint("  fix (needs approval):")
             for c in d["proposedChanges"]:
-                print(f"    - {c['change']}")
+                _tprint(f"    - {c['change']}")
         if d.get("patch"):
-            print("  patch:")
+            _tprint("  patch:")
             for line in d["patch"].rstrip().splitlines():
-                print(f"    {line}")
+                _tprint(f"    {line}")
         if d.get("relatedRules"):
-            print(f"  caught before deploy by: {', '.join(d['relatedRules'])} (kube-noob audit)")
-        print()
-    print(out.get("summary") or out.get("note", ""))
+            _tprint(f"  caught before deploy by: {', '.join(d['relatedRules'])} (kube-noob audit)")
+        _tprint()
+    _tprint(out.get("summary") or out.get("note", ""))
 
 
 def _print_reach(out: dict[str, Any]) -> None:
-    print(f"{out['verdict'].upper()}  {out['source']} -> {out['destination']}  {out['protocol']} {out['port']}")
+    _tprint(f"{out['verdict'].upper()}  {out['source']} -> {out['destination']}  {out['protocol']} {out['port']}")
     for direction in ("egress", "ingress"):
         r = out[direction]
-        print(f"  {direction:7} {'allowed' if r['allowed'] else 'DENIED '}  {r['reason']}")
+        _tprint(f"  {direction:7} {'allowed' if r['allowed'] else 'DENIED '}  {r['reason']}")
         for pol in [] if r["allowed"] else r.get("policies", []):
             for rule in pol.get("rules", []):
                 if not rule["allows"]:
                     miss = [x for x, ok in (("peer", rule["peerMatches"]), ("port", rule["portMatches"])) if not ok]
-                    print(
+                    _tprint(
                         f"          {pol['policy']} rule {rule['rule']}: allows {rule['peer']} on {rule['ports']} "
                         f"(no match: {', '.join(miss)})"
                     )
     if out.get("warning"):
-        print(f"  warning: {out['warning']}")
+        _tprint(f"  warning: {out['warning']}")
     for c in out.get("proposedChanges", []):
-        print(f"\n  fix (needs approval): {c['change']}")
+        _tprint(f"\n  fix (needs approval): {c['change']}")
         for line in (c.get("manifest") or "").rstrip().splitlines():
-            print(f"    {line}")
-    print("\n  check (read-only):")
+            _tprint(f"    {line}")
+    _tprint("\n  check (read-only):")
     for step in out.get("readOnlyNextSteps", []):
-        print(f"    {step['command']}")
-    print("\n  not evaluated: " + "; ".join(out.get("notEvaluated", [])))
+        _tprint(f"    {step['command']}")
+    _tprint("\n  not evaluated: " + "; ".join(out.get("notEvaluated", [])))
 
 
 def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:

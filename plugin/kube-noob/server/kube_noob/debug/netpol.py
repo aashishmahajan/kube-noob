@@ -57,6 +57,16 @@ NOT_EVALUATED = (
 _LABEL_VALUE = re.compile(r"^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$")
 _DNS = re.compile(r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$")
 _PORT_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+_LABEL_KEY = re.compile(r"^([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def _shell_safe_selector(labels: dict[str, str]) -> str | None:
+    """``k=v,k2=v2`` for a command line, or None when a key or value is not valid label syntax (it came from a
+    manifest or the cluster, so it could carry shell syntax)."""
+    if not labels or not all(_LABEL_KEY.match(k) and (v == "" or _LABEL_VALUE.match(v)) for k, v in labels.items()):
+        return None
+    return ",".join(f"{k}={v}" for k, v in sorted(labels.items()))
 
 
 def _labelstr(v: Any) -> str:
@@ -218,7 +228,7 @@ class Inventory:
             labels: dict[str, str] = {}
             for part in sel.split(","):
                 k, eq, v = part.partition("=")
-                if not eq or not k.strip() or not _LABEL_VALUE.match(v.strip() or "x"):
+                if not eq or not _LABEL_KEY.match(k.strip()) or not _LABEL_VALUE.match(v.strip() or "x"):
                     raise ValueError(f"bad label in {spec!r}: use ns:key=value,key2=value2")
                 labels[k.strip()] = v.strip()
             if not _DNS.match(ns):
@@ -516,20 +526,23 @@ def check_reachability(
         )
     if changes:
         out["proposedChanges"] = changes
+    # Names and labels come from manifests or the cluster: only Kubernetes syntax goes into a command line.
     checks = []
-    for ns in dict.fromkeys(e.namespace for e in (src, dst) if e.namespace):
+    safe_ns = [ns for ns in dict.fromkeys(e.namespace for e in (src, dst) if e.namespace) if _DNS.match(ns)]
+    for ns in safe_ns:
         checks.append(f"{cli} get networkpolicy -n {ns} -o yaml")
         checks.append(f"{cli} get namespace {ns} --show-labels")
     for e in (src, dst):
-        if e.namespace and e.selector:
-            sel = ",".join(f"{k}={v}" for k, v in sorted(e.selector.items()))
+        sel = _shell_safe_selector(e.selector)
+        if e.namespace in safe_ns and sel:
             checks.append(f"{cli} get pods -n {e.namespace} -l {sel} -o wide --show-labels")
     if cli == "oc":
         checks.append("oc get adminnetworkpolicy,baselineadminnetworkpolicy")
-        if src.namespace:
+        if src.namespace in safe_ns:
             checks.append(f"oc get egressfirewall -n {src.namespace} -o yaml")
     out["readOnlyNextSteps"] = [_step(c) for c in checks if classify_step(c) == "read"]
-    if not src.external and src.namespace:
+    kind, _, name = src.ref.partition("/")
+    if src.namespace in safe_ns and kind.isalpha() and _DNS.match(name) and (dst.external or dst.namespace in safe_ns):
         target = dst.describe() if dst.external else f"<{_short(dst)}-service>.{dst.namespace}.svc"
         probe = f"{cli} exec -n {src.namespace} {src.ref} -- curl -sS -o /dev/null --max-time 5 {target}:{port}"
         out["diagnosticCommands"] = [{"command": probe, "requiresApproval": True}]

