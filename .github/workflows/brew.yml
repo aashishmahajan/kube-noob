@@ -86,9 +86,20 @@ jobs:
           brew install kube-noob
           formula="$(brew --repository aashishmahajan/kube-noob)/Formula/kube-noob.rb"
           want="$(sed -n 's#^  url ".*/kube_noob-\([0-9][0-9.]*\)\.tar\.gz"#\1#p' "$formula")"
-          pypi="$(curl -fsS https://pypi.org/pypi/kube-noob/json | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])')"
           got="$(kube-noob --version)"
-          echo "formula $want, PyPI $pypi, installed: $got"
           if [ "$got" != "kube-noob $want" ]; then echo "::error title=brew::installed '$got', formula says $want"; exit 1; fi
-          if [ "$want" != "$pypi" ]; then echo "::error title=brew::the formula is $want but PyPI has $pypi: run scripts/brew_formula.py $pypi --write"; exit 1; fi
+          # Right after a release PyPI's index can still report the previous version for a few minutes (CDN cache):
+          # wait for it, and fail only if PyPI has a NEWER version than the formula or lacks the formula's version.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            pypi="$(curl -fsS -H 'Cache-Control: no-cache' "https://pypi.org/pypi/kube-noob/json?t=$(date +%s)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])')"
+            [ "$pypi" = "$want" ] && break
+            sleep 30
+          done
+          echo "formula $want, PyPI $pypi, installed: $got"
+          if [ "$want" != "$pypi" ]; then
+            newer="$(python3 -c 'import sys; v=lambda s: tuple(int(x) for x in s.split(".")); print(int(v(sys.argv[2]) > v(sys.argv[1])))' "$want" "$pypi")"
+            if [ "$newer" = "1" ]; then echo "::error title=brew::the formula is $want but PyPI has $pypi: run scripts/brew_formula.py $pypi --write"; exit 1; fi
+            curl -fsS -o /dev/null "https://pypi.org/pypi/kube-noob/$want/json" || { echo "::error title=brew::the formula's version $want is not on PyPI"; exit 1; }
+            echo "::notice title=brew::PyPI's index still reports $pypi; $want is published and installed"
+          fi
           kube-noob selftest

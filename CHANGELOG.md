@@ -2,8 +2,7 @@
 
 ## 0.3.1 - 2026-10-27
 
-Why was this denied, and can pod A reach pod B? Policy debugging, offline and read-only. This is the first published
-0.3 release: it also carries everything listed under 0.3.0.
+Why was this denied, and can pod A reach pod B? Policy debugging, offline and read-only.
 
 - `kube-noob policy explain` and the MCP tool `kubenoob_explain_denial`: explain a denial policy by policy for Kyverno
   (including rules Kyverno generates for Deployments and other controllers), OPA Gatekeeper (deny and warn),
@@ -21,6 +20,8 @@ Why was this denied, and can pod A reach pod B? Policy debugging, offline and re
   propose the smallest NetworkPolicy that allows exactly that traffic (tests apply it and re-check). Exits 1 when
   denied, for CI. AdminNetworkPolicy, EgressFirewall and CNI-specific policies are reported as not evaluated.
 - `examples/netpol-shop.yaml`: a default-deny namespace with an allowed and a blocked path, for trying `policy reach`.
+- Homebrew CI: right after a release, the public-tap check waits for PyPI's index to show the new version (it is
+  cached for a few minutes) instead of failing; it still fails when PyPI has a newer version than the formula.
 - Red-team hardening for both: names that reach a copy-paste command (policy, binding, namespace, subject, labels)
   must match Kubernetes syntax, so a log or manifest cannot smuggle `;`, `$(...)` or a newline into one; terminal
   escape sequences are dropped from text output; every pattern is bounded so hostile 200 KB input stays fast.
