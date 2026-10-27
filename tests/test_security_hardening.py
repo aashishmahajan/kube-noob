@@ -161,3 +161,15 @@ def test_chart_and_image_do_not_pin_web_enabled() -> None:
     netpol = (ROOT / "deploy/helm/kube-noob/templates/networkpolicy.yaml").read_text()
     assert "fail" in netpol and "at least one allowed source" in netpol
     assert os.path.exists(ROOT / "deploy/helm/kube-noob/values.yaml")
+
+
+def test_unreachable_local_model_fails_cleanly() -> None:
+    from kube_noob.agent.providers import build_provider
+    from kube_noob.errors import ProviderError
+
+    s = load_settings(
+        overrides={"llm": {"provider": "openai-compatible", "baseUrl": "http://127.0.0.1:9/v1", "timeoutSeconds": 2}}
+    )
+    provider = build_provider(s.llm, s)
+    with pytest.raises(ProviderError, match="Cannot reach the model endpoint"):
+        provider.turn("system", [{"role": "user", "content": "hi"}], [])

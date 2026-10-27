@@ -8,7 +8,9 @@ from __future__ import annotations
 import base64
 import hmac
 import inspect
+import logging
 import os
+import time
 from importlib import resources
 from typing import Annotated, Any, cast
 
@@ -17,7 +19,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import Icon, ToolAnnotations
-from pydantic import Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 from pydantic_core import PydanticUndefined
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -35,6 +37,8 @@ from kube_noob.toolkit import Toolkit, ToolSpec
 TOOL_PREFIX = "kubenoob_"
 PUBLIC_PATHS = frozenset({"/healthz", "/readyz"})
 MAX_ERROR_CHARS = 2000
+MAX_BODY_BYTES = 8 * 1024 * 1024  # manifests are capped at 5 MB; JSON-RPC framing needs some headroom
+_audit = logging.getLogger("kube_noob.audit")
 
 
 def _icons() -> list[Icon]:
@@ -82,15 +86,32 @@ def _wrapper(spec: ToolSpec) -> Any:
     async def tool(**kwargs: Any) -> dict[str, Any]:
         # Anticipated failures (guards, bad input, disabled features) become ToolError so the calling model sees the
         # actionable message; anything else stays an opaque crash whose details remain in the server log.
+        started = time.monotonic()
+        outcome = "ok"
         try:
             validated = model.model_validate(kwargs)
             result: dict[str, Any] = await anyio.to_thread.run_sync(spec.fn, validated)
         except ValidationError as exc:
+            outcome = "invalid-arguments"
             raise ToolError(f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from exc
         except (KubeNoobError, ValueError) as exc:
+            outcome = type(exc).__name__
             raise ToolError(str(exc)[:MAX_ERROR_CHARS]) from exc
         except KeyError as exc:  # unknown task / chunk / lesson ids
+            outcome = "not-found"
             raise ToolError(str(exc.args[0] if exc.args else exc)[:MAX_ERROR_CHARS]) from exc
+        except Exception:
+            outcome = "crash"
+            raise
+        finally:
+            # Audit trail without content: which tool, argument names and sizes, outcome, duration.
+            _audit.info(
+                "tool=%s args=%s outcome=%s ms=%d",
+                TOOL_PREFIX + spec.name,
+                {k: len(v) if isinstance(v, str | list | dict) else type(v).__name__ for k, v in kwargs.items()},
+                outcome,
+                (time.monotonic() - started) * 1000,
+            )
         return result
 
     tool.__name__ = TOOL_PREFIX + spec.name
@@ -99,6 +120,68 @@ def _wrapper(spec: ToolSpec) -> Any:
     annotations["return"] = dict[str, Any]
     tool.__annotations__ = annotations
     return tool
+
+
+def _forbid_unknown_arguments(mcp: MCPServer, name: str) -> None:
+    """Reject misspelled arguments (e.g. 'taskId' for 'task_id') instead of silently dropping them.
+
+    The SDK builds a lenient argument model from the function signature; swap in a subclass with extra='forbid' and
+    advertise additionalProperties: false. Covered by a test, so an SDK change that breaks this fails CI.
+    """
+    tool = mcp._tool_manager.get_tool(name)
+    if tool is None:
+        raise RuntimeError(f"tool {name} was not registered")
+    base = tool.fn_metadata.arg_model
+    strict = type(base.__name__, (base,), {"model_config": ConfigDict(arbitrary_types_allowed=True, extra="forbid")})
+    tool.fn_metadata.arg_model = strict
+    tool.parameters["additionalProperties"] = False
+
+
+class BodyLimit:
+    """Reject request bodies above ``limit`` bytes with 413 before the MCP app sees them.
+
+    Bodies are read up front (JSON-RPC requests are small and the server answers with plain JSON), so a declared
+    Content-Length or a chunked upload that exceeds the limit never reaches the application.
+    """
+
+    def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await JSONResponse({"error": "request body too large", "limitBytes": self.limit}, status_code=413)(
+            scope, receive, send
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
+            await self.app(scope, receive, send)
+            return
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None and declared.isdigit() and int(declared) > self.limit:
+            await self._reject(scope, receive, send)
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body.extend(message.get("body", b""))
+            if len(body) > self.limit:
+                await self._reject(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+        replayed = False
+
+        async def replay() -> Any:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
 
 
 class BearerAuth:
@@ -143,6 +226,7 @@ def build_server(settings: Settings) -> MCPServer:
                 open_world_hint=spec.open_world,
             ),
         )(_wrapper(spec))
+        _forbid_unknown_arguments(mcp, TOOL_PREFIX + spec.name)
 
     @mcp.prompt(
         name="master_controller",
@@ -266,4 +350,4 @@ def http_app(settings: Settings, *, allow_unauthenticated: bool = False) -> ASGI
         stateless_http=True,
         json_response=True,
     )
-    return BearerAuth(app, token)
+    return BodyLimit(BearerAuth(app, token))

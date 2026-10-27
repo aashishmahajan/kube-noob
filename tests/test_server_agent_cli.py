@@ -262,3 +262,51 @@ def test_http_host_checks(monkeypatch: pytest.MonkeyPatch) -> None:
         r = client.post("/mcp", json=init, headers={**headers, "Authorization": "Bearer s3cret-token"})
         assert r.status_code == 200, r.text
         assert client.post("/mcp", json=init, headers=headers).status_code == 401
+
+
+def test_mcp_rejects_unknown_arguments(settings: Settings) -> None:
+    async def run() -> tuple[Any, Any, Any]:
+        async with Client(build_server(settings)) as c:
+            tools = {t.name: t for t in (await c.list_tools()).tools}
+            typo = await c.call_tool("kubenoob_grade_answer", {"taskId": "bench-qa-oom", "completion": "x"})
+            good = await c.call_tool("kubenoob_explain_rule", {"rule_id": "KN-ST001"})
+            return tools["kubenoob_grade_answer"], typo, good
+
+    schema_tool, typo, good = anyio.run(run)
+    assert schema_tool.input_schema.get("additionalProperties") is False
+    assert typo.is_error and "taskId" in typo.content[0].text
+    assert not good.is_error
+
+
+def test_http_body_limit_and_audit_log(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from starlette.testclient import TestClient
+
+    from kube_noob.server.mcp_app import MAX_BODY_BYTES
+
+    monkeypatch.setenv("KUBE_NOOB_HTTP_TOKEN", "s3cret-token")
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "Authorization": "Bearer s3cret-token",
+    }
+    with TestClient(http_app(load_settings()), base_url="http://127.0.0.1:8080") as client:
+        big = b"x" * (MAX_BODY_BYTES + 1)
+        assert client.post("/mcp", content=big, headers=headers).status_code == 413
+
+        def chunks() -> Any:
+            for _ in range(9):
+                yield b"y" * (1024 * 1024)
+
+        assert client.post("/mcp", content=chunks(), headers=headers).status_code == 413
+        call = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "kubenoob_explain_rule", "arguments": {"rule_id": "KN-ST001"}},
+        }
+        with caplog.at_level(logging.INFO, logger="kube_noob.audit"):
+            r = client.post("/mcp", json=call, headers={**headers, "MCP-Protocol-Version": "2025-06-18"})
+        assert r.status_code == 200, r.text
+        assert any("tool=kubenoob_explain_rule" in m and "outcome=ok" in m for m in caplog.messages)

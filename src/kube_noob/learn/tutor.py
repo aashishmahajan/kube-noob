@@ -128,7 +128,7 @@ class Tutor:
     def lesson(self, lesson_id: str, learner: str | None = None) -> dict[str, Any]:
         les = lessons().get(lesson_id)
         if les is None:
-            raise KeyError(f"unknown lesson {lesson_id!r}")
+            raise KeyError(f"unknown lesson {lesson_id!r}; available: {', '.join(sorted(lessons()))}")
         store = get_store()
         body: list[str] = []
         citations: list[dict[str, Any]] = []
@@ -165,7 +165,7 @@ class Tutor:
     def exercise(self, exercise_id: str) -> dict[str, Any]:
         ex = exercises().get(exercise_id)
         if ex is None:
-            raise KeyError(f"unknown exercise {exercise_id!r}")
+            raise KeyError(f"unknown exercise {exercise_id!r}; available: {', '.join(sorted(exercises()))}")
         return {
             "id": ex["id"],
             "track": ex["track"],
@@ -181,7 +181,7 @@ class Tutor:
     def submit(self, exercise_id: str, answer: str, learner: str = "local") -> dict[str, Any]:
         ex = exercises().get(exercise_id)
         if ex is None:
-            raise KeyError(f"unknown exercise {exercise_id!r}")
+            raise KeyError(f"unknown exercise {exercise_id!r}; available: {', '.join(sorted(exercises()))}")
         ev = evaluate(answer, ex["checks"])
         points = int(ex.get("points", 10))
         earned = round(points * ev.score) if ev.parsed else 0
@@ -224,13 +224,13 @@ class Tutor:
     def quiz_question(self, qid: str) -> dict[str, Any]:
         q = quizzes().get(qid)
         if q is None:
-            raise KeyError(f"unknown quiz question {qid!r}")
+            raise KeyError(f"unknown quiz question {qid!r}; available: {', '.join(sorted(quizzes()))}")
         return {"id": qid, "track": q["track"], "question": q["question"], "choices": q["choices"]}
 
     def answer_quiz(self, qid: str, choice: int, learner: str = "local") -> dict[str, Any]:
         q = quizzes().get(qid)
         if q is None:
-            raise KeyError(f"unknown quiz question {qid!r}")
+            raise KeyError(f"unknown quiz question {qid!r}; available: {', '.join(sorted(quizzes()))}")
         if not 0 <= choice < len(q["choices"]):
             raise ValueError(f"choice must be 0..{len(q['choices']) - 1}")
         correct = choice == int(q["answer"])

@@ -298,7 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except (KubeNoobError, KeyError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
+        print(f"error: {msg}", file=sys.stderr)
         return 4
 
 

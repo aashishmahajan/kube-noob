@@ -14,6 +14,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+import httpx
+
 from kube_noob.config import LLMSettings, Settings
 from kube_noob.errors import ProviderError
 from kube_noob.net import Purpose, http_client
@@ -89,14 +91,23 @@ class AnthropicProvider:
         ]
 
     def _create(self, **kw: Any) -> Any:
-        if self.fallbacks:
-            try:
-                return self.client.beta.messages.create(fallbacks="default", betas=[FALLBACK_BETA], **kw)
-            except Exception as exc:
-                if "fallback" not in str(exc).lower() and "beta" not in str(exc).lower():
-                    raise
-                self.fallbacks = False
-        return self.client.messages.create(**kw)
+        import anthropic
+
+        try:
+            if self.fallbacks:
+                try:
+                    return self.client.beta.messages.create(fallbacks="default", betas=[FALLBACK_BETA], **kw)
+                except anthropic.APIStatusError as exc:
+                    if "fallback" not in str(exc).lower() and "beta" not in str(exc).lower():
+                        raise
+                    self.fallbacks = False
+            return self.client.messages.create(**kw)
+        except anthropic.APIConnectionError as exc:
+            raise ProviderError(f"Cannot reach the Anthropic API ({exc}). Check network/proxy access.") from exc
+        except anthropic.AuthenticationError as exc:
+            raise ProviderError("The Anthropic API rejected the key in llm.apiKeyEnv (HTTP 401).") from exc
+        except anthropic.APIStatusError as exc:
+            raise ProviderError(f"Anthropic API error HTTP {exc.status_code}: {str(exc)[:300]}") from exc
 
     def turn(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Turn:
         anth_tools = [
@@ -169,11 +180,21 @@ class OpenAICompatibleProvider:
         headers = {"Content-Type": "application/json"}
         if self.key:
             headers["Authorization"] = f"Bearer {self.key}"
-        with http_client(self.settings, Purpose.LLM, timeout=self.llm.timeout_seconds, extra_headers=headers) as c:
-            resp = c.post(f"{self.base}/chat/completions", content=json.dumps(payload))
+        try:
+            with http_client(self.settings, Purpose.LLM, timeout=self.llm.timeout_seconds, extra_headers=headers) as c:
+                resp = c.post(f"{self.base}/chat/completions", content=json.dumps(payload))
+        except httpx.TimeoutException as exc:
+            raise ProviderError(
+                f"{self.base} did not answer within {self.llm.timeout_seconds}s (llm.timeoutSeconds)"
+            ) from exc
+        except httpx.TransportError as exc:
+            raise ProviderError(f"Cannot reach the model endpoint {self.base}: {exc}") from exc
         if resp.status_code >= 400:
             raise ProviderError(f"{self.base} returned HTTP {resp.status_code}: {resp.text[:300]}")
-        return resp.json()  # type: ignore[no-any-return]
+        try:
+            return resp.json()  # type: ignore[no-any-return]
+        except ValueError as exc:
+            raise ProviderError(f"{self.base} returned a non-JSON response: {resp.text[:200]}") from exc
 
     def turn(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Turn:
         payload = {
