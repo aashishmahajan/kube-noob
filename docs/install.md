@@ -17,6 +17,9 @@ The tap is needed because kube-noob is not in Homebrew's main catalogue; after `
 finds it. Homebrew 6 and later also refuse formulae from third-party taps until you trust them; `brew trust
 --formula` trusts only this one formula ([Homebrew: Tap Trust](https://docs.brew.sh/Tap-Trust)). Get uv or pipx with `brew install uv` or `brew install pipx`.
 
+Every method installs two commands: `kube-noob` and its short form `noob` (from 0.2.3). The PyPI package named
+`noob` is an unrelated graph library that also installs a `noob` command; if you have it, use `kube-noob`.
+
 Check what you are running:
 
 ```bash

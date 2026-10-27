@@ -82,6 +82,7 @@ def test_ships_as_mcp_plugin_cli_and_openshift_service() -> None:
 
     cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert cfg["project"]["scripts"]["kube-noob"] == "kube_noob.cli:main"
+    assert cfg["project"]["scripts"]["noob"] == "kube_noob.cli:main", "the short form runs the same CLI"
     assert (ROOT / "plugin/kube-noob/.mcp.json").is_file() and (ROOT / ".claude-plugin/marketplace.json").is_file()
     assert (ROOT / "deploy/helm/kube-noob/Chart.yaml").is_file()
     assert "kube-noob" in (ROOT / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()

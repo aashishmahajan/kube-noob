@@ -46,8 +46,8 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (needs Python 3.11+, newer than macOS's
-built-in one). Upgrades, errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (needs Python 3.11+, newer than macOS's
+built-in one). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
 
 ## Use with Claude or any MCP client
@@ -64,7 +64,7 @@ In claude.ai or the desktop app: **Customize > Plugins > Add > Add marketplace**
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.2.2", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.2.3", "kube-noob", "mcp"]}}}
 ```
 
 Cluster and web tools appear only when enabled.
@@ -87,7 +87,7 @@ NetworkPolicies and runs under `restricted-v2`.
 
 `kube-noob doctor` prints what the process can reach.
 
-Config is never read from the current directory implicitly. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
+Config never comes from the current directory implicitly. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
 
 ## Docs
 

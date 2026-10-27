@@ -1,8 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 - 2026-10-27
 
-- Homebrew: the formula is at 0.2.2. The release workflow now writes it once PyPI has the new version and pushes it to
+Install fixes: the Homebrew formula is kept in step by the release and tested the way users install it; a short
+`noob` command; an install guide with the fix for each common error.
+
+- `noob` is a short form of `kube-noob`: every install method (pip, pipx, uv, Homebrew) puts both commands on
+  `PATH`. The Homebrew formula links `noob` from this release on and its test runs `noob --version`.
+- PyPI shows the install guide (`docs/install.md`) under the project links, and the README there starts with the
+  Homebrew commands.
+- Homebrew: the formula was brought up to 0.2.2. The release workflow now writes it once PyPI has the new version and pushes it to
   main, and a new CI job installs it exactly as documented (`brew tap aashishmahajan/kube-noob
   https://github.com/aashishmahajan/kube-noob`, `brew trust --formula aashishmahajan/kube-noob/kube-noob`, then
   `brew install kube-noob`) on macOS and Linux and fails if the installed version differs from the formula or from
