@@ -47,14 +47,27 @@ jobs:
       - run: pytest --cov --cov-report=term-missing:skip-covered --cov-fail-under=80
       - name: Build sdist + wheel
         run: python -m build
-      - name: Dists pass the twine bundled in the pinned PyPI publish action
-        run: scripts/check_publishable.sh
       - name: Install wheel in a clean venv and smoke-test
         run: |
           python -m venv /tmp/wheelenv
           /tmp/wheelenv/bin/pip install dist/*.whl
           /tmp/wheelenv/bin/kube-noob --version
           /tmp/wheelenv/bin/kube-noob search "restricted-v2" --format json | python -c "import json,sys; assert json.load(sys.stdin)['results']"
+
+  publishable:
+    # Upload validation exactly as pypa/gh-action-pypi-publish runs it: same twine, same Python as its container.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: action
+        run: echo "python=$(scripts/check_publishable.sh --python-version)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ steps.action.outputs.python }}
+      - run: python -m pip install --upgrade pip build && python -m build
+      - run: scripts/check_publishable.sh
 
   helm-and-dogfood:
     runs-on: ubuntu-latest
