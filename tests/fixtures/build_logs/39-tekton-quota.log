@@ -1,0 +1,4 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] found 0 vulnerabilities
+task build failed: TaskRun Pod exceeded available resources: pods "app-ci-run-x7k2p-04-build-pod" is forbidden: exceeded quota: ci-quota, requested: limits.memory=4Gi, used: limits.memory=6Gi, limited: limits.memory=8Gi. Run tkn tr desc app-ci-run-x7k2p-04-build for more details

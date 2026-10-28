@@ -1,0 +1,9 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] found 0 vulnerabilities
+[build : build] + dnf install -y nodejs
+[build : build] Updating Subscription Management repositories.
+[build : build] Errors during downloading metadata for repository 'ubi-9-appstream-rpms':
+[build : build]   - Curl error (6): Couldn't resolve host name for https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/repodata/repomd.xml [Could not resolve host: cdn-ubi.redhat.com]
+[build : build] Error: Failed to download metadata for repo 'ubi-9-appstream-rpms': Cannot download repomd.xml: Cannot download repodata/repomd.xml: All mirrors were tried
+task build failed: "step-build" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-04-build for more details

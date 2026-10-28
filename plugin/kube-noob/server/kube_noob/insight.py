@@ -37,8 +37,6 @@ KINDS = (
     "question",
 )
 PENDING = {
-    "containerfile": "the Containerfile audit (requirements R4.2) is not built yet; until then audit the manifests "
-    "that run the image and pin its base image by digest",
     "sbom": "SBOM analysis (R5.1) is not built yet; run your scanner and read its findings with RHACS or Trivy",
     "scanner-report": "scanner report analysis (R5.1) is not built yet",
     "packet-capture": "packet capture analysis (queue N2) is not built yet; tcpdump text is read as logs",
@@ -352,9 +350,7 @@ GATHER = (
     ("{cli} logs <pod> -n {ns} --previous --tail=200", "the last run's logs when the container restarted"),
 )
 GATHER_NOTE = " Nothing here was evidence enough to diagnose: run the steps and paste what they print."
-NOT_YET = {
-    "build-log": "build failure analysis (requirements R4.1) is not built yet; the log was diagnosed as text",
-}
+NOT_YET: dict[str, str] = {}
 
 
 def gather_steps(platform: str | None, namespace: str | None) -> list[dict[str, str]]:
@@ -443,6 +439,15 @@ def _ticket_findings(kit: Any, keys: list[str], version: str | None) -> list[dic
     return out
 
 
+def _containerfile(kit: Any, text: str) -> dict[str, Any] | str:
+    from kube_noob import toolkit as tk
+
+    try:
+        return dict(kit.containerfile_audit(tk.ContainerfileIn(containerfile=text[: tk.MAX_MANIFEST_CHARS])))
+    except ValueError as exc:
+        return f"not audited: {str(exc).splitlines()[0][:300]}"
+
+
 def insight(kit: Any, text: str, platform: str | None = None, version: str | None = None) -> dict[str, Any]:
     """Recognise the input, run every analyser that applies (each on its own size and time budget) and merge
     what they found into one answer."""
@@ -515,6 +520,61 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
             )
             steps = [*den.get("readOnlyNextSteps", [])[:3], *steps]
         context = d.get("context") or {}
+    if "build-log" in names:
+        b = budget.run(
+            "build",
+            lambda: kit.build_diagnose(
+                tk.BuildDiagnoseIn(log=text[-tk.MAX_BUILD_LOG :], platform=platform, version=version)
+            ),
+        )
+        if b:
+            cause = b.get("cause") or {}
+            step = b.get("failingStep") or {}
+            findings.append(
+                {
+                    "source": "build",
+                    "id": cause.get("class") or "build-failure",
+                    "title": f"{b['system']}: step {step.get('name', '?')} failed"
+                    + (f": {cause['meaning']}" if cause else ""),
+                    "confidence": cause.get("confidence"),
+                    "evidence": [e["text"] for e in b.get("evidence", [])[:2]],
+                    "fix": b.get("fix", [])[:3],
+                    "rank": 2,
+                }
+            )
+            for m in b.get("knownIssues", [])[:2]:
+                if m.get("id") not in {f.get("id") for f in findings}:
+                    findings.append(
+                        {
+                            "source": "reported-issue",
+                            "id": m.get("id"),
+                            "title": m.get("title"),
+                            "verdict": m.get("verdict") or m.get("status"),
+                            "url": m.get("url"),
+                            "rank": 20,
+                        }
+                    )
+            steps = [{"command": c, "why": "read the failed run"} for c in b.get("readOnlyNextSteps", [])[:3]] + steps
+    if "containerfile" in names:
+        rep = budget.run(
+            "containerfile",
+            lambda: _containerfile(kit, text),
+        )
+        if isinstance(rep, str):
+            ran.remove("containerfile")
+            skipped.append({"kind": "containerfile", "why": rep})
+        elif rep:
+            for f in rep["findings"][:10]:
+                findings.append(
+                    {
+                        "source": "rule",
+                        "id": f["ruleId"],
+                        "title": f["message"],
+                        "severity": f["severity"],
+                        "resource": f"Containerfile line {f['line']}" if f.get("line") else "Containerfile",
+                        "rank": 15 - _SEVERITY.get(str(f.get("severity")), 0),
+                    }
+                )
     keys = _ticket_keys(text)
     if keys:
         known = {f["id"] for f in findings}
@@ -579,7 +639,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         )
     for k in sorted(names & (set(PENDING) | set(NOT_YET))):
         skipped.append({"kind": k, "why": PENDING.get(k) or NOT_YET[k]})
-    evidence = {"playbook", "policy", "rule", "ticket", "reported-issue", "team-memory"}
+    evidence = {"playbook", "policy", "rule", "ticket", "reported-issue", "team-memory", "build"}
     if not steps and not any(f["source"] in evidence for f in findings) and (names & textual or not names):
         ns = context.get("namespace")
         steps = gather_steps(platform, ns if isinstance(ns, str) else None)

@@ -1,0 +1,362 @@
+[
+ {
+  "file": "01-github-actions-dependency-fetch.log",
+  "system": "github-actions",
+  "class": "dependency-fetch",
+  "step": "npm ci"
+ },
+ {
+  "file": "02-github-actions-dependency-fetch.log",
+  "system": "github-actions",
+  "class": "dependency-fetch",
+  "step": "pip install -r requirements.txt"
+ },
+ {
+  "file": "03-github-actions-compile.log",
+  "system": "github-actions",
+  "class": "compile",
+  "step": "mvn -B -DskipTests package"
+ },
+ {
+  "file": "04-github-actions-compile.log",
+  "system": "github-actions",
+  "class": "compile",
+  "step": "npm run build"
+ },
+ {
+  "file": "05-github-actions-test.log",
+  "system": "github-actions",
+  "class": "test",
+  "step": "pytest -q"
+ },
+ {
+  "file": "06-github-actions-test.log",
+  "system": "github-actions",
+  "class": "test",
+  "step": "mvn -B verify"
+ },
+ {
+  "file": "07-github-actions-image-push.log",
+  "system": "github-actions",
+  "class": "image-push",
+  "step": "podman push quay.io/acme/api:1.8.0"
+ },
+ {
+  "file": "08-github-actions-registry-auth.log",
+  "system": "github-actions",
+  "class": "registry-auth",
+  "step": "docker push docker.io/acme/api:1.8.0"
+ },
+ {
+  "file": "09-github-actions-quota.log",
+  "system": "github-actions",
+  "class": "quota",
+  "step": "oc apply -f deploy/"
+ },
+ {
+  "file": "10-github-actions-timeout.log",
+  "system": "github-actions",
+  "class": "timeout",
+  "step": "make integration-test"
+ },
+ {
+  "file": "11-github-actions-timeout.log",
+  "system": "github-actions",
+  "class": "timeout",
+  "step": "make integration-test"
+ },
+ {
+  "file": "12-github-actions-out-of-memory.log",
+  "system": "github-actions",
+  "class": "out-of-memory",
+  "step": "npm run build"
+ },
+ {
+  "file": "13-github-actions-out-of-memory.log",
+  "system": "github-actions",
+  "class": "out-of-memory",
+  "step": "mvn -B package"
+ },
+ {
+  "file": "14-github-actions-permissions.log",
+  "system": "github-actions",
+  "class": "permissions",
+  "step": "npm ci"
+ },
+ {
+  "file": "15-github-actions-registry-auth.log",
+  "system": "github-actions",
+  "class": "registry-auth",
+  "step": "npm ci"
+ },
+ {
+  "file": "16-github-actions-test.log",
+  "system": "github-actions",
+  "class": "test",
+  "step": "npm test -- --ci"
+ },
+ {
+  "file": "17-jenkins-dependency-fetch.log",
+  "system": "jenkins",
+  "class": "dependency-fetch",
+  "step": "Build"
+ },
+ {
+  "file": "18-jenkins-compile.log",
+  "system": "jenkins",
+  "class": "compile",
+  "step": "Build"
+ },
+ {
+  "file": "19-jenkins-compile.log",
+  "system": "jenkins",
+  "class": "compile",
+  "step": "Execute shell"
+ },
+ {
+  "file": "20-jenkins-test.log",
+  "system": "jenkins",
+  "class": "test",
+  "step": "Execute shell"
+ },
+ {
+  "file": "21-jenkins-test.log",
+  "system": "jenkins",
+  "class": "test",
+  "step": "Test"
+ },
+ {
+  "file": "22-jenkins-image-push.log",
+  "system": "jenkins",
+  "class": "image-push",
+  "step": "Publish"
+ },
+ {
+  "file": "23-jenkins-registry-auth.log",
+  "system": "jenkins",
+  "class": "registry-auth",
+  "step": "Publish"
+ },
+ {
+  "file": "24-jenkins-quota.log",
+  "system": "jenkins",
+  "class": "quota",
+  "step": "Deploy"
+ },
+ {
+  "file": "25-jenkins-quota.log",
+  "system": "jenkins",
+  "class": "quota",
+  "step": "Deploy"
+ },
+ {
+  "file": "26-jenkins-timeout.log",
+  "system": "jenkins",
+  "class": "timeout",
+  "step": "Integration"
+ },
+ {
+  "file": "27-jenkins-out-of-memory.log",
+  "system": "jenkins",
+  "class": "out-of-memory",
+  "step": "Build"
+ },
+ {
+  "file": "28-jenkins-permissions.log",
+  "system": "jenkins",
+  "class": "permissions",
+  "step": "Deploy"
+ },
+ {
+  "file": "29-jenkins-permissions.log",
+  "system": "jenkins",
+  "class": "permissions",
+  "step": "Deploy"
+ },
+ {
+  "file": "30-jenkins-dependency-fetch.log",
+  "system": "jenkins",
+  "class": "dependency-fetch",
+  "step": "Execute shell"
+ },
+ {
+  "file": "31-jenkins-compile.log",
+  "system": "jenkins",
+  "class": "compile",
+  "step": "Build"
+ },
+ {
+  "file": "32-tekton-dependency-fetch.log",
+  "system": "tekton",
+  "class": "dependency-fetch",
+  "step": "build : build"
+ },
+ {
+  "file": "33-tekton-compile.log",
+  "system": "tekton",
+  "class": "compile",
+  "step": "build : build"
+ },
+ {
+  "file": "34-tekton-test.log",
+  "system": "tekton",
+  "class": "test",
+  "step": "unit-test : run-tests"
+ },
+ {
+  "file": "35-tekton-test.log",
+  "system": "tekton",
+  "class": "test",
+  "step": "unit-test : run-tests"
+ },
+ {
+  "file": "36-tekton-image-push.log",
+  "system": "tekton",
+  "class": "image-push",
+  "step": "build : push"
+ },
+ {
+  "file": "37-tekton-registry-auth.log",
+  "system": "tekton",
+  "class": "registry-auth",
+  "step": "build : push"
+ },
+ {
+  "file": "38-tekton-quota.log",
+  "system": "tekton",
+  "class": "quota",
+  "step": "build : build"
+ },
+ {
+  "file": "39-tekton-quota.log",
+  "system": "tekton",
+  "class": "quota",
+  "step": "build"
+ },
+ {
+  "file": "40-tekton-timeout.log",
+  "system": "tekton",
+  "class": "timeout",
+  "step": "e2e : run-tests"
+ },
+ {
+  "file": "41-tekton-out-of-memory.log",
+  "system": "tekton",
+  "class": "out-of-memory",
+  "step": "build : build"
+ },
+ {
+  "file": "42-tekton-out-of-memory.log",
+  "system": "tekton",
+  "class": "out-of-memory",
+  "step": "build : build"
+ },
+ {
+  "file": "43-tekton-permissions.log",
+  "system": "tekton",
+  "class": "permissions",
+  "step": "build : build"
+ },
+ {
+  "file": "44-tekton-dependency-fetch.log",
+  "system": "tekton",
+  "class": "dependency-fetch",
+  "step": "build : build"
+ },
+ {
+  "file": "45-tekton-compile.log",
+  "system": "tekton",
+  "class": "compile",
+  "step": "build : build"
+ },
+ {
+  "file": "46-tekton-permissions.log",
+  "system": "tekton",
+  "class": "permissions",
+  "step": "build : build"
+ },
+ {
+  "file": "47-openshift-build-dependency-fetch.log",
+  "system": "openshift-build",
+  "class": "dependency-fetch",
+  "step": "RUN go mod download"
+ },
+ {
+  "file": "48-openshift-build-dependency-fetch.log",
+  "system": "openshift-build",
+  "class": "dependency-fetch",
+  "step": "RUN dnf install -y nodejs"
+ },
+ {
+  "file": "49-openshift-build-compile.log",
+  "system": "openshift-build",
+  "class": "compile",
+  "step": "RUN npm run build"
+ },
+ {
+  "file": "50-openshift-build-compile.log",
+  "system": "openshift-build",
+  "class": "compile",
+  "step": "RUN go build ./..."
+ },
+ {
+  "file": "51-openshift-build-test.log",
+  "system": "openshift-build",
+  "class": "test",
+  "step": "RUN npm test -- --ci"
+ },
+ {
+  "file": "52-openshift-build-image-push.log",
+  "system": "openshift-build",
+  "class": "image-push",
+  "step": "push image"
+ },
+ {
+  "file": "53-openshift-build-registry-auth.log",
+  "system": "openshift-build",
+  "class": "registry-auth",
+  "step": "FROM registry.redhat.io/ubi9/nodejs-20:latest"
+ },
+ {
+  "file": "54-openshift-build-registry-auth.log",
+  "system": "openshift-build",
+  "class": "registry-auth",
+  "step": "push image"
+ },
+ {
+  "file": "55-openshift-build-registry-auth.log",
+  "system": "openshift-build",
+  "class": "registry-auth",
+  "step": "fetch source"
+ },
+ {
+  "file": "56-openshift-build-quota.log",
+  "system": "openshift-build",
+  "class": "quota",
+  "step": "FROM docker.io/library/node:20-alpine"
+ },
+ {
+  "file": "57-openshift-build-out-of-memory.log",
+  "system": "openshift-build",
+  "class": "out-of-memory",
+  "step": "RUN mvn -B package"
+ },
+ {
+  "file": "58-openshift-build-out-of-memory.log",
+  "system": "openshift-build",
+  "class": "out-of-memory",
+  "step": "RUN npm run build"
+ },
+ {
+  "file": "59-openshift-build-permissions.log",
+  "system": "openshift-build",
+  "class": "permissions",
+  "step": "RUN make install"
+ },
+ {
+  "file": "60-openshift-build-dependency-fetch.log",
+  "system": "openshift-build",
+  "class": "dependency-fetch",
+  "step": "RUN npm ci"
+ }
+]

@@ -1,0 +1,30 @@
+Cloning "https://github.com/acme/web.git" ...
+	Commit:	1f2e3d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e (Fix cart totals)
+	Author:	Dana <dana@example.com>
+	Date:	Mon Oct 26 10:11:12 2026 +0000
+time="2026-10-27T10:11:15Z" level=info msg="Not using native diff for overlay, this may cause degraded performance for building images: kernel has CONFIG_OVERLAY_FS_REDIRECT_DIR enabled"
+I1027 10:11:15.123456       1 defaults.go:112] Defaulting to storage driver "overlay" with options [mountopt=metacopy=on].
+Caching blobs under "/var/cache/blobs".
+Trying to pull registry.access.redhat.com/ubi9/nodejs-20:1-60...
+Getting image source signatures
+Copying blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef
+Writing manifest to image destination
+STEP 1/7: FROM registry.access.redhat.com/ubi9/nodejs-20:1-60
+STEP 2/7: WORKDIR /opt/app-root/src
+--> 5f70bf18a086
+STEP 3/7: COPY package*.json ./
+--> f70bf18a0860
+STEP 4/7: RUN npm ci
+added 812 packages in 21s
+--> 70bf18a08600
+STEP 5/7: COPY . .
+STEP 6/7: RUN npm run build
+built in 9.81s
+STEP 7/7: CMD ["npm", "start"]
+COMMIT temp.builder.openshift.io/shop/web-3:3b2a1c0d
+--> 0bf18a086007
+Successfully tagged temp.builder.openshift.io/shop/web-3:3b2a1c0d
+Pushing image image-registry.openshift-image-registry.svc:5000/shop/web:latest ...
+Getting image source signatures
+Copying blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef
+error: build error: Failed to push image: trying to reuse blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef at destination: checking whether a blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef exists in quay.io/acme/web: unauthorized: access to the requested resource is not authorized

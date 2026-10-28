@@ -175,3 +175,9 @@ def test_the_plugin_ships_no_rhacs_central_reader() -> None:
     mods = _sync().plugin_modules(ROOT)
     assert "kube_noob.rhacs" in mods and "kube_noob.rhacs_central" not in mods
     assert not (PLUGIN / "server" / "kube_noob" / "rhacs_central.py").exists()
+
+
+def test_the_plugin_ships_build_log_diagnosis_but_not_the_image_audit() -> None:
+    mods = _sync().plugin_modules(ROOT)
+    assert "kube_noob.build.logs" in mods
+    assert not {"kube_noob.build.containerfile", "kube_noob.build.image", "kube_noob.build.oci"} & mods

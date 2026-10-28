@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `kube-noob build diagnose` (and the MCP tool `build_diagnose`, and `insight` for a pasted build log): a failed
+  GitHub Actions, Jenkins (Pipeline and freestyle), Tekton (`tkn ... logs`) or OpenShift build (`oc logs build/...`)
+  log gives the failing step and why it is that step, the error line and its template, the cause class (dependency
+  fetch, compile, test, image push, registry auth, quota, timeout, out of memory, permissions) with its evidence,
+  reported issues and team memory for the error lines, and the fix for that CI system. 60 labelled logs in each
+  system's format: the right class and step for all 60 (55 classes on the first run, before tuning; RT2 measures
+  blind). Lines quoted from the log are redacted; hostile logs are bounded.
+- `kube-noob build audit` (and the MCP tool `containerfile_audit`, and `insight` for a pasted Containerfile): KN-B001
+  to KN-B008 check a Containerfile (base image by digest, non-root USER, credentials in ENV/ARG/LABEL/RUN or copied
+  files, downloads piped into a shell, package caches, HEALTHCHECK or the workload's probes with `--manifests`,
+  multi-stage builds), each with a good and a bad fixture; `--context` checks what `COPY . .` would take past
+  `.containerignore`/`.dockerignore`; `--image-layout` reads the built image from an OCI layout on disk without
+  extracting it (every blob checked against its digest) and finds credentials in its layers (KN-B009, including one a
+  later layer deleted) and in its config and history (KN-B010). `kube-noob explain KN-B003` works for these checks.
 - `kube-noob rhacs compare` (and the MCP tool `rhacs_compare`; `rhacs_compare_live` with `rhacs.enabled`): every
   policy in an RHACS export, or read from Central, gets an outcome with the reason: overlap (the kube-noob rules that
   check the same setting, with severity and scope differences), related (the same risk seen through image, runtime or

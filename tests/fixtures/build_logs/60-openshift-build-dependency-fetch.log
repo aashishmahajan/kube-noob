@@ -1,0 +1,24 @@
+Cloning "https://github.com/acme/web.git" ...
+	Commit:	1f2e3d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e (Fix cart totals)
+	Author:	Dana <dana@example.com>
+	Date:	Mon Oct 26 10:11:12 2026 +0000
+time="2026-10-27T10:11:15Z" level=info msg="Not using native diff for overlay, this may cause degraded performance for building images: kernel has CONFIG_OVERLAY_FS_REDIRECT_DIR enabled"
+I1027 10:11:15.123456       1 defaults.go:112] Defaulting to storage driver "overlay" with options [mountopt=metacopy=on].
+Caching blobs under "/var/cache/blobs".
+Trying to pull registry.access.redhat.com/ubi9/nodejs-20:1-60...
+Getting image source signatures
+Copying blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef
+Writing manifest to image destination
+STEP 1/7: FROM registry.access.redhat.com/ubi9/nodejs-20:1-60
+STEP 2/7: WORKDIR /opt/app-root/src
+--> 5f70bf18a086
+STEP 3/7: COPY package*.json ./
+--> f70bf18a0860
+STEP 4/7: RUN npm ci
+npm WARN deprecated inflight@1.0.6: This module is not supported, and leaks memory.
+npm ERR! code E404
+npm ERR! 404 Not Found - GET https://registry.npmjs.org/@acme%2fui-kit - Not found
+npm ERR! 404
+npm ERR! 404  '@acme/ui-kit@^2.3.0' is not in this registry.
+npm ERR! A complete log of this run can be found in: /home/runner/.npm/_logs/debug-0.log
+error: build error: building at STEP "RUN npm ci": while running runtime: exit status 1

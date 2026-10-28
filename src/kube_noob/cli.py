@@ -211,6 +211,70 @@ def _exceptions_cmd(a: argparse.Namespace, fmt: str) -> int:
     return 0 if out["gate"] else 1
 
 
+def _build_cmd(a: argparse.Namespace, kit: Any, fmt: str) -> int:
+    from kube_noob import toolkit as tk
+    from kube_noob.build import containerfile as cf
+    from kube_noob.build import image, oci
+
+    if a.build_cmd == "diagnose":
+        text = _read(a.file)
+        out = kit.build_diagnose(
+            tk.BuildDiagnoseIn(log=text[-tk.MAX_BUILD_LOG :], platform=a.platform, version=a.pversion)
+        )
+        if a.format == "text":
+            step = out["failingStep"]
+            cause = out["cause"]
+            _tprint(f"system: {out['system']}, {out['steps']} steps")
+            _tprint(f"failing step: {step['name']} ({step['why']})" if step else f"failing step: {out.get('note')}")
+            if step and step.get("command"):
+                _tprint(f"  command: {step['command']}")
+            if cause:
+                _tprint(f"cause: {cause['class']} ({cause['confidence']}): {cause['meaning']}")
+            else:
+                _tprint(f"cause: not recognised. {out.get('causeNote', '')}")
+            for e in out["evidence"]:
+                _tprint(f"  line {e['line']}: {e['text']}")
+            if out["errorTemplate"]:
+                _tprint(f"error template {out['errorTemplate']['id']}: {out['errorTemplate']['text'][:200]}")
+            for m in out.get("knownIssues", []):
+                _tprint(f"reported issue {m.get('id')}: {m.get('title')}")
+            for m in out.get("memory", []):
+                _tprint(f"team memory {m.get('citation') or m.get('id')}: {m.get('symptom')}")
+            for f in out["fix"]:
+                _tprint(f"fix: {f}")
+            for r in out["readOnlyNextSteps"]:
+                _tprint(f"read-only: {r}")
+        else:
+            _emit(out, fmt)
+        return 0
+    if not a.file and not a.image_layout:
+        raise ConfigError("pass the Containerfile with -f, an image with --image-layout, or both")
+    try:
+        rep = image.audit(
+            _read(a.file) if a.file else None,
+            context=Path(a.context) if a.context else None,
+            manifests=_read(a.manifests) if a.manifests else None,
+            layout=Path(a.image_layout) if a.image_layout else None,
+            platform=a.image_platform,
+        )
+    except (cf.ContainerfileError, oci.LayoutError) as exc:
+        raise ConfigError(str(exc)) from exc
+    if a.format == "text":
+        c = rep["counts"]
+        _tprint(", ".join(f"{n} {sev}" for sev, n in c.items() if n) or "no findings")
+        for f in rep["findings"]:
+            where = f"line {f['line']}" if f.get("line") else (f"layer {f['layer']}" if f.get("layer") else "image")
+            _tprint(f"  [{f['severity'].upper():8}] {f['ruleId']} {where}: {f['message']}")
+            _tprint(f"      fix: {f['fix']}")
+        for n in rep["notChecked"]:
+            _tprint(f"not checked: {n}")
+        for n in (rep.get("image") or {}).get("notRead", []):
+            _tprint(f"not read: {n}")
+    else:
+        _emit(rep, fmt)
+    return 1 if cf.failed(rep, a.fail_on) else 0
+
+
 def _rhacs_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob import rhacs
 
@@ -365,6 +429,33 @@ def build_parser() -> argparse.ArgumentParser:
     exc_chk = exc_sub.add_parser("check", help="Check every entry and say why one is refused or expired")
     exc_chk.add_argument("file", help="the exception list (YAML)")
     exc_chk.add_argument("--today", default=None, help="check as of this date (YYYY-MM-DD), for planning renewals")
+    bd = sub.add_parser(
+        "build",
+        help="Build insight: why a build failed, and a Containerfile and image audit",
+        description="diagnose reads a failed GitHub Actions, Jenkins, Tekton or OpenShift build log and names the "
+        "failing step, the error, the cause class and the fix. audit checks a Containerfile (and, with --context, "
+        "what COPY takes from the build context; with --image-layout, the built image's config and layers). "
+        "Examples: kube-noob build diagnose -f build.log; kube-noob build audit -f Containerfile --context .",
+    )
+    bd_sub = bd.add_subparsers(dest="build_cmd", required=True)
+    _patch(bd_sub, common)
+    bdd = bd_sub.add_parser("diagnose", help="Name the failing step, the cause class and the fix of a build log")
+    bdd.add_argument("-f", "--file", required=True, help="the build log, - for stdin")
+    bdd.add_argument("--platform", choices=PLATFORMS)
+    bdd.add_argument("--version", dest="pversion", help="the cluster's OpenShift version, for reported issues")
+    bda = bd_sub.add_parser(
+        "audit",
+        help="Audit a Containerfile, the build context and an image on disk (static, offline)",
+        description="Exit 1 when a finding is at or above --fail-on. An OCI layout comes from skopeo copy "
+        "docker://<image> oci:<dir>, podman save --format oci-dir or buildah push <image> oci:<dir>; nothing is "
+        "pulled or extracted.",
+    )
+    bda.add_argument("-f", "--file", help="the Containerfile or Dockerfile")
+    bda.add_argument("--context", help="the build context directory: check what COPY takes from it")
+    bda.add_argument("--image-layout", help="an OCI image layout directory of the built image")
+    bda.add_argument("--image-platform", default=None, help="os/arch to read from a multi-arch layout (linux/amd64)")
+    bda.add_argument("--manifests", help="the workload YAML that runs the image: its probes satisfy KN-B007")
+    bda.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     rh = sub.add_parser(
         "rhacs",
         help="Compare RHACS (StackRox) policies with kube-noob's rules: overlap, related, gaps, outside its scope",
@@ -1172,6 +1263,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _exceptions_cmd(a, fmt)
     if a.cmd == "rhacs":
         return _rhacs_cmd(a, s, fmt)
+    if a.cmd == "build":
+        return _build_cmd(a, kit, fmt)
     if a.cmd == "watch":
         return _watch(a, s, fmt)
 

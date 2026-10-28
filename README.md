@@ -16,11 +16,11 @@ in a box: audit rules, read-only-first playbooks, cited docs and graded exercise
 MCP client calls it as tools; the CLI runs it with no AI at all. It makes no network calls unless you turn them on.
 
 - **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
-  removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison.
+  removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles.
 - **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno).
 - **Debug**: 40 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
   denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
-  evidence (never Secrets).
+  evidence (never Secrets); failed CI builds explained.
 - **Learn**: 5 tracks, 16 lessons, graded exercises; your team's fixes as code.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
@@ -48,8 +48,7 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+, not macOS's
-built-in 3.9). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 
 ## Use with Claude or any MCP client
 
@@ -86,7 +85,7 @@ NetworkPolicies and runs under `restricted-v2`.
 | Local learning file (profile, confirmed notes) | on | `learningEnabled: false` |
 | Model for `kube-noob ask` only | none | `llm.provider: anthropic` (`kube-noob[ask]`) or `openai-compatible` |
 
-`kube-noob doctor` shows what it can reach. Config never comes from the current directory implicitly. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
+`kube-noob doctor` shows what it can reach. Config never comes from the current directory. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
 
 ## Docs
 

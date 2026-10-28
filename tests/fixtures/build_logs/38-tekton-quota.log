@@ -1,0 +1,6 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] warning: unused import: `std::fmt`
+[build : build] + oc apply -f deploy/
+[build : build] Error from server (Forbidden): error when creating "deploy/api.yaml": pods "api-7f9c" is forbidden: exceeded quota: compute, requested: requests.cpu=2, used: requests.cpu=7, limited: requests.cpu=8
+task build failed: "step-build" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-03-build for more details

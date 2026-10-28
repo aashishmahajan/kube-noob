@@ -47,6 +47,7 @@ from kube_noob.signals import alertmanager, for_text, playbooks_for
 PlatformT = Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
 MAX_MANIFEST_CHARS = 1_000_000
 RHACS_CACHE_SECONDS = 300
+MAX_BUILD_LOG = 2_000_000
 StageName = Literal["validate", "audit", "calibrate", "red-team"]
 ALL_STAGE_NAMES: tuple[StageName, ...] = ("validate", "audit", "calibrate", "red-team")
 # web_fetch reads documentation text only: archives, binaries, scripts and images are refused before decoding.
@@ -409,6 +410,35 @@ class ClusterPostureIn(_In):
         default_factory=list, max_length=50, description="Namespaces to read (default: all the account can list)."
     )
     top: int = Field(20, ge=1, le=200, description="How many ranked paths to return.")
+
+
+class BuildDiagnoseIn(_In):
+    log: str = Field(
+        ...,
+        min_length=3,
+        max_length=MAX_BUILD_LOG,
+        description="A failed build or pipeline log: GitHub Actions, Jenkins, Tekton (tkn ... logs) or an OpenShift "
+        "build (oc logs build/<name>). The end of the log matters most: when cutting, keep the end.",
+    )
+    platform: PlatformT | None = None
+    version: str | None = Field(
+        None,
+        max_length=20,
+        pattern=r"^\d+\.\d+(\.\d+)?$",
+        description="The cluster's OpenShift version, for reported issues that may apply.",
+    )
+
+
+class ContainerfileIn(_In):
+    containerfile: str = Field(
+        ..., min_length=4, max_length=MAX_MANIFEST_CHARS, description="The Containerfile or Dockerfile text."
+    )
+    manifests: str | None = Field(
+        None,
+        max_length=MAX_MANIFEST_CHARS,
+        description="Optional: the workload YAML that runs the image; its readiness or liveness probes satisfy the "
+        "health check.",
+    )
 
 
 class RhacsCompareIn(_In):
@@ -932,6 +962,38 @@ class Toolkit:
         inv = attack_paths.collect_live(get_backend(self.settings), list(p.namespaces))
         return attack_paths.scan(inv, top=p.top)
 
+    def build_diagnose(self, p: BuildDiagnoseIn) -> dict[str, Any]:
+        """The failing step, the error line and its template, the cause class and the fix; reported issues and team
+        memory for the error lines."""
+        from kube_noob.build import logs
+
+        d = logs.diagnose(p.log)
+        out = logs.as_dict(d)
+        platform = p.platform or ("openshift" if d.system == "openshift-build" else None)
+        evidence = "\n".join(e.full or e.text for e in d.evidence) or "\n".join(p.log.splitlines()[-40:])
+        reported = known_issue_match(evidence[:100_000], platform, p.version, 3, self.settings.data_dir)
+        out["knownIssues"] = reported["matches"]
+        self._attach_memory(out, evidence[:MAX_SIGNAL_TEXT], p.version, platform)
+        self._observe([f"build:{d.system}:{d.cause or 'unknown'}"])
+        return out
+
+    def containerfile_audit(self, p: ContainerfileIn) -> dict[str, Any]:
+        try:
+            from kube_noob.build import containerfile as cf
+            from kube_noob.build import image
+        except ImportError as exc:  # the Claude plugin build ships without the Containerfile and image audit
+            raise ValueError(
+                "The Containerfile audit is not part of this build (the Claude plugin): run kube-noob build audit "
+                "-f Containerfile, or use the in-cluster service."
+            ) from exc
+
+        try:
+            out = image.audit(p.containerfile, manifests=p.manifests)
+        except cf.ContainerfileError as exc:
+            raise ValueError(str(exc)) from exc
+        self._observe([f"containerfile:{f['ruleId']}" for f in out["findings"]])
+        return out
+
     @staticmethod
     def _rhacs_out(policies: list[dict[str, Any]], outcomes: list[str], source: dict[str, Any]) -> dict[str, Any]:
         from kube_noob import rhacs
@@ -1412,6 +1474,16 @@ class Toolkit:
                 self.posture_scan,
             ),
             ToolSpec(
+                "build_diagnose",
+                "Diagnose a failed build log",
+                "Read a failed GitHub Actions, Jenkins, Tekton or OpenShift build log: the failing step (and why it is "
+                "that step), the error line and its template, the cause class (dependency fetch, compile, test, image "
+                "push, registry auth, quota, timeout, out of memory, permissions) with its evidence, reported issues, "
+                "team memory and the fix for that CI system. Read-only.",
+                BuildDiagnoseIn,
+                self.build_diagnose,
+            ),
+            ToolSpec(
                 "rhacs_compare",
                 "Compare RHACS policies with kube-noob's rules",
                 "Map every policy in an RHACS (StackRox) export to kube-noob rules by name and criteria: overlap (same "
@@ -1603,6 +1675,20 @@ class Toolkit:
                     open_world=True,
                 ),
             ]
+        if importlib.util.find_spec("kube_noob.build.containerfile") is not None:  # not in the Claude plugin
+            s.append(
+                ToolSpec(
+                    "containerfile_audit",
+                    "Audit a Containerfile",
+                    "Static checks of a Containerfile or Dockerfile: base images pinned by digest, a non-root USER, "
+                    "no credentials in ENV, ARG, LABEL, RUN or copied files, no download piped into a shell, package "
+                    "caches cleaned, a health check or probes, a multi-stage build. Each finding names its fix and "
+                    "source. The CLI (kube-noob build audit) also reads the build context and the built image's "
+                    "layers.",
+                    ContainerfileIn,
+                    self.containerfile_audit,
+                )
+            )
         if self.settings.rhacs.enabled and importlib.util.find_spec("kube_noob.rhacs_central") is not None:
             s.append(
                 ToolSpec(

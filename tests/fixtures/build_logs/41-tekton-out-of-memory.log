@@ -1,0 +1,8 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] warning: unused import: `std::fmt`
+[build : build] + ./gradlew assemble
+[build : build] > Task :app:compileKotlin
+[build : build] Expiring Daemon because JVM heap space is exhausted
+[build : build] Daemon will be stopped at the end of the build after running out of JVM memory
+task build failed: "step-build" exited with code 137: OOMKilled. Run tkn tr desc app-ci-run-x7k2p-03-build for more details

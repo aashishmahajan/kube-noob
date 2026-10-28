@@ -231,8 +231,9 @@ def test_pending_kinds_are_named_with_what_to_do_today(kit: tk.Toolkit) -> None:
     helm = kit.insight(tk.InsightIn(text="apiVersion: v2\nname: web\nversion: 0.1.0\n"))
     assert helm["ran"] == [] and helm["skipped"][0]["kind"] == "helm-chart"
     assert "helm template" in helm["skipped"][0]["why"]
-    cf = kit.insight(tk.InsightIn(text="FROM node:20\nRUN npm ci\nUSER 1001\n"))
-    assert cf["skipped"] == [{"kind": "containerfile", "why": ins.PENDING["containerfile"]}] and cf["findings"] == []
+    cf = kit.insight(tk.InsightIn(text="FROM node:20\nRUN npm ci\nUSER 1001\n"))  # audited since R4.2
+    assert "containerfile" in cf["ran"] and not any(x["kind"] == "containerfile" for x in cf["skipped"])
+    assert {"KN-B001", "KN-B007"} <= {f["id"] for f in cf["findings"]}
     unknown = kit.insight(tk.InsightIn(text="lorem ipsum dolor sit amet\nconsectetur adipiscing elit\nsed do"))
     assert unknown["kinds"] == [{"kind": "unknown", "evidence": "nothing recognised"}]
     assert unknown["ran"] == ["diagnose", "gather"]

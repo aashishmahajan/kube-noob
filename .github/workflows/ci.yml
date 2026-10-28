@@ -124,6 +124,40 @@ jobs:
               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" \
               | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium
           done
+      - name: Audit our own Containerfiles; find a credential planted in a real image and deleted by a later layer
+        run: |
+          set -euo pipefail
+          trap 'echo "::error title=image audit::line $LINENO: $BASH_COMMAND"' ERR
+          helm template kn deploy/helm/kube-noob --set auth.existingSecret=kn-token > /tmp/kn-chart.yaml
+          for f in Containerfile Containerfile.db Containerfile.seed; do
+            kube-noob build audit -f "$f" --context . --manifests /tmp/kn-chart.yaml --fail-on high --format text
+          done
+          work=$(mktemp -d)
+          head="-----BEGIN OPEN""SSH PRIVATE KEY-----"
+          printf '%s\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n-----END OPENSSH PRIVATE KEY-----\n' "$head" > "$work/id_rsa"
+          printf 'FROM registry.access.redhat.com/ubi9/ubi-minimal:latest\nCOPY id_rsa /root/.ssh/id_rsa\nRUN rm /root/.ssh/id_rsa\nUSER 1001\n' > "$work/Containerfile"
+          docker build -q -t kn-planted:1 -f "$work/Containerfile" "$work"
+          mkdir "$work/layout"
+          docker save kn-planted:1 | tar -x -C "$work/layout"
+          ls "$work/layout"
+          rc=0
+          kube-noob build audit -f "$work/Containerfile" --image-layout "$work/layout" --format json > "$work/report.json" || rc=$?
+          test "$rc" = 1
+          python -c "
+          import json, sys
+          text = open(sys.argv[1]).read()
+          rep = json.loads(text)
+          assert 'b3BlbnNzaC1rZXkt' not in text, 'the key body leaked into the report'
+          hits = [f for f in rep['findings'] if f['ruleId'] == 'KN-B009']
+          planted = [f for f in hits if 'root/.ssh/id_rsa' in f['message']]
+          assert planted and 'deleted in layer' in planted[0]['message'], hits
+          others = [f['message'] for f in hits if f not in planted]
+          print('::notice title=image audit::planted key found in layer', planted[0]['layer'], 'of', rep['image']['layers'],
+                '(deleted later);', len(others), 'other layer findings;', rep['image']['files'], 'files read;',
+                'not read:', rep['image']['notRead'])
+          for m in others[:10]:
+              print('::warning title=image audit other finding::' + m[:300])
+          " "$work/report.json"
       - name: Chart guards (fail-closed NetworkPolicy, fsGroup only off-OpenShift, web flag wired to env)
         run: |
           set -euo pipefail

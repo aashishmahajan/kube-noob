@@ -342,6 +342,35 @@ as a tool in OpenShift Lightspeed, or to run it as a sidecar, follow [openshift.
 runbooks with `kube-noob corpus add-docs <folder> --source platform-runbooks`, and prove the answers on your
 machine with `kube-noob selftest`.
 
+## Build: from a failed build to the fix
+
+`build diagnose` reads the log your CI system already wrote: GitHub Actions (`gh run view <id> --log-failed`),
+Jenkins (the console), Tekton (`tkn pipelinerun logs <run>`) or an OpenShift build (`oc logs build/<name>`). It names
+the failing step and why it is that step (the step with `##[error]`, the stage that ran before the skipped ones, the
+task that `tkn` reports failed, the STEP buildah stopped at), the error line and its template, the cause class
+(dependency fetch, compile, test, image push, registry auth, quota, timeout, out of memory, permissions), reported
+issues and team memory for the error lines, and the fix for that system (a BuildConfig push secret, a Tekton step's
+`computeResources`, `timeout-minutes`). Quoted lines are redacted.
+
+```bash
+gh run view 1234567890 --log-failed > build.log
+kube-noob build diagnose -f build.log --format text
+oc logs build/web-7 -n shop | kube-noob build diagnose -f - --platform openshift --version 4.20
+```
+
+`build audit` checks a Containerfile before it is built and the image after: base images pinned by digest, a
+non-root `USER` (on OpenShift: group 0 owns what it writes), no credentials in `ENV`, `ARG`, `LABEL`, `RUN` or copied
+files, no download piped into a shell, package caches cleaned, a health check or the workload's probes, a multi-stage
+build. With `--context` it lists the credential files `COPY . .` would take; with `--image-layout` it reads the built
+image from disk (no pull, no extraction) and finds credentials in its layers, including one a later layer deleted,
+and in its config and history. Values are never printed, only the kind and where.
+
+```bash
+kube-noob build audit -f Containerfile --context . --manifests k8s/deployment.yaml
+skopeo copy docker://quay.io/acme/web:1.8.0 oci:/tmp/web-oci:1.8.0
+kube-noob build audit -f Containerfile --image-layout /tmp/web-oci --fail-on high
+```
+
 ## Security: policy-aligned reviews and red-team scenarios
 
 Each audit finding maps to the RHACS (StackRox) policy that would fire. `redteam` shows how an attacker would use a

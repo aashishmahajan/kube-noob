@@ -1,0 +1,46 @@
+Started by user Dana
+Obtained Jenkinsfile from git https://github.com/acme/orders.git
+[Pipeline] Start of Pipeline
+[Pipeline] node
+Running on agent-linux-3 in /home/jenkins/agent/workspace/orders_main
+[Pipeline] {
+[Pipeline] stage
+[Pipeline] { (Declarative: Checkout SCM)
+[Pipeline] checkout
+The recommended git tool is: NONE
+using credential github-app
+Checking out Revision 1f2e3d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e (main)
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] withEnv
+[Pipeline] {
+[Pipeline] stage
+[Pipeline] { (Build)
+[Pipeline] sh
++ mvn -B -DskipTests package
+[INFO] BUILD SUCCESS
+Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError("HTTPSConnectionPool(host='pypi.org', port=443): Read timed out. (read timeout=15)")'
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] stage
+[Pipeline] { (Deploy)
+[Pipeline] sh
++ docker build -t acme/web .
+#9 [build 5/7] RUN npm run build
+#9 ERROR: failed to copy files: copy file range failed: no space left on device
+ERROR: failed to solve: failed to copy files: copy file range failed: no space left on device
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] stage
+[Pipeline] { (Declarative: Post Actions)
+[Pipeline] junit
+Recording test results
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] }
+[Pipeline] // withEnv
+[Pipeline] }
+[Pipeline] // node
+[Pipeline] End of Pipeline
+ERROR: script returned exit code 1
+Finished: FAILURE
