@@ -310,9 +310,9 @@ jobs:
             | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
           seed="--set jira.seed.source=image --set jira.seed.image.repository=quay.io/acme/kn-seed"
           for args in "--set jira.seed.source=image" "$seed" "--set jira.seed.source=pvc" "--set jira.seed.source=s3" \
-              "$seed --set jira.seed.image.tag=1 --set jira.seed.path=/seed/../x.tgz" \
-              "$seed --set jira.seed.image.tag=1 --set jira.seed.path=/kube-noob-seed/x.tgz" \
-              "$seed --set jira.seed.image.tag=1 --set jira.seed.sizeLimit=1Ti"; do
+              "$seed --set jira.seed.image.tag=ci1 --set jira.seed.path=/seed/../x.tgz" \
+              "$seed --set jira.seed.image.tag=ci1 --set jira.seed.path=/kube-noob-seed/x.tgz" \
+              "$seed --set jira.seed.image.tag=ci1 --set jira.seed.sizeLimit=1Ti"; do
             if mt $args >/dev/null 2>&1; then
               echo "::error title=chart::jira.seed values must fail to render: $args"; exit 1
             fi
@@ -351,18 +351,18 @@ jobs:
           dbd="--set db.image.digest=sha256:$(printf 'a%.0s' $(seq 64))"
           for args in "--set db.enabled=true" "--set db.enabled=true --set db.image.digest=latest" \
               "--set db.enabled=true $dbd --set db.path=/kube-noob-db-seed/x.tgz" \
-              "--set db.enabled=true $dbd --set db.path=/db/../x.tgz" "--set db.enabled=true $dbd --set db.image.tag=1"; do
+              "--set db.enabled=true $dbd --set db.path=/db/../x.tgz" "--set db.enabled=true $dbd --set db.image.tag=v1"; do
             if mt $args >/dev/null 2>&1; then
               echo "::error title=chart::db values must fail to render: $args"; exit 1
             fi
           done
           render() { mt "$@" > /tmp/render.yaml 2> /tmp/render.err \
             || { echo "::error title=chart render::$(tr '\n' ' ' < /tmp/render.err | cut -c1-1500)"; return 1; }; }
-          render --set db.enabled=true $dbd $seed --set jira.seed.image.tag=1
+          render --set db.enabled=true $dbd $seed --set jira.seed.image.tag=ci1
           python scripts/chart_seed_guard.py db < /tmp/render.yaml
           render --set db.enabled=true $dbd
           python scripts/chart_seed_guard.py db-data < /tmp/render.yaml
-          sealed="$seed --set jira.seed.image.tag=1 --set jira.seed.path=/seed/jira-snapshot.tgz.enc"
+          sealed="$seed --set jira.seed.image.tag=ci1 --set jira.seed.path=/seed/jira-snapshot.tgz.enc"
           render $sealed --set jira.seed.keySecret.name=kn-seed-key
           python scripts/chart_seed_guard.py sealed < /tmp/render.yaml
           for args in "--set jira.seed.keySecret.name=kn-seed-key" "$sealed --set jira.seed.keySecret.name=Bad_Name" \
@@ -461,6 +461,29 @@ jobs:
           kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
           if tar -xzOf dist/kube-noob-db/kube-noob-db.tgz | grep -q PRIVATE; then
             echo "::error title=db::Jira text reached the public bundle"; exit 1; fi
+      - name: Live Red Hat VEX (two CVEs, three requests) joins the bundle under CC BY 4.0
+        env:
+          KUBE_NOOB_DATA_DIR: /tmp/db-data
+        run: |
+          set -euo pipefail
+          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-3094 --format json | tee /tmp/vex.json
+          python -c "
+          import json
+          out = json.load(open('/tmp/vex.json'))
+          assert out['kept'] >= 1 and out['malformed'] == 0, out
+          recs = [json.loads(line) for line in open('/tmp/db-data/corpus/redhat-vex.jsonl')]
+          rapid = next(r for r in recs if r['cve'] == 'CVE-2023-44487')
+          products = sorted({s['product'] for s in rapid['statements']})
+          statuses = sorted({s['status'] for s in rapid['statements']})
+          assert any('OpenShift' in p for p in products), products
+          print('::notice title=Red Hat VEX live::' + f'{len(rapid[\"statements\"])} statements; statuses {statuses}; products {products[:6]}')
+          "
+          code=$(curl -s -o /dev/null -w '%{http_code}' https://security.access.redhat.com/data/csaf/v2/vex/archive_latest.txt)
+          echo "::notice title=VEX archive pointer::archive_latest.txt HTTP $code"
+          kube-noob corpus db-bundle -o dist/kube-noob-db/kube-noob-db.tgz
+          kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
+          tar -xzf dist/kube-noob-db/kube-noob-db.tgz -C dist/kube-noob-db ATTRIBUTION.md
+          grep -q "Red Hat Security Data" dist/kube-noob-db/ATTRIBUTION.md
       - name: Build both images
         run: |
           docker build -f Containerfile.db -t kube-noob-db:ci .

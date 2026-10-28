@@ -607,6 +607,20 @@ def build_parser() -> argparse.ArgumentParser:
     cjp.add_argument("--online", action="store_true")
     ch = csub.add_parser("history", help="Release timelines from Git tags")
     ch.add_argument("--online", action="store_true")
+    cav = csub.add_parser(
+        "advisories",
+        help="Red Hat CSAF VEX statements (CC BY 4.0) for OpenShift, RHACS, ACM, layered products and RHEL 8/9",
+        description="Per CVE: severity, CVSS and each component's status per product (fixed with the erratum, "
+        "affected, not affected with the VEX justification, under investigation). Paced one request a second plus "
+        "jitter. Examples: kube-noob corpus advisories --online --cves CVE-2023-44487; kube-noob corpus advisories "
+        "--online --since 2026-10-27; kube-noob corpus advisories --from-archive csaf_vex.tar.zst",
+    )
+    cav.add_argument("--online", action="store_true")
+    cav.add_argument("--cves", help="comma-separated CVE ids")
+    cav.add_argument("--since", help="every CVE whose VEX changed after this date or time (from changes.csv)")
+    cav.add_argument("--from-archive", help="a downloaded VEX archive (.tar.zst, .tar.gz or a folder), read offline")
+    cav.add_argument("--max-requests", type=int, default=3000)
+    cav.add_argument("--replace", action="store_true", help="start the shard over instead of merging")
     cki = csub.add_parser("known-issues", help="Refresh reported OpenShift issues from the release notes (Git)")
     cki.add_argument("--minors", default="4.20,4.21,4.22", help="comma-separated OpenShift minor releases")
     cki.add_argument("--online", action="store_true")
@@ -1587,10 +1601,56 @@ def _learning(a: argparse.Namespace, kit: Any, fmt: str) -> int:
     return 0
 
 
+def _advisories(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob.sources import advisories
+
+    if a.from_archive:
+        if a.cves or a.since:
+            raise ConfigError("--from-archive reads every CVE in the archive; drop --cves and --since")
+        archive = Path(a.from_archive)
+        if not archive.exists():
+            raise ConfigError(f"no such archive: {archive}")
+        out = advisories.run(s.data_dir, advisories.from_archive(archive), replace=a.replace)
+    else:
+        if s.offline:
+            raise ConfigError("the offline lock is on; read a downloaded archive instead: --from-archive <file>")
+        if not (a.online or s.web_enabled):
+            raise ConfigError("advisories are downloaded; pass --online (or set webEnabled: true)")
+        if bool(a.cves) == bool(a.since):
+            raise ConfigError("pass --cves CVE-...,CVE-... or --since <date> (or --from-archive <file>)")
+        if not 1 <= a.max_requests <= 50_000:
+            raise ConfigError("--max-requests must be 1-50000")
+        with advisories.vex_http(s) as http:
+            client = advisories.VexClient(http, max_requests=a.max_requests)
+            cves = [c.strip().upper() for c in a.cves.split(",") if c.strip()] if a.cves else []
+            if a.since:
+                cves = client.changed_since(a.since)[: max(0, a.max_requests - 1)]
+            docs = []
+            missing = []
+            for cve in cves:
+                doc = client.document(cve)
+                (docs.append(doc) if doc is not None else missing.append(cve))
+            out = {**advisories.run(s.data_dir, docs, replace=a.replace), "requests": client.requests}
+            if missing:
+                out["notPublished"] = missing
+    if a.format == "text":
+        _tprint(
+            f"{out['source']} ({out['license']}): {out['documents']} documents read, {out['kept']} about the default "
+            f"products, {out['malformed']} malformed; the shard holds {out['cves']} CVEs"
+        )
+        if out.get("notPublished"):
+            _tprint("no VEX published for: " + ", ".join(out["notPublished"]))
+    else:
+        _emit(out, fmt)
+    return 0
+
+
 def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob.sources.corpus import read_manifest, verify, write_shard
 
     cc = a.corpus_cmd
+    if cc == "advisories":
+        return _advisories(a, s, fmt)
     if cc in {"build", "jira", "jira-projects", "history", "known-issues"} and s.offline:
         raise ConfigError(
             "the offline lock is on (offline: true / KUBE_NOOB_OFFLINE); corpus downloads are blocked. "

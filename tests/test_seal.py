@@ -205,3 +205,4 @@ def test_chart_wires_the_key_from_a_secret_only() -> None:
     assert wf["permissions"] == {"contents": "read", "actions": "read"}
     cf = (ROOT / "Containerfile.seed").read_text()
     assert "USER 1001" in cf and "org.opencontainers.image.source=" not in cf
+    assert "COPY --chown=0:0 --chmod=0444 dist/seed/${SEED}" in cf  # the snapshot is owner-only on the build host

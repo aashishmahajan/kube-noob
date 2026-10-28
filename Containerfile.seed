@@ -19,6 +19,7 @@ LABEL name="kube-noob-db-jira" \
       org.opencontainers.image.title="kube-noob-db-jira" \
       org.opencontainers.image.created="${BUILT_AT}" \
       io.k8s.display-name="kube-noob-db-jira"
-COPY dist/seed/${SEED} /seed/${SEED}
+# Readable by the init container's non-root user; the snapshot was written owner-only (and sealed) on the build host.
+COPY --chown=0:0 --chmod=0444 dist/seed/${SEED} /seed/${SEED}
 USER 1001
 CMD ["ls", "-l", "/seed"]

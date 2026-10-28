@@ -303,6 +303,7 @@ def build(data_dir: Path, out: Path, now: datetime | None = None) -> dict[str, A
                 for p in sorted(stage.rglob("*")):
                     if p.is_file():
                         _tar_add(tf, p, p.relative_to(stage).as_posix())
+            os.chmod(tmp_out, 0o644)  # public data: readable by the image's and the init container's users
             os.replace(tmp_out, out)
         except BaseException:
             Path(tmp_out).unlink(missing_ok=True)

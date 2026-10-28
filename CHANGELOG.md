@@ -111,6 +111,16 @@
   runs every `jira.sync.intervalHours` +/- 10%; clones from GitHub (`corpus build`, `corpus known-issues`) are spaced
   by a random 1 to 4 s; the scheduled `corpus-refresh` starts at a random offset of up to 15 minutes (the Jira client
   already spaced requests by the crawl delay plus random jitter).
+- `kube-noob corpus advisories` (requirements R5.5): Red Hat CSAF VEX statements, licensed CC BY 4.0 (checked on
+  access.redhat.com/security/data), for OpenShift, RHACS, ACM, the layered products and RHEL 8 and 9. Per CVE:
+  severity, CVSS base score and, per product, each component's status (fixed with its erratum, affected with the
+  remediation category, not affected with the VEX justification, under investigation), plus a summary search reads.
+  `--cves`, `--since` (from `changes.csv`) or `--from-archive` (a downloaded archive, read offline; `.tar.zst` through
+  `zstd`). GET-only, HTTPS to security.access.redhat.com only, one request a second plus jitter, `Retry-After`
+  honoured, a request budget, 25 MB per document, 4,000 statements per CVE. The source's licence is checked against
+  the public bundle's allow-list before anything is written: a source not on it stops the build. The `redhat-vex`
+  shard ships in `kube-noob-db` with Red Hat's attribution; the `db-image` workflow refreshes it daily from Red Hat's
+  VEX archive, and CI fetches two CVEs live to prove the format.
 - Private `kube-noob-db-jira` seed (requirements R1.4, R1.5): `kube-noob corpus seal` / `unseal` seal a Jira snapshot
   with your organisation's key (AES-256-GCM in 1 MiB chunks, a per-file key from PBKDF2-HMAC-SHA256 with 600,000
   iterations, chunk counters and a last-chunk flag as nonces, so a wrong key, an edited, reordered, dropped or

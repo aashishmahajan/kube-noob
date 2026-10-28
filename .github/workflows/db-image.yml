@@ -51,6 +51,15 @@ jobs:
           kube-noob corpus history --online --format json | tee history-summary.json
           kube-noob corpus known-issues --online --format json | tee known-issues-summary.json
           kube-noob corpus verify
+      - name: Red Hat VEX statements (CC BY 4.0) for the default products
+        run: |
+          set -euo pipefail
+          base=https://security.access.redhat.com/data/csaf/v2/vex
+          name=$(curl -fsSL --retry 3 "$base/archive_latest.txt" | tr -d '\r\n ')
+          case "$name" in csaf_vex_*.tar.zst) ;; *) echo "::error::unexpected VEX archive name '$name'"; exit 1;; esac
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name" "$base/$name"
+          kube-noob corpus advisories --from-archive "$RUNNER_TEMP/$name" --replace --format json | tee advisories-summary.json
+          rm -f "$RUNNER_TEMP/$name"
       - name: Pack the bundle
         run: |
           mkdir -p dist/kube-noob-db

@@ -114,6 +114,17 @@ kube-noob selftest --cases our-problems.yaml --gate 0.9
 kube-noob has no model, so nothing is learned by itself: a failed case is fixed with a playbook, signal, rule or
 team memory entry that is reviewed like any other change, and then guards against regressions.
 
+### Is this CVE fixed in my OpenShift?
+
+`corpus advisories` keeps Red Hat's VEX statements for the products kube-noob covers, so search answers which
+component is fixed by which erratum, which is not affected and why, offline. The public `kube-noob-db` image carries
+them already.
+
+```bash
+kube-noob corpus advisories --online --cves CVE-2023-44487
+kube-noob search 'CVE-2023-44487 openshift haproxy router'
+```
+
 ### Is this a known bug?
 
 `known-issues` matches an error or symptom against the issues Red Hat lists in the OpenShift 4.20, 4.21 and 4.22 release

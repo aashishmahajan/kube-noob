@@ -5,6 +5,7 @@
 # 48 schedules its first run at a random offset and then every 48 h.
 # Usage: scripts/e2e_jira_seed_kind.sh <kube-noob image name:tag loaded in kind> <kind cluster name>
 set -euo pipefail
+trap 'echo "::error title=jira seed in kind::line $LINENO: $BASH_COMMAND"; kubectl -n kn-seed get pods,events 2>/dev/null | tail -30' ERR
 image="$1"
 cluster="${2:-kn}"
 here="$(cd "$(dirname "$0")/.." && pwd)"

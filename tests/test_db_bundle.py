@@ -106,6 +106,7 @@ def test_the_bundle_ships_only_what_may_be_shared(tmp_path: Path) -> None:
     assert set(manifest["shards"]) == {"history", "k8s-docs"}
     again = db_bundle.build(data, tmp_path / "again.tgz", BUILT)
     assert again["sha256"] == out["sha256"]  # reproducible: same data, same bytes
+    assert oct(Path(out["bundle"]).stat().st_mode & 0o777) == "0o644"  # public: the image's users can read it
     assert db_bundle.check_archive(Path(out["bundle"])) == []
 
 
@@ -273,7 +274,7 @@ def test_the_chart_pins_the_image_by_digest() -> None:
     assert 'regexMatch "^sha256:[a-f0-9]{64}$"' in dep
     assert '"{{ .Values.db.image.repository }}@{{ .Values.db.image.digest }}"' in dep
     cf = (ROOT / "Containerfile.db").read_text()
-    assert "USER 1001" in cf and "COPY dist/kube-noob-db/kube-noob-db.tgz" in cf
+    assert "USER 1001" in cf and "COPY --chown=0:0 --chmod=0444 dist/kube-noob-db/kube-noob-db.tgz" in cf
     wf = yaml.safe_load((ROOT / ".github/workflows/db-image.yml").read_text())
     assert wf["permissions"] == {"contents": "read"} and "permissions" not in wf["jobs"]["db"]
     steps = [s.get("name", "") for s in wf["jobs"]["db"]["steps"]]

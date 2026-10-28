@@ -5,6 +5,8 @@
 .mypy_cache
 .ruff_cache
 dist
+!dist/kube-noob-db
+!dist/seed
 build
 docs
 tests

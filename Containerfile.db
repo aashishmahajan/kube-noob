@@ -24,7 +24,7 @@ LABEL name="kube-noob-db" \
       org.opencontainers.image.source="https://github.com/aashishmahajan/kube-noob" \
       org.opencontainers.image.licenses="CC-BY-4.0 AND Apache-2.0 AND MIT" \
       io.k8s.display-name="kube-noob-db"
-COPY dist/kube-noob-db/kube-noob-db.tgz dist/kube-noob-db/ATTRIBUTION.md /kube-noob-db/
+COPY --chown=0:0 --chmod=0444 dist/kube-noob-db/kube-noob-db.tgz dist/kube-noob-db/ATTRIBUTION.md /kube-noob-db/
 COPY LICENSE NOTICE /licenses/
 USER 1001
 CMD ["ls", "-l", "/kube-noob-db"]
