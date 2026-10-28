@@ -17,6 +17,12 @@ kube-noob bundles derived data and links to public sources. Licenses were verifi
 
 Exact source URLs and upstream SHA-256 digests: `src/kube_noob/schemas/data/PROVENANCE.json`.
 
+## Test fixtures (in the repository, not in the package)
+
+| Material | Upstream | License | Where |
+|---|---|---|---|
+| RHACS default policies (89 policies as an export, `exclusions` removed) | stackrox/stackrox `pkg/defaults/policies/files` @dce8fb594ee287a5386fece8be1df3ee1adedc72 | Apache-2.0 | `tests/fixtures/rhacs/default-policies-export.json` |
+
 ## Knowledge base
 
 The built-in knowledge docs (`src/kube_noob/data/knowledge/`) are original text (Apache-2.0) that summarise and cite:

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `kube-noob rhacs compare` (and the MCP tool `rhacs_compare`; `rhacs_compare_live` with `rhacs.enabled`): every
+  policy in an RHACS export, or read from Central, gets an outcome with the reason: overlap (the kube-noob rules that
+  check the same setting, with severity and scope differences), related (the same risk seen through image, runtime or
+  API-event data), gap (a deploy-time setting kube-noob has no rule for, such as AppArmor or an egress
+  NetworkPolicy), outside (image contents, runtime behaviour, API events, label conventions) or unexplained (criteria
+  kube-noob does not know; exit 1). It also lists where the two disagree (RHACS flags Secrets passed as environment
+  variables; kube-noob suggests `secretKeyRef` over literal values), default policies RHACS ships disabled that
+  kube-noob checks, and the rules no policy covers. RHACS's 89 default policies map with none unexplained. Reading
+  Central is GET-only, to `rhacs.endpoint` only, with no redirects, a jittered pause between requests, the token from
+  `$ROX_API_TOKEN`, and results reused for 5 minutes; the chart's `rhacs` values wire the token Secret, Central's CA
+  and egress to the Central pods.
 - Daily drift and policy report: `kube-noob posture snapshot`, `posture diff` and `posture report`, `serve` with
   `posture.reportEnabled` (one a day, jittered; chart `posture.report.enabled`, which needs cluster access,
   persistence and one replica) and the MCP tool `posture_report`. Snapshots hold hashes and names, never values;

@@ -57,6 +57,24 @@ spec:
         - {protocol: TCP, port: {{ .Values.networkPolicy.egress.apiServerPort }}}
         - {protocol: TCP, port: 443}
     {{- end }}
+    {{- if .Values.rhacs.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.rhacs.centralNamespace | quote }}
+          podSelector:
+            matchLabels: {app: central}
+      ports:
+        - {protocol: TCP, port: 8443}
+    {{- if and .Values.rhacs.egressCIDRs (not (.Values.config.offline | default false)) }}
+    - to:
+        {{- range .Values.rhacs.egressCIDRs }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
+    {{- end }}
     {{- if and (or .Values.config.webEnabled .Values.jira.sync.enabled) (not (.Values.config.offline | default false)) }}
     - to:
         - ipBlock:

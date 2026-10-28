@@ -7,6 +7,9 @@
 * ``Purpose.LLM``     - the configured model provider endpoint. Not web browsing; always permitted when an
                         LLM provider is configured. Under the offline lock every request (and no redirect, no proxy
                         from the environment) must target loopback or an in-cluster ``*.svc`` host.
+* ``Purpose.RHACS``   - RHACS Central's policy API. Requires ``rhacs.enabled``; GET only, https only, to the configured
+                        endpoint's host and port only, no redirects. Under the offline lock only a loopback or
+                        in-cluster ``*.svc`` Central, with no proxy from the environment.
 
 No other module may construct an ``httpx`` client directly, except the in-cluster API client in
 ``kube_noob.debug.backends`` (ServiceAccount token, cluster CA, no redirects, no proxy), which is used only when cluster
@@ -16,12 +19,14 @@ access is enabled.
 from __future__ import annotations
 
 import enum
+import ssl
+from urllib.parse import urlsplit
 
 import httpx
 
 from kube_noob import __version__
 from kube_noob.config import Settings, is_local_url
-from kube_noob.errors import DomainNotAllowedError, WebDisabledError
+from kube_noob.errors import ConfigError, DomainNotAllowedError, WebDisabledError
 
 USER_AGENT = f"kube-noob/{__version__} (+https://github.com/aashishmahajan/kube-noob)"
 
@@ -30,6 +35,7 @@ class Purpose(enum.Enum):
     WEB = "web"
     SOURCES = "sources"
     LLM = "llm"
+    RHACS = "rhacs"
 
 
 def host_allowed(host: str, allowed: list[str]) -> bool:
@@ -71,7 +77,41 @@ def http_client(
 
         hooks["request"].append(_guard)
 
+    verify: bool | ssl.SSLContext = True
+    if purpose is Purpose.RHACS:
+        rh = settings.rhacs
+        if not (rh.enabled and rh.endpoint):
+            raise WebDisabledError(
+                "rhacs",
+                "Reading RHACS Central is off (rhacs.enabled: false). Set rhacs.enabled: true and rhacs.endpoint, or "
+                "compare an exported policy file instead.",
+            )
+        if settings.offline and not is_local_url(rh.endpoint):
+            raise WebDisabledError(
+                "rhacs",
+                "The offline lock only allows a loopback or in-cluster (*.svc) RHACS Central; refused "
+                f"{urlsplit(rh.endpoint).hostname}.",
+            )
+        central = urlsplit(rh.endpoint)
+        want = (central.hostname or "").lower(), central.port or 443
+        if rh.ca_file is not None:
+            try:
+                verify = ssl.create_default_context(cafile=str(rh.ca_file))
+            except (OSError, ssl.SSLError) as exc:
+                raise ConfigError(f"rhacs.caFile {rh.ca_file} is not a readable PEM bundle: {exc}") from exc
+
+        def _central_only(request: httpx.Request) -> None:
+            if request.method != "GET":
+                raise WebDisabledError("rhacs", f"RHACS access is read-only: {request.method} is not allowed (GET).")
+            got = request.url.host.lower(), request.url.port or 443
+            if request.url.scheme != "https" or got != want:
+                raise DomainNotAllowedError(f"{request.url.host} (only rhacs.endpoint {want[0]} is allowed)")
+
+        hooks["request"].append(_central_only)
+
     locked_llm = settings.offline and purpose is Purpose.LLM
+    no_redirects = locked_llm or purpose is Purpose.RHACS
+    no_env_proxy = settings.offline and purpose in (Purpose.LLM, Purpose.RHACS)
     if locked_llm:
 
         def _local_only(request: httpx.Request) -> None:
@@ -89,10 +129,11 @@ def http_client(
         headers.update(extra_headers)
     return httpx.Client(
         timeout=timeout if timeout is not None else settings.web.timeout_seconds,
-        follow_redirects=not locked_llm,
+        follow_redirects=not no_redirects,
         max_redirects=5,
         headers=headers,
         event_hooks=hooks,
         transport=transport,
-        trust_env=not locked_llm,
+        trust_env=not no_env_proxy,
+        verify=verify,
     )

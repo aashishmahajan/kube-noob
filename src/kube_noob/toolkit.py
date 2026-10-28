@@ -8,8 +8,11 @@ web tools exist only when ``webEnabled: true``; live-cluster tools only when ``c
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import re
 import tempfile
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -43,6 +46,7 @@ from kube_noob.signals import alertmanager, for_text, playbooks_for
 
 PlatformT = Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
 MAX_MANIFEST_CHARS = 1_000_000
+RHACS_CACHE_SECONDS = 300
 StageName = Literal["validate", "audit", "calibrate", "red-team"]
 ALL_STAGE_NAMES: tuple[StageName, ...] = ("validate", "audit", "calibrate", "red-team")
 # web_fetch reads documentation text only: archives, binaries, scripts and images are refused before decoding.
@@ -407,6 +411,25 @@ class ClusterPostureIn(_In):
     top: int = Field(20, ge=1, le=200, description="How many ranked paths to return.")
 
 
+class RhacsCompareIn(_In):
+    policies: str = Field(
+        ...,
+        min_length=2,
+        max_length=MAX_MANIFEST_CHARS,
+        description='An RHACS policy export as JSON: {"policies": [...]} from the RHACS portal (Export policy to '
+        "JSON) or POST /v1/policies/export, a list of policies, or one policy.",
+    )
+    outcomes: list[Literal["overlap", "related", "gap", "outside", "unexplained"]] = Field(
+        default_factory=list, max_length=5, description="Only return policies with these outcomes (default: all)."
+    )
+
+
+class RhacsLiveIn(_In):
+    outcomes: list[Literal["overlap", "related", "gap", "outside", "unexplained"]] = Field(
+        default_factory=list, max_length=5, description="Only return policies with these outcomes (default: all)."
+    )
+
+
 class LearningNoteIn(_In):
     symptom: str = Field(..., min_length=3, max_length=400, description="What was observed, in one or two sentences.")
     cause: str = Field(..., min_length=3, max_length=600, description="The confirmed root cause.")
@@ -535,6 +558,9 @@ class Toolkit:
         self.shared = shared
         self.tutor = Tutor(settings.data_dir)
         self.learning = LearningStore(settings.data_dir)
+        # Central's policies, read at most once per RHACS_CACHE_SECONDS whatever the number of callers.
+        self._rhacs_lock = threading.Lock()
+        self._rhacs_cache: tuple[float, list[dict[str, Any]], dict[str, Any]] | None = None
 
     # -- helpers ---------------------------------------------------------------------------------------------
     def store(self) -> Any:
@@ -905,6 +931,42 @@ class Toolkit:
 
         inv = attack_paths.collect_live(get_backend(self.settings), list(p.namespaces))
         return attack_paths.scan(inv, top=p.top)
+
+    @staticmethod
+    def _rhacs_out(policies: list[dict[str, Any]], outcomes: list[str], source: dict[str, Any]) -> dict[str, Any]:
+        from kube_noob import rhacs
+
+        out = {"source": source, **rhacs.compare(policies)}
+        if outcomes:
+            out["policies"] = [r for r in out["policies"] if r["outcome"] in outcomes]
+        return out
+
+    def rhacs_compare(self, p: RhacsCompareIn) -> dict[str, Any]:
+        from kube_noob import rhacs
+
+        try:
+            policies = rhacs.load(p.policies)
+        except rhacs.RhacsError as exc:
+            raise ValueError(str(exc)) from exc
+        self._observe(["rhacs-compare"])
+        return self._rhacs_out(policies, list(p.outcomes), {"input": "export"})
+
+    def rhacs_compare_live(self, p: RhacsLiveIn) -> dict[str, Any]:
+        try:
+            from kube_noob import rhacs_central
+        except ImportError as exc:  # the Claude plugin build ships without the Central reader
+            raise ValueError(
+                "Reading RHACS Central is not part of this build (the Claude plugin). Use the kube-noob CLI or the "
+                "in-cluster service, or pass an export to rhacs_compare."
+            ) from exc
+
+        with self._rhacs_lock:
+            now = time.monotonic()
+            if self._rhacs_cache is None or now - self._rhacs_cache[0] > RHACS_CACHE_SECONDS:
+                policies, source = rhacs_central.read_central(self.settings)
+                self._rhacs_cache = (now, policies, source)
+            read_at, policies, source = self._rhacs_cache
+        return self._rhacs_out(policies, list(p.outcomes), {**source, "ageSeconds": round(now - read_at)})
 
     def posture_report(self, p: EmptyIn) -> dict[str, Any]:
         from kube_noob import drift
@@ -1350,6 +1412,17 @@ class Toolkit:
                 self.posture_scan,
             ),
             ToolSpec(
+                "rhacs_compare",
+                "Compare RHACS policies with kube-noob's rules",
+                "Map every policy in an RHACS (StackRox) export to kube-noob rules by name and criteria: overlap (same "
+                "setting, with severity and scope differences), related (the same risk seen through image, runtime or "
+                "API-event data), gap (a deploy-time setting kube-noob has no rule for), outside (image contents, "
+                "runtime behaviour, API events, label conventions) or unexplained (criteria kube-noob does not know). "
+                "Lists disagreements and the rules no policy covers. Local only.",
+                RhacsCompareIn,
+                self.rhacs_compare,
+            ),
+            ToolSpec(
                 "posture_report",
                 "Latest drift and policy report",
                 "The newest daily report in this install's data folder: objects added, removed and changed since the "
@@ -1530,6 +1603,18 @@ class Toolkit:
                     open_world=True,
                 ),
             ]
+        if self.settings.rhacs.enabled and importlib.util.find_spec("kube_noob.rhacs_central") is not None:
+            s.append(
+                ToolSpec(
+                    "rhacs_compare_live",
+                    "Compare Central's RHACS policies (live, read-only)",
+                    "Read the policies from RHACS Central (rhacs.endpoint; GET only) and "
+                    "compare them like rhacs_compare.",
+                    RhacsLiveIn,
+                    self.rhacs_compare_live,
+                    open_world=True,
+                )
+            )
         if self.settings.web_enabled:
             s.append(
                 ToolSpec(

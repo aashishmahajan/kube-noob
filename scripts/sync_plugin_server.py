@@ -40,8 +40,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = Path("plugin/kube-noob")
 VENDORED = PLUGIN / "server" / "kube_noob"
 ENTRY = "kube_noob.server.stdio"
-# Reached only through kube_noob.debug.cluster.get_backend after it checks that cluster access is enabled.
-GUARDED_IMPORTS = frozenset({"kube_noob.debug.backends"})
+# Reached only through kube_noob.debug.cluster.get_backend after it checks that cluster access is enabled, and the RHACS
+# Central reader (the only code that reads its API token), imported only by the rhacs_compare_live tool.
+GUARDED_IMPORTS = frozenset({"kube_noob.debug.backends", "kube_noob.rhacs_central"})
 # LLM SDKs never ship in the plugin, even if one returns to the core dependencies; the plugin runs the MCP server only.
 EXCLUDED_DEPENDENCIES = frozenset({"anthropic", "openai"})
 MAX_FILE_BYTES = 256 * 1024

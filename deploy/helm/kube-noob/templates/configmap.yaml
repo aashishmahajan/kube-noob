@@ -35,6 +35,15 @@ data:
         - {{ . | quote }}
         {{- end }}
       {{- end }}
+    rhacs:
+      enabled: {{ .Values.rhacs.enabled }}
+      {{- if .Values.rhacs.enabled }}
+      endpoint: {{ .Values.rhacs.endpoint | quote }}
+      maxPolicies: {{ .Values.rhacs.maxPolicies }}
+      {{- if .Values.rhacs.caConfigMap.name }}
+      caFile: /etc/kube-noob-rhacs-ca/{{ .Values.rhacs.caConfigMap.key }}
+      {{- end }}
+      {{- end }}
     probe:
       enabled: {{ .Values.probe.enabled }}
     dryRun:

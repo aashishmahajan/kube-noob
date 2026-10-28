@@ -180,6 +180,26 @@ jobs:
           cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
           assert cfg['posture'] == {'reportEnabled': True, 'keep': 14, 'namespaces': ['shop', 'payments']}, cfg
           "
+          if helm template kn deploy/helm/kube-noob $base --set rhacs.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::rhacs.enabled without rhacs.tokenSecret.name must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set rhacs.enabled=true --set rhacs.tokenSecret.name=rox \
+               --set config.offline=true --set rhacs.endpoint=https://central.example.com >/dev/null 2>&1; then
+            echo "::error title=chart::config.offline with an external RHACS Central must fail to render"; exit 1
+          fi
+          rh="--set rhacs.enabled=true --set rhacs.tokenSecret.name=rox --set rhacs.caConfigMap.name=rox-ca"
+          helm template kn deploy/helm/kube-noob $base $rh --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['rhacs'] == {'enabled': True, 'endpoint': 'https://central.stackrox.svc', 'maxPolicies': 500,
+                                  'caFile': '/etc/kube-noob-rhacs-ca/ca.pem'}, cfg
+          Settings.model_validate(cfg)
+          "
+          helm template kn deploy/helm/kube-noob $base $rh | grep -A2 "name: ROX_API_TOKEN" | grep -q 'name: "rox"'
+          helm template kn deploy/helm/kube-noob $base $rh --show-only templates/networkpolicy.yaml | grep -q "port: 8443"
+          helm template kn deploy/helm/kube-noob $base $rh | kube-noob audit -f - --platform openshift --version 4.22 \
+            --fail-on high
           if helm template kn deploy/helm/kube-noob $base --set jira.sync.enabled=true --set replicaCount=1 \
                >/dev/null 2>&1; then
             echo "::error title=chart::jira.sync.enabled without persistence must fail to render"; exit 1

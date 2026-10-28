@@ -91,6 +91,23 @@ posture:
     enabled: false
     keep: 14                 # snapshots (and their reports) kept, newest first
 
+rhacs:
+  # Read RHACS Central's policies (GET /v1/policies, read-only) for the MCP tool rhacs_compare_live: which of your
+  # RHACS policies kube-noob's rules also check, which differ, and what kube-noob has no rule for. The token is sent
+  # only to endpoint. Egress is opened to the Central pods in centralNamespace (TCP 8443) for an in-cluster Central, or
+  # to egressCIDRs (TCP 443) for one reached through a Route; under config.offline only an in-cluster (*.svc) Central.
+  enabled: false
+  endpoint: https://central.stackrox.svc   # Central's root URL: https://host[:port], no path
+  tokenSecret:
+    name: ""                 # Secret with an API token that can read policies (for example the Analyst role)
+    key: token
+  caConfigMap:
+    name: ""                 # ConfigMap with the CA that signed Central's certificate (in-cluster Central: StackRox's CA)
+    key: ca.pem
+  centralNamespace: stackrox
+  egressCIDRs: []            # an external Central: its addresses (port 443)
+  maxPolicies: 500
+
 jira:
   # Local copy of Red Hat's public Jira (redhat.atlassian.net) so answers can say "reported as OCPBUGS-12345: fixed in
   # 4.21.3" or "closed as Not a Bug". The sync reads tickets through Jira's REST API, at most one request per second

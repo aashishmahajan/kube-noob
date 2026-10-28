@@ -65,7 +65,8 @@ def _instructions(settings: Settings) -> str:
         "(Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, RBAC) use "
         "kubenoob_explain_denial; to enforce the audit rules at admission, kubenoob_policy_generate writes "
         "ValidatingAdmissionPolicy and Kyverno policy YAML (suggest audit mode first; it applies nothing); for "
-        "'what could an attacker reach from what we expose?' use kubenoob_posture_scan; "
+        "'what could an attacker reach from what we expose?' use kubenoob_posture_scan; for 'what does RHACS check "
+        "that kube-noob does not?' pass the policy export to kubenoob_rhacs_compare; "
         "for 'can pod A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
         + (

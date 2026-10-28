@@ -211,6 +211,55 @@ def _exceptions_cmd(a: argparse.Namespace, fmt: str) -> int:
     return 0 if out["gate"] else 1
 
 
+def _rhacs_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob import rhacs
+
+    try:
+        if a.live:
+            if a.file:
+                raise ConfigError("pass -f with an export or --live, not both")
+            from kube_noob import rhacs_central
+
+            policies, source = rhacs_central.read_central(s)
+        else:
+            if not a.file:
+                raise ConfigError(
+                    "pass the policy export with -f (the portal's Export policy to JSON, or POST "
+                    "/v1/policies/export), or --live"
+                )
+            if a.file != "-" and Path(a.file).is_file() and Path(a.file).stat().st_size > rhacs.MAX_BYTES:
+                raise ConfigError(f"{a.file}: larger than {rhacs.MAX_BYTES} bytes")
+            policies, source = rhacs.load(_read(a.file)), {"file": a.file}
+    except rhacs.RhacsError as exc:
+        raise ConfigError(f"rhacs: {exc}") from exc
+    out = {"source": source, **rhacs.compare(policies)}
+    if a.format == "text":
+        c = out["counts"]
+        _tprint(
+            f"{out['total']} RHACS policies: {c['overlap']} overlap, {c['related']} related, {c['gap']} gap, "
+            f"{c['outside']} outside kube-noob's scope, {c['unexplained']} unexplained"
+        )
+        for row in out["policies"]:
+            if a.outcome and row["outcome"] not in a.outcome:
+                continue
+            rules = f" -> {', '.join(row['rules'])}" if row["rules"] else ""
+            off = " (disabled in RHACS)" if row["disabled"] else ""
+            _tprint(f"  [{row['outcome']:11}] {row['name']}{rules}{off}")
+            _tprint(f"      {row['reason']}")
+            for n in row.get("notes", []):
+                _tprint(f"      note: {n}")
+        if out["disagreements"]:
+            _tprint("disagree: " + "; ".join(out["disagreements"]))
+        if out["disabledButCheckedByKubeNoob"]:
+            _tprint("disabled in RHACS, checked by kube-noob: " + "; ".join(out["disabledButCheckedByKubeNoob"]))
+        _tprint(
+            f"kube-noob rules no imported policy covers ({len(out['kubeNoobOnly'])}): " + ", ".join(out["kubeNoobOnly"])
+        )
+    else:
+        _emit(out, fmt)
+    return 1 if out["unexplained"] else 0
+
+
 def _blueprint_from_args(a: argparse.Namespace) -> dict[str, Any]:
     if a.blueprint:
         data = yaml.safe_load(_read(a.blueprint)) or {}
@@ -316,6 +365,31 @@ def build_parser() -> argparse.ArgumentParser:
     exc_chk = exc_sub.add_parser("check", help="Check every entry and say why one is refused or expired")
     exc_chk.add_argument("file", help="the exception list (YAML)")
     exc_chk.add_argument("--today", default=None, help="check as of this date (YYYY-MM-DD), for planning renewals")
+    rh = sub.add_parser(
+        "rhacs",
+        help="Compare RHACS (StackRox) policies with kube-noob's rules: overlap, related, gaps, outside its scope",
+        description="Maps every policy in an RHACS export (the portal's Export policy to JSON, or POST "
+        "/v1/policies/export) to kube-noob rules by name and criteria, and says why the rest differ: image and "
+        "vulnerability data, runtime events, API events, label conventions, or a deploy-time setting kube-noob has no "
+        "rule for. Exit 1 when a policy is unexplained. "
+        "Example: kube-noob rhacs compare -f policies.json",
+    )
+    rh_sub = rh.add_subparsers(dest="rhacs_cmd", required=True)
+    _patch(rh_sub, common)
+    rhc = rh_sub.add_parser("compare", help="Compare an export (-f) or Central's policies (--live, read-only)")
+    rhc.add_argument("-f", "--file", default=None, help="policy export (JSON), - for stdin")
+    rhc.add_argument(
+        "--live",
+        action="store_true",
+        help="read Central's policies (GET only; needs rhacs.enabled, rhacs.endpoint and $ROX_API_TOKEN)",
+    )
+    rhc.add_argument(
+        "--outcome",
+        action="append",
+        default=[],
+        choices=["overlap", "related", "gap", "outside", "unexplained"],
+        help="with --format text: only these outcomes; repeat",
+    )
     manifests_cmd("validate", "Schema/API/platform validation only")
     manifests_cmd("redteam", "Red-team scenarios only")
     fx = manifests_cmd("fix", "Apply safe mechanical fixes")
@@ -1096,6 +1170,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _posture(a, s, fmt)
     if a.cmd == "exceptions":
         return _exceptions_cmd(a, fmt)
+    if a.cmd == "rhacs":
+        return _rhacs_cmd(a, s, fmt)
     if a.cmd == "watch":
         return _watch(a, s, fmt)
 

@@ -15,6 +15,17 @@
 {{- fail "posture.report.enabled writes one report a day from one pod: set replicaCount: 1" }}
 {{- end }}
 {{- end }}
+{{- if .Values.rhacs.enabled }}
+{{- if not .Values.rhacs.tokenSecret.name }}
+{{- fail "rhacs.enabled needs rhacs.tokenSecret.name: a Secret with an RHACS API token that can read policies" }}
+{{- end }}
+{{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$" .Values.rhacs.endpoint) }}
+{{- fail "rhacs.endpoint must be Central's root: https://host[:port] with no path" }}
+{{- end }}
+{{- if and (.Values.config.offline | default false) (not (regexMatch "\\.svc(\\.cluster\\.local)?(:[0-9]{1,5})?$" .Values.rhacs.endpoint)) }}
+{{- fail "config.offline allows only an in-cluster Central: rhacs.endpoint must be a *.svc host" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") (gt (int .Values.replicaCount) 1) }}
 {{- fail "persistence with a ReadWriteOnce volume attaches to one node: set replicaCount: 1 (or a ReadWriteMany accessMode)" }}
 {{- end }}
@@ -240,6 +251,11 @@ spec:
             - name: KUBE_NOOB_SEED_KEY_FILE
               value: /var/run/kube-noob/seed-key/{{ .Values.jira.seed.keySecret.key }}
             {{- end }}
+            {{- if .Values.rhacs.enabled }}
+            - name: ROX_API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.rhacs.tokenSecret.name | quote }}, key: {{ .Values.rhacs.tokenSecret.key | quote }}}
+            {{- end }}
             {{- with (include "kube-noob.tokenSecret" .) }}
             - name: KUBE_NOOB_HTTP_TOKEN
               valueFrom:
@@ -276,6 +292,9 @@ spec:
             {{- end }}
             {{- if .Values.jira.seed.keySecret.name }}
             - {name: seed-key, mountPath: /var/run/kube-noob/seed-key, readOnly: true}
+            {{- end }}
+            {{- if and .Values.rhacs.enabled .Values.rhacs.caConfigMap.name }}
+            - {name: rhacs-ca, mountPath: /etc/kube-noob-rhacs-ca, readOnly: true}
             {{- end }}
             {{- if eq $seedSource "image" }}
             - {name: jira-seed, mountPath: /var/lib/kube-noob/seed, readOnly: true}
@@ -334,6 +353,12 @@ spec:
         - name: memory-ssh
           secret: {secretName: {{ .Values.memory.git.sshSecret | quote }}, defaultMode: 288}
         {{- end }}
+        {{- end }}
+        {{- if and .Values.rhacs.enabled .Values.rhacs.caConfigMap.name }}
+        - name: rhacs-ca
+          configMap:
+            name: {{ .Values.rhacs.caConfigMap.name | quote }}
+            items: [{key: {{ .Values.rhacs.caConfigMap.key | quote }}, path: {{ .Values.rhacs.caConfigMap.key | quote }}}]
         {{- end }}
         {{- if .Values.jira.seed.keySecret.name }}
         - name: seed-key

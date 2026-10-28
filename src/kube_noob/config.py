@@ -209,6 +209,59 @@ class PostureSettings(_Base):
         return v
 
 
+# rhacs.tokenEnv may only name a KUBE_NOOB_* variable (unset: the variable the RHACS CLI reads), so a configuration
+# file cannot make kube-noob send an unrelated variable to Central.
+_RHACS_TOKEN_VAR = re.compile(r"^KUBE_NOOB_[A-Z0-9_]+$")
+
+
+class RhacsSettings(_Base):
+    """Read RHACS Central's policies for ``kube-noob rhacs compare --live`` and the ``rhacs_compare_live`` tool.
+
+    Off by default. GET only, to ``endpoint``'s host only, no redirects; the token comes from ``tokenEnv`` (unset: the
+    RHACS CLI's API token variable) and is sent only to that host. Under the offline lock only a loopback or
+    in-cluster ``*.svc`` Central is allowed."""
+
+    enabled: bool = False
+    endpoint: str | None = None  # https://central.stackrox.svc or https://central-stackrox.apps.example.com
+    token_env: str | None = None
+    ca_file: Path | None = None  # PEM bundle for Central's certificate (default: the system trust store)
+    max_policies: int = Field(default=500, ge=1, le=2000)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _https_root(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().rstrip("/")
+        parts = urlsplit(v)
+        if parts.scheme != "https" or not parts.hostname:
+            raise ValueError(f"rhacs.endpoint must be an https:// URL with a host, got {v!r}")
+        if parts.username or parts.password or parts.path or parts.query or parts.fragment:
+            raise ValueError("rhacs.endpoint must be Central's root (https://host[:port]) without credentials or path")
+        return v
+
+    @field_validator("token_env")
+    @classmethod
+    def _token_var(cls, v: str | None) -> str | None:
+        if v is not None and not _RHACS_TOKEN_VAR.match(v):
+            raise ValueError(
+                f"rhacs.tokenEnv {v!r} must be a KUBE_NOOB_* variable; leave it unset to use the RHACS CLI's token "
+                "variable"
+            )
+        return v
+
+    @field_validator("ca_file")
+    @classmethod
+    def _expand_ca(cls, v: Path | None) -> Path | None:
+        return v.expanduser() if v is not None else None
+
+    @model_validator(mode="after")
+    def _endpoint_when_enabled(self) -> RhacsSettings:
+        if self.enabled and not self.endpoint:
+            raise ValueError("rhacs.enabled needs rhacs.endpoint (Central's https:// root)")
+        return self
+
+
 class ProbeSettings(_Base):
     """Tier P: ephemeral debug containers or probe Jobs. Off by default; every probe needs an approval."""
 
@@ -310,6 +363,7 @@ class Settings(_Base):
     server: ServerSettings = Field(default_factory=ServerSettings)
     watch: WatchSettings = Field(default_factory=WatchSettings)
     posture: PostureSettings = Field(default_factory=PostureSettings)
+    rhacs: RhacsSettings = Field(default_factory=RhacsSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     probe: ProbeSettings = Field(default_factory=ProbeSettings)

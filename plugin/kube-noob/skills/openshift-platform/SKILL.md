@@ -21,3 +21,5 @@ description: >
   ValidatingPolicy YAML; suggest `mode: audit` first and switch a rule to enforce once its warnings are gone.
 - For "what could an attacker reach?", `kubenoob_posture_scan` ranks paths from a Route, Ingress or exposed
   Service to node access or the pod's ServiceAccount rights; lead with rank 1, its evidence and its fix.
+- With an RHACS policy export, `kubenoob_rhacs_compare` says which policies kube-noob's rules also check, which
+  differ (image, runtime or API-event data) and what kube-noob has no rule for; name the gaps and disagreements first.

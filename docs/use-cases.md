@@ -352,6 +352,29 @@ kube-noob redteam -f k8s/ --platform openshift
 kube-noob explain KN-S004
 ```
 
+### What does RHACS check that kube-noob does not, and the other way round?
+
+`rhacs compare` maps every RHACS policy (export them from the RHACS portal with Export policy to JSON, or
+`POST /v1/policies/export`) to kube-noob's rules, by the default policy names each rule cites and by the
+policy's criteria, and gives each one outcome with the reason. Overlap names the rules and any difference in severity
+or scope (RHACS scopes a policy by namespace; kube-noob checks every object). Related means the same risk seen another
+way: RHACS records who exec'd into a pod, kube-noob checks who is allowed to (KN-S017); RHACS combines a privileged
+container with fixable CVEs, kube-noob checks the privileged part. Gap names a deploy-time setting kube-noob has no
+rule for. Outside is what a static manifest check cannot see: image contents and vulnerabilities, processes and
+network flows at runtime, API events, label conventions. The report also lists where the two disagree, the default
+policies RHACS ships disabled that kube-noob checks, and the kube-noob rules no policy covers. A policy with
+criteria kube-noob does not know is unexplained and the command exits 1.
+
+```bash
+kube-noob rhacs compare -f policies.json --format text
+kube-noob rhacs compare -f policies.json --format text --outcome gap --outcome related
+ROX_API_TOKEN=<token> kube-noob --config rhacs.yaml rhacs compare --live
+```
+
+`--live` reads Central with `rhacs.enabled: true` and `rhacs.endpoint` in the configuration: GET only, to that host
+only, a token that can read policies (the Analyst role is enough), a short random pause between requests; under the
+offline lock only an in-cluster Central (`*.svc`).
+
 ### Which exposure leads where? Attack paths
 
 `posture scan` follows what is exposed (a Route, an Ingress, a LoadBalancer, NodePort or externalIPs Service) to the
