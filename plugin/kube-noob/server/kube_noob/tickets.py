@@ -77,7 +77,9 @@ _ERRORISH = re.compile(
     r"invalid|x509|oomkilled|backoff|back-off|not found|exceeded|unauthorized|rejected|conflict|deadline|crash)\b"
 )
 _CLAUSE = re.compile(r"[:;,\"'()\[\]{}|=/\\<>]")
-_COMMENT_HEAD = re.compile(r"^Comment \((\d{4}-\d{2}-\d{2})?\): ?", re.MULTILINE)
+_COMMENT_HEAD = re.compile(
+    r"^Comment \((\d{4}-\d{2}-\d{2})?\)(?: by (?:Commenter [A-Z]{1,3}|a commenter))?: ?", re.MULTILINE
+)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n{2,}")
 _URL = re.compile(r"^https://[A-Za-z0-9.-]+/browse/([A-Z][A-Z0-9_]{1,29}-\d{1,9})$")
 REMARKS: tuple[tuple[str, re.Pattern[str]], ...] = (

@@ -116,6 +116,9 @@ incident watch also say what became of each matching ticket:
   duplicate of another ticket, which is then followed;
 - the workaround, cause or "why closed" sentence from the latest comments.
 
+The copy keeps each ticket's full description and every comment, so you can audit it yourself; commenters appear as
+Commenter A, B and so on (per ticket), and names, emails, phone numbers and account ids are removed.
+
 ```bash
 kube-noob corpus jira-projects --online
 kube-noob corpus jira --online

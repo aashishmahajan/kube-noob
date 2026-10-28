@@ -60,9 +60,13 @@ _ACCOUNT = re.compile(
     r"|https?://[^\s/]+/(?:jira/)?(?:people|secure/ViewProfile\.jspa\?name=)[^\s)\]>\"']*",  # profile links
     re.IGNORECASE,
 )
-MAX_COMMENTS = 20
+MAX_COMMENTS = 2_000  # comments kept per ticket: in practice every one
 MAX_TEXT = 20_000
-SYNC_MAX_TEXT = 12_000  # per issue in a full-project copy: description and the latest comments carry the signal
+SYNC_MAX_TEXT = 1_000_000  # characters per ticket in the copy: the full anonymised text; a longer one keeps its end
+TEXT_VERSION = 2  # 2: every comment, authors as pseudonyms; a copy made before refetches its tickets once
+COMMENT_PAGE = 100
+_PHONE = re.compile(r"(?<![\w.])\+?\(?\d{1,4}\)?[ -]\d{2,4}[ -]\d{3,4}(?:[ -]\d{2,4})?(?!\w|\.\d)")
+_ADDRESS = r"(?:Hi|Hello|Hey|Thanks|Thank you|Thx|cc|CC|Cc|Dear|ping|@)[ ,]{1,2}"
 LONG_JQL = 1500  # characters; above this the search request is sent as POST
 MAX_RETRY_AFTER = 120.0  # seconds; a larger Retry-After is capped so a pull cannot hang for hours
 CRAWL_DELAY = 1.0  # robots.txt on redhat.atlassian.net: "Crawl-delay: 1" for every crawler (checked 2026-10-28)
@@ -84,17 +88,62 @@ class BudgetExhausted(JiraError):
 
 def scrub(text: str) -> str:
     text = _EMAIL.sub("<email>", text)
+    text = _PHONE.sub("<phone>", text)
     return _ACCOUNT.sub("<account>", text)
 
 
-def adf_to_text(node: Any) -> str:
-    """Atlassian Document Format -> plain text (Markdown-ish)."""
+def _label(i: int) -> str:
+    """A, B, ... Z, AA, AB, ...: the i-th commenter on a ticket."""
+    out = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        out = chr(65 + r) + out
+    return out
+
+
+def pseudonyms(comments: list[Any]) -> tuple[dict[str, str], dict[str, str]]:
+    """Per ticket, in order of first comment: account id -> "Commenter A", and display name -> the same label. Neither
+    the id nor the name is stored; the maps only replace them in the text."""
+    by_id: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    for c in comments:
+        author = c.get("author") if isinstance(c, dict) else None
+        if not isinstance(author, dict):
+            continue
+        ident = str(author.get("accountId") or author.get("name") or author.get("displayName") or "")
+        if not ident:
+            continue
+        label = by_id.setdefault(ident, f"Commenter {_label(len(by_id))}")
+        name = str(author.get("displayName") or "").strip()
+        if len(name) >= 3:
+            by_name.setdefault(name, label)
+    return by_id, by_name
+
+
+def unname(text: str, by_name: dict[str, str]) -> str:
+    """Replace each commenter's display name, and their first name where it addresses them ("Hi Jane", "cc Jane",
+    "@Jane"), with the commenter's label."""
+    for name in sorted(by_name, key=len, reverse=True):
+        label = by_name[name]
+        text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", label, text)
+        first = name.split()[0]
+        if len(name.split()) > 1 and len(first) >= 3 and first.isalpha():
+            address = re.compile(rf"\b({_ADDRESS}){re.escape(first)}(?!\w)")
+            text = address.sub(rf"\g<1>{label}", text)
+            text = re.sub(rf"@{re.escape(first)}(?!\w)", f"@{label}", text)
+    return text
+
+
+def adf_to_text(node: Any, people: dict[str, str] | None = None) -> str:
+    """Atlassian Document Format -> plain text (Markdown-ish). A mention of a known commenter becomes their label,
+    any other mention ``@user``."""
     if node is None:
         return ""
     if isinstance(node, str):
         return node
     if isinstance(node, list):
-        return "".join(adf_to_text(n) for n in node)
+        return "".join(adf_to_text(n, people) for n in node)
     if not isinstance(node, dict):
         return ""
     t = node.get("type")
@@ -104,35 +153,36 @@ def adf_to_text(node: Any) -> str:
     if t == "hardBreak":
         return "\n"
     if t == "mention":
-        return "@user"
+        ident = str((node.get("attrs") or {}).get("id") or "")
+        return "@" + people[ident] if people and ident in people else "@user"
     if t == "emoji":
         return str((node.get("attrs") or {}).get("text", ""))
     if t in {"inlineCard", "blockCard", "embedCard"}:
         return str((node.get("attrs") or {}).get("url", ""))
     if t == "paragraph":
-        return adf_to_text(content) + "\n\n"
+        return adf_to_text(content, people) + "\n\n"
     if t == "heading":
         level = int((node.get("attrs") or {}).get("level", 2))
-        return "#" * min(max(level, 1), 6) + " " + adf_to_text(content) + "\n\n"
+        return "#" * min(max(level, 1), 6) + " " + adf_to_text(content, people) + "\n\n"
     if t == "codeBlock":
-        return "```\n" + adf_to_text(content) + "\n```\n\n"
+        return "```\n" + adf_to_text(content, people) + "\n```\n\n"
     if t == "blockquote":
-        return "".join("> " + ln + "\n" for ln in adf_to_text(content).strip().splitlines()) + "\n"
+        return "".join("> " + ln + "\n" for ln in adf_to_text(content, people).strip().splitlines()) + "\n"
     if t in {"bulletList", "orderedList"}:
         items = []
         for i, li in enumerate(content):
             prefix = f"{i + 1}. " if t == "orderedList" else "- "
-            items.append(prefix + adf_to_text(li).strip().replace("\n\n", "\n"))
+            items.append(prefix + adf_to_text(li, people).strip().replace("\n\n", "\n"))
         return "\n".join(items) + "\n\n"
     if t == "listItem":
-        return adf_to_text(content)
+        return adf_to_text(content, people)
     if t == "table":
         rows = []
         for row in content:
-            cells = [adf_to_text(c).strip().replace("\n", " ") for c in (row.get("content") or [])]
+            cells = [adf_to_text(c, people).strip().replace("\n", " ") for c in (row.get("content") or [])]
             rows.append("| " + " | ".join(cells) + " |")
         return "\n".join(rows) + "\n\n"
-    return adf_to_text(content)
+    return adf_to_text(content, people)
 
 
 @dataclass
@@ -319,13 +369,24 @@ def issue_to_record(
     target = _names(f.get(target_field)) if isinstance(f.get(target_field), list) else []
     key = issue.get("key", "")
     desc = f.get("description")
-    desc_text = adf_to_text(desc) if isinstance(desc, dict | list) else str(desc or "")
-    comments = ((f.get("comment") or {}).get("comments") or [])[-MAX_COMMENTS:]
+    comment_field = f.get("comment") or {}
+    all_comments = [c for c in comment_field.get("comments") or [] if isinstance(c, dict)]
+    comments = all_comments[-MAX_COMMENTS:]
+    by_id, by_name = pseudonyms(comments)
+    desc_text = adf_to_text(desc, by_id) if isinstance(desc, dict | list) else str(desc or "")
     comment_text = "\n".join(
-        f"Comment ({str(c.get('created', ''))[:10]}): "
-        + (adf_to_text(c.get("body")) if isinstance(c.get("body"), dict | list) else str(c.get("body") or "")).strip()
+        f"Comment ({str(c.get('created', ''))[:10]}) by "
+        + by_id.get(
+            str((c.get("author") or {}).get("accountId") or (c.get("author") or {}).get("name") or ""),
+            by_id.get(str((c.get("author") or {}).get("displayName") or ""), "a commenter"),
+        )
+        + ": "
+        + (
+            adf_to_text(c.get("body"), by_id) if isinstance(c.get("body"), dict | list) else str(c.get("body") or "")
+        ).strip()
         for c in comments
     )
+    comments_total = max(int(comment_field.get("total") or 0), len(all_comments))
     fix, aff = _names(f.get("fixVersions")), _names(f.get("versions"))
     comps, labels = _names(f.get("components")), [str(x) for x in f.get("labels") or []]
     status = (f.get("status") or {}).get("name")
@@ -340,16 +401,23 @@ def issue_to_record(
         f"Components: {', '.join(comps) or '-'} | Labels: {', '.join(labels) or '-'}",
         f"Created: {str(f.get('created', ''))[:10]} | Updated: {str(f.get('updated', ''))[:10]}",
     ]
+    cut = False
     if comment_text and len(desc_text) + len(comment_text) > max_text:
         # keep the latest comments (where fixes, workarounds and "not a bug" verdicts are written) within budget
         room = max(max_text // 2, max_text - len(desc_text) - 600)
         comment_text = "...\n" + comment_text[-room:].split("\n", 1)[-1]
-    text = scrub(
-        "\n".join(header)
-        + "\n\n## Description\n\n"
-        + desc_text.strip()
-        + ("\n\n## Comments\n\n" + comment_text if comment_text else "")
-    )[:max_text]
+        cut = True
+    full = unname(
+        scrub(
+            "\n".join(header)
+            + "\n\n## Description\n\n"
+            + desc_text.strip()
+            + ("\n\n## Comments\n\n" + comment_text if comment_text else "")
+        ),
+        by_name,
+    )
+    text = full[:max_text]
+    cut = cut or len(full) > max_text
     status_category = ((f.get("status") or {}).get("statusCategory") or {}).get("key")
     return {
         "id": f"jira-{key}",
@@ -376,6 +444,9 @@ def issue_to_record(
         "links": _links(f.get("issuelinks")),
         "version": ",".join(matched) or None,
         "versionBasis": basis,
+        "comments": len(comments),
+        "commentsTotal": comments_total,
+        **({"textCut": True} if cut else {}),
     }
 
 
@@ -663,7 +734,10 @@ def state_from_records(records: dict[str, dict[str, Any]], project: str) -> dict
     times = [t for r in recs if (t := _parse_iso(r.get("retrievedAt")))]
     if not keys or not times:
         return {}
-    return {"complete": False, "lowestKey": min(keys, key=key_number), "lastSyncAt": _iso(min(times))}
+    out: dict[str, Any] = {"complete": False, "lowestKey": min(keys, key=key_number), "lastSyncAt": _iso(min(times))}
+    if all("commentsTotal" in r for r in recs):  # written with every comment: no need to fetch the tickets again
+        out["textVersion"] = TEXT_VERSION
+    return out
 
 
 @dataclass
@@ -748,6 +822,24 @@ def sync_project(
         key = str(issue.get("key") or "")
         if not ISSUE_KEY.fullmatch(key) or not key.startswith(project + "-"):
             return ""
+        prev = records.get(f"jira-{key}")
+        fields_now = issue.get("fields") or {}
+        total_now = int(
+            ((fields_now.get("comment") or {}) if isinstance(fields_now.get("comment"), dict) else {}).get("total") or 0
+        )
+        if (
+            prev
+            and prev.get("updated") == fields_now.get("updated")
+            and prev.get("status") == (fields_now.get("status") or {}).get("name")
+            and prev.get("resolution") == (fields_now.get("resolution") or {}).get("name")
+            and prev.get("fixVersions") == _names(fields_now.get("fixVersions"))
+            and prev.get("comments") == prev.get("commentsTotal")
+            and int(prev.get("commentsTotal") or 0) >= total_now
+        ):
+            res.fetched += 1  # unchanged since it was kept whole (the open pass and the backfill both meet it)
+            return key
+        # a budget that runs out here raises before the ticket is kept, so the next run fetches it whole
+        issue = with_all_comments(client, key, issue)
         rec = issue_to_record(issue, base_url, project, [], "sync", retrieved, target_field, SYNC_MAX_TEXT)
         if changes is not None:
             event = change_event(records.get(rec["id"]), rec, phase, since)
@@ -757,6 +849,13 @@ def sync_project(
         res.fetched += 1
         return key
 
+    if int(state.get("textVersion") or 1) < TEXT_VERSION:
+        if state.get("lowestKey") or state.get(
+            "complete"
+        ):  # a copy made before: refetch every ticket once, newest first
+            state["complete"] = False
+            state.pop("lowestKey", None)
+        state["textVersion"] = TEXT_VERSION
     lowest = str(state.get("lowestKey") or "")
     if not (ISSUE_KEY.fullmatch(lowest) and lowest.startswith(project + "-")):
         state.pop("lowestKey", None)  # foreign or malformed: restart the backfill from the top
@@ -781,6 +880,34 @@ def sync_project(
     res.complete = bool(state.get("complete"))
     res.total = len(records)
     return res
+
+
+def with_all_comments(client: JiraClient, key: str, issue: dict[str, Any]) -> dict[str, Any]:
+    """The issue with every comment (up to ``MAX_COMMENTS``): a search returns a ticket's latest comments only, so
+    when its ``total`` is larger the rest come from the issue's paged comment endpoint, oldest first."""
+    fields = issue.get("fields") or {}
+    raw = fields.get("comment")
+    field: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    got = [c for c in field.get("comments") or [] if isinstance(c, dict)]
+    total = int(field.get("total") or len(got))
+    if total <= len(got) or not ISSUE_KEY.fullmatch(key):
+        return issue
+    comments: list[dict[str, Any]] = []
+    start = 0
+    while start < min(total, MAX_COMMENTS):
+        page = client.get(
+            f"/rest/api/3/issue/{key}/comment", {"startAt": start, "maxResults": COMMENT_PAGE, "orderBy": "created"}
+        )
+        batch = [c for c in (page.get("comments") or []) if isinstance(c, dict)] if isinstance(page, dict) else []
+        if not batch:
+            break
+        comments.extend(batch)
+        start += len(batch)
+        total = max(total, int(page.get("total") or 0)) if isinstance(page, dict) else total
+    seen = {str(c.get("id")) for c in comments if c.get("id") is not None}
+    comments += [c for c in got if c.get("id") is None or str(c.get("id")) not in seen]  # newer than the paging
+    comments.sort(key=lambda c: str(c.get("created") or ""))
+    return {**issue, "fields": {**fields, "comment": {**field, "comments": comments[-MAX_COMMENTS:], "total": total}}}
 
 
 def _open_pass(

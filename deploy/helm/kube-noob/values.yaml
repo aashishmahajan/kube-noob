@@ -87,7 +87,8 @@ jira:
   # and maxRequests per run, every intervalHours, and keeps them on the PVC; ticket text never leaves the pod. Needs
   # persistence.enabled, replicaCount 1 and egress to redhat.atlassian.net:443 (opened below when enabled); refused
   # under config.offline. Without egress, build the copy elsewhere and import it: kube-noob corpus import <tgz>.
-  # Disk: about 1 GiB per 100k tickets (copy plus search index); the default projects need 2-3 GiB.
+  # Disk: the copy keeps every comment of every ticket, so give it room (raise persistence.size to 10Gi for the default
+  # projects) and check the volume's use after the first full sync.
   sync:
     enabled: false
     projects: default        # default (OpenShift, ROSA, ACM, RHACS...), all, or keys such as OCPBUGS,ROX,HOSTEDCP

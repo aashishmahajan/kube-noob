@@ -411,7 +411,12 @@ def test_an_imported_copy_resumes_without_a_state_file(tmp_path: Path) -> None:
         )
     }
     st = state_from_records(records, "OCPBUGS")
-    assert st == {"complete": False, "lowestKey": "OCPBUGS-103", "lastSyncAt": "2026-10-20T00:00:00Z"}
+    assert st == {
+        "complete": False,
+        "lowestKey": "OCPBUGS-103",
+        "lastSyncAt": "2026-10-20T00:00:00Z",
+        "textVersion": 2,
+    }
     foreign = {**records, "jira-ROX-1": {**records["jira-OCPBUGS-103"], "id": "jira-ROX-1"}}
     assert state_from_records(foreign, "OCPBUGS")["lowestKey"] == "OCPBUGS-103"
     filtered = {k: {**r, "versionBasis": "explicit-version"} for k, r in records.items()}

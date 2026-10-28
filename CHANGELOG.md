@@ -101,6 +101,14 @@
   daily (repository variable `JIRA_EVERY_DAYS=2` for every two days), continues the previous run's encrypted copy,
   writes the changes and open tickets to the run summary, and uploads the new copy only encrypted
   (`jira-main-copy-encrypted`); Git docs and release history stay weekly.
+- The Jira copy keeps each ticket's full text and every comment (up to 2,000 comments and 1 MB per ticket; a longer
+  ticket keeps its latest part and is marked `textCut`). A search returns only a ticket's latest comments, so the
+  rest come from the issue's paged comment endpoint inside the same request budget, and a ticket is stored only once
+  all its comments are in; an unchanged ticket met twice (open pass, then backfill) is not fetched again. People stay
+  out: comment authors become per-ticket pseudonyms (Commenter A, B, ...), their display names and their first names
+  where they are addressed ("Hi Jane", "cc Jane", "@Jane") become the same label, mentions of other people become
+  `@user`, and phone numbers join the emails, account ids and profile links already removed. Copies made before
+  refetch their tickets once (newest first, within the usual budget); imported copies written this way do not.
 - Prompt-injection hygiene on every MCP result (`kube_noob.sanitize`): invisible Unicode removed; chat-template and
   role markers, tool-call shapes, instruction phrases aimed at a model and exfiltrating Markdown (remote images, links
   with query strings) replaced by `[removed: ...]`; the result carries `untrusted: true` and `injectionSignals` (kind,
