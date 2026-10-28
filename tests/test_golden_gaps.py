@@ -321,3 +321,27 @@ def test_aws_cli_reads_are_reads() -> None:
     assert classify_step("aws iam list-roles") == "read"
     assert classify_step("aws ec2 create-tags --resources subnet-1 --tags Key=a,Value=1") == "change"
     assert classify_step("aws iam put-role-policy --role-name r --policy-name p --policy-document file://x") == "change"
+
+
+def test_a_question_after_a_template_snippet_is_still_a_question(kit: tk.Toolkit) -> None:
+    # Golden helm-006: a one-paragraph post that quotes a template call and ends by asking was read only as a Helm
+    # template, so no document was searched. The last sentence asks, so it is also a question.
+    from kube_noob.insight import recognise
+
+    text = (
+        "Our shared labels helper has worked for months in other charts, but in this new chart it prints an empty "
+        'chart name and version. I render it with {{ template "web.labels" }} in the Deployment metadata, and '
+        "helm template --debug shows chart: and version: with no values at all, while the rest of the manifest "
+        "renders fine. Why is .Chart.Name empty there?"
+    )
+    assert {k.kind for k in recognise(text)} >= {"helm-chart", "question"}
+    assert any(g.startswith("kn:helm-templates-values#") for g in _top(kit, text)[:2])
+    assert "question" not in {k.kind for k in recognise('{{ template "web.labels" . }}\nname: web')}
+
+
+def test_helm_releases_missing_after_helm_2_point_at_namespaces(kit: tk.Toolkit) -> None:
+    # Golden helm-010: "although" counted as a word the knowledge had never seen, which raised the bar for every
+    # document, and the namespace note was one bullet among command changes. Helm 3 keeps releases per namespace
+    # (helm-www e5a4c62 faq/changes_since_helm2.md "Release Names are now scoped to the Namespace").
+    text = "Since we moved from Helm 2 to Helm 3, helm list is empty although the apps still run. Where did they go?"
+    assert _top(kit, text)[:1] == ["kn:helm-templates-values#6"]  # "helm list shows few or no releases"

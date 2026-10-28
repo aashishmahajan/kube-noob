@@ -37,7 +37,7 @@
   status: miss
   expect:
   - DBG-VAP
-  gap: 'rank: DBG-VAP (messageExpression/message advice and failed expression origin) above the generic policy finding'
+  gap: 'rank: DBG-VAP playbook should outrank the generic policy-source finding'
 - id: pol-003
   technology: policy
   kind: howto
@@ -72,7 +72,7 @@
   status: miss
   expect:
   - 'kn:kyverno-troubleshooting#1'
-  gap: 'rank: kn:kyverno-troubleshooting#1 (PolicyException) above the generic Kyverno finding that says to add labels'
+  gap: 'rank: kn:kyverno-troubleshooting#1 PolicyException doc should outrank the generic kyverno match'
 - id: pol-005
   technology: policy
   kind: concept
@@ -123,10 +123,7 @@
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#validation-actions'
   outOfScope: false
   status: miss
-  expect:
-  - 'kn:k8s-validating-admission-policy#3'
-  gap: 'rank: kn:k8s-validating-admission-policy#3 (validationActions Warn/Audit then Deny) above the Pod Security dry-run
-    section'
+  gap: 'doc: ValidatingAdmissionPolicyBinding validationActions Warn and Audit first, then Deny'
 - id: pol-008
   technology: policy
   kind: error
@@ -143,7 +140,7 @@
     url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/violations'
   outOfScope: false
   status: miss
-  gap: 'doc: Gatekeeper constraint enforcementAction dryrun and warn for audit-only rollout'
+  gap: 'doc: Gatekeeper constraint spec.enforcementAction dryrun or warn instead of deny'
 - id: pol-009
   technology: policy
   kind: out-of-scope
@@ -154,7 +151,7 @@
   source: {}
   outOfScope: true
   status: miss
-  gap: 'abstain: kn:k8s-images#0 should not have fired for an AWS IAM question'
+  gap: 'abstain: doc: kn:k8s-images#0 should not have fired; AWS IAM for ECR is out of scope'
 - id: pol-010
   technology: policy
   kind: error
@@ -204,7 +201,7 @@
     url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/failing-closed'
   outOfScope: false
   status: miss
-  gap: 'doc: Gatekeeper webhook failurePolicy Ignore vs Fail trade-off when webhook pods are down'
+  gap: 'doc: Gatekeeper webhook failurePolicy Ignore by default versus Fail trade-offs'
 - id: pol-013
   technology: policy
   kind: error
@@ -257,8 +254,7 @@
   status: miss
   expect:
   - DBG-SCC
-  gap: 'rank: DBG-SCC / kn:ocp-scc#7 (never edit default SCCs, grant an SCC to the ServiceAccount) above the remove-privileged
-    policy finding'
+  gap: 'rank: DBG-SCC playbook should outrank the restricted-v2 policy-source finding'
 - id: pol-016
   technology: policy
   kind: out-of-scope
@@ -299,8 +295,7 @@
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-requiring.adoc'
   outOfScope: false
   status: miss
-  gap: 'rank: kn:ocp-scc#4 (openshift.io/required-scc on pod template) not in top3; only a pointer to it appears in the second
-    finding'
+  gap: 'rank: kn:ocp-scc#4 required-scc annotation doc must be returned first'
 - id: pol-019
   technology: policy
   kind: out-of-scope

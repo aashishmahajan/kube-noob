@@ -134,6 +134,14 @@
 - Questions about Falco or NeuVector get no document (golden rhacs-019 and rhacs-020 had drawn the RHACS default
   policies and the image document). Golden RHACS out of scope 4 of 4 left unanswered (was 2); community test half: 2
   answers moved, both better (independent grader).
+- Helm: `helm list` showing few or no releases has its own section (Helm 3 keeps each release in its namespace, so
+  after moving from Helm 2, or after switching context, use `-n` or `-A`), and the template-scope section names the
+  `template` call without a dot and its `unknown object type "nil"` error (helm-www Named Templates and Changes since
+  Helm 2). A paste whose last sentence asks is also read as a question, so a post that quotes a template call gets
+  documents; "although" and "though" are everyday words, not unknown terms. Golden: Helm 15 of 16 (helm-006 and
+  helm-010 now answer, a fit), and an independent regrade of every golden miss moved RHACS to 14 of 16; in scope 76
+  of 96. Community: train half 8 answers moved (3 better, 5 neither), test half 10 moved (5 better, 0 worse, 5
+  neither).
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

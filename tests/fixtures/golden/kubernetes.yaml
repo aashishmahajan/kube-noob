@@ -121,7 +121,7 @@
   status: miss
   expect:
   - 'kn:k8s-dns#1'
-  gap: 'rank: kn:k8s-dns#1 debug-order walk (resolv.conf, DNS pods, logs) should outrank the DBG-DNS playbook'
+  gap: 'rank: kn:k8s-dns#1 debug-order doc should outrank the DBG-DNS playbook'
 - id: k8s-008
   technology: kubernetes
   kind: error
@@ -254,7 +254,7 @@
     url: 'https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
   outOfScope: false
   status: miss
-  gap: 'doc: CPU limit throttling versus reactive memory OOM kill enforcement'
+  gap: 'doc: CPU limits throttle while memory limits are enforced reactively by OOM kill'
 - id: k8s-016
   technology: kubernetes
   kind: concept

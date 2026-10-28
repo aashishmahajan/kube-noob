@@ -160,7 +160,7 @@
   outOfScope: false
   platform: openshift
   status: miss
-  gap: 'doc: UPI CSR approval with oc get csr and oc adm certificate approve, client CSRs then serving CSRs'
+  gap: 'doc: UPI worker join: oc get csr, oc adm certificate approve client CSRs first, then serving CSRs'
 - id: ocp-010
   technology: openshift
   kind: howto
@@ -195,7 +195,7 @@
   outOfScope: false
   platform: openshift
   status: miss
-  gap: 'doc: complete required-scc section including SCC must exist and checking the pod''s openshift.io/scc annotation'
+  gap: 'doc: required-scc example in the pod template plus checking the pod''s openshift.io/scc annotation'
 - id: ocp-012
   technology: openshift
   kind: howto
@@ -230,7 +230,7 @@
   outOfScope: false
   platform: openshift
   status: miss
-  gap: 'doc: UPI bootstrap debugging with journalctl -u bootkube.service, Ignition curl -I check, api DNS and LB 6443'
+  gap: 'doc: collect bootstrap logs via ssh core, journalctl -b -f -u bootkube.service and podman logs'
 - id: ocp-014
   technology: openshift
   kind: concept
@@ -247,8 +247,7 @@
   outOfScope: false
   platform: openshift
   status: miss
-  gap: 'doc: ClusterOperator Available/Progressing/Degraded/Upgradeable definitions and rank Degraded-does-not-mean-downtime
-    section first'
+  gap: 'rank: kn:ocp-cluster-update-status#1 first, plus doc: meaning of Available, Progressing, Degraded, Upgradeable'
 - id: ocp-015
   technology: openshift
   kind: concept
@@ -284,7 +283,7 @@
   status: miss
   expect:
   - 'kn:ocp-pod-security-admission#0'
-  gap: 'rank: kn:ocp-pod-security-admission#0 should outrank the DBG-PSA playbook'
+  gap: 'rank: kn:ocp-pod-security-admission#0 label-sync doc should outrank DBG-PSA playbook'
 - id: ocp-017
   technology: openshift
   kind: out-of-scope

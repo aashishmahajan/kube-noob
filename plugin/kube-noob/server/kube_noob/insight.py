@@ -144,6 +144,16 @@ _EVENT_FIELDS = re.compile(
     r"\"reason\":\s{0,4}\"[A-Z][A-Za-z]+\"[^{}]{0,400}?\"type\":\s{0,4}\"(?:Warning|Normal)\""
 )
 _QUESTION = re.compile(r"^(?:how|why|what|when|where|which|can|could|should|is|are|does|do|will|my|i )\b", re.I)
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def _asks_last(text: str) -> bool:
+    """A paragraph of prose that quotes a snippet and ends by asking ("... I call {{ template "x" }}. What is
+    wrong?"): its last sentence is a question, however long the paragraph before it."""
+    last = _SENTENCE_END.split(text[-400:].rstrip())[-1].strip()
+    return last.endswith("?") and len(last) <= 240 and bool(_QUESTION.match(last)) and bool(_WORD.search(last))
+
+
 _WORD = re.compile(r"[A-Za-z]{3}")
 _HELM = re.compile(
     r"\{\{-?\s*(?:\.Values|\.Release|include |template |if |range )|^apiVersion: v2\n(?:.*\n){0,6}name: ", re.M
@@ -352,7 +362,7 @@ def recognise(text: str) -> list[Kind]:
         asked and one_line and set(found) <= {"policy-denial", "ticket"}
     ):
         found["question"] = "a question or symptom in words"
-    elif found and _ASKED_LINE.search(stripped[:3000]):
+    elif found and (_ASKED_LINE.search(stripped[:3000]) or _asks_last(stripped)):
         found["question"] = "a question next to what was pasted"
     keys = _ticket_keys(stripped[:20_000])
     if keys and "ticket" not in found:

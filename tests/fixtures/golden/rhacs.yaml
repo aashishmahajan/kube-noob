@@ -19,7 +19,7 @@
   status: miss
   expect:
   - DBG-STACKROX-ADMISSION
-  gap: 'rank: DBG-STACKROX-ADMISSION (has break-glass annotation and fixes) should outrank the one-line policy explainer'
+  gap: 'rank: DBG-STACKROX-ADMISSION playbook should outrank the generic rhacs policy-source finding'
 - id: rhacs-002
   technology: rhacs
   kind: howto
@@ -68,9 +68,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-enforcement-about.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: hard enforcement = admission controller webhook rejects, soft = Sensor scales workload to zero (kn:rhacs-enforcement
-    section not retrieved)'
+  status: pass
+  expect:
+  - 'kn:rhacs-enforcement#1'
 - id: rhacs-005
   technology: rhacs
   kind: error
@@ -103,7 +103,9 @@
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/configure-policy-scope.adoc'
   outOfScope: false
   status: miss
-  gap: 'doc: RHACS policy scope Excluded resources, namespace entry as RE2 regex like test-.*'
+  expect:
+  - 'kn:rhacs-policy-rules-scope#3'
+  gap: 'rank: kn:rhacs-policy-rules-scope#3 exclusion doc should outrank the roxctl deployment check doc'
 - id: rhacs-007
   technology: rhacs
   kind: error
@@ -178,8 +180,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-structure.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: policy rules are ORed and criteria within a rule ANDed (the logic chunk of kn:rhacs-policy-rules-scope)'
+  status: pass
+  expect:
+  - 'kn:rhacs-policy-rules-scope#1'
 - id: rhacs-012
   technology: rhacs
   kind: error

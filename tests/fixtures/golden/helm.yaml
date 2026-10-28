@@ -101,8 +101,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/chart_template_guide/named_templates/'
   outOfScope: false
-  status: miss
-  gap: 'doc: retrieve the named-template scope section (pass . to template/include) for the nil .Chart.Name symptom'
+  status: pass
+  expect:
+  - 'kn:helm-templates-values#2'
 - id: helm-007
   technology: helm
   kind: error
@@ -117,7 +118,7 @@
     url: 'https://helm.sh/docs/v3/topics/advanced/'
   outOfScope: false
   status: miss
-  gap: 'doc: helm install/upgrade --take-ownership flag to adopt existing objects (with --dry-run check)'
+  gap: 'doc: helm install/upgrade --take-ownership to adopt existing objects, verified with --dry-run'
 - id: helm-008
   technology: helm
   kind: error
@@ -164,8 +165,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/faq/troubleshooting/'
   outOfScope: false
-  status: miss
-  gap: 'doc: retrieve Helm 3 namespaced releases section (helm list -n / -A) for the migrated-from-Helm-2 symptom'
+  status: pass
+  expect:
+  - 'kn:helm-templates-values#6'
 - id: helm-011
   technology: helm
   kind: howto

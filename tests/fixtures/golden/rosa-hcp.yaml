@@ -139,7 +139,7 @@
   outOfScope: false
   platform: rosa-hcp
   status: miss
-  gap: 'playbook: Multi-Attach after node loss, force-delete the old pod with --force --grace-period=0; RWX if supported'
+  gap: 'playbook: Multi-Attach after node loss: oc delete pod --force --grace-period=0, volume freed in about six minutes'
 - id: rosa-009
   technology: rosa-hcp
   kind: howto
@@ -243,7 +243,7 @@
   outOfScope: false
   platform: rosa-hcp
   status: miss
-  gap: 'rank: kn:rosa-hcp#1 (HCP architecture: Red Hat-owned control plane, PrivateLink, separate upgrades) missing from top3'
+  gap: 'doc: ROSA HCP vs Classic: control plane in Red Hat account via PrivateLink, no infra nodes, separate upgrades'
 - id: rosa-015
   technology: rosa-hcp
   kind: concept
@@ -290,7 +290,8 @@
   outOfScope: true
   platform: rosa-hcp
   status: miss
-  gap: 'abstain: kn:rosa-hcp-lifecycle#0 (ROSA console after ready) should not have fired on an EKS access question'
+  gap: 'abstain: doc: kn:rosa-hcp-lifecycle#0, kn:rosa-efs#0 and kn:rosa-troubleshooting#1 should not fire for an EKS access
+    question'
 - id: rosa-018
   technology: rosa-hcp
   kind: out-of-scope
@@ -313,7 +314,8 @@
   outOfScope: true
   platform: rosa-hcp
   status: miss
-  gap: 'abstain: kn:k8s-debug-pods#0 should not have fired on an application-code localhost connection question'
+  gap: 'abstain: doc: kn:k8s-debug-pods#0 and kn:rosa-troubleshooting#0 should not fire for an application database connection
+    error'
 - id: rosa-020
   technology: rosa-hcp
   kind: out-of-scope
