@@ -125,11 +125,24 @@ answer:
 | 19 frequent documents need their subject's words (answered rows; a random 100 of the rest) | 80; 100 | 60; 84 | 4; 3 | 16; 13 |
 | Invalid UTF-8 playbook and its narrowly gated document | 6 | 3 | 3 | 0 |
 | Cause-linked triage on 17 playbooks (what users see: cause, fix, first steps) | 121 | 78 | 7 | 36 |
+| Cause tuning and plain-word symptoms, after removing the signals graders found harmful (two blinded graders) | 28 | 15; 17 | 4; 7 | 9; 4 |
+| Most common cause when nothing points at one (CrashLoopBackOff, image pull, OOM; chosen on the train half) | 105 | 24; 25 | 1; 2 | 80; 78 |
 
 Cause choice has its own held-out set (`tests/fixtures/triage/`, 114 questions, one typed and one pasted per cause,
-written by an agent that saw only the causes): the answer names the labelled cause for 63 (50 before cause-linked
-triage); the right playbook is among the findings for 83 and first for 76. `python scripts/eval_triage.py` prints it
-per playbook.
+written by an agent that saw only the causes): the answer names the labelled cause for 79 (50 before cause-linked
+triage, 63 after it); the right playbook is among the findings for 94 and first for 85. Patterns are tuned only on a
+separate training set written the same way (`tests/fixtures/triage-train`, 171 questions: 87 right before tuning,
+136 after). `python scripts/eval_triage.py [--dir ...]` prints either per playbook.
+
+The training set rewards recall, and real posts punish false positives. The first version of the plain-word signals
+raised the training score to 147 and the held-out score to 84, but on the community halves two blinded graders found
+the answers it changed worse more often than better (test half: 35 and 28 better, 51 and 50 worse): a probe mentioned
+in passing (48 worse, 21 better across both halves), "mount failed" (15 worse, 1 better), SERVFAIL and other DNS
+words, and pod-to-pod traffic named playbooks on feature requests, design questions, Docker posts and CNI or CSI bug
+reports. Those signals were removed and the rows above measure what shipped. Showing the playbook's first cause when
+nothing points at one was likewise better for CrashLoopBackOff, image pull and OOM but worse for PVC, probe, DNS and
+NetworkPolicy answers (where the first cause is a specific one, such as ReadWriteMany on EBS), so only those three
+playbooks have a default cause.
 
 Most moved answers were wrong both before and after: real questions are dominated by Red Hat bug reports (the
 bundled release notes hold the key for few of them) and by products outside the box, which documentation content

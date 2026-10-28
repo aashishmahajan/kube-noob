@@ -1,8 +1,9 @@
 """Offline troubleshooting playbooks.
 
 Each playbook maps observable signals (event reasons, status strings, log lines, CLI errors) to root causes, ordered
-read-only checks, and fixes. ``{ns}``, ``{name}``, ``{pod}``, ``{pvc}`` placeholders are filled by the diagnoser when
-it can parse them from the input. ``oc`` and ``kubectl`` are interchangeable for every check unless marked [OCP].
+read-only checks, and fixes. ``{ns}``, ``{name}``, ``{pod}``, ``{pvc}``, ``{svc}`` and ``{selector}`` placeholders are
+filled by the diagnoser when it can parse them from the input. ``oc`` and ``kubectl`` are interchangeable for
+every check unless marked [OCP].
 """
 
 from __future__ import annotations
@@ -35,13 +36,22 @@ class Playbook:
     weight: float = 1.0
     tags: tuple[str, ...] = field(default=())
     causes: tuple[Cause, ...] = ()  # cause-linked triage (every root cause once); empty: causes are not linked yet
+    # The cause shown when no cause's own patterns match: set only where independent graders found the playbook's
+    # most common cause better than a guess from shared words on the community train half (None: shared words decide).
+    default_cause: int | None = None
 
 
 PLAYBOOKS: tuple[Playbook, ...] = (
     Playbook(
         "DBG-CRASHLOOP",
         "Container keeps crashing (CrashLoopBackOff)",
-        (r"CrashLoopBackOff", r"Back-off restarting failed container", r"restartCount:\s*[1-9]\d*"),
+        (
+            r"CrashLoopBackOff",
+            r"Back-off restarting failed container",
+            r"restartCount:\s*[1-9]\d*",
+            r"\b(?:keeps?|kept) (?:restarting|crashing|dying)\b|\bgets? restarted over and over\b|"
+            r"\brestart(?:s|ed|ing)? (?:over and over|every (?:few )?(?:seconds|minutes)|constantly|repeatedly)\b",
+        ),
         (
             "The process exits right after start (bad config, missing env/secret, failed migration, wrong command).",
             "Liveness probe kills a slow-starting app (look for 'Liveness probe failed' before each restart).",
@@ -69,14 +79,15 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         related_rules=("KN-C003", "KN-C005"),
         knowledge=("k8s-debug-pods", "ocp-arbitrary-uid"),
         weight=0.9,  # a symptom, not a cause: a specific cause (OOM, probe, UID) with equal evidence ranks first
+        default_cause=0,
         causes=(
             Cause(
                 0,
                 (
                     r"\bexit(?:ed)?\s+(?:with\s+)?(?:code|status)\b",
                     r"\b(?:panic|traceback|exception|fatal|segfault)\b",
-                    r"\b(?:env(?:ironment)?\s+var(?:iable)?s?|config(?:uratio"
-                    r"n)?|database|migration|missing\s+(?:file|key|secret))\b",
+                    r"\b(?:env(?:ironment)?\s+var(?:iable)?s?|config(?:uration)?|database|migration|missing\s+(?:file|"
+                    r"key|secret))\b",
                 ),
                 (0, 1, 3, 2),
                 (0, 1),
@@ -166,6 +177,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         related_rules=("KN-S012", "KN-C013"),
         knowledge=("k8s-images",),
         weight=0.9,  # a symptom with several causes: a playbook that names the cause ranks first on equal evidence
+        default_cause=0,
         causes=(
             Cause(
                 0,
@@ -173,6 +185,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
                     r"manifest unknown|not found: manifest|manifest for \S{1,200} not found",
                     r"repository does not exist|repository \S{1,200} not found",
                     r"\b(?:tag|typo|misspel\w*|wrong image)\b",
+                    r"clean-?up|retention|garbage.collect\w*|purged|deleted|no longer (?:exists|there)",
+                    r"(?:already|still) running|only (?:the )?(?:new|freshly)|freshly scheduled"
+                    r"|new (?:replicas|pods|nodes) (?:can't|cannot|fail)",
                 ),
                 (0, 4, 1, 3),
                 (0,),
@@ -180,7 +195,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             Cause(
                 1,
                 (
-                    r"pull access denied",
+                    r"pull access denied(?! for [a-z0-9_.-]+(?::[\w.-]+)?(?:,|\s|$))",
                     r"unauthorized|authentication required|403 forbidden|denied: requested access",
                     r"\bprivate\b|docker login|credential|pull[- ]?secret|imagepullsecret",
                 ),
@@ -202,9 +217,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             Cause(
                 5,
                 (
-                    r"minikube|kind load|built (?:it )?locally|local(?:ly built)? image"
-                    r"|docker build|my (?:laptop|machine|workstation)",
+                    r"minikube|\bkind (?:cluster|load)\b|kind-control-plane|\bk3d\b|microk8s|docker desktop",
+                    r"built (?:it )?locally|local(?:ly built)? image|exists locally|docker build|docker images"
+                    r"|my (?:laptop|machine|workstation)",
+                    r"never pushed|(?:didn't|did not|haven't|have not|never) push\w*|without pushing",
                     r"imagePullPolicy|:latest\b",
+                    r"pull access denied for [a-z0-9_.-]+(?::[\w.-]+)?(?:,|\s|$)",
                 ),
                 (1, 4, 0),
                 (4,),
@@ -227,6 +245,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"(?:different|another|other)\s+(?:namespace|project)[^.\n]{0,60}\bpull[- ]?secret",
             r"(?:copy|share|use|reuse)\s+(?:a\s+|the\s+)?pull[- ]?secrets?\s+(?:across|between)\s+"
             r"(?:namespaces|projects)",
+            r"secrets?\s+(?:can't|cannot|could not|couldn't)\s+be\s+retrieved"
+            r"|(?:can't|cannot|could not|couldn't|unable to)"
+            r"\s+retrieve\s+(?:the\s+|some\s+)?(?:image\s+)?pull[- ]?secrets?",
+            r"(?:another|other|different) project'?s? (?:internal )?(?:registry|image ?streams?|images?)",
         ),
         (
             "imagePullSecrets name Secrets in the pod's own namespace only (they are LocalObjectReferences): kubelet "
@@ -268,11 +290,11 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             Cause(
                 0,
                 (
-                    r"pull[- ]?secrets?\b[^.\n]{0,40}\b(?:in|from)\s+(?:a\s+|a"
-                    r"n\s+)?(?:different|another|other)\s+(?:namespace|project)",
+                    r"pull[- ]?secrets?\b[^.\n]{0,40}\b(?:in|from)\s+(?:a\s+|an\s+)?(?:different|another|other)\s+(?:n"
+                    r"amespace|project)",
                     r"(?:different|another|other)\s+(?:namespace|project)[^.\n]{0,60}\bpull[- ]?secret",
-                    r"(?:copy|share|use|reuse)\s+(?:a\s+|the\s+)?pull[- ]?s"
-                    r"ecrets?\s+(?:across|between)\s+(?:namespaces|projects)",
+                    r"(?:copy|share|use|reuse)\s+(?:a\s+|the\s+)?pull[- ]?secrets?\s+(?:across|between)\s+(?:namespace"
+                    r"s|projects)",
                     r"(?:different|another|other)\s+namespace",
                     r"FailedToRetrieveImagePullSecret|Unable to retrieve some image pull secrets",
                 ),
@@ -281,7 +303,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             ),
             Cause(
                 1,
-                (r"service ?account|\bsa\b", r"\blink(?:ed|s)?\b", r"(?:wrong|different|another) name|renamed|typo"),
+                (
+                    r"service ?account|\bsa\b",
+                    r"\blink(?:ed|s)?\b",
+                    r"(?:wrong|different|another) name|renamed|typo|mismatch",
+                    r"get (?:sa|serviceaccount)\b|\bget secrets\b",
+                ),
                 (1, 2, 3, 0),
                 (1, 0),
             ),
@@ -291,6 +318,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
                     r"internal registry|image-registry\.openshift-image-registry|image ?stream",
                     r"image-puller",
                     r"another project",
+                    r"unauthorized|authentication required",
                 ),
                 (1, 0),
                 (4,),
@@ -325,11 +353,20 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C004", "KN-C005"),
         knowledge=("k8s-resources",),
+        default_cause=0,
         causes=(
             Cause(0, (r"\b(?:jvm|java|heap|xmx|node\.?js|max-old-space-size|python)\b", r"\blimit\b"), (0, 1), (0, 1)),
             Cause(
                 1,
-                (r"\bleak", r"\bgrow(?:s|ing)?\b|increas\w+ (?:over time|steadily)|after (?:a few )?(?:hours|days)"),
+                (
+                    r"\bleak",
+                    r"\bgrow(?:s|ing)?\b|increas\w+ (?:over time|steadily)|after (?:a few )?(?:hours|days)",
+                    r"climb\w*|steadily|sawtooth|every (?:few|\d+) hours|never goes down|keeps (?:growing|increasing)",
+                    r"\bcach(?:e|es|ing)\b|in[- ]memory (?:map|dict|store|list)|dict of"
+                    r"|keeps? (?:a|an) (?:dict|map|list)",
+                    r"per (?:hour|day)\b|(?:raised|increased|doubled|bumped) the (?:memory )?limit"
+                    r"|took (?:twice|longer)|just (?:takes|took) longer",
+                ),
                 (1, 0),
                 (0,),
             ),
@@ -337,8 +374,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
                 2,
                 (
                     r"OOMKilling",
-                    r"\bnode\b.{0,40}(?:oom|out of memory)|system oom"
-                    r"|no (?:memory )?limits|without (?:memory )?limits|BestEffort",
+                    r"\bnode\b.{0,40}(?:oom|out of memory)|system oom|no (?:memory )?limits|without (?:memory )?limits"
+                    r"|BestEffort",
+                    r"SystemOOM|oom_score_adj|kernel: Out of memory|oom[- ]?killer|\bdmesg\b"
+                    r"|kernel (?:logs?|messages?)|NotReady",
                 ),
                 (2, 0),
                 (2,),
@@ -353,6 +392,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"secret \"?[\w.-]+\"? not found",
             r"configmap \"?[\w.-]+\"? not found",
             r"couldn't find key [\w.-]+ in (Secret|ConfigMap)",
+            r"failed to prepare subPath",
             r"CreateContainerError",
         ),
         (
@@ -393,6 +433,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"string field (?:'[\w.]{1,120}' )?contains invalid UTF-8",
             r"contains invalid UTF-8 data when serializing a protocol buffer",
             r"error (?:un)?marshall?ing request:? string field contains invalid UTF-8",
+            r"\bUTF-?8\b[^.\n]{0,60}\b(?:unmarshal\w*|protobuf)\b|\b(?:unmarshal\w*|protobuf)\b[^.\n]{0,60}\bUTF-?8\b",
         ),
         (
             "An environment variable from a Secret or ConfigMap (env valueFrom or envFrom) holds bytes that are not "
@@ -547,6 +588,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"0/\d+ nodes are available",
             r"FailedScheduling",
             r"Too many pods",
+            r"\bPending\b[^.\n]{0,40}\b(?:lack of|not enough|insufficient|out of) (?:cpu|memory|resources|capacity)\b",
         ),
         (
             "Requests exceed the free allocatable capacity on every node.",
@@ -568,22 +610,30 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         causes=(
             Cause(
                 0,
-                (r"Insufficient (?:cpu|memory|nvidia\.com/gpu|ephemeral-storage)", r"0/\d+ nodes are available"),
+                (r"Insufficient (?:cpu|memory|nvidia\.com/gpu|ephemeral-storage)|0/\d+ nodes are available",),
                 (0, 1),
                 (0,),
             ),
             Cause(
                 1,
                 (
-                    r"requests? (?:are |is )?(?:too|very|far) (?:big|large|high)"
-                    r"|over-?(?:provision|request)\w*|copied|default requests",
+                    r"requests? (?:are |is )?(?:too|very|far) (?:big|large|high)|over-?(?:provision|request)\w*|copied"
+                    r"|default requests",
+                    r"\btop (?:pods?|nodes?)\b|utili[sz]ation|barely|real (?:load|usage)|actual usage",
+                    r"(?:shared|common|default|generated|fixed)\b[^.\n]{0,40}\b(?:requests?|numbers)\b|\btemplate\b"
+                    r"|requests:\s*\n\s*cpu:\s*\x22?[1-9]",
+                    r"\b\d{1,3}m\s+\d{1,4}Mi\b",
                 ),
                 (1, 0),
                 (0,),
             ),
             Cause(
                 2,
-                (r"autoscal\w*", r"machine ?pool|node ?pool|scale up|max(?:imum)? (?:size|nodes|replicas)"),
+                (
+                    r"autoscal\w*",
+                    r"machine ?pool|node ?pool|scale.?up|max(?:imum)? (?:size|nodes|replicas)",
+                    r"NotTriggerScaleUp|max node group size",
+                ),
                 (2, 3, 0),
                 (1, 0),
             ),
@@ -634,6 +684,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"(?i)\b(?:pvcs?|persistentvolumeclaims?|volume claims?)\b[^\n]{0,40}"
             r"\b(?:stuck|pending|not bound|unbound)\b",
             r"(?i)\b(?:stuck|pending)\b[^\n]{0,20}\b(?:pvcs?|persistentvolumeclaims?)\b",
+            r"\b(?:pvcs?|persistentvolumeclaims?)\b[^.\n]{0,80}\b(?:stays?|stuck|remains?|hangs?) (?:in )?Pending\b|"
+            r"\bclaims? (?:is|are|stays?|remains?) (?:still )?Pending\b",
         ),
         (
             "Access mode unsupported by the class: ReadWriteMany on EBS (gp3-csi/gp2-csi) or Ceph RBD filesystem.",
@@ -656,19 +708,42 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         knowledge=("storage-access-modes", "rosa-efs"),
         weight=1.2,
         causes=(
-            Cause(0, (r"ReadWriteMany|\bRWX\b|access mode", r"gp[23](?:-csi)?|\bebs\b|\brbd\b"), (0, 1), (0,)),
+            Cause(
+                0,
+                (
+                    r"ReadWriteMany|\bRWX\b",
+                    r"access mode \S{0,20} ?(?:is )?not supported|unsupported access mode|capabilit\w+ not supported",
+                ),
+                (0, 1),
+                (0,),
+            ),
             Cause(
                 1,
                 (
                     r"storageclass\.storage\.k8s\.io \"?[\w.-]+\"? not found",
                     r"no default storage ?class|storageClassName"
                     r"|storage ?class \S{0,40} ?(?:missing|not found|does not exist)",
+                    r"no storage ?class (?:is )?set|storage ?class is not set",
                 ),
                 (1, 0),
                 (1,),
             ),
-            Cause(2, (r"waiting for first consumer|WaitForFirstConsumer",), (0,), ()),
-            Cause(3, (r"\bcsi\b|\bdriver\b|\befs\b|provisioner|AccessDenied|ExternalProvisioning",), (2, 3, 0), (0,)),
+            Cause(
+                2,
+                (
+                    r"waiting for first consumer|WaitForFirstConsumer",
+                    r"before deploying|no pod (?:uses|is using|yet)|not (?:yet )?used by (?:a|any) pod"
+                    r"|just to (?:check|test)",
+                ),
+                (0,),
+                (),
+            ),
+            Cause(
+                3,
+                (r"(?<![\w-])csi\b|\bdriver\b|\befs\b|provisioner|AccessDenied|ExternalProvisioning",),
+                (2, 3, 0),
+                (0,),
+            ),
         ),
     ),
     Playbook(
@@ -710,6 +785,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"timed out waiting for the condition",
             r"MountVolume\.\w+ failed .*permission denied",
             r"Read-only file system",
+            r"\b(?:permission denied|EACCES)\b[^\n]{0,80}\b(?:mounted|volume|pvc|persistent volume)\b|"
+            r"\b(?:mounted|mount point|persistent volume|pvc)\b[^\n]{0,80}\b"
+            r"(?:permission denied|EACCES|owned by root)\b|"
+            r"\b(?:can't|cannot|unable to) write to (?:\w+ ){0,2}(?:volume|pvc|mount)\b",
         ),
         (
             "Referenced Secret/ConfigMap volume missing.",
@@ -758,6 +837,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"probe failed:.*connection refused",
             r"Client\.Timeout exceeded while awaiting headers",
             r"HTTP probe failed with statuscode",
+            r"\bprobes? (?:keeps? |kept |are |is |was )?(?:fail(?:s|ed|ing)?|timing out|times? out|timed out)\b|"
+            r"\bfail(?:ed|ing|s)? (?:liveness|readiness|startup) (?:probes?|checks?)\b",
+            r"\b(?:flips?|flapping|toggles?|switch\w*) between (?:Ready|NotReady) and (?:Ready|NotReady)\b",
         ),
         (
             "Probe port/path does not match what the app serves (wrong port name, /healthz vs /health).",
@@ -787,7 +869,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
                 (0, 1),
                 (0,),
             ),
-            Cause(1, (r"connection refused", r"127\.0\.0\.1|localhost|0\.0\.0\.0|\bbind"), (1, 2), (0,)),
+            Cause(
+                1,
+                (r"connection refused", r"127\.0\.0\.1|0\.0\.0\.0|\bbind\b|listen(?:s|ing)? on (?:127|localhost)"),
+                (1, 2),
+                (0,),
+            ),
             Cause(
                 2,
                 (r"Client\.Timeout|timeoutSeconds|timed? ?out|deadline", r"dependenc\w+|database|downstream"),
@@ -818,7 +905,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         (
             "oc get route {name} -n {ns} -o yaml   # status.ingress[].conditions",
-            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={name}",
+            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={svc}",
             "oc get pods -n {ns} --show-labels",
             "oc get networkpolicy -n {ns}",
         ),
@@ -840,6 +927,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"Endpoints:\s*<none>",
             r"endpoints \"[\w.-]+\" not found",
             r"connection refused",
+            r"get (?:endpoints|ep)\b[^\n]{0,120}(?:\n[^\n]{0,120}){0,2}?<none>",
+            r"\b(?:services?|svc)\b[^.\n]{0,40}\b(?:has|have|shows?|with|gets?)\s+(?:no|zero|empty)\s+endpoints?\b",
+            r"\bendpoints?(?: list| slices?)?\s+(?:is|are|was|stays?)\s+empty\b|\bempty endpoints?(?: list)?\b",
+            r"notReadyAddresses",
         ),
         (
             "Service selector does not match pod labels.",
@@ -847,9 +938,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "targetPort names a port the container does not declare.",
         ),
         (
-            "oc describe svc {name} -n {ns}",
-            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={name} -o wide",
-            "oc get pods -n {ns} -l <selector> -o wide",
+            "oc describe svc {svc} -n {ns}",
+            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={svc} -o wide",
+            "oc get pods -n {ns} -l {selector} -o wide",
         ),
         (
             "Align spec.selector with pod template labels; fix readiness; use numeric targetPort or declare the "
@@ -978,6 +1069,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"Red Hat Advanced Cluster Security",
             r"violated .* polic(y|ies)",
             r"The attempted operation violated \d+ enforced polic",
+            r"\b(?:rhacs|stackrox)\b[^.\n]{0,80}\b(?:block\w*|den(?:y|ied|ies)|reject\w*|refus\w*)\b",
+            r"admission controller enforcement|deploy[- ]?(?:stage|time) enforcement|\benforced polic(?:y|ies)\b",
         ),
         (
             "A RHACS policy with deploy-time enforcement matched (e.g. Privileged Container, Latest tag, "
@@ -1127,6 +1220,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"lookup [\w.-]+ on [\d.:]+: (read udp|dial udp).*i/o timeout",
             r"NXDOMAIN",
             r"nslookup: can't resolve",  # busybox nslookup (kubernetes/website dns-debugging-resolution.md)
+            r"no servers could be reached",
+            r"\b\d{1,3}(?:\.\d{1,3}){3}:(?:53|5353)\b",
             r"(?i)\b(?:dns|name resolution)\b[^\n]{0,30}\b(?:issues?|problems?|not (?:working|resolving)|"
             r"fail(?:s|ed|ing|ure)?|broken|timeouts?)\b",
         ),
@@ -1161,7 +1256,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         knowledge=("k8s-networkpolicy",),
         causes=(
-            Cause(0, (r"network ?polic|networkpolicy|\begress\b|default-deny|deny-all",), (5, 6, 0), (0,)),
+            Cause(
+                0,
+                (r"network ?polic|networkpolicy|default-deny|deny-all", r"\begress\b|lock(?:ed)? down|allow rules?"),
+                (5, 6, 0),
+                (0,),
+            ),
             Cause(
                 1,
                 (
@@ -1186,6 +1286,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"dial tcp [\d.:]+: (connect: )?connection timed out",
             r"EgressFirewall",
             r"context deadline exceeded",
+            r"\bdefault-deny\b|\bdeny-all\b|\bdeny all (?:policy|ingress|egress)\b",
         ),
         (
             "A default-deny NetworkPolicy without an allow rule for this source/port.",
@@ -1210,10 +1311,20 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         weight=0.8,
         causes=(
             Cause(0, (r"network ?polic|networkpolicy|default-deny|deny-all|podSelector",), (0, 2), (0,)),
-            Cause(1, (r"egress ?firewall",), (1, 2), (1,)),
+            Cause(
+                1,
+                (r"egress ?firewall", r"\bOVN\b|egressfirewall\.k8s\.ovn\.org|first[- ]match|allow ?list|0\.0\.0\.0/0"),
+                (1, 2),
+                (1,),
+            ),
             Cause(
                 2,
-                (r"security groups?|\bfirewall\b|\bnacl\b|network acl|\baws\b|\bazure\b|\bgcp\b|\bvpc\b|outbound",),
+                (
+                    r"security groups?|\bfirewall\b|\bnacl\b|network acl|\baws\b|\bazure\b|\bgcp\b|\bvpc\b|outbound"
+                    r"|\bec2\b|compute\.internal|different subnets",
+                    r"no (?:network ?polic\w*|netpol\w*)|networkpolic\w* -A\s+No resources found"
+                    r"|(?:not|never) use\w* network ?polic",
+                ),
                 (2,),
                 (2,),
             ),
@@ -1261,6 +1372,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"x509: certificate is valid for",
             r"tls: failed to verify certificate",
             r"certificate verify failed",
+            r"\bcertificate has expired\b|\bERR_CERT_[A-Z_]+\b",
         ),
         (
             "Expired certificate (check notAfter), clock skew, or the client does not trust the issuing CA.",
@@ -1283,7 +1395,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             Cause(
                 0,
                 (
-                    r"certificate has expired|not yet valid|\bexpired\b",
+                    r"certificate has expired|not yet valid|(?<!not )(?<!n't )\bexpired\b",
                     r"unknown authority|self-signed|not trusted|ca bundle|\bclock\b",
                 ),
                 (2, 0),
@@ -1291,7 +1403,11 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             ),
             Cause(
                 1,
-                (r"certificate is valid for", r"\bsan\b|subject ?alt\w*|hostname|does(?:n't| not) match"),
+                (
+                    r"certificate is valid for",
+                    r"\bsan\b|subject ?alt\w*|hostname|does(?:n't| not) match",
+                    r"renamed|moved (?:it )?to (?:a )?new namespace|new (?:service )?name",
+                ),
                 (2, 1),
                 (1,),
             ),
@@ -1559,12 +1675,25 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         causes=(
             Cause(
                 0,
-                (r"privatelink|vpc endpoint|route table|security group|cannot reach|unreachable|\bendpoint\b",),
+                (
+                    r"privatelink|vpc endpoint|route table|security group|cannot reach|unreachable|\bendpoint\b",
+                    r"waiting for nodes to join|not joining|never join\w*",
+                ),
                 (0, 3),
                 (0, 1),
             ),
             Cause(1, (r"subnet|ip address(?:es)?|\btags?\b",), (1, 2), (0,)),
-            Cause(2, (r"instance type|quota|capacity|insufficient",), (2, 1), (0,)),
+            Cause(
+                2,
+                (
+                    r"InsufficientInstanceCapacity"
+                    r"|instance type[^.\n]{0,40}\b(?:not (?:being )?(?:available|supported|offered)|unavailable|unsupp"
+                    r"orted)|quota|insufficient capacity",
+                    r"\b[a-z]\d[a-z]{0,2}\.(?:\d{0,2}x?large|metal|medium)\b|\bAZ\b|availability zone",
+                ),
+                (2, 1),
+                (0,),
+            ),
         ),
     ),
     Playbook(

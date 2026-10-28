@@ -73,6 +73,10 @@ flowchart LR
   downloads and allows only loopback or `*.svc` model endpoints. `kube-noob doctor` reports the result.
 - Cluster access is read-only, allowlisted per resource, never Secrets, and redacts values before they reach a model.
   Diagnoses list read-only steps first; commands that execute or change state are labelled as needing approval.
+  A structured playbook ties each root cause to the patterns that point at it, its own read-only steps and fixes
+  (`debug.playbooks.Cause`, `debug.diagnose.likely_cause`); with no pattern matching, the first cause is shown.
+  Names in steps come only from command-shaped input (`pod/<name>`, `kubectl get svc <name>`, `Selector:` lines) and
+  are pasted into a command only when made of characters a shell leaves alone there, so a copied step only ever reads.
 - Anything beyond reading is a capability tier (`kube_noob.tiers`: probe, dry-run, external writes, gate forwarding),
   off by default. Code that changes something is a `Writer` that cannot be built while its tier is off, and each
   action needs a person's `Approval` for that action, unexpired and used once. The read-only backends have no write

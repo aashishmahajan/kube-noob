@@ -236,7 +236,7 @@
       Normal   Pulling    10s  kubelet            Pulling image "myapp:latest"
       Warning  Failed     8s   kubelet            Failed to pull image "myapp:latest": Error response from daemon: pull access denied for myapp, repository does not exist or may require 'docker login': denied: requested access to the resource is denied
       Warning  Failed     8s   kubelet            Error: ErrImagePull
-  status: miss
+  status: pass
 - id: pullsecret-0a
   playbook: DBG-PULLSECRET
   cause: 0
@@ -244,7 +244,7 @@
   platform: null
   text: |
     Pod events in namespace team-a say it can't retrieve the image pull secret regcred. I created regcred in the default namespace a few days ago and it shows up there fine, so why isn't the pod using it?
-  status: miss
+  status: pass
 - id: pullsecret-0b
   playbook: DBG-PULLSECRET
   cause: 0
@@ -284,7 +284,7 @@
     NAME                 TYPE                             DATA   AGE
     nexus-pull-2026      kubernetes.io/dockerconfigjson   1      6d
     The pod spec itself has no imagePullSecrets. Where is that name coming from?
-  status: miss
+  status: pass
 - id: pullsecret-2a
   playbook: DBG-PULLSECRET
   cause: 2
@@ -555,7 +555,7 @@
     worker-2   11%    21%
     worker-3   8%     16%
     Memory looks mostly free. Why is it Pending?
-  status: miss
+  status: pass
 - id: pending-resources-2a
   playbook: DBG-PENDING-RESOURCES
   cause: 2
@@ -580,7 +580,7 @@
     $ oc get machineset -n openshift-machine-api
     prod-x7k2p-worker-us-east-1a   3   3   3   3   90d
     Why is the cluster not adding nodes?
-  status: miss
+  status: pass
 - id: pvc-pending-0a
   playbook: DBG-PVC-PENDING
   cause: 0
@@ -642,7 +642,7 @@
     Events:
       Normal  WaitForFirstConsumer  3s (x18 over 4m)  persistentvolume-controller  waiting for first consumer to be created before binding
     Do I need to worry about this?
-  status: miss
+  status: pass
 - id: pvc-pending-3a
   playbook: DBG-PVC-PENDING
   cause: 3
@@ -684,7 +684,7 @@
   platform: null
   text: |
     My Postgres pod on plain Kubernetes can't write to its mounted data volume and logs "permission denied" on /var/lib/postgresql/data. The PVC is bound and mounted fine and the container runs as UID 999.
-  status: miss
+  status: pass
 - id: mount-1b
   playbook: DBG-MOUNT
   cause: 1
@@ -836,7 +836,7 @@
   platform: null
   text: |
     kubectl get endpoints for my service shows <none> even though three pods are Running and Ready. I renamed the app label in the Deployment yesterday, so what should I check?
-  status: miss
+  status: pass
 - id: no-endpoints-0b
   playbook: DBG-NO-ENDPOINTS
   cause: 0
@@ -851,7 +851,7 @@
     cart   <none>      3d
     $ kubectl get pods --show-labels
     cart-5f8c7d9b6-lq2tn   1/1   Running   0   3d   app=cart,tier=backend
-  status: miss
+  status: pass
 - id: no-endpoints-1a
   playbook: DBG-NO-ENDPOINTS
   cause: 1
@@ -878,7 +878,7 @@
     $ kubectl get pods -l app=api
     api-6c8f7d5b9-vh4kd   0/1   Running   0   5m
     Events: Warning Unhealthy kubelet Readiness probe failed: HTTP probe failed with statuscode: 500
-  status: miss
+  status: pass
 - id: no-endpoints-2a
   playbook: DBG-NO-ENDPOINTS
   cause: 2
@@ -1015,7 +1015,7 @@
     default-deny-egress  <none>         2d
     allow-db-egress      app=orders     2d      (egress: 10.0.0.0/8 tcp/5432)
     DNS worked before these policies were applied.
-  status: miss
+  status: pass
 - id: dns-1a
   playbook: DBG-DNS
   cause: 1
@@ -1082,7 +1082,7 @@
   platform: null
   text: |
     I added a default-deny ingress NetworkPolicy to our payments namespace and now the frontend pods time out connecting to the api on port 8080. Everything worked before the policy, so why is traffic dropped?
-  status: miss
+  status: pass
 - id: netpol-0b
   playbook: DBG-NETPOL
   cause: 0
@@ -1176,7 +1176,7 @@
     Post "https://api.example.com/v1/token": tls: failed to verify certificate: x509: certificate is valid for ingress.example.com, www.example.com, not api.example.com
     notAfter=Mar 14 10:22:07 2027 GMT
     The cert is not expired and the CA is trusted. What is wrong?
-  status: miss
+  status: pass
 - id: rosa-hcp-nodes-0a
   playbook: DBG-ROSA-HCP-NODES
   cause: 0
@@ -1226,7 +1226,7 @@
   platform: rosa-hcp
   text: |
     I created a ROSA HCP machine pool with GPU instances in a single AZ and it never gets any nodes. How do I find out why?
-  status: miss
+  status: pass
 - id: rosa-hcp-nodes-2b
   playbook: DBG-ROSA-HCP-NODES
   cause: 2

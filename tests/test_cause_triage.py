@@ -156,6 +156,7 @@ def test_structured_playbooks_are_consistent() -> None:
         p = by_id[pid]
         assert p.causes, pid
         assert sorted(c.cause for c in p.causes) == list(range(len(p.root_causes))), pid  # every cause, once
+        assert p.default_cause is None or 0 <= p.default_cause < len(p.root_causes), pid
         for c in p.causes:
             assert all(0 <= i < len(p.checks) for i in c.checks), (pid, c.cause)
             assert all(0 <= i < len(p.fixes) for i in c.fixes), (pid, c.cause)
@@ -193,10 +194,203 @@ def test_gather_steps_only_for_text_about_a_cluster(kit: tk.Toolkit) -> None:
     docker = kit.insight(tk.InsightIn(text="How do I make a Docker image smaller? The push takes ages."))
     assert docker["readOnlyNextSteps"] == [] and "gather" not in docker["ran"]
     assert "names no Kubernetes or OpenShift" in docker["approach"]
-    pod = kit.insight(tk.InsightIn(text="my pod keeps restarting and I do not know why"))
-    assert pod["readOnlyNextSteps"] and pod["readOnlyNextSteps"][0]["command"].startswith("kubectl get pods")
+    pods = kit.insight(tk.InsightIn(text="something is off with the pods in my namespace and I do not know what"))
+    assert pods["readOnlyNextSteps"] and pods["readOnlyNextSteps"][0]["command"].startswith("kubectl get pods")
+    restarting = kit.insight(tk.InsightIn(text="my pod keeps restarting and I do not know why"))
+    assert restarting["findings"][0]["id"] == "DBG-CRASHLOOP"
+    assert str(restarting["findings"][0]["cause"]).startswith("The process exits right after start")
+    assert restarting["readOnlyNextSteps"][0]["command"] == "kubectl logs <pod> -n <namespace> --previous"
     given = kit.insight(tk.InsightIn(text="the app is slow since this morning", platform="openshift"))
     assert given["readOnlyNextSteps"][0]["command"].startswith("oc get pods")
+
+
+@pytest.mark.parametrize(
+    ("text", "playbook"),
+    [
+        ("$ kubectl get ep orders\nNAME     ENDPOINTS   AGE\norders   <none>      3m", "DBG-NO-ENDPOINTS"),
+        ("my Service has no endpoints even though the pods are up", "DBG-NO-ENDPOINTS"),
+        ("subsets:\n- notReadyAddresses:\n  - ip: 10.0.3.7", "DBG-NO-ENDPOINTS"),
+        ("the endpoint list is empty after I changed the selector", "DBG-NO-ENDPOINTS"),
+        (";; connection timed out; no servers could be reached", "DBG-DNS"),
+        ("the pull secret can't be retrieved according to the pod events", "DBG-PULLSECRET"),
+        ("kubelet says it cannot retrieve the image pull secret for my deployment", "DBG-PULLSECRET"),
+        ("after we added a default-deny policy the frontend cannot reach the API", "DBG-NETPOL"),
+        ("the readiness probe keeps failing with connection refused on the pod IP", "DBG-PROBE"),
+        ("the pod flips between Ready and NotReady every few minutes under load", "DBG-PROBE"),
+        ("my worker pod keeps restarting a few seconds after it starts", "DBG-CRASHLOOP"),
+        ('Error: failed to prepare subPath for volumeMount "conf" of container "api"', "DBG-CONFIGERR"),
+        ("the pod fails to create its container with an unmarshalling error about invalid UTF-8", "DBG-INVALID-UTF8"),
+        ("my PVC requests 50Gi from the standard class and it just stays Pending for ages", "DBG-PVC-PENDING"),
+        ("the app gets permission denied writing to the mounted volume at /srv/data", "DBG-MOUNT"),
+        ("RHACS blocked my Deployment because of a policy about privileged containers", "DBG-STACKROX-ADMISSION"),
+        ("since someone enabled deploy-stage enforcement our rollouts are refused", "DBG-STACKROX-ADMISSION"),
+        ("browsers show NET::ERR_CERT_DATE_INVALID for the shop route", "DBG-X509"),
+        ("pods are Pending for lack of memory and no node gets added", "DBG-PENDING-RESOURCES"),
+    ],
+)
+def test_symptoms_in_plain_words_name_the_playbook(kit: tk.Toolkit, text: str, playbook: str) -> None:
+    found = [f["id"] for f in kit.insight(tk.InsightIn(text=text))["findings"] if f["source"] == "playbook"]
+    assert playbook in found, found
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Could not resolve dependencies for project com.example:app: artifact not found",
+        "npm ERR! could not resolve peer dependency react@18",
+        "git merge: unable to resolve the conflict in README.md",
+        "how do I set the number of endpoints in my REST API design?",
+    ],
+)
+def test_build_tool_and_api_words_do_not_name_dns_or_endpoints(text: str) -> None:
+    ids = [d["id"] for d in diagnose(text).as_dict()["diagnoses"]]
+    assert "DBG-DNS" not in ids and "DBG-NO-ENDPOINTS" not in ids, ids
+
+
+# Community test half, 2026-10-28: plain-word signals for these phrases named a playbook on feature requests, design
+# questions, CNI and CSI bug reports and Docker posts, and two independent graders found the answers worse (probe
+# mentions 48 worse, 21 better; "mount failed" 15 worse, 1 better; DNS words 31 worse, 11 better). They were removed.
+@pytest.mark.parametrize(
+    ("text", "playbook"),
+    [
+        ("Feature request: let the startup probe use a different port than the liveness probe", "DBG-PROBE"),
+        ("Should initialDelaySeconds default to the image's healthcheck start period?", "DBG-PROBE"),
+        ("cephfs kernel mount failed with exit status 32 after the node upgrade", "DBG-MOUNT"),
+        ("docker compose: the api container gets SERVFAIL from the embedded resolver", "DBG-DNS"),
+        ("Calico eBPF: pod-to-pod traffic drops with Multus secondary interfaces", "DBG-NETPOL"),
+        ("feature: CoreDNS forward plugin should cache SERVFAIL answers", "DBG-DNS"),
+    ],
+)
+def test_feature_requests_and_other_runtimes_do_not_name_a_playbook(text: str, playbook: str) -> None:
+    ids = [d["id"] for d in diagnose(text).as_dict()["diagnoses"]]
+    assert playbook not in ids, ids
+
+
+@pytest.mark.parametrize(
+    ("text", "key", "want"),
+    [
+        ("we hit a namespace issue when the PVC is pending", "ns", None),
+        ("the pvc cannot be resized in namespace 1", "pvc", None),
+        ("the pvc cannot be resized in namespace 1", "ns", None),
+        ('persistentvolumeclaims "data-db-0" is forbidden in the namespace "shop"', "pvc", "data-db-0"),
+        ('persistentvolumeclaims "data-db-0" is forbidden in the namespace "shop"', "ns", "shop"),
+        ("kubectl get pvc data-kafka-0 -n streaming", "pvc", "data-kafka-0"),
+        ("kubectl get pvc data-kafka-0 -n streaming", "ns", "streaming"),
+        ("volumes:\n- name: data\n  persistentVolumeClaim:\n    claimName: uploads\n", "pvc", "uploads"),
+        ("the pods in namespace team-a cannot pull", "ns", "team-a"),
+    ],
+)
+def test_names_come_from_command_shaped_text_not_sentences(text: str, key: str, want: str | None) -> None:
+    from kube_noob.debug.diagnose import extract_context
+
+    assert extract_context(text).get(key) == want
+
+
+def test_service_steps_use_the_service_name_and_selector_from_the_paste() -> None:
+    pasted = (
+        "$ kubectl get svc web -o jsonpath='{.spec.selector}'\n"
+        '{"app":"web-frontend","tier":"fe"}\n'
+        "$ kubectl get endpoints web -n shop\n"
+        "NAME   ENDPOINTS   AGE\nweb    <none>      9m\n"
+    )
+    d = _first(pasted, platform="kubernetes")
+    assert d["id"] == "DBG-NO-ENDPOINTS"
+    cmds = _commands(d)
+    assert "kubectl describe svc web -n shop" in cmds
+    assert "kubectl get endpointslices -n shop -l kubernetes.io/service-name=web -o wide" in cmds
+    assert "kubectl get pods -n shop -l app=web-frontend,tier=fe -o wide" in cmds
+    event = _first('Error: no endpoints available for service "orders-api"', platform="kubernetes")
+    assert "kubectl describe svc orders-api -n <namespace>" in _commands(event)
+    described = _first(
+        "Name:              cart\nNamespace:         shop\nSelector:          app=cart\nEndpoints:         <none>\n",
+        platform="kubernetes",
+    )
+    assert "kubectl get pods -n shop -l app=cart -o wide" in _commands(described)
+    prose = _first("Endpoints: <none>\nWhen I get endpoints for the router, the list is empty.", platform="kubernetes")
+    assert "kubectl describe svc <service> -n <namespace>" in _commands(prose)
+    unsafe = _first(
+        "no endpoints available for service \"x\"\n$ kubectl get svc x -o jsonpath='{.spec.selector}'\n"
+        '{"app":"a;rm -rf /"}'
+    )
+    assert all("rm -rf" not in c for c in _commands(unsafe))
+    from kube_noob.debug.diagnose import _fill
+
+    assert _fill("kubectl get pod {pod} -n {ns}", {"pod": "#x", "ns": "a;b"}) == "kubectl get pod <pod> -n <namespace>"
+    assert _fill("kubectl get pods -l {selector}", {"selector": "app=a,tier=b"}) == "kubectl get pods -l app=a,tier=b"
+
+
+@pytest.mark.parametrize(
+    ("text", "platform", "playbook", "cause"),
+    [
+        (
+            'Failed to pull image "shopfront": pull access denied for shopfront, repository does not exist or may '
+            "require 'docker login'\n$ docker images | grep shopfront\nshopfront  latest  a1b2c3  1 hour ago  90MB",
+            None,
+            "DBG-IMAGEPULL",
+            "An image built only on your workstation",
+        ),
+        (
+            "ImagePullBackOff for quay.io/team/api:2.4.1 on the new nodes only; pods already running on the old nodes "
+            "are fine. The registry retention policy ran this morning.",
+            None,
+            "DBG-IMAGEPULL",
+            "Typo in image name or tag",
+        ),
+        (
+            "Pulling image-registry.openshift-image-registry.svc:5000/tools/cli:3 from project apps fails: "
+            "unauthorized: authentication required. Warning FailedToRetrieveImagePullSecret for tools-pull.",
+            "openshift",
+            "DBG-PULLSECRET",
+            "[OCP] The image is in the internal registry of another project",
+        ),
+        (
+            "Reason: OOMKilled every six hours. The service keeps an in-memory map of sessions as a cache; we raised "
+            "the limit to 3Gi and it just took longer to die.",
+            "kubernetes",
+            "DBG-OOM",
+            "Memory leak or unbounded cache",
+        ),
+        (
+            "Node went NotReady again and dmesg shows the oom-killer picking containers; the batch pods are BestEffort "
+            "and none of them show OOMKilled in their own status. Reason: OOMKilled appears only on a sidecar.",
+            "openshift",
+            "DBG-OOM",
+            "Node-level OOM",
+        ),
+        (
+            "0/4 nodes are available: 4 Insufficient cpu. Every service comes from one shared chart with requests "
+            "cpu: 2; kubectl top pods shows 15m each.",
+            "kubernetes",
+            "DBG-PENDING-RESOURCES",
+            "Requests are far larger than needed",
+        ),
+        (
+            'ProvisioningFailed: failed to provision volume with StorageClass "gp3-csi": rpc error: code = '
+            "InvalidArgument desc = Volume capabilities not supported. PVC is Pending.",
+            "openshift",
+            "DBG-PVC-PENDING",
+            "Access mode unsupported by the class",
+        ),
+        (
+            "Since the security team locked down egress with allow rules per app, pods log Temporary failure in name "
+            "resolution. CoreDNS pods look healthy and connecting by IP works.",
+            "kubernetes",
+            "DBG-DNS",
+            "Egress NetworkPolicy blocks DNS",
+        ),
+        (
+            "x509: certificate is valid for hook.old.svc, not hook.new.svc after I moved the webhook to a new "
+            "namespace. The certificate is not expired and the CA bundle did not change.",
+            "kubernetes",
+            "DBG-X509",
+            "Hostname mismatch",
+        ),
+    ],
+)
+def test_more_causes_follow_the_evidence(text: str, platform: str | None, playbook: str, cause: str) -> None:
+    d = next((d for d in diagnose(text, platform=platform).as_dict()["diagnoses"] if d["id"] == playbook), None)
+    assert d is not None, playbook
+    assert str(d["likelyCause"]).startswith(cause), d["likelyCause"]
 
 
 def test_a_conceptual_question_gets_the_explaining_document_before_a_weak_playbook(kit: tk.Toolkit) -> None:

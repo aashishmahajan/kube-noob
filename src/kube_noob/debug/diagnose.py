@@ -26,17 +26,52 @@ _COMPILED: dict[str, list[re.Pattern[str]]] = {
     p.pid: [re.compile(s, re.IGNORECASE) for s in p.signals] for p in PLAYBOOKS
 }
 
+# Names come from command- or output-shaped text: a -n flag, a Namespace: field, JSON, 'namespace "shop"' as API
+# errors quote it, namespace/shop; an unquoted word after "namespace" in a sentence ("a namespace issue") is English,
+# so it needs a hyphen or digit (or is "default") unless it follows "in namespace" ("pods in namespace shop").
 _NS_PATTERNS = (
-    re.compile(r"(?:-n|--namespace)[ =]([a-z0-9][-a-z0-9]{0,62})"),
+    re.compile(r"(?:^|[\s'\"`(])(?:-n|--namespace)[ =]([a-z0-9][-a-z0-9]{0,62})\b"),
     re.compile(r"\bNamespace:\s+([a-z0-9][-a-z0-9]{0,62})"),
     re.compile(r"\"namespace\":\s*\"([a-z0-9][-a-z0-9]{0,62})\""),
-    re.compile(r"namespace \"?([a-z0-9][-a-z0-9]{0,62})\"?"),
+    re.compile(r"\bnamespaces? \"([a-z0-9][-a-z0-9]{0,62})\""),
+    re.compile(r"\bnamespaces?/([a-z0-9][-a-z0-9]{0,62})\b"),
+    re.compile(r"\b(?:in|from|into|to) (?:the )?namespace ((?=[0-9-]*[a-z])[a-z0-9][-a-z0-9]{0,62})\b"),
+    re.compile(r"\bnamespace ((?=[a-z0-9-]*[-0-9])(?=[0-9-]*[a-z])[a-z0-9][-a-z0-9]{0,62}|default)\b"),
 )
+# "pod/api-1", 'pod "api-1"', or "pod api-7d9f" in a sentence; a bare word after "pod " ("my pod keeps restarting")
+# is English, so the unquoted form needs the hyphen or digit generated pod names carry.
 _POD_PATTERNS = (
-    re.compile(r"\bpod[/ ]\"?([a-z0-9][-a-z0-9.]{0,252})\"?"),
+    re.compile(r"\bpod/\"?([a-z0-9][-a-z0-9.]{0,252})\"?"),
+    re.compile(r"\bpod \"([a-z0-9][-a-z0-9.]{0,252})\""),
+    re.compile(r"\bpod ([a-z0-9][a-z0-9.]{0,120}[-0-9][-a-z0-9.]{0,130})\b"),
     re.compile(r"^Name:\s+([a-z0-9][-a-z0-9.]{0,252})$", re.MULTILINE),
 )
-_PVC_PATTERN = re.compile(r"(?:persistentvolumeclaim|pvc)[/ ]\"?([a-z0-9][-a-z0-9.]{0,252})\"?", re.IGNORECASE)
+# The Service a paste is about: "svc/web", "kubectl get svc web" (a command, not "when I get endpoints for the
+# router"), 'no endpoints available for service "web"', or the
+# Name of `kubectl describe svc` output (it has Endpoints: or TargetPort: lines).
+_SVC_PATTERNS = (
+    re.compile(r"\b(?:svc|services?|endpoints|ep|endpointslices?)/\"?([a-z0-9][-a-z0-9]{0,62})\b"),
+    re.compile(r"\b(?:kubectl|oc) get (?:svc|services?|endpoints|ep)[ \t]+([a-z0-9][-a-z0-9]{0,62})\b(?![./])"),
+    re.compile(r"\b(?:no endpoints available for service|services?) \"([a-z0-9][-a-z0-9]{0,62})\""),
+)
+_DESCRIBE_SVC = re.compile(r"^(?:Endpoints|TargetPort):", re.MULTILINE)
+_DESCRIBE_NAME = re.compile(r"^Name:\s+([a-z0-9][-a-z0-9]{0,62})\s*$", re.MULTILINE)
+# A Service's selector: `kubectl describe svc` prints "Selector: app=web,tier=fe"; jsonpath {.spec.selector} prints
+# a JSON object on the next line.
+_SELECTOR_LINE = re.compile(
+    r"^Selector:[ \t]+([\w./-]{1,253}=[\w.-]{0,63}(?:,[\w./-]{1,253}=[\w.-]{0,63}){0,9})[ \t]*$", re.M
+)
+_SELECTOR_JSON = re.compile(r"\.spec\.selector\b[^\n]{0,200}\n[ \t]*(\{[^\n{}]{1,600}\})")
+_LABEL_KEY = re.compile(r"^[A-Za-z0-9][\w./-]{0,252}$")
+_LABEL_VALUE = re.compile(r"^[A-Za-z0-9._-]{0,63}$")
+# The same for claims: pvc/data-0, 'pvc "data"', claimName: data, or "pvc data-db-0" (the bare form needs a hyphen
+# or digit: "the pvc is pending" names no claim).
+_PVC_PATTERNS = (
+    re.compile(r"\b(?i:persistentvolumeclaims?|pvc)/\"?([a-z0-9][-a-z0-9.]{0,252})"),
+    re.compile(r"\b(?i:persistentvolumeclaims?|pvc) \"([a-z0-9][-a-z0-9.]{0,252})\""),
+    re.compile(r"\bclaimName:[ \t]*\"?([a-z0-9][-a-z0-9.]{0,252})"),
+    re.compile(r"\b(?i:persistentvolumeclaims?|pvc) ((?=[a-z0-9.]*[-0-9])[a-z0-9][-a-z0-9.]{0,252})\b"),
+)
 _SA_PATTERN = re.compile(r"system:serviceaccount:(?P<ns>[a-z0-9][-a-z0-9]{0,62}):([a-z0-9][-a-z0-9]{0,62})")
 _SA_SPEC = re.compile(r"\bserviceAccountName[=:]\s*\"?([a-z0-9][-a-z0-9.]{0,252})")
 _FORBIDDEN = re.compile(
@@ -160,9 +195,17 @@ def extract_context(text: str) -> dict[str, str]:
     if pod:
         ctx["pod"] = pod
         ctx.setdefault("name", pod)
-    m = _PVC_PATTERN.search(text)
-    if m:
-        ctx["pvc"] = m.group(1)
+    pvc = _first(_PVC_PATTERNS, text)
+    if pvc:
+        ctx["pvc"] = pvc
+    svc = _first(_SVC_PATTERNS, text)
+    if svc is None and _DESCRIBE_SVC.search(text) and (m := _DESCRIBE_NAME.search(text)):
+        svc = m.group(1)
+    if svc:
+        ctx["svc"] = svc
+    selector = _selector(text)
+    if selector:
+        ctx["selector"] = selector
     m = _SA_PATTERN.search(text)
     if m:
         ctx["sa"], ctx["sa_ns"] = m.group(2), m.group("ns")
@@ -176,7 +219,30 @@ def extract_context(text: str) -> dict[str, str]:
     return ctx
 
 
-_SAFE_VALUE = re.compile(r"^[A-Za-z0-9@._:/=+#%-]{1,253}$")  # nothing a shell treats specially, no spaces
+def _selector(text: str) -> str | None:
+    """The Service selector as ``k=v,k=v`` when every key and value is a valid label (anything else stays a
+    placeholder)."""
+    m = _SELECTOR_LINE.search(text)
+    if m:
+        return m.group(1)
+    m = _SELECTOR_JSON.search(text)
+    if not m:
+        return None
+    try:
+        doc = json.loads(m.group(1))
+    except ValueError:
+        return None
+    if not isinstance(doc, dict) or not doc or len(doc) > 10:
+        return None
+    pairs = []
+    for k, v in doc.items():
+        if not (isinstance(v, str) and _LABEL_KEY.match(k) and _LABEL_VALUE.match(v)):
+            return None
+        pairs.append(f"{k}={v}")
+    return ",".join(pairs)
+
+
+_SAFE_VALUE = re.compile(r"^(?!#)[A-Za-z0-9@._:/=+#%,-]{1,600}$")  # nothing a shell treats specially, no spaces
 
 
 def _fill(cmd: str, ctx: dict[str, str]) -> str:
@@ -191,6 +257,8 @@ def _fill(cmd: str, ctx: dict[str, str]) -> str:
         "pod": "<pod>",
         "name": "<name>",
         "pvc": "<pvc>",
+        "svc": "<service>",
+        "selector": "<selector>",
         "secret": "<secret>",
         "sa": "default",
         "subject": sa_subject if "sa" in ctx else "<user-or-serviceaccount>",
@@ -264,8 +332,9 @@ def _fits(text: str, platform: str | None, openshift: bool, rosa: bool) -> bool:
 
 def likely_cause(p: Playbook, text: str, platform: str | None, openshift: bool, rosa: bool) -> Cause | None:
     """The cause ``text`` points at: three points for each of the cause's own patterns it matches, plus the
-    rarity-weighted words it shares with the cause and its fixes; the playbook's order breaks ties. A cause that
-    does not fit the platform (``_fits``) is never chosen."""
+    rarity-weighted words it shares with the cause and its fixes; the playbook's order breaks ties. When no cause's
+    own patterns match, a playbook with a ``default_cause`` shows that one (its most common cause; graders found shared
+    words a worse guess there). A cause that does not fit the platform (``_fits``) is never chosen."""
     if not p.causes:
         return None
     from kube_noob.insight import _playbook_word_counts, _specific_terms
@@ -274,16 +343,21 @@ def likely_cause(p: Playbook, text: str, platform: str | None, openshift: bool, 
     want = _specific_terms(text[:20_000], kubernetes_words=True)
     best: Cause | None = None
     best_score = -1.0
-    for c in p.causes:
+    default: Cause | None = None
+    evidence = False
+    for c in sorted(p.causes, key=lambda c: c.cause):
         cause = p.root_causes[c.cause]
         if not _fits(cause, platform, openshift, rosa):
             continue
+        if c.cause == p.default_cause:
+            default = c
         hits = sum(1 for w in _WHEN[(p.pid, c.cause)] if w.search(text))
+        evidence = evidence or hits > 0
         words = _specific_terms(" ".join([cause, *(p.fixes[i] for i in c.fixes)]), kubernetes_words=True)
         score = 3.0 * hits + sum(1.0 / df.get(t, 1) for t in want & words)
         if score > best_score:
             best, best_score = c, score
-    return best
+    return best if evidence or default is None else default
 
 
 # Patterns too common to name an OpenShift playbook when the text does not say it is OpenShift: a bare "Permission

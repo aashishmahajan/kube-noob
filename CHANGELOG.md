@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- Triage tuned on a training set and checked on real posts. Cause patterns for 11 playbooks were tuned on a new
+  training set (`tests/fixtures/triage-train`, 171 questions written by an agent that saw only the causes; the
+  held-out set is never tuned on): an image that still runs on old nodes points at a removed tag; a bare name in
+  `pull access denied for <name>` points at a local image, not a private registry; `Volume capabilities not
+  supported` at an access mode the class cannot serve; the kernel OOM killer and NotReady nodes at node-level OOM;
+  caches and raised limits that only delay the kill at a leak; requests from a shared template next to low
+  `kubectl top` usage at oversized requests; OVN at an EgressFirewall; "not expired" no longer counts as expiry.
+  When nothing points at a cause, CrashLoopBackOff, image pull and OOM answers show their most common cause (the
+  process exits right after start; a wrong or missing tag; a limit below the working set) instead of a guess from
+  shared words. Symptoms in plain words now name a playbook when they are specific to the failure: a Service with no
+  endpoints (and `get endpoints` tables showing `<none>`, `notReadyAddresses`), a pod that keeps restarting, a probe
+  that keeps failing, a pod flipping between Ready and NotReady, a PVC that stays Pending, a pull secret that cannot
+  be retrieved, a default-deny policy, permission denied on a mounted volume, RHACS blocking a deployment,
+  `NET::ERR_CERT_*`, an unmarshalling error about UTF-8, Pending for lack of memory, `no servers could be reached`,
+  a DNS server on port 53. Signals that two blinded graders found harmful on the community halves were removed before
+  shipping: a probe mentioned in passing, "mount failed", SERVFAIL and other DNS words, pod-to-pod traffic (on feature
+  requests, design questions, Docker posts and CNI or CSI bug reports they named a playbook with the wrong cause).
+  Steps carry the names the input gives and never an English word: pod, PVC and namespace names come from
+  command-shaped text (no more `kubectl describe pod keeps` or `-n issue`), and Service steps use the Service name
+  and selector from the paste (`kubectl get svc web`, `Selector:` lines, `{.spec.selector}` output). Measured:
+  training set 87 to 136 of 171 causes right; held-out set 63 to 79 of 114, no item lost; golden unchanged (85 of
+  96 in scope, 21 of 23 out of scope, regressed 0). Community test half, two blinded graders: 28 answers changed in
+  content (15 and 17 better, 4 and 7 worse), the default causes changed 105 more (24 and 25 better, 1 and 2 worse),
+  and 30 answered rows lost an English word in a name slot; the train half agreed (31 changed: 16 better, 7 worse;
+  default causes 120 changed: 94 better, 5 worse).
 - Cause-linked triage: the 17 playbooks that answer most real posts (CrashLoopBackOff, image pull, pull secret,
   OOM, config errors, invalid UTF-8, pending resources, PVC pending, mounts, probes, Service endpoints, RHACS
   admission, eviction, DNS, NetworkPolicy, x509, ROSA HCP nodes) tie each root cause to the words that point at it,

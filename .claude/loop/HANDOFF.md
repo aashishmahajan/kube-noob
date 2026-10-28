@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 late night (QA8 cause-linked triage in progress, row 20y; Claude made the 20w ranking calls as the owner asked: explain-first for weak playbooks on conceptual questions, related reading for pasted posts, cluster-context gather steps).
+right now; STATE.md says what is done. Updated 2026-10-28 late night (QA8 round 2 committed: triage tuned on a training set, plain-word signals kept only where blinded graders found real posts better, default causes, names in steps; row 20y waits for CI. Next: row 20w remaining ranking items).
 
 ## Repository and branch
 
@@ -29,6 +29,18 @@ right now; STATE.md says what is done. Updated 2026-10-28 late night (QA8 cause-
 
 ## In flight (finish these first)
 
+-1. QA8 (row 20y), round 2 committed. Mark done when CI is green on that commit. How to keep tuning triage:
+   tune `Cause.when` patterns and playbook signals on `tests/fixtures/triage-train` only
+   (`python scripts/eval_triage.py --dir tests/fixtures/triage-train`), check `python scripts/eval_triage.py`
+   (held-out; a `status: pass` item must stay a pass; promote new passes), `python scripts/eval_golden.py`
+   (regressed 0), then the community halves: `git archive HEAD src` into the scratchpad, run
+   `scripts/eval_questions.py --split train|test` and a shown-answer dump (cause, fix, first steps) with
+   `PYTHONPATH` on each tree, and have two blinded graders (X/Y in random order, key kept outside their folder, a
+   private work dir each) judge only the rows that changed. The training set rewards recall; real posts punish
+   false positives: the first plain-word signal set scored higher on both labelled sets and lost on real posts.
+   Grader notes not yet acted on: CRASHLOOP steps miss init containers (`logs --previous` without `-c`); DNS steps
+   use kube-system/kube-dns labels on OpenShift posts; `rosa list machinepools` shows on EKS posts; EFS advice on
+   Azure/GCE PVC posts; ROSA-only steps should need ROSA context like causes do.
 0. QA5 (STATE row 20u): per-technology measurement and the golden set. Committed; dispatch CI and mark done when green.
    Golden set: `tests/fixtures/golden/*.yaml` (119 items; status pass/abstain/miss, `gap` says what each miss needs).
    Baseline: in-scope top-1 answers 7/96, out of scope 15/23 unanswered. To regrade after a change:

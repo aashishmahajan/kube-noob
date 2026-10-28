@@ -88,7 +88,11 @@ at shown first with its own fix and steps: a secret in another namespace gets "c
 namespace and link it" and `kubectl get secrets -A --field-selector metadata.name=<secret>`; only a question that says
 OpenShift and names another project's internal registry gets `system:image-puller`. The 17 playbooks that answer
 most real posts work this way (cause-linked triage): each cause carries the words that point at it, the read-only
-steps that confirm it and its fixes, and text that never says OpenShift gets `kubectl` steps. `audit` catches it before deploy
+steps that confirm it and its fixes, and text that never says OpenShift gets `kubectl` steps. When nothing in the text
+points at one cause, the playbook's most common cause is shown rather than a guess. Plain words name a playbook when
+they are specific to the failure ("my Service has no endpoints", "my pod keeps restarting", "the readiness probe keeps
+failing", "the PVC stays Pending"), and the steps carry the names in what you paste: `kubectl get svc web` and its
+`{.spec.selector}` output give `kubectl describe svc web` and `kubectl get pods -l app=web-frontend`. `audit` catches it before deploy
 (KN-C013) when the bundle defines the Secret only in another namespace, and the in-cluster debug reads the pod's and
 its ServiceAccount's pull secret names.
 

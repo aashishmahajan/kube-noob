@@ -9,7 +9,8 @@ product under its own terms and privacy policy. kube-noob adds no network traffi
 
 ## What it reads
 
-- Text you give it: manifests, events, logs, error messages and questions. It processes them in memory to answer.
+- Text you give it: manifests, events, logs, error messages and questions. It processes them in memory to answer;
+  names it finds there (a pod, a Service, a label selector, a namespace) go only into the steps it prints.
 - Its bundled knowledge, and documents you index yourself with `kube-noob corpus add-docs`.
 - Only if you turn on cluster access: read-only requests to the Kubernetes or OpenShift API of your current
   kubeconfig context. It never reads Secrets and redacts values that look like credentials.

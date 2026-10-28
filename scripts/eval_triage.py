@@ -4,8 +4,11 @@ expected playbook, and does that finding show the expected root cause?
 The set (``tests/fixtures/triage/*.yaml``) is original text written by an agent that saw only each playbook's list of
 root causes (not the patterns or code that pick one), one typed question and one pasted error per cause, each
 labelled with its playbook and cause index. ``status: pass`` items must keep passing (``tests/test_triage.py``).
+Patterns are tuned on the separate training set (``tests/fixtures/triage-train``, written the same way) and never on
+the held-out set.
 
     python scripts/eval_triage.py [--dir tests/fixtures/triage] [--out triage-results.json] [--json]
+    python scripts/eval_triage.py --dir tests/fixtures/triage-train
 """
 
 from __future__ import annotations
