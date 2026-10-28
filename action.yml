@@ -24,7 +24,9 @@ inputs:
     required: false
     default: default
   containerfiles:
-    description: Containerfiles to audit, separated by spaces.
+    description: >-
+      Containerfiles to audit, separated by spaces. With sarif-reports, each is also the build that ships code:
+      PATH[=IMAGE][,context=DIR][,target=STAGE] (the context defaults to the Containerfile's directory).
     required: false
     default: ""
   scanner-reports:

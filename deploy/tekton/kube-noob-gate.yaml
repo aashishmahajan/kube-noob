@@ -34,7 +34,9 @@ spec:
       default: "."
     - name: containerfiles
       type: string
-      description: Containerfiles in the workspace to audit, separated by spaces.
+      description: >-
+        Containerfiles in the workspace to audit, separated by spaces; with sarif-reports each is also the build that
+        ships code, PATH[=IMAGE][,context=DIR][,target=STAGE] (context defaults to the Containerfile's directory).
       default: ""
     - name: scanner-reports
       type: string

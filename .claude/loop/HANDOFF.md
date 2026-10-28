@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (G1 done; G2 built, CI next; SAST1 red team returned 16 findings to fix).
+right now; STATE.md says what is done. Updated 2026-10-28 (G1 and G2 done; SAST1 red-team fixes committed, CI next).
 
 ## Repository and branch
 
@@ -29,13 +29,12 @@ right now; STATE.md says what is done. Updated 2026-10-28 (G1 done; G2 built, CI
 
 ## In flight (finish these first)
 
-1. G2 (must-gather analysers, row 17): built, check.sh green; dispatch CI for the commit and mark done when green.
-   Note for every future YAML path: PyYAML's CSafeLoader composer recurses in C and segfaults the process on 100,000
+1. G2 (must-gather analysers, row 17): done, CI 40689956115 green. Note for every future YAML path: PyYAML's CSafeLoader composer recurses in C and segfaults the process on 100,000
    nested brackets; `kube_noob.mustgather.analyse._Loader` pre-scans `yaml.parse` events (non-recursive) for depth,
    aliases and document count before loading. Reuse it if `yamlio` ever moves to CSafeLoader.
-2. SAST1 (row 15s): CI 40684007114 green on b1f2ad9, but the independent red team reproduced 16 findings. Fix each
-   with a regression test in `tests/test_code_redteam.py`, then dispatch CI and mark done. The repro scripts lived in
-   the session scratchpad (gone); each item below says enough to rebuild its repro.
+2. SAST1 (row 15s): the independent red team reproduced 16 findings; all are fixed, each with a regression test in
+   `tests/test_code_redteam.py` (named test_rtN_...). Remaining: CI green on the fix commit, then mark row 15s done.
+   The list stays here as the record of what was fixed:
    - SAST1-RT1 (high) absolute `--containerfile`/`-c` path (or `,context=/abs`): context becomes an absolute path,
      `ship._norm_context` only strips the leading `/`, every finding reads "not shipped", gate and `code report
      --fail-on high` exit 0. Fix: resolve contexts and Containerfile paths relative to `--repo` (refuse outside).
@@ -93,7 +92,7 @@ right now; STATE.md says what is done. Updated 2026-10-28 (G1 done; G2 built, CI
 
 ## Queue after that (from STATE.md)
 
-LT1 (blocked: owner's load image), VUL2 (blocked on DB1), RT2, then the older queue (G3, G5, I6, I1, N2, N1, N5, G4, E2, E1, E3, E4b, E5, I2, I9, I8,
+LT1 (blocked: owner's load image), VUL2 (blocked on DB1), RT2, then the older queue (G3 next, G5, I6, I1, N2, N1, N5, G4, E2, E1, E3, E4b, E5, I2, I9, I8,
 P1, P2, GATE1-3, V2, V3, N3, N4, A1-A5, I10, T3, I3, I4, I5, I7, GOV1-3, M13). Every enrichment that fetches anything
 must be jittered (random pause between requests, jittered first run and intervals).
 

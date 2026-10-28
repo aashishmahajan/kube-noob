@@ -141,6 +141,7 @@ class Instruction:
     body: str  # the arguments without the leading --flags
     flags: dict[str, str] = field(default_factory=dict)
     heredoc: str = ""
+    mounts: list[str] = field(default_factory=list)  # every RUN --mount value (flags keeps only the last)
 
 
 @dataclass
@@ -164,7 +165,14 @@ class ContainerfileError(ValueError):
 
 
 _DIRECTIVE = re.compile(r"^#\s{0,10}(escape|syntax|check)\s{0,10}=\s{0,10}(\S{1,200})\s*$", re.I)
-_HEREDOC = re.compile(r"<<(-?)([\"']?)([A-Za-z_][A-Za-z0-9_]{0,40})\2")
+# BuildKit (moby/buildkit frontend/dockerfile/parser): an instruction splits from its arguments on reWhitespace
+# ([\t\v\f\r ]+); flags end at the first word that does not start with "--" (or at a bare "--"); heredocs are read
+# only in RUN, COPY and ADD, and only from a whole word matching reHeredoc (^(\d*)<<(-?)\s*([^<]*)$); the first line's
+# UTF-8 byte order mark is discarded.
+_HEREDOC = re.compile(r"^(\d{0,3})<<(-?)([\"']?)([A-Za-z_][A-Za-z0-9_]{0,40})\3$")
+_HEREDOC_CMDS = frozenset({"RUN", "COPY", "ADD"})
+_WS = re.compile(r"[\t\v\f\r ]+")
+_FLAG = re.compile(r"--(?:\"[^\"]*\"|'[^']*'|[^\s\"'])*")
 _KEYWORDS = frozenset(
     {
         "FROM",
@@ -190,6 +198,7 @@ _KEYWORDS = frozenset(
 
 
 def parse(text: str) -> Parsed:
+    text = text.removeprefix("\ufeff")
     if len(text.encode("utf-8", "replace")) > MAX_BYTES:
         raise ContainerfileError(f"larger than {MAX_BYTES} bytes")
     lines = text.splitlines()
@@ -225,9 +234,14 @@ def parse(text: str) -> Parsed:
                 logical += escape  # keep continuing past comments and blank lines, as BuildKit does
                 continue
             logical += " " + nxt.strip()
+        word, *tail = _WS.split(logical.strip(), maxsplit=1)
+        rest = tail[0] if tail else ""
+        cmd = word.upper()
         heredoc_parts: list[str] = []
-        for m in _HEREDOC.finditer(logical):
-            dash, delim = m.group(1), m.group(3)
+        for m in (_HEREDOC.match(w) for w in rest.split()) if cmd in _HEREDOC_CMDS else ():
+            if not m:
+                continue
+            dash, delim = m.group(2), m.group(4)
             body: list[str] = []
             while i < len(lines):
                 cur = lines[i]
@@ -236,8 +250,6 @@ def parse(text: str) -> Parsed:
                     break
                 body.append(cur)
             heredoc_parts.append("\n".join(body))
-        word, _, rest = logical.strip().partition(" ")
-        cmd = word.upper()
         if cmd not in _KEYWORDS:
             notes.append(f"line {start}: {word[:40]!r} is not a Containerfile instruction")
             continue
@@ -245,13 +257,19 @@ def parse(text: str) -> Parsed:
         if count > MAX_INSTRUCTIONS:
             raise ContainerfileError(f"more than {MAX_INSTRUCTIONS} instructions")
         flags: dict[str, str] = {}
+        mounts: list[str] = []
         rest = rest.strip()
         while rest.startswith("--"):
-            tok, _, rest = rest.partition(" ")
+            m = _FLAG.match(rest)
+            tok = m.group(0) if m else rest
+            rest = rest[len(tok) :].lstrip()
+            if tok == "--":
+                break
             key, _, val = tok[2:].partition("=")
-            flags[key.lower()] = val
-            rest = rest.lstrip()
-        ins = Instruction(start, cmd, rest, flags, "\n".join(heredoc_parts))
+            flags[key.lower()] = val.strip("\"'") if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'" else val
+            if key.lower() == "mount" and len(mounts) < 50:
+                mounts.append(flags["mount"])
+        ins = Instruction(start, cmd, rest, flags, "\n".join(heredoc_parts), mounts)
         if cmd == "FROM":
             parts = rest.split()
             base = parts[0] if parts else ""
@@ -402,16 +420,21 @@ def _secret_values(ins: Instruction, where: str) -> list[secrets.Hit]:
     return secrets.scan_text(text, where, assignments=ins.cmd in {"ENV", "ARG", "LABEL"})
 
 
-def ignore_rules(text: str) -> list[tuple[bool, re.Pattern[str]]]:
-    """A .containerignore or .dockerignore as (exception, pattern) rules, in order; the last match wins."""
+def ignore_rules(text: str, bad: list[str] | None = None) -> list[tuple[bool, re.Pattern[str]]]:
+    """A .containerignore or .dockerignore as (exception, pattern) rules, in order; the last match wins. A pattern
+    that is not valid (``[]``, ``[!]``, ``[z-a]``; the build refuses it too) is left out and listed in ``bad``."""
     rules = []
-    for raw in text.splitlines()[:5000]:
+    for raw in text.removeprefix("\ufeff").splitlines()[:5000]:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         neg = line.startswith("!")
         pat = os.path.normpath(line.lstrip("!").strip().lstrip("/")).replace(os.sep, "/")
-        rules.append((neg, re.compile(_glob(pat))))
+        try:
+            rules.append((neg, re.compile(_glob(pat))))
+        except re.error:
+            if bad is not None and len(bad) < 20:
+                bad.append(line[:200])
     return rules
 
 
@@ -444,7 +467,8 @@ def _glob(pat: str) -> str:
             if j == -1:
                 out += re.escape(ch)
             else:
-                out += "[" + pat[i + 1 : j].replace("\\", "\\\\").replace("!", "^", 1) + "]"
+                body = pat[i + 1 : j].replace("\\", "\\\\")
+                out += "[" + ("^" + body[1:] if body.startswith("!") else body) + "]"
                 i = j
         else:
             out += re.escape(ch)

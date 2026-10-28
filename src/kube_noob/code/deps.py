@@ -26,6 +26,8 @@ from typing import Any
 MAX_FILES = 500
 MAX_FILE_BYTES = 5_000_000
 MAX_HITS = 5
+MAX_LINE = 4_096  # longer lines are not matched (no declaration is that long; patterns stay linear)
+NPM_SECTIONS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
 
 MANIFESTS: dict[str, tuple[tuple[str, str], ...]] = {  # (filename pattern, kind)
     "pypi": (
@@ -69,11 +71,13 @@ def _patterns(ecosystem: str, name: str, filename: str) -> list[re.Pattern[str]]
     n = re.escape(name)
     if ecosystem == "pypi":
         loose = "[-_.]+".join(re.escape(part) for part in re.split(r"[-_.]+", name))
+        # One \s* before an optional "[extras]" that carries its own trailing \s*: two \s* around an optional
+        # group backtrack quadratically on a long run of spaces.
         if fnmatch.fnmatchcase(filename, "requirements*") or filename in {"Pipfile", "setup.cfg"}:
-            return [re.compile(rf"(?i)^\s*{loose}\s*(?:\[[^\]]*\])?\s*(?:[=<>!~;@]|$|#)")]
+            return [re.compile(rf"(?i)^\s*{loose}\s*(?:\[[^\]]*\]\s*)?(?:[=<>!~;@#]|$)")]
         if filename == "pyproject.toml":
             return [
-                re.compile(rf"(?i)[\"']{loose}\s*(?:\[[^\]]*\])?\s*(?:[=<>!~;@\"']|$)"),
+                re.compile(rf"(?i)[\"']{loose}\s*(?:\[[^\]]*\]\s*)?(?:[=<>!~;@\"']|$)"),
                 re.compile(rf"(?i)^\s*{loose}\s*="),
             ]
         return [re.compile(rf'(?i)^\s*name\s*=\s*"{loose}"'), re.compile(rf'(?i)^\s*"{loose}"\s*:')]
@@ -83,7 +87,9 @@ def _patterns(ecosystem: str, name: str, filename: str) -> list[re.Pattern[str]]
         if filename == "pnpm-lock.yaml":
             return [re.compile(rf"^\s*/?{n}[@/:]"), re.compile(rf"^\s*'?{n}'?:")]
         if filename in {"package-lock.json", "npm-shrinkwrap.json"}:
-            return [re.compile(rf'"node_modules/{n}"\s*:'), re.compile(rf'^\s*"{n}"\s*:')]
+            # v2/v3: the top-level "node_modules/<name>" entry; v1: a package entry (an object), never a string in
+            # another package's "requires" or "dependencies" map
+            return [re.compile(rf'^\s*"node_modules/{n}"\s*:'), re.compile(rf'^\s*"{n}"\s*:\s*\{{')]
         return [re.compile(rf'^\s*"{n}"\s*:')]
     if ecosystem == "maven":
         group, _, artifact = name.rpartition(":")
@@ -160,25 +166,86 @@ def find(
         kind = _kind(ecosystem, filename)
         if not kind:
             continue
-        patterns = _patterns(ecosystem, name, filename)
-        if not patterns:
-            continue
-        text = files[path]
-        for number, line in enumerate(text.splitlines()[:200_000], start=1):
-            if any(p.search(line) for p in patterns):
-                hits.append(
-                    Declared(
-                        path,
-                        number,
-                        line.strip()[:200],
-                        kind,
-                        "copied into the image from here" if path in copied else "found by name",
-                    )
+        lines = files[path].splitlines()[:200_000]
+        number = _line_for(ecosystem, name, filename, lines)
+        if number:
+            hits.append(
+                Declared(
+                    path,
+                    number,
+                    lines[number - 1].strip()[:200],
+                    kind,
+                    "copied into the image from here" if path in copied else "found by name",
                 )
-                break
+            )
         if len(hits) >= MAX_HITS:
             break
     return hits
+
+
+def _line_for(ecosystem: str, name: str, filename: str, lines: list[str]) -> int | None:
+    """The 1-based line that declares ``name`` in one dependency file, or None."""
+    if ecosystem == "maven" and filename == "pom.xml":
+        return _pom_line(name, lines)
+    if ecosystem == "npm" and filename == "package.json":
+        return _package_json_line(name, lines)
+    patterns = _patterns(ecosystem, name, filename)
+    for rx in patterns:  # in order of preference: the first pattern that matches anywhere wins
+        for number, line in enumerate(lines, start=1):
+            if len(line) <= MAX_LINE and rx.search(line):  # no declaration is that long; cutting one would fake "$"
+                return number
+    return None
+
+
+_POM_TOKEN = re.compile(r"<(/?)(dependency|exclusions)\b[^>]{0,200}>|<(groupId|artifactId)>\s*([^<\s]{1,300})\s*</\3>")
+
+
+def _pom_line(name: str, lines: list[str]) -> int | None:
+    """The ``<artifactId>`` line of a ``<dependency>`` (not one inside its ``<exclusions>``, not a plugin or the
+    parent) whose groupId matches when the name carries one (``group:artifact``)."""
+    group, _, artifact = name.rpartition(":")
+    artifact = artifact or name
+    in_dep = in_excl = False
+    dep_group, dep_line, dep_artifact = "", 0, ""
+    for number, line in enumerate(lines, start=1):
+        for m in _POM_TOKEN.finditer(line[:MAX_LINE]):
+            close, tag, field, value = m.group(1), m.group(2), m.group(3), m.group(4)
+            if tag == "exclusions":
+                in_excl = not close
+            elif tag == "dependency" and not in_excl:
+                if not close:
+                    in_dep, dep_group, dep_line, dep_artifact = True, "", 0, ""
+                else:
+                    if in_dep and dep_artifact == artifact and (not group or dep_group == group):
+                        return dep_line
+                    in_dep = False
+            elif field and in_dep and not in_excl:
+                if field == "groupId":
+                    dep_group = value
+                else:
+                    dep_artifact, dep_line = value, number
+    return None
+
+
+def _package_json_line(name: str, lines: list[str]) -> int | None:
+    """``"<name>":`` inside one of the dependency maps, not a script or another field with the same key."""
+    key = re.compile(rf'"{re.escape(name)}"\s*:')
+    opening = re.compile(rf'^\s*"({"|".join(NPM_SECTIONS)})"\s*:\s*\{{(.*)$')
+    inside = False
+    for number, line in enumerate(lines, start=1):
+        text = line[:MAX_LINE]
+        m = opening.match(text)
+        if m:
+            inside = "}" not in m.group(2)
+            if key.search(m.group(2)):
+                return number
+            continue
+        if inside:
+            if key.match(text.strip()):
+                return number
+            if text.strip().startswith("}"):
+                inside = False
+    return None
 
 
 def normalised_name(ecosystem: str, name: str) -> str:

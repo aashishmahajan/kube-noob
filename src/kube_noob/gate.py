@@ -215,7 +215,14 @@ def run(
     trust_report_vex: bool = False,
     sarif_reports: list[tuple[str, str]] | None = None,
     source_roots: list[str] | None = None,
+    code_builds: list[Any] | None = None,
+    unknown_builds: list[str] | None = None,
+    repo: Path | None = None,
 ) -> dict[str, Any]:
+    """``code_builds``: Containerfiles read with their context (``kube_noob.code.builds``); without them each
+    Containerfile's directory is its context. ``unknown_builds``: Containerfiles given but not readable as builds
+    (shipping is then unknown, which fails like shipped code). ``repo``: the checkout, to tell a SARIF path that is
+    no file of the repository (scanned elsewhere) from one no image ships."""
     from kube_noob.audit import exceptions as exc
     from kube_noob.audit.engine import analyze
 
@@ -292,10 +299,17 @@ def run(
         failures.append(
             f"{vulns['failing']} vulnerability finding(s) at {fail_on} or above that are fixable or known exploited"
         )
-    code = _code_findings(sarif_reports, containerfiles, source_roots or [], fail_on)
+    code = _code_findings(
+        sarif_reports, containerfiles, source_roots or [], fail_on, code_builds, unknown_builds or [], repo
+    )
     findings.extend(code["findings"])
     if code["failing"]:
-        where = "in shipped code" if containerfiles else "(no --containerfile: shipping not known)"
+        unknown_n = (code["summary"] or {}).get("shippingUnknown") or 0
+        where = (
+            ("in shipped code or code whose shipping is not known" if unknown_n else "in shipped code")
+            if containerfiles
+            else "(no --containerfile: shipping not known)"
+        )
         failures.append(f"{code['failing']} code finding(s) at {fail_on} or above {where}")
     failures.extend(code["errors"])
     order = {s: i for i, s in enumerate(SEVERITIES)}
@@ -355,10 +369,18 @@ def run(
 
 
 def _code_findings(
-    reports: list[tuple[str, str]], containerfiles: list[tuple[str, str]], roots: list[str], fail_on: str
+    reports: list[tuple[str, str]],
+    containerfiles: list[tuple[str, str]],
+    roots: list[str],
+    fail_on: str,
+    code_builds: list[Any] | None = None,
+    unknown_builds: list[str] | None = None,
+    repo: Path | None = None,
 ) -> dict[str, Any]:
     """SAST findings from SARIF as gate findings. With Containerfiles, a finding in a file no image ships (tests,
-    tools, files the .dockerignore leaves out cannot be known here) is reported but does not fail the gate."""
+    tools, files the .dockerignore leaves out) is reported but does not fail the gate. Shipping that cannot be
+    known fails closed: a path outside the source root, a path that is no file of the repository, or a Containerfile
+    that could not be read as a build."""
     if not reports:
         return {"findings": [], "failing": 0, "errors": [], "summary": None}
     from kube_noob.code import sarif, ship
@@ -370,21 +392,37 @@ def _code_findings(
             parsed.append(sarif.parse(text, uri, roots=roots))
         except sarif.SarifError as err:
             raise GateError(str(err)) from err
-    builds = []
-    for uri, text in containerfiles:
-        try:
-            builds.append(ship.parse_build(ship.Build(uri, text, "", str(Path(uri).parent))))
-        except ship.ShipError as err:
-            errors.append(str(err))
+    unknown = list(unknown_builds or [])
+    if code_builds is not None:
+        builds = list(code_builds)
+    else:
+        builds = []
+        for uri, text in containerfiles:
+            try:
+                builds.append(ship.parse_build(ship.Build(uri, text, "", str(Path(uri).parent))))
+            except ship.ShipError as err:
+                errors.append(str(err))
+                unknown.append(str(err))
+    given = bool(containerfiles) or bool(builds) or bool(unknown)
     merged = sarif.merge([f for r in parsed for f in r.findings])
     floor = Severity.parse(fail_on) if fail_on != "never" else None
     findings: list[dict[str, Any]] = []
     failing = 0
     not_shipped = 0
+    unknown_count = 0
     for f in merged:
-        shipped = ship.where(builds, f.location.path) if builds else []
-        unshipped = bool(builds) and not shipped
+        why = ""
+        if given:
+            if not f.location.resolved:
+                why = "the path is outside the source root (pass --source-root with the directory the scanner ran in)"
+            elif repo is not None and not (repo / f.location.path).is_file():
+                why = "no such file in the repository (scan from the repository root, or pass --source-root)"
+            elif unknown:
+                why = f"a Containerfile could not be read as a build ({unknown[0]})"
+        shipped = ship.where(builds, f.location.path) if builds and not why else []
+        unshipped = given and not shipped and not why
         not_shipped += int(unshipped)
+        unknown_count += int(bool(why))
         cwe = ", ".join(f"CWE-{c}" for c in f.cwe)
         tools = ", ".join(sorted({s["tool"] for s in f.sources}))
         findings.append(
@@ -394,7 +432,7 @@ def _code_findings(
                 "severity": f.severity,
                 "message": (f"{cwe}: " if cwe else "")
                 + f"{f.message} ({tools})"
-                + (" - not shipped in any image" if unshipped else ""),
+                + (" - not shipped in any image" if unshipped else f" - shipping unknown: {why}" if why else ""),
                 "resource": ", ".join(sorted({s.image for s in shipped})) or "code",
                 "path": "",
                 "uri": f.location.path,
@@ -413,7 +451,9 @@ def _code_findings(
         "findings": len(merged),
         "excluded": sum(len(r.excluded) for r in parsed),
         "quality": sum(len(r.quality) for r in parsed),
-        "notShipped": not_shipped if builds else None,
+        "notShipped": not_shipped if given else None,
+        "shippingUnknown": unknown_count if given else None,
+        "notes": list(dict.fromkeys(n for r in parsed for n in r.notes))[:20],
     }
     return {"findings": findings, "failing": failing, "errors": errors, "summary": summary}
 
@@ -627,11 +667,16 @@ def markdown(report: dict[str, Any], top: int = 25) -> str:
     c = report.get("code")
     if c:
         shipped = "" if c["notShipped"] is None else f", {c['notShipped']} in files no image ships"
+        if c.get("shippingUnknown"):
+            shipped += f", {c['shippingUnknown']} whose shipping is not known (gated as shipped)"
         lines += [
             f"Code findings from {_cell(', '.join(c['tools']), 300)}: {c['findings']} security findings{shipped}, "
             f"{c['excluded']} excluded (suppressed or fixed), {c['quality']} lint or quality results not gated.",
             "",
         ]
+        lines += [f"Note: {_cell(n, 400)}" for n in c.get("notes") or []]
+        if c.get("notes"):
+            lines.append("")
     v = report.get("vulnerabilities")
     if v:
         lines += [
@@ -655,6 +700,6 @@ def write(report: dict[str, Any], *, sarif_path: str | None, summary: str | None
     if sarif_path:
         Path(sarif_path).write_text(json.dumps(sarif(report), indent=1) + "\n", encoding="utf-8")
     if summary:
-        Path(summary).write_text(markdown(report), encoding="utf-8")
+        Path(summary).write_text(markdown(report), encoding="utf-8", errors="replace")
     if quality:
         Path(quality).write_text(json.dumps(codequality(report), indent=1) + "\n", encoding="utf-8")

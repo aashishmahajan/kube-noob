@@ -53,7 +53,7 @@ SECURITY_RULE_PREFIXES = ("security/", "security-node/", "no-unsanitized/", "@mi
 _CWE = re.compile(r"(?i)(?<![a-z0-9])cwe[-/_ ]?0*(\d{1,5})(?!\d)")
 _LINK_REF = re.compile(r"\[([^\]\n]{0,300})\]\(\d{1,4}\)")
 _ARG = re.compile(r"\{(\d{1,2})\}")
-_CONTROL = re.compile(r"[\x00-\x1f\x7f  ]+")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029\u202a-\u202e\u2066-\u2069]+")
 
 
 class SarifError(ValueError):
@@ -61,9 +61,17 @@ class SarifError(ValueError):
 
 
 def _s(v: Any, n: int = 300) -> str:
+    """A scalar as one bounded line: control and bidi characters become spaces, lone surrogates (valid JSON, not
+    valid UTF-8) become "?"."""
     if not isinstance(v, (str, int, float)) or isinstance(v, bool):
         return ""
-    return _CONTROL.sub(" ", str(v)[:n]).strip()
+    text = str(v)[:n].encode("utf-8", "replace").decode("utf-8")
+    return _CONTROL.sub(" ", text).strip()
+
+
+def _raw(v: Any, n: int) -> str:
+    """A URI as written (bounded, lone surrogates replaced): control characters are judged after percent-decoding."""
+    return v[:n].encode("utf-8", "replace").decode("utf-8") if isinstance(v, str) else ""
 
 
 def _dict(v: Any) -> dict[str, Any]:
@@ -272,18 +280,21 @@ def _location(
     for loc in _list(result.get("locations"))[:10]:
         phys = _dict(_dict(loc).get("physicalLocation"))
         art = _dict(phys.get("artifactLocation"))
-        uri = _s(art.get("uri"), 2000)
+        uri = _raw(art.get("uri"), 2000).strip()
         base_id = _s(art.get("uriBaseId"), 200)
         idx = _index(art.get("index"))
         if not uri and idx is not None:
             arts = _list(run.get("artifacts"))
             if idx < len(arts):
                 a = _dict(_dict(arts[idx]).get("location"))
-                uri, base_id = _s(a.get("uri"), 2000), base_id or _s(a.get("uriBaseId"), 200)
+                uri, base_id = _raw(a.get("uri"), 2000).strip(), base_id or _s(a.get("uriBaseId"), 200)
         if not uri:
             continue
         path, absolute = _resolve(uri, base_id, bases)
+        path = path.encode("utf-8", "replace").decode("utf-8")
         rel, ok = _relative(path, absolute, roots)
+        if _CONTROL.search(rel):  # %0A, %00, %1B decoded: never a repository file; never printed as is
+            rel, ok = _CONTROL.sub("?", rel), False
         region = _dict(phys.get("region"))
         return Location(
             rel, _int(region.get("startLine")), _int(region.get("startColumn")), _int(region.get("endLine")), ok
@@ -495,22 +506,33 @@ def merge(findings: list[CodeFinding]) -> list[CodeFinding]:
     out: list[CodeFinding] = []
     for group in groups.values():
         merged: list[CodeFinding] = []
+        by_cwe: dict[int, int] = {}  # CWE -> index in merged; linear, not a scan of merged per finding
+        by_rule: dict[tuple[str, str], int] = {}
+        # each merged finding's sources, for a constant-time membership test
+        keys: list[set[tuple[tuple[str, str], ...]]] = []
         for f in group:
-            target = next(
-                (
-                    m
-                    for m in merged
-                    if (set(m.cwe) & set(f.cwe))
-                    or any(s["tool"] == f.tool and s["ruleId"] == f.rule_id for s in m.sources)
-                ),
-                None,
-            )
-            if target is None:
+            hits = [by_cwe[c] for c in f.cwe if c in by_cwe]
+            if (f.tool, f.rule_id) in by_rule:
+                hits.append(by_rule[(f.tool, f.rule_id)])
+            if not hits:
                 merged.append(dataclasses.replace(f, sources=list(f.sources)))
+                keys.append({tuple(sorted(x.items())) for x in f.sources})
+                n = len(merged) - 1
+                by_rule.setdefault((f.tool, f.rule_id), n)
+                for c in f.cwe:
+                    by_cwe.setdefault(c, n)
                 continue
-            if f.sources[0] not in target.sources:
+            n = min(hits)
+            target = merged[n]
+            key = tuple(sorted(f.sources[0].items()))
+            if key not in keys[n]:
+                keys[n].add(key)
                 target.sources.append(f.sources[0])
-            target.cwe = tuple(sorted(set(target.cwe) | set(f.cwe)))
+            if not set(f.cwe) <= set(target.cwe):
+                target.cwe = tuple(sorted(set(target.cwe) | set(f.cwe)))
+            by_rule.setdefault((f.tool, f.rule_id), n)
+            for c in f.cwe:
+                by_cwe.setdefault(c, n)
             higher = SEVERITY_RANK[f.severity] > SEVERITY_RANK[target.severity]
             same = SEVERITY_RANK[f.severity] == SEVERITY_RANK[target.severity]
             if higher or (same and (f.score or 0.0) > (target.score or 0.0)):

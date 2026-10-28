@@ -214,12 +214,33 @@ def _exceptions_cmd(a: argparse.Namespace, fmt: str) -> int:
 def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob import gate
     from kube_noob.audit.exceptions import ExceptionsError
+    from kube_noob.code import builds as cb
 
+    repo = Path.cwd()
+    containerfiles: list[tuple[str, str]] = []
+    code_builds = []
+    unknown: list[str] = []
+    for spec in a.containerfile:
+        try:
+            b = cb.load_one(spec, repo)
+        except cb.BuildSpecError as err:  # still audited; code shipping through it is unknown
+            try:
+                path = cb.parse_spec(spec, repo).path
+            except cb.BuildSpecError:
+                path = spec
+            containerfiles.append((path, _read(path)))
+            unknown.append(str(err))
+            continue
+        containerfiles.append((b.containerfile, b.text))
+        code_builds.append(b)
     try:
         sources = gate.collect(a.file, _read) + gate.render(a.chart, a.values, a.namespace)
         report = gate.run(
             sources,
-            containerfiles=[(p, _read(p)) for p in a.containerfile],
+            containerfiles=containerfiles,
+            code_builds=code_builds,
+            unknown_builds=unknown,
+            repo=repo,
             platform=a.platform or s.default_platform,
             version=a.pversion,
             exceptions=_read(a.exceptions) if a.exceptions else None,
@@ -489,51 +510,13 @@ def _vuln_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     return 1 if bad else 0
 
 
-_BUILD_SPEC = re.compile(r"^(?P<path>[^=,]{1,500})(?:=(?P<image>[^,]{1,500}))?(?P<opts>(?:,[a-z]{1,10}=[^,]{1,500})*)$")
-
-
 def _code_builds(specs: list[str], repo: Path) -> list[Any]:
-    from kube_noob.code import ship
+    from kube_noob.code import builds
 
-    builds = []
-    for spec in specs:
-        m = _BUILD_SPEC.match(spec.strip())
-        if not m:
-            raise ConfigError(f"-c {spec!r}: expected PATH[=IMAGE][,context=DIR][,target=STAGE]")
-        opts = dict(o.split("=", 1) for o in m.group("opts").split(",") if o)
-        unknown = sorted(set(opts) - {"context", "target"})
-        if unknown:
-            raise ConfigError(f"-c {spec!r}: unknown option {', '.join(unknown)} (context, target)")
-        rel = m.group("path").strip()
-        path = (repo / rel).resolve()
-        if not path.is_file() or repo.resolve() not in path.parents:
-            raise ConfigError(f"-c {rel}: no such Containerfile in {repo}")
-        context = opts.get("context", str(Path(rel).parent))
-        ctx_dir = (repo / context).resolve()
-        if ctx_dir != repo.resolve() and repo.resolve() not in ctx_dir.parents:
-            raise ConfigError(f"-c {rel}: context {context!r} is outside the repository")
-        ignore = ""
-        for name in (".containerignore", ".dockerignore"):
-            f = ctx_dir / name
-            if f.is_file() and not f.is_symlink():
-                ignore = f.read_text(encoding="utf-8", errors="replace")[:1_000_000]
-                break
-        try:
-            builds.append(
-                ship.parse_build(
-                    ship.Build(
-                        rel,
-                        path.read_text(encoding="utf-8", errors="replace"),
-                        (m.group("image") or "").strip(),
-                        context,
-                        ignore,
-                        opts.get("target", ""),
-                    )
-                )
-            )
-        except ship.ShipError as exc:
-            raise ConfigError(str(exc)) from exc
-    return builds
+    try:
+        return builds.load(specs, repo)
+    except builds.BuildSpecError as exc:
+        raise ConfigError(f"-c {exc}") from exc
 
 
 def _dependency_files(repo: Path) -> dict[str, str]:
@@ -592,7 +575,17 @@ def _code_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
                 raise ConfigError(f"{path}: larger than {vr.MAX_BYTES} bytes")
             scans.append(vr.parse(_read(path), path))
         files = _dependency_files(repo) if scans else None
-        out = assess.assess(sarifs, builds, reach, scans, files, top=a.top, include_quality=a.include_quality)
+        root = repo.resolve()
+        out = assess.assess(
+            sarifs,
+            builds,
+            reach,
+            scans,
+            files,
+            top=a.top,
+            include_quality=a.include_quality,
+            exists=lambda rel: (root / rel).is_file() and root in (root / rel).resolve().parents,
+        )
     except (sarif.SarifError, vr.ReportError) as exc:
         raise ConfigError(str(exc)) from exc
     if a.format == "text":
@@ -781,7 +774,14 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--chart", action="append", default=[], help="a Helm chart directory to render; repeat")
     gt.add_argument("--values", action="append", default=[], help="values file for --chart; repeat")
     gt.add_argument("--namespace", default="default", help="namespace to render charts into")
-    gt.add_argument("--containerfile", action="append", default=[], help="a Containerfile to audit; repeat")
+    gt.add_argument(
+        "--containerfile",
+        action="append",
+        default=[],
+        metavar="PATH[=IMAGE][,context=DIR][,target=STAGE]",
+        help="a Containerfile to audit and, with --sarif-report, the build that ships code (context defaults to "
+        "its directory: context=. for docker build -f deploy/Containerfile .); repeat",
+    )
     gt.add_argument("--platform", choices=PLATFORMS)
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")

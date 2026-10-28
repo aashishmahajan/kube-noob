@@ -10,6 +10,19 @@
   elides their values; kube-noob does not open them at all); nested archives are listed, not opened. Caps bound the
   file count, the bytes processed (a gzip bomb stops at the cap), each file, what is kept in memory and the nesting
   depth; logs keep their last MiB. The layout was read from openshift/oc's `must-gather` and `inspect` source.
+- Code findings red team (SAST1): 16 reproduced findings fixed, each with a regression test
+  (`tests/test_code_redteam.py`). Fail-open paths closed: an absolute `-c`/`--containerfile` path or context, the
+  gate having no build context (`--containerfile PATH[=IMAGE][,context=DIR][,target=STAGE]` now, as in `code
+  report -c`), `RUN --mount=type=bind` builds (the `docker init` Go and Rust templates), a UTF-8 byte order mark, a
+  tab after an instruction or inside a flag, and `<<WORD` outside RUN, COPY and ADD each made shipped code "not
+  shipped". Shipping that cannot be known (a path outside the source root, a path that is no repository file, a
+  Containerfile that could not be read) now fails closed and says why, and SARIF notes reach the gate summary.
+  `COPY *.py` no longer matches `tests/x.py` (Go `filepath.Match`), `<Containerfile>.dockerignore` takes precedence
+  as in BuildKit, dependency lines skip `<exclusions>`, package.json scripts and lockfile `requires` maps, stage
+  traversal and SARIF merging are linear (a 26-stage Containerfile hung the gate; 40,000 results took minutes),
+  dependency patterns no longer backtrack, invalid `.dockerignore` classes are skipped instead of crashing,
+  percent-decoded control characters and lone surrogates in SARIF are neutralised, and insight recognises SARIF
+  without `$schema`.
 - `must-gather analyze` now says what is wrong (backlog G2), ranked by severity, each finding with the files it came
   from, its signals and read-only next steps: the cluster version (current, desired, channel, history; Failing,
   Available, Invalid, ReleaseAccepted, Upgradeable, RetrievedUpdates; an update that stopped partway), cluster

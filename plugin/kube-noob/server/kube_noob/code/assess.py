@@ -15,6 +15,7 @@ containers names the same registry and repository (any tag or digest: the code i
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -181,7 +182,11 @@ def assess(
     files: dict[str, str] | None = None,
     top: int = 20,
     include_quality: bool = False,
+    exists: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
+    """``exists``: whether a repository-relative path is a file of the repository. With Containerfiles, a finding
+    whose path is outside the source root or no repository file has unknown shipping: it is ranked and gated like
+    shipped code (fail closed), never filed as "not shipped"."""
     from kube_noob.code.sarif import merge
 
     builds = builds or []
@@ -192,13 +197,23 @@ def assess(
     notes = [n for s in sarifs for n in s.notes]
     shipped_rows: list[dict[str, Any]] = []
     not_shipped: list[dict[str, Any]] = []
+    unknown = 0
     for f in findings:
-        shipped = ship.where(builds, f.location.path) if builds else []
-        if builds and not shipped:
+        why = ""
+        if builds and not f.location.resolved:
+            why = "the path is outside the source root (pass --source-root with the directory the scanner ran in)"
+        elif builds and exists is not None and not exists(f.location.path):
+            why = "no such file in the repository (scan from the repository root, or pass --source-root)"
+        shipped = ship.where(builds, f.location.path) if builds and not why else []
+        if builds and not shipped and not why:
             not_shipped.append({**f.as_dict(), "shipped": "no image ships this file"})
             continue
+        unknown += int(bool(why))
         row = _rank_row(f, shipped, reach)
-        row["shipped"] = [s.as_dict() for s in shipped] if builds else "unknown (no Containerfiles given)"
+        if why:
+            row["shipped"] = f"unknown: {why}"
+        else:
+            row["shipped"] = [s.as_dict() for s in shipped] if builds else "unknown (no Containerfiles given)"
         shipped_rows.append(row)
     shipped_rows.sort(
         key=lambda r: (
@@ -240,6 +255,7 @@ def assess(
             "quality": len(quality),
             "shipped": len(shipped_rows) if builds else None,
             "notShipped": len(not_shipped) if builds else None,
+            "shippingUnknown": unknown if builds else None,
             "sca": len(sca),
         },
         "ranking": {
@@ -277,7 +293,15 @@ def failing(out: dict[str, Any], fail_on: str) -> list[str]:
     ]
     why = []
     if code:
-        where = "in shipped code" if out["counts"]["shipped"] is not None else "(no -c: shipping not known)"
+        where = (
+            (
+                "in shipped code or code whose shipping is not known"
+                if out["counts"].get("shippingUnknown")
+                else "in shipped code"
+            )
+            if out["counts"]["shipped"] is not None
+            else "(no -c: shipping not known)"
+        )
         why.append(f"{code} code finding{'' if code == 1 else 's'} at {fail_on} or above {where}")
     if sca:
         n = len(sca)
@@ -295,7 +319,8 @@ def render_text(out: dict[str, Any], top: int = 20) -> str:
         f"({c['mergedAcrossTools']} merged across tools), {c['excluded']} excluded, {c['quality']} lint or quality",
     ]
     if c["shipped"] is not None:
-        lines.append(f"{c['shipped']} in shipped code, {c['notShipped']} in files no image ships")
+        unknown = f", {c['shippingUnknown']} whose shipping is not known" if c.get("shippingUnknown") else ""
+        lines.append(f"{c['shipped']} in shipped code, {c['notShipped']} in files no image ships{unknown}")
     for img in out["images"]:
         where = ", ".join(img["workloads"]) or "no workload in the input"
         lines.append(f"  {img['image']} ({img['containerfile']}, context {img['context']}): runs in {where}")

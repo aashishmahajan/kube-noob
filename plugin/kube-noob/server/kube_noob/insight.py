@@ -232,7 +232,17 @@ def recognise(text: str) -> list[Kind]:
             found["sbom"] = "SPDX or CycloneDX document"
         if ("Results" in doc and "SchemaVersion" in doc) or ("matches" in doc and "descriptor" in doc):
             found["scanner-report"] = "Trivy or Grype report"
-        if "runs" in doc and "sarif" in str(doc.get("$schema", "")).lower() + str(doc.get("version", "")):
+        runs = doc.get("runs")
+        sarif_schema = "sarif" in str(doc.get("$schema", "")).lower()
+        # $schema is optional in SARIF 2.1.0: version "2.1.0" with runs[].tool.driver is enough
+        sarif_shape = (
+            str(doc.get("version", "")) == "2.1.0"
+            and isinstance(runs, list)
+            and any(
+                isinstance(r, dict) and isinstance(r.get("tool"), dict) and "driver" in r["tool"] for r in runs[:20]
+            )
+        )
+        if "runs" in doc and (sarif_schema or sarif_shape):
             found["scanner-report"] = "SARIF report"
         if isinstance(doc.get("scan"), dict) and isinstance(doc["scan"].get("components"), list):
             found["scanner-report"] = "RHACS image scan"

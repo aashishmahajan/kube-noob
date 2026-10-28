@@ -13,6 +13,7 @@
     entrypoint: [""]
   variables:
     KUBE_NOOB_PATHS: "."
+    # PATH[=IMAGE][,context=DIR][,target=STAGE], separated by spaces (context: the Containerfile's directory)
     KUBE_NOOB_CONTAINERFILES: ""
     KUBE_NOOB_SCANNER_REPORTS: ""
     KUBE_NOOB_VEX: ""

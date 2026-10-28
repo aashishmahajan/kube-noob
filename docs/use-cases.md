@@ -557,8 +557,13 @@ results are excluded with the reason, and lint or quality results are counted bu
 the tool's `security-severity` score (bands as GitHub code scanning uses them), Bandit's issue severity, or the SARIF
 level.
 
-With the Containerfiles (`-c PATH=IMAGE`), each file is followed into the images that ship it: copied (with its path
-in the image) or built (an input of a stage the final image copies from), and the `.dockerignore` is honoured. With
+With the Containerfiles (`-c PATH=IMAGE[,context=DIR][,target=STAGE]`; the context defaults to the Containerfile's
+directory, so `docker build -f deploy/Containerfile .` is `-c deploy/Containerfile=IMAGE,context=.`), each file is
+followed into the images that ship it: copied (with its path in the image) or built (an input of a stage the final
+image copies from or builds on, including sources bind-mounted with `RUN --mount=type=bind`), and the
+`<Containerfile>.dockerignore` or the context's `.dockerignore` is honoured. Containerfiles are read the way
+BuildKit reads them (a byte order mark, tabs, heredocs only in RUN, COPY and ADD; COPY wildcards that never cross
+`/`). With
 the manifests, findings rank by exposure and privileges like image vulnerabilities, each with its attack path, so an
 SQL injection behind a Route ranks above the same weakness in an internal worker, and a finding in `tests/` that no
 image ships is listed apart. With the images' scanner reports (`-r`), every language-package vulnerability points at
@@ -571,13 +576,16 @@ kube-noob code report -s semgrep.sarif -s bandit.sarif -s codeql.sarif \
   -c web/Containerfile=quay.io/acme/shop-web -c worker/Containerfile=quay.io/acme/shop-worker \
   -m deploy/ -r trivy-web.json --source-root "$GITHUB_WORKSPACE" --fail-on high
 kube-noob gate -f deploy/ --containerfile web/Containerfile --sarif-report semgrep.sarif --fail-on high
+kube-noob gate --containerfile deploy/Containerfile,context=. --sarif-report codeql.sarif --fail-on high
 ```
 
 Bandit writes SARIF with its `sarif` extra (`pip install "bandit[sarif]"`), ESLint with
 `@microsoft/eslint-formatter-sarif`, SpotBugs with `-sarif`, CodeQL with `codeql database analyze --format=sarif-latest`.
 Pass `--source-root` with the directory the tools ran in when their SARIF has absolute paths (ESLint always writes
 them; SpotBugs names its source directories). In the gate, a finding fails the build only when one of the gate's
-Containerfiles ships its file.
+Containerfiles ships its file, or when shipping cannot be known: a path outside the source root, a path that is no
+file of the repository (the scanner ran in a subdirectory), or a Containerfile that could not be read as a build.
+Those fail closed and say why.
 
 ### What could go wrong with this application? A threat model
 
