@@ -170,7 +170,9 @@ every patch is validated, audited and red-teamed, commands must carry the classi
 privileged SCC, cluster-admin, hostPath or wildcard RBAC fail unless the entry records who accepted the risk and why.
 `add` writes a proposed entry and never commits; `migrate-learning` turns confirmed learning notes into proposed
 entries, and `import --from servicenow-json|servicenow-csv|jira-json|jira-csv -f export` turns resolved tickets into
-proposed entries with their outcomes, without the people in them. kube-noob reads the repository where it runs and never uploads, bundles or exports it.
+proposed entries with their outcomes, without the people in them. `replay` answers whether that memory would have
+helped: it replays later tickets in order, without hindsight, and reports hits, misses and, with your labels,
+how many matches were useful (the gate is 30%). kube-noob reads the repository where it runs and never uploads, bundles or exports it.
 
 Set `memory.paths` (or `KUBE_NOOB_MEMORY_PATHS`) and `diagnose`, `known-issues`, `debug` and `bundle` add the
 matching approved entries to every answer, cited as `[mem:MEM-<n>]`. Over MCP, `kubenoob_memory_match` searches

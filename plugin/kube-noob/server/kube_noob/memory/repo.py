@@ -148,15 +148,19 @@ def _schema_text(schema: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------------------------------- add
 
 
-def add_entry(root: Path, fields: dict[str, Any], today: date | None = None) -> tuple[Path, MemoryEntry]:
+def add_entry(
+    root: Path, fields: dict[str, Any], today: date | None = None, created: date | None = None
+) -> tuple[Path, MemoryEntry]:
     """Write a new ``proposed`` entry with the next free id. ``fields`` are the entry's fields without id, status and
-    dates. The entry is validated before anything is written."""
+    dates; ``created`` backdates the entry to when the lesson was learned (an imported ticket's resolution date).
+    The entry is validated before anything is written."""
     require_repo(root)
     day = today or date.today()
+    born = min(created or day, day)
     for _ in range(100):
         number = next_number(root)
         entry = MemoryEntry.model_validate(
-            {**fields, "id": f"MEM-{number}", "status": "proposed", "created": day, "updated": day}
+            {**fields, "id": f"MEM-{number}", "status": "proposed", "created": born, "updated": day}
         )
         path = root / ENTRIES_DIR / f"{entry.id}.yaml"
         if _write_new(path, dump_entry(entry)):

@@ -82,6 +82,12 @@
   assignee, caller, reporter and similar fields are not read, and emails, account ids, @mentions, phone numbers,
   "Assigned to:" lines and "reported by <name>" are removed; a sentence that carries a credential is dropped whole.
   `--dry-run` writes nothing. Fixed: an entry with no versions was written with an empty `versions: {}` block.
+- `kube-noob memory replay --memory <dir> --tickets <export> --from <format> [--labels labels.yaml]
+  [--as-of-ticket-date] [--out <dir>]`: would your team's memory have helped? Tickets are replayed in the order they
+  were opened and matched on their title and description only; a ticket never matches the entry it became, and with
+  `--as-of-ticket-date` only entries created before it count (imported entries are dated when their ticket was
+  resolved). The Markdown and JSON report gives the hit rate, hits per signal kind, the misses with their signals and,
+  with labels, the useful-match rate against the 30% gate.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.

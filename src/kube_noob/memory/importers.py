@@ -83,6 +83,7 @@ _SN_COLUMNS = {
     "closed_at": ("closed_at", "closed"),
     "work_notes": ("work_notes", "work notes"),
     "comments": ("comments", "additional comments"),
+    "opened_at": ("opened_at", "opened", "sys_created_on", "created"),
 }
 _JIRA_COLUMNS = {
     "key": ("issue key", "key"),
@@ -91,6 +92,7 @@ _JIRA_COLUMNS = {
     "status": ("status",),
     "resolution": ("resolution",),
     "resolved": ("resolved", "resolution date", "resolutiondate"),
+    "created": ("created",),
 }
 
 
@@ -104,6 +106,7 @@ class Ticket:
     outcome: str  # resolved | partial | none
     reason: str  # why there is no fix, when outcome is none
     resolved: date | None
+    opened: date | None = None
 
 
 class TicketImportError(ValueError):
@@ -159,7 +162,15 @@ def _sn_ticket(rec: dict[str, Any]) -> Ticket:
     when = _date(get["resolved_at"]) or _date(get["closed_at"])
     notes = "\n".join(x for x in (get["work_notes"], get["comments"]) if x)
     return Ticket(
-        get["number"], get["short_description"], get["description"], notes, get["close_notes"], outcome, reason, when
+        get["number"],
+        get["short_description"],
+        get["description"],
+        notes,
+        get["close_notes"],
+        outcome,
+        reason,
+        when,
+        _date(get["opened_at"]),
     )
 
 
@@ -179,11 +190,19 @@ def _jira_ticket(key: str, f: dict[str, Any]) -> Ticket:
         resolution,
         str(f.get("resolutiondate") or ""),
         done,
+        str(f.get("created") or ""),
     )
 
 
 def _jira_from(
-    key: str, title: str, body: str, comments: list[str], resolution: str, resolved: str, done: bool
+    key: str,
+    title: str,
+    body: str,
+    comments: list[str],
+    resolution: str,
+    resolved: str,
+    done: bool,
+    created: str = "",
 ) -> Ticket:
     outcome, reason = "none", ""
     if not resolution or resolution.lower() in {"unresolved", "none"}:
@@ -195,7 +214,7 @@ def _jira_from(
     else:
         outcome = "partial" if _WORKAROUND.search(resolution) else "resolved"
     last = comments[-1] if comments else ""
-    return Ticket(key, title, body, "\n".join(comments[:-1]), last, outcome, reason, _date(resolved))
+    return Ticket(key, title, body, "\n".join(comments[:-1]), last, outcome, reason, _date(resolved), _date(created))
 
 
 def _columns(header: list[str], wanted: dict[str, tuple[str, ...]]) -> dict[str, int]:
@@ -287,6 +306,7 @@ def parse(fmt: str, text: str) -> list[Ticket]:
                     cell("resolution"),
                     cell("resolved"),
                     cell("status").lower() in {"done", "closed", "resolved"},
+                    cell("created"),
                 )
             )
     return out
@@ -408,11 +428,17 @@ def import_tickets(
         try:
             if dry_run:
                 entry = MemoryEntry.model_validate(
-                    {**fields, "id": f"MEM-{preview_number}", "status": "proposed", "created": day, "updated": day}
+                    {
+                        **fields,
+                        "id": f"MEM-{preview_number}",
+                        "status": "proposed",
+                        "created": min(t.resolved or day, day),
+                        "updated": day,
+                    }
                 )
                 preview_number += 1
             else:
-                _, entry = add_entry(root, fields, day)
+                _, entry = add_entry(root, fields, day, created=t.resolved)
         except (ValidationError, ValueError) as exc:
             reason = _reason(exc) if isinstance(exc, ValidationError) else str(exc)
             skipped.append({"ticket": ref, "reason": f"text fails the entry rules: {reason}"[:300]})

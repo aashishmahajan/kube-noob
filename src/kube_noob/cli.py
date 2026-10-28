@@ -479,6 +479,23 @@ def build_parser() -> argparse.ArgumentParser:
     mimp.add_argument("--owner", default="unassigned")
     mimp.add_argument("--cluster", help="a cluster label for every imported outcome, e.g. prod-east")
     mimp.add_argument("--dry-run", action="store_true", help="show what would be written; write nothing")
+    mrp = msub.add_parser(
+        "replay",
+        help="Would memory have helped? Replay tickets in date order and report hits, misses and useful matches",
+    )
+    mrp.add_argument("--memory", required=True, help="the memory repository")
+    mrp.add_argument("--tickets", required=True, help="the ticket export to replay")
+    mrp.add_argument(
+        "--from",
+        dest="ticket_format",
+        required=True,
+        choices=["servicenow-json", "servicenow-csv", "jira-json", "jira-csv"],
+        help="the export's format (--format stays the output format)",
+    )
+    mrp.add_argument("--labels", help="YAML: ticket ref -> true/false (was the match useful?)")
+    mrp.add_argument("--as-of-ticket-date", action="store_true", help="only entries created before each ticket count")
+    mrp.add_argument("--approved-only", action="store_true", help="ignore proposed entries")
+    mrp.add_argument("--out", help="directory for report.md and report.json")
     mmig = msub.add_parser("migrate-learning", help="Turn confirmed learning notes into proposed entries (once)")
     mmig.add_argument("dir")
     mmig.add_argument("--owner", default="unassigned")
@@ -1261,6 +1278,35 @@ def _memory(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
                 _tprint(
                     f"  {g['key']:40} {len(g['entries'])} entries, applied {g['applied']}, resolved {g['resolved']}"
                 )
+        else:
+            _emit(out, fmt)
+        return 0
+    if cmd == "replay":
+        from kube_noob.memory.importers import MAX_EXPORT
+        from kube_noob.memory.replay import load_labels, markdown, replay
+
+        for f in (a.tickets, a.labels):
+            if f and not Path(f).is_file():
+                raise ConfigError(f"no file {f}")
+        if Path(a.tickets).stat().st_size > MAX_EXPORT:
+            raise ConfigError(f"{a.tickets} is larger than {MAX_EXPORT // 1_000_000} MB")
+        labels = load_labels(Path(a.labels).read_text(encoding="utf-8")) if a.labels else None
+        out = replay(
+            Path(a.memory),
+            a.ticket_format,
+            Path(a.tickets).read_text(encoding="utf-8"),
+            labels,
+            a.as_of_ticket_date,
+            include_proposed=not a.approved_only,
+        )
+        md = markdown(out)
+        if a.out:
+            target = Path(a.out)
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "report.md").write_text(md, encoding="utf-8")
+            (target / "report.json").write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+        if a.format == "text":
+            print(md, end="")
         else:
             _emit(out, fmt)
         return 0

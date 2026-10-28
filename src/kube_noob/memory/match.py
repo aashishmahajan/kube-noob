@@ -12,6 +12,7 @@ retired (history, not a fix). Each match carries its outcomes: "matched N times,
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,10 @@ def match(
     operators: dict[str, str] | None = None,
     include_proposed: bool = False,
     limit: int = 5,
+    keep: Callable[[MemoryEntry], bool] | None = None,
 ) -> dict[str, Any]:
+    """Entries for ``text``; ``keep`` narrows the entries considered (the replay harness drops entries created after
+    a ticket, so it never matches with hindsight)."""
     from kube_noob.signals import alertmanager, for_text
 
     payload = alertmanager.parse(text)
@@ -150,6 +154,9 @@ def match(
                 continue
             if not _applies(e, platform, version, operators or {}):
                 skipped["notApplicable"] += 1
+                continue
+            if keep is not None and not keep(e):
+                skipped["filtered"] = skipped.get("filtered", 0) + 1
                 continue
             mine = {(s.kind, s.name) for s in e.signals}
             hit_strong = sorted(f"{k}:{n}" for k, n in mine & strong)
