@@ -77,11 +77,49 @@ jobs:
               for p in s["projects"]:
                   fh.write(f"| {p['project']} | {p['total']} | {p.get('complete', False)} |\n")
           PY
-      - name: Known bug lookup works on the fresh copy
+      - name: Resume pass (changes since the first pass, then older tickets by key)
         run: |
-          kube-noob known-issues "ovnkube-node CrashLoopBackOff failed to get node annotation" \
-            --platform openshift --format json > ki.json
-          python -c "import json; k=json.load(open('ki.json')); print('::notice title=Known-issue smoke::' + str([(m['id'], m.get('verdict') or m.get('kind')) for m in k['matches']]))"
+          first=$(python -c "import json; print(json.load(open('jira-summary.json'))['selected'][0])")
+          kube-noob corpus jira --online --projects "$first" --max-requests 8 --format json > jira-resume.json
+          python - <<'PY'
+          import json
+          r = json.load(open("jira-resume.json"))["projects"][0]
+          print(f"::notice title=Jira resume::{r}")
+          if r.get("error"):
+              print("::error title=Jira resume::" + r["error"][:900])
+              raise SystemExit(1)
+          PY
+      - name: Known bugs found on real tickets (each ticket's own error line finds it)
+        run: |
+          python - <<'PY'
+          import json, os, random, sqlite3
+          from pathlib import Path
+          from kube_noob import tickets
+
+          data = Path(os.environ["KUBE_NOOB_DATA_DIR"])
+          db = tickets.ensure_index(data)
+          con = sqlite3.connect(db)
+          rows = con.execute("SELECT key, body FROM tickets WHERE type = 'Bug' ORDER BY key").fetchall()
+          random.Random(7).shuffle(rows)
+          tried = found = 0
+          for key, body in rows:
+              desc, _ = tickets.split_body(body)
+              lines = [ln for ln in desc.splitlines() if tickets.error_phrases(ln)]
+              if not lines:
+                  continue
+              tried += 1
+              out = tickets.match(lines[0], "openshift", None, 3, data)
+              found += any(m["id"] == key for m in out["matches"])
+              if tried == 50:
+                  break
+          print(f"::notice title=Real-ticket recall::{found} of {tried} bugs found from their own first error line")
+          if tried < 10 or found < tried * 0.6:
+              print("::error title=Real-ticket recall::too low")
+              raise SystemExit(1)
+          generic = ["Back-off restarting failed container", "OOMKilled", "ImagePullBackOff", "CrashLoopBackOff"]
+          noisy = {g: [m["id"] for m in tickets.match(g, "openshift", None, 3, data)["matches"]] for g in generic}
+          print(f"::notice title=Generic errors::{noisy}")
+          PY
       - name: Git documentation sources
         run: |
           kube-noob corpus build --online --sources "${{ inputs.git_sources || 'all' }}" --format json | tee git-summary.json

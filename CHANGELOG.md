@@ -25,6 +25,9 @@ Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and w
   dataset exports, and CI uploads them only encrypted. Reporter, assignee and comment authors are never stored.
 - Release-note issue links point at redhat.atlassian.net (Red Hat's Jira moved to Atlassian Cloud).
 - Ticket shards no longer load into the general search index; they have their own.
+- Chart fix found by kube-noob's own audit (KN-ST002): with `persistence.enabled` and the default ReadWriteOnce volume,
+  the Deployment now uses the Recreate strategy and refuses `replicaCount` above 1. A rolling update's surge pod, or a
+  second replica, on another node hung in ContainerCreating with a Multi-Attach error.
 
 ## 0.4.0 - 2026-10-27
 

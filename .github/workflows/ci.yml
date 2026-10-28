@@ -127,13 +127,20 @@ jobs:
       - name: Chart guards (fail-closed NetworkPolicy, fsGroup only off-OpenShift, web flag wired to env)
         run: |
           set -euo pipefail
+          trap 'echo "::error title=chart guard failed::line $LINENO: $BASH_COMMAND"' ERR
           base="--set auth.existingSecret=kn-token"
           if helm template kn deploy/helm/kube-noob $base --set networkPolicy.allowSameNamespace=false \
                --set networkPolicy.allowRouter=false >/dev/null 2>&1; then
             echo "::error title=chart::NetworkPolicy with no allowed source must fail to render"; exit 1
           fi
-          helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true | grep -q "fsGroup: 1001"
-          if helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true \
+          if helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::a ReadWriteOnce PVC with two replicas must fail to render"; exit 1
+          fi
+          pv="--set persistence.enabled=true --set replicaCount=1"
+          helm template kn deploy/helm/kube-noob $base $pv | grep -q "fsGroup: 1001"
+          helm template kn deploy/helm/kube-noob $base $pv | grep -q "type: Recreate"
+          helm template kn deploy/helm/kube-noob $base $pv | kube-noob audit -f - --platform kubernetes --fail-on high
+          if helm template kn deploy/helm/kube-noob $base $pv \
                --api-versions security.openshift.io/v1 | grep -q "fsGroup"; then
             echo "::error title=chart::fsGroup must not be set on OpenShift"; exit 1
           fi
