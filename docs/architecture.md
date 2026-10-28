@@ -55,6 +55,8 @@ flowchart LR
 ## Trust boundaries
 
 - MCP clients and model output are untrusted input: every tool validates with Pydantic, YAML is size/alias bounded.
+  Pasted payloads are data too: an Alertmanager payload is read as JSON only (2 MB, 500 alerts, 64 labels, 2,000
+  characters per value, control characters dropped), and only an OpenShift release label sets the version.
 - The HTTP transport authenticates with a bearer token (constant time) unless bound to loopback (sidecar).
 - Outbound HTTP only through `kube_noob.net`: web purpose requires `webEnabled` and allowlisted HTTPS hosts on every
   hop, GET only; `web_fetch` refuses non-text content types before reading the body. LLM and in-cluster API clients

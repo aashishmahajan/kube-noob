@@ -528,6 +528,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     from kube_noob import toolkit as tk
+    from kube_noob.signals import alertmanager
 
     kit = tk.Toolkit(s)
     fmt = "yaml" if a.format == "text" else a.format
@@ -638,6 +639,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
         if len(text.strip()) < 3:
             raise ConfigError("nothing to diagnose: pass the error text in quotes, a file with -f, or pipe it in")
+        if len(text) > tk.MAX_DIAGNOSE_TEXT:  # a long Alertmanager payload keeps every alert's labels and summary
+            text = alertmanager.compact(text) or text[-tk.MAX_DIAGNOSE_TEXT :]
         _emit(
             kit.diagnose(
                 tk.DiagnoseIn(text=text, platform=getattr(a, "platform", None), version=getattr(a, "pversion", None))
@@ -660,20 +663,24 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return 0
 
     if a.cmd == "signals":
-        from kube_noob.signals import extract as extract_signals
-
         if a.text and a.file is not None:
             raise ConfigError("pass the text or -f, not both")
         text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
-        found = [x.as_dict() for x in extract_signals(text)]
+        if len(text) > tk.MAX_SIGNAL_TEXT:
+            text = alertmanager.compact(text) or text[-tk.MAX_SIGNAL_TEXT :]
+        out = kit.extract_signals(tk.SignalsIn(text=text))
         if a.format == "text":
-            for x in found:
+            for x in out["signals"]:
                 detail = f"  {x['detail']}" if x.get("detail") else ""
                 _tprint(f"{x['kind']:15} {x['name']}{detail}")
-            if not found:
+            for x in out["implied"]:
+                _tprint(f"{x['kind']:15} {x['name']}  implied by '{x['detail']}'")
+            if out["playbooks"]:
+                _tprint(f"playbooks: {', '.join(out['playbooks'])}")
+            if not out["signals"] and not out["implied"]:
                 print("no signals found")
         else:
-            _emit({"signals": found}, fmt)
+            _emit(out, fmt)
         return 0
 
     if a.cmd == "ticket":
@@ -915,6 +922,8 @@ def _print_denials(out: dict[str, Any]) -> None:
         if d.get("relatedRules"):
             _tprint(f"  caught before deploy by: {', '.join(d['relatedRules'])} (kube-noob audit)")
         _tprint()
+    if out.get("signals"):
+        _tprint("signals: " + ", ".join(f"{x['kind']} {x['name']}" for x in out["signals"]))
     _tprint(out.get("summary") or out.get("note", ""))
 
 

@@ -19,7 +19,9 @@ are for the user to run: give them as copy-paste lines (no shell comments) and d
    Otherwise ask for read-only evidence: the output of `oc describe pod`, `oc get events --sort-by=.lastTimestamp`,
    `oc logs --previous`, or a redacted bundle (`kube-noob bundle deployment/<name> -n <ns> --cluster-enabled`).
 2. Call `kubenoob_diagnose` with the raw text, the platform and, on OpenShift, the cluster version if known (`4.20.8`).
-   Present its `readOnlyNextSteps` first.
+   An Alertmanager webhook payload goes in as it is; its `openshift_version` label stands in for the version (see
+   `input`). Name the `signals` it found (alert names, reasons), then present `readOnlyNextSteps` first.
+   `kubenoob_extract_signals` lists the signals alone, with the alerts the words imply and the playbooks they point at.
 3. If `knownIssues` is not empty, or the user asks "is this a known bug?", say so plainly: the issue id with its link,
    what became of it (`status`; for Red Hat Jira tickets also `verdict`: fixed, fix in progress, open, not a bug, won't
    fix, cannot reproduce, obsolete or duplicate), and the `workaround` or `remarks` from the comments. A ticket closed

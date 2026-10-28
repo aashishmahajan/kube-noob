@@ -15,8 +15,12 @@ from kube_noob.debug.cluster import Backend, redact_text
 from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Playbook
 from kube_noob.debug.steps import classify_step, split_comment
 from kube_noob.errors import ClusterAccessError
+from kube_noob.signals import Signal, for_text, playbooks_for
 
 MAX_INPUT = 400_000
+SIGNAL_WEIGHT = 1.0  # a playbook that catalogued signals point at gains this much, once: CrashLoopBackOff and
+# BackOff name one symptom, so two symptom signals must not outrank the specific cause (OOMKilled) they share
+MAX_SIGNALS_SHOWN = 50
 
 _COMPILED: dict[str, list[re.Pattern[str]]] = {
     p.pid: [re.compile(s, re.IGNORECASE) for s in p.signals] for p in PLAYBOOKS
@@ -87,6 +91,7 @@ class DiagnoseResult:
     context: dict[str, str]
     exit_codes: dict[int, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    signals: list[Signal] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +100,7 @@ class DiagnoseResult:
                 "change the cluster are listed separately and require explicit approval."
             ),
             "context": self.context,
+            "signals": [x.as_dict() for x in self.signals[:MAX_SIGNALS_SHOWN]],
             "exitCodes": {str(k): v for k, v in self.exit_codes.items()},
             "diagnoses": [d.as_dict() for d in self.diagnoses],
             "notes": self.notes,
@@ -153,10 +159,14 @@ def _fill(cmd: str, ctx: dict[str, str]) -> str:
 _OPENSHIFT_ONLY = re.compile(
     r"#\s*\[(OCP|ROSA)\]|\boc (get|describe) (route|scc|securitycontextconstraints)\b|\boc adm (?!top)"
 )
+_KUBERNETES_ONLY = re.compile(r"#\s*\[K8S\]")  # e.g. kubeadm's static pods in kube-system
 
 
 def _for_platform(cmd: str, platform: str | None) -> str | None:
-    """Commands as the user's platform spells them: plain Kubernetes gets kubectl and no OpenShift-only steps."""
+    """Commands as the user's platform spells them: plain Kubernetes gets kubectl and no OpenShift-only steps;
+    OpenShift and ROSA get no steps marked [K8S]. With no platform, both are shown."""
+    if platform and platform != "kubernetes" and _KUBERNETES_ONLY.search(cmd):
+        return None
     if platform != "kubernetes" or not cmd.startswith(("oc ", "openssl", "kubectl")):
         return cmd
     if _OPENSHIFT_ONLY.search(cmd):
@@ -168,17 +178,26 @@ def _for_platform(cmd: str, platform: str | None) -> str | None:
     return re.sub(r"^oc ", "kubectl ", cmd)
 
 
-def diagnose(text: str, platform: str | None = None, limit: int = 5) -> DiagnoseResult:
+def diagnose(
+    text: str, platform: str | None = None, limit: int = 5, signals: list[Signal] | None = None
+) -> DiagnoseResult:
+    """Rank playbooks for ``text``: one point per matching pattern plus ``SIGNAL_WEIGHT`` when catalogued signals point
+    at the playbook (``kube_noob.signals``: an alert name, a container or event reason, a phrase such as "leader
+    changed"), times the playbook's weight. ``signals`` overrides the signals read from ``text``, e.g. the ones read
+    from an Alertmanager payload."""
     if len(text) > MAX_INPUT:
         text = text[-MAX_INPUT:]
     text = redact_text(text)
     ctx = extract_context(text)
+    if signals is None:
+        signals = for_text(text)
+    linked = playbooks_for(signals)
     lines = text.splitlines()
     results: list[Diagnosis] = []
     for p in PLAYBOOKS:
         if platform and platform not in p.platforms:
             continue
-        evidence: list[str] = []
+        evidence: list[str] = [f"signal {x.kind} {x.name}" for x in linked.get(p.pid, [])]
         hits = 0
         for pat in _COMPILED[p.pid]:
             matched_line = next((ln.strip() for ln in lines if pat.search(ln)), None)
@@ -189,8 +208,9 @@ def diagnose(text: str, platform: str | None = None, limit: int = 5) -> Diagnose
                 clipped = matched_line[:300]
                 if clipped not in evidence:
                     evidence.append(clipped)
-        if hits:
-            score = hits * p.weight
+        boost = SIGNAL_WEIGHT if p.pid in linked else 0.0
+        if hits or boost:
+            score = (hits + boost) * p.weight
             checks = [_for_platform(_fill(c, ctx), platform) for c in p.checks]
             results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c]))
     results.sort(key=lambda d: (-d.score, d.playbook.pid))
@@ -202,7 +222,7 @@ def diagnose(text: str, platform: str | None = None, limit: int = 5) -> Diagnose
             "No playbook matched. Paste `oc describe pod`, `oc get events --sort-by=.lastTimestamp` and "
             "`oc logs --previous` output for a better diagnosis."
         )
-    return DiagnoseResult(results[:limit], ctx, exit_info, notes)
+    return DiagnoseResult(results[:limit], ctx, exit_info, notes, signals)
 
 
 # --- live collection ---------------------------------------------------------------------------------------
@@ -366,6 +386,11 @@ def bundle_markdown(result: dict[str, Any]) -> str:
         "## Evidence",
         *(f"- {e}" for e in result.get("evidence", [])),
     ]
+    if result.get("signals"):
+        lines += ["", "## Signals", ""]
+        lines += [
+            f"- {x['kind']} {x['name']}" + (f" ({x['detail']})" if x.get("detail") else "") for x in result["signals"]
+        ]
     for m in result.get("knownIssues", []):
         lines += ["", f"## Reported issue {m['id']}", "", m["status"], "", m["summary"], "", f"- Issue: {m['url']}"]
         lines += [f"- Workaround: {m['workaround']}"] if m.get("workaround") else []

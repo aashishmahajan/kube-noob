@@ -52,7 +52,8 @@ def _instructions(settings: Settings) -> str:
         "kube-noob: offline-first Kubernetes / Helm / OpenShift / ROSA HCP / RHACS (StackRox) learning, audit and "
         "debugging tools. Start design or review requests with kubenoob_run_protocol (7 steps: Clarify, Validate, "
         "Research, Audit, Calibrate, Generate, Red Team). Ground answers with kubenoob_search_knowledge and cite "
-        "chunk ids as [kn:<doc>#<n>]. Debug with kubenoob_diagnose"
+        "chunk ids as [kn:<doc>#<n>]. Debug with kubenoob_diagnose (events, logs or an Alertmanager webhook payload; "
+        "kubenoob_extract_signals lists the alert names and reasons a text carries)"
         + (" and the read-only kubenoob_cluster_* tools." if settings.cluster.enabled else ".")
         + " For 'is this a known bug?' or any OpenShift error, check kubenoob_known_issues (reported issues from the "
         "release notes and, when this install keeps a local copy of Red Hat's public Jira, the tickets: fixed and in "

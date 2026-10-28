@@ -1035,6 +1035,12 @@ def _namespace(text: str) -> str | None:
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
+def admission_signal(denial: dict[str, Any]) -> str:
+    """The signal name of a denial: ``engine``, or ``engine:policy/rule`` (``kube_noob.signals`` kind admission)."""
+    parts = [p for p in (denial.get("policy"), denial.get("rule")) if p]
+    return f"{denial['engine']}:{'/'.join(parts)}" if parts else str(denial["engine"])
+
+
 def explain(text: str, platform: str | None = None) -> dict[str, Any]:
     """Every admission denial in ``text``, explained. Returns ``{"denials": [...], "summary": ..., ...}``.
 
@@ -1064,6 +1070,9 @@ def explain(text: str, platform: str | None = None) -> dict[str, Any]:
         ),
         "denials": [d.as_dict() for d in denials],
     }
+    names = list(dict.fromkeys(admission_signal(d) for d in out["denials"]))
+    first = {n: next(i for i, d in enumerate(out["denials"]) if admission_signal(d) == n) for n in names}
+    out["signals"] = [{"kind": "admission", "name": n, "source": f"denial[{first[n]}]"} for n in names]
     if denials:
         names = [
             f"{ENGINES[d.engine]} {d.policy}" + (f"/{d.rule}" if d.rule else "") if d.policy else ENGINES[d.engine]

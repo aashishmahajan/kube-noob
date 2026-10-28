@@ -34,6 +34,16 @@
   match) to 48/51 (none). `kube-noob known-issues 'etcd leader changed frequently, apiserver timeouts after
   upgrade' --version 4.21.0` now finds OCPBUGS-73881 (4.20.5 finds OCPBUGS-73876; 4.21.2 and 4.20.13, which carry
   the fixes, find nothing).
+- Signals everywhere: `diagnose`, `debug` and `bundle` list the signals they read (alert names, event, condition
+  and container reasons, admission rules, components) and rank playbooks with them; `policy explain` lists the
+  admission signals. `diagnose -f alert.json` takes an Alertmanager webhook payload (or the API's alert list) as it
+  is: each alert is read as text, known issues are matched on each alert's line and summary, and an
+  `openshift_version` or `version` label that names an OpenShift 4 release picks the issues for that version. New
+  read-only MCP tool `kubenoob_extract_signals`; `kube-noob signals` also prints the alerts a text implies and the
+  playbooks they point at.
+- New playbook DBG-ETCD (39 in all): leader changes, slow disk (WAL fsync and backend commit latency), no leader,
+  members down and the database space alarm, with read-only checks for OpenShift and kubeadm clusters, from the etcd
+  FAQ and maintenance guide and the OpenShift etcd procedures. Every etcd alert in the catalogue points at it.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.

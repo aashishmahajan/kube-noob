@@ -39,6 +39,7 @@ from kube_noob.known_issues import match as known_issue_match
 from kube_noob.learn.memory import LearningStore
 from kube_noob.learn.tutor import Tutor
 from kube_noob.net import Purpose, http_client
+from kube_noob.signals import alertmanager, for_text, playbooks_for
 
 PlatformT = Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
 MAX_MANIFEST_CHARS = 1_000_000
@@ -126,9 +127,17 @@ class RuleIn(_In):
     rule_id: str = Field(..., pattern=r"^[A-Za-z]{2}-[A-Za-z]{1,2}\d{3}$", description="e.g. KN-S001")
 
 
+MAX_DIAGNOSE_TEXT = 400_000
+MAX_SIGNAL_TEXT = 400_000
+
+
 class DiagnoseIn(_In):
     text: str = Field(
-        ..., min_length=3, max_length=400_000, description="Events, `describe` output, logs, CLI errors or status JSON."
+        ...,
+        min_length=3,
+        max_length=MAX_DIAGNOSE_TEXT,
+        description="Events, `describe` output, logs, CLI errors, status JSON or an Alertmanager webhook payload "
+        "(its alerts are read as text; an `openshift_version` or `version` label gives the version).",
     )
     platform: PlatformT | None = None
     version: str | None = Field(
@@ -167,6 +176,15 @@ class KnownIssuesIn(_In):
         description="The cluster's OpenShift version (4.20 or 4.20.8): keeps only issues that can affect it.",
     )
     limit: int = Field(3, ge=1, le=10)
+
+
+class SignalsIn(_In):
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_SIGNAL_TEXT,
+        description="An Alertmanager payload, events, a ClusterOperator, pod status, logs or an error in words.",
+    )
 
 
 class PolicyExplainIn(_In):
@@ -515,13 +533,26 @@ class Toolkit:
 
     # -- debugging -------------------------------------------------------------------------------------------
     def diagnose(self, p: DiagnoseIn) -> dict[str, Any]:
-        out = diagnose(p.text, platform=p.platform, limit=p.limit).as_dict()
+        """Playbooks, reported issues and policy denials for the text. An Alertmanager payload is read alert by alert
+        (``kube_noob.signals.alertmanager``); its signals come from the payload's structure and its version label
+        stands in for ``version`` when that is not given."""
+        payload = alertmanager.parse(p.text)
+        text = payload.text if payload else p.text
+        version = p.version or (payload.version if payload else None)
+        out = diagnose(text, platform=p.platform, limit=p.limit, signals=for_text(p.text)).as_dict()
+        if payload:
+            out = {
+                "input": {**payload.summary(), "version": version} | ({"versionFrom": "argument"} if p.version else {}),
+                **out,
+            }
         self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
-        reported = known_issue_match(p.text, p.platform, p.version, 3, self.settings.data_dir)
+        reported = known_issue_match(
+            payload.symptoms if payload else text, p.platform, version, 3, self.settings.data_dir
+        )
         out["knownIssues"] = reported["matches"]
         if reported["matches"]:
             self._observe([f"known-issue:{m['id']}" for m in reported["matches"]])
-        denials = explain_denials(p.text, p.platform)["denials"]
+        denials = explain_denials(text, p.platform)["denials"]
         if denials:
             out["policyDenials"] = denials
             self._observe([f"policy:{d['engine']}" for d in denials])
@@ -538,6 +569,42 @@ class Toolkit:
         out = tickets.ticket(p.key, self.settings.data_dir, p.version)
         if out.get("found"):
             self._observe([f"known-issue:{out['id']}"])
+        return out
+
+    def extract_signals(self, p: SignalsIn) -> dict[str, Any]:
+        """The signals in a text and what they point at: catalogue entries (with their upstream sources) and the
+        playbooks ranked by how many signals point at them. ``signals`` are read from the text or payload;
+        ``implied`` are the catalogued names its words imply ("leader changed")."""
+        from kube_noob.signals import extract
+        from kube_noob.signals.catalogue import get
+
+        payload = alertmanager.parse(p.text)
+        found = extract(p.text)
+        named = {(x.kind, x.name) for x in found}
+        everything = for_text(p.text)
+        implied = [x for x in everything if (x.kind, x.name) not in named]
+        catalogue: list[dict[str, Any]] = []
+        for x in everything:
+            entry = get(x.kind, x.name)
+            if entry and entry.id not in {c["id"] for c in catalogue}:
+                catalogue.append(
+                    {
+                        "id": entry.id,
+                        "components": list(entry.components),
+                        "playbooks": list(entry.playbooks),
+                        "sources": list(entry.sources),
+                    }
+                )
+        ranked = sorted(playbooks_for(everything).items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        out: dict[str, Any] = {
+            "signals": [x.as_dict() for x in found],
+            "implied": [x.as_dict() for x in implied],
+            "catalogue": catalogue,
+            "playbooks": [pid for pid, _ in ranked],
+        }
+        if payload:
+            out = {"input": payload.summary(), **out}
+        self._observe([f"signal:{c['id']}" for c in catalogue][:20])  # catalogued (public) names only
         return out
 
     def explain_denial(self, p: PolicyExplainIn) -> dict[str, Any]:
@@ -884,10 +951,23 @@ class Toolkit:
             ToolSpec(
                 "diagnose",
                 "Diagnose symptoms offline",
-                "Match pasted events / describe output / logs / CLI errors against troubleshooting playbooks; "
-                "returns ranked root causes, read-only checks with names filled in, and fixes.",
+                "Match pasted events / describe output / logs / CLI errors or an Alertmanager webhook payload against "
+                "troubleshooting playbooks, ranked by matching patterns and by the signals the text carries (alert "
+                "names, reasons); returns the signals, ranked root causes, read-only checks with names filled in, "
+                "fixes, reported issues for the version and policy denials.",
                 DiagnoseIn,
                 self.diagnose,
+            ),
+            ToolSpec(
+                "extract_signals",
+                "Extract signals",
+                "Read the canonical names in an error: Alertmanager alert names (webhook payload or text), event and "
+                "ClusterOperator condition reasons, container reasons, admission rules, components and normalised "
+                "error templates, plus the alerts its words imply. Returns each signal with where it was found, the "
+                "catalogue entry (components, playbooks, upstream source) and the playbooks it points at. Read-only "
+                "and offline.",
+                SignalsIn,
+                self.extract_signals,
             ),
             ToolSpec(
                 "known_issues",

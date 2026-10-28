@@ -279,11 +279,11 @@ def _components(text: str, out: _Collector, where: str) -> None:
 
 def _text(text: str, out: _Collector, where: str) -> None:
     text = text[:MAX_INPUT]
+    from kube_noob.debug.policy import admission_signal
     from kube_noob.debug.policy import explain as explain_denials
 
     for d in explain_denials(text[:200_000])["denials"]:
-        parts = [p for p in (d.get("policy"), d.get("rule")) if p]
-        out.add("admission", f"{d['engine']}:{'/'.join(parts)}" if parts else d["engine"], where)
+        out.add("admission", admission_signal(d), where)
     from kube_noob.signals.catalogue import _alert_names
 
     known_alerts = _alert_names()

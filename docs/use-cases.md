@@ -49,7 +49,8 @@ To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It ex
 ## SRE or on-call: diagnose before you change anything
 
 1. Paste events, `describe` output or logs into `diagnose`: as quoted text (multi-line is fine; single quotes stop the
-   shell expanding `$`), as a file with `-f`, or piped in. You get the likely cause, then read-only steps (get,
+   shell expanding `$`), as a file with `-f`, or piped in. An Alertmanager webhook payload works as it is. You get
+   the signals it found (alert names, event and container reasons), the likely cause, then read-only steps (get,
    describe, logs, events).
 2. Commands that run inside a container are listed next, and changes come last. Both are marked as needing approval.
 
@@ -57,9 +58,16 @@ To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It ex
 kube-noob demo diagnose
 kube-noob diagnose 'Back-off restarting failed container api in pod api-1'
 kube-noob diagnose -f events.txt
+kube-noob diagnose -f alert.json
+kube-noob signals -f alert.json
 oc get events -n shop --sort-by=.lastTimestamp | kube-noob diagnose
 kube-noob bundle deployment/orders-api -n shop --cluster-enabled
 ```
+
+Signals rank the playbooks: a firing `etcdHighNumberOfLeaderChanges` puts the etcd playbook first even when the
+words differ, and a payload's `openshift_version` (or `version`) label, when it names an OpenShift 4 release, picks
+the reported issues for that version. `signals` (MCP: `kubenoob_extract_signals`) lists what was found, the alerts the
+words imply ("leader changed"), each catalogue entry's upstream source and the playbooks they point at.
 
 `bundle` writes a redacted, read-only evidence pack (`bundle.md` and `bundle.json`) that you can attach to a ticket.
 Once a fix is confirmed, save it with `kube-noob learning note`. The team finds it next time as `[kn:local-N#0]`.

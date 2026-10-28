@@ -864,6 +864,79 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
         knowledge=("ocp-operators",),
     ),
+    # Sources (checked 2026-10-28): etcd FAQ (disk latency is part of leader liveness; WAL fsync p99 < 10 ms,
+    # backend commit p99 < 25 ms; CPU starvation) https://etcd.io/docs/v3.5/faq/ ; etcd maintenance guide (space
+    # quota, NOSPACE alarm, compact, defrag, alarm disarm) https://etcd.io/docs/v3.5/op-guide/maintenance/ ; log and
+    # error strings: server/storage/wal/wal.go ("slow fdatasync"), server/etcdserver/raft.go ("leader failed to send
+    # out heartbeat on time"), server/etcdserver/txn/util.go ("apply request took too long"),
+    # api/v3rpc/rpctypes/error.go ("etcdserver: leader changed", "mvcc: database space exceeded") in etcd-io/etcd;
+    # alert names in kube_noob/data/signals.yaml; OpenShift commands from openshift-docs modules/etcd-defrag.adoc,
+    # restore-determine-state-etcd-member.adoc and recommended-etcd-practices.adoc (enterprise-4.21); kubeadm static
+    # pod labels (component=etcd) from cmd/kubeadm/app/util/staticpod/utils.go.
+    Playbook(
+        "DBG-ETCD",
+        "etcd is slow or unstable (leader changes, slow disk, no leader, database space)",
+        (
+            r"etcdHighNumberOfLeaderChanges",
+            r"etcdNoLeader",
+            r"etcd(MembersDown|InsufficientMembers)",
+            r"etcdHigh(Fsync|Commit)Durations",
+            r"etcdGRPC(Read|Write)?RequestsSlow",
+            r"etcd(DatabaseQuotaLowSpace|ExcessiveDatabaseGrowth|DatabaseHighFragmentationRatio)",
+            r"etcdserver: (leader changed|no leader|request timed out)",
+            r"mvcc: database space exceeded",
+            r"apply request took too long",
+            r"slow fdatasync",
+            r"failed to send out heartbeat on time",
+            r"\betcd\b[^\n]{0,60}\bleader (changed|changes|election)",
+        ),
+        (
+            "Slow disk under etcd: every write is persisted before it is acknowledged, so disk latency is part of "
+            "leader liveness. A WAL fsync p99 above 10 ms or a backend commit p99 above 25 ms makes the leader miss "
+            "heartbeats, members hold elections, and the API server times out.",
+            "CPU starvation on the control-plane nodes, the second most common cause of missed heartbeats.",
+            "Slow or lossy network between control-plane nodes (high round-trip time between zones).",
+            "The database reached its space quota: etcd raises a NOSPACE alarm and accepts only reads and deletes "
+            "(`mvcc: database space exceeded`) until it is compacted, defragmented and the alarm is cleared.",
+            "A member is down or its node is NotReady; with too few members the cluster loses quorum and has no "
+            "leader.",
+            "A product bug that adds control-plane I/O: check the reported issues listed for your version.",
+        ),
+        (
+            "oc get co etcd kube-apiserver   # [OCP] Degraded or Progressing, and since when",
+            "oc describe co etcd   # [OCP] the operator's messages name the failing member or check",
+            "oc get pods -n openshift-etcd -l k8s-app=etcd -o wide   # [OCP] one per control-plane node, restarts",
+            "kubectl get pods -n kube-system -l component=etcd -o wide   # [K8S] kubeadm runs etcd as a static pod",
+            "oc get nodes -l node-role.kubernetes.io/master   # [OCP] control-plane nodes Ready?",
+            "kubectl get nodes -l node-role.kubernetes.io/control-plane   # [K8S] control-plane nodes Ready?",
+            "oc adm top nodes -l node-role.kubernetes.io/master   # [OCP] CPU and memory pressure",
+            "kubectl top nodes -l node-role.kubernetes.io/control-plane   # [K8S] CPU and memory pressure",
+            "In Observe > Metrics (or Prometheus), graph histogram_quantile(0.99, "
+            "rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) (healthy under 0.01 s), histogram_quantile(0.99, "
+            "rate(etcd_disk_backend_commit_duration_seconds_bucket[5m])) (under 0.025 s) and "
+            "changes(etcd_server_is_leader[10m]).",
+            "oc rsh -n openshift-etcd etcd-<control-plane-node> etcdctl endpoint status --cluster -w table   # [OCP] "
+            "leader, database size and raft index of every member",
+            "oc rsh -n openshift-etcd etcd-<control-plane-node> etcdctl alarm list   # [OCP] NOSPACE means the "
+            "database hit its quota",
+        ),
+        (
+            "Give etcd fast, dedicated storage: Red Hat asks for a block device that writes at least 50 IOPS of 8 KB "
+            "sequentially, including fdatasync, in under 10 ms, prefers NVMe in production and rules out network "
+            "file systems and spinning disks. Move other I/O off the control-plane disks.",
+            "Relieve CPU pressure on control-plane nodes: keep workloads off them and size them up.",
+            "If a reported issue below matches your version, update to the release that fixes it before changing "
+            "hardware.",
+            "NOSPACE alarm: find what grows (events, custom resources, secrets), then defragment one member at a "
+            "time, starting with a member that is not the leader, and clear the alarm (`etcdctl defrag`, "
+            "`etcdctl alarm disarm`) following OpenShift's 'Defragmenting etcd data' procedure. Defragmenting "
+            "blocks reads and writes on that member while it runs.",
+            "Member down or no leader: fix the node first (NotReady, disk full, network); replace a member only by "
+            "following OpenShift's 'Replacing an unhealthy etcd member' procedure, never removing members below "
+            "quorum.",
+        ),
+        platforms=("kubernetes", "openshift"),
+    ),
     Playbook(
         "DBG-ROSA-HCP-NODES",
         "ROSA HCP: machine pool nodes not joining / not ready",

@@ -38,61 +38,73 @@ signals:
     aliases: [leader changed, leader changes, leader election, leader elections, etcdserver leader changed]
     terms: [etcd, leader, election, elections, changes, disk, fsync, latency, masters, control plane, high i/o]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift, etcd-errors]
   - id: alert:etcdNoLeader
     aliases: [no leader, etcdserver no leader, etcd has no leader]
     terms: [etcd, leader, quorum, election]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift, etcd-errors]
   - id: alert:etcdMembersDown
     aliases: [etcd member down, etcd members down]
     terms: [etcd, member, members, unreachable, quorum]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift]
   - id: alert:etcdInsufficientMembers
     aliases: [insufficient members, lost quorum, quorum lost]
     terms: [etcd, quorum, member, members]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift]
   - id: alert:etcdHighFsyncDurations
     aliases: [wal fsync, slow fsync, fsync duration, slow disk]
     terms: [etcd, fsync, wal, disk, latency, storage, high i/o]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift]
   - id: alert:etcdHighCommitDurations
     aliases: [backend commit, commit duration]
     terms: [etcd, commit, disk, latency]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift]
   - id: alert:etcdGRPCRequestsSlow
     aliases: [apply request took too long, took too long, slow requests]
     terms: [etcd, grpc, slow, latency, requests]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-txn]
   - id: alert:etcdGRPCReadRequestsSlow
     aliases: [slow read requests]
     terms: [etcd, grpc, slow, read, latency]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-openshift]
   - id: alert:etcdGRPCWriteRequestsSlow
     aliases: [slow write requests]
     terms: [etcd, grpc, slow, write, latency]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-openshift]
   - id: alert:etcdDatabaseQuotaLowSpace
     aliases: [database space exceeded, mvcc database space exceeded, etcd quota]
     terms: [etcd, database, quota, space, defrag, defragmentation, compaction]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift, etcd-errors]
   - id: alert:etcdExcessiveDatabaseGrowth
     aliases: [etcd database growth]
     terms: [etcd, database, growth, size, objects]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift]
   - id: alert:etcdDatabaseHighFragmentationRatio
     aliases: [etcd fragmentation]
     terms: [etcd, defrag, defragmentation, fragmentation, database]
     components: [etcd]
+    playbooks: [DBG-ETCD]
     sources: [etcd-mixin, etcd-openshift]
   # --- API server ---------------------------------------------------------------------------------------------------
   - id: alert:KubeAPIErrorBudgetBurn

@@ -1,0 +1,65 @@
+{
+  "version": "4",
+  "groupKey": "{}/{namespace=\"openshift-etcd\"}:{alertname=\"etcdHighNumberOfLeaderChanges\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "kube-noob",
+  "groupLabels": {"alertname": "etcdHighNumberOfLeaderChanges"},
+  "commonLabels": {
+    "alertname": "etcdHighNumberOfLeaderChanges",
+    "job": "etcd",
+    "namespace": "openshift-etcd",
+    "openshift_version": "4.21.0",
+    "prometheus": "openshift-monitoring/k8s",
+    "severity": "warning"
+  },
+  "commonAnnotations": {
+    "summary": "etcd cluster has high number of leader changes."
+  },
+  "externalURL": "https://alertmanager-main-openshift-monitoring.apps.example.test",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "etcdHighNumberOfLeaderChanges",
+        "job": "etcd",
+        "namespace": "openshift-etcd",
+        "openshift_version": "4.21.0",
+        "prometheus": "openshift-monitoring/k8s",
+        "severity": "warning"
+      },
+      "annotations": {
+        "description": "etcd cluster \"etcd\": 7 average leader changes within the last 10 minutes. Frequent elections may be a sign of insufficient resources, high network latency, or disruptions by other components and should be investigated.",
+        "summary": "etcd cluster has high number of leader changes."
+      },
+      "startsAt": "2026-10-28T09:12:41.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://console-openshift-console.apps.example.test/monitoring/graph?g0.expr=avg%28changes%28etcd_server_is_leader%5B10m%5D%29%29+%3E+5",
+      "fingerprint": "6f3a1c2b9d8e7f01"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "etcdHighFsyncDurations",
+        "endpoint": "etcd-metrics",
+        "instance": "10.0.12.34:9979",
+        "job": "etcd",
+        "namespace": "openshift-etcd",
+        "openshift_version": "4.21.0",
+        "pod": "etcd-master-0.example.test",
+        "prometheus": "openshift-monitoring/k8s",
+        "service": "etcd",
+        "severity": "warning"
+      },
+      "annotations": {
+        "description": "etcd cluster \"etcd\": 99th percentile fsync durations are 0.61s on etcd instance 10.0.12.34:9979.",
+        "runbook_url": "https://github.com/openshift/runbooks/blob/master/alerts/cluster-etcd-operator/etcdHighFsyncDurations.md",
+        "summary": "etcd cluster 99th percentile fsync durations are too high."
+      },
+      "startsAt": "2026-10-28T09:10:11.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://console-openshift-console.apps.example.test/monitoring/graph",
+      "fingerprint": "0a9b8c7d6e5f4321"
+    }
+  ]
+}
