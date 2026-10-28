@@ -38,8 +38,9 @@ KINDS = (
 )
 PENDING = {
     "packet-capture": "packet capture analysis (queue N2) is not built yet; tcpdump text is read as logs",
-    "must-gather": "must-gather findings (queue G2-G3) are not built yet: kube-noob must-gather analyze <dir or "
-    ".tar.gz> opens one safely and lists what it holds; paste the pod's events and logs for a diagnosis",
+    "must-gather": "a list of must-gather paths is not the must-gather itself: kube-noob must-gather analyze <dir or "
+    ".tar.gz> opens it safely and ranks what is wrong (the MCP tool is queue G5); paste the pod's events and logs "
+    "for a diagnosis",
 }
 UNREAD = {  # recognised, but in a form the vulnerability reader does not take
     "sbom": "only JSON SBOMs are read: export SPDX 2.3 or CycloneDX JSON (syft -o spdx-json, trivy image -f "

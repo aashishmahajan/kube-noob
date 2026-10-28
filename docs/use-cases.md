@@ -242,11 +242,31 @@ logs) are listed and not opened, and files named like Secrets are never read. It
 what, for which version (`version`) and when (`timestamp`), and how many resources, namespaces, pods and logs each
 holds.
 
+Then it says what is wrong, most severe first: a Failing or unavailable cluster version and an update that stopped
+partway, cluster operators that are not Available or are Degraded, NotReady nodes (control-plane first) and node
+pressure, degraded machine config pools, failed OLM operators, pods that cannot start (CrashLoopBackOff with the last
+error line from the container's log, image pull errors, OOM kills, Unschedulable), warning events by reason, and
+etcd's slow-disk and leader-election lines. Each finding names the file it came from, the signals it carries (the
+same keys known-issue and memory matching use) and read-only commands to confirm it on the live cluster. A plain
+`oc adm inspect` output works too; whatever was not collected is listed.
+
 ```bash
 oc adm must-gather
 tar cvaf must-gather.tar.gz must-gather.local.*/
 kube-noob must-gather analyze must-gather.tar.gz
+kube-noob must-gather analyze must-gather.tar.gz --fail-on critical
 kube-noob --format json must-gather analyze must-gather.local.5421342344627712289/
+```
+
+```text
+OpenShift 4.20.3; updating to 4.20.4; platform AWS; 1/2 nodes Ready; 2/3 cluster operators Available, 1 Degraded
+findings: 2 critical, 8 high, 10 medium, 2 low, 2 info
+  CRITICAL clusterversion: the cluster version operator reports Failing [ClusterOperatorDegraded]
+  CRITICAL clusteroperators: cluster operator image-registry is not Available [NoReplicasAvailable]
+  HIGH     pods: shop/ReplicaSet/web-6b8f9: container web: CrashLoopBackOff (2 pods), 14 restarts
+           log: Error: connect ECONNREFUSED 10.0.0.5:5432
+           next: oc describe pod -n shop web-7d9f
+  MEDIUM   etcd: etcd logged "slow fdatasync" 1 time(s) on 1 member(s)
 ```
 
 ### Why was this denied?

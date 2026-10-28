@@ -9,8 +9,25 @@
   devices and FIFOs are never followed or read; files named like Secrets are never read (oc adm inspect already
   elides their values; kube-noob does not open them at all); nested archives are listed, not opened. Caps bound the
   file count, the bytes processed (a gzip bomb stops at the cap), each file, what is kept in memory and the nesting
-  depth; logs keep their last MiB. The layout was read from openshift/oc's `must-gather` and `inspect` source. The
-  analysers that turn it into findings (backlog G2) come next.
+  depth; logs keep their last MiB. The layout was read from openshift/oc's `must-gather` and `inspect` source.
+- `must-gather analyze` now says what is wrong (backlog G2), ranked by severity, each finding with the files it came
+  from, its signals and read-only next steps: the cluster version (current, desired, channel, history; Failing,
+  Available, Invalid, ReleaseAccepted, Upgradeable, RetrievedUpdates; an update that stopped partway), cluster
+  operators (not Available, Degraded, Upgradeable=False), nodes (NotReady or no longer reporting, memory, disk and PID
+  pressure, network unavailable, cordoned; control-plane nodes rank first), machine config pools (each *Degraded
+  condition, degraded machines, updating, paused), OLM operators (Failed, Pending, Unknown; the copies OLM writes into
+  every namespace are folded into the original), pods (container waiting reasons such as CrashLoopBackOff and
+  ImagePullBackOff, OOM kills, Unschedulable, Evicted; replicas of one owner are one finding, with the last error
+  line of the crashing container's log), warning events by reason (summed over `count` and `series.count`), and etcd
+  log hints (apply request took too long, slow fdatasync, heartbeat on time, leader elections across terms). The
+  platform (Infrastructure) and the installed operators are reported for the case draft (G3). Every finding feeds the
+  signals that known-issue and memory matching use: the alert a condition implies (KubeNodeNotReady,
+  ClusterOperatorDegraded, KubePodCrashLooping, etcdHighFsyncDurations), event and container reasons, components.
+  `--fail-on` exits 1 at a severity. Field and value names were read from kubernetes/api, kubelet, openshift/api,
+  operator-framework/api and etcd. Safety: YAML is parsed with libyaml after an event pre-scan that refuses aliases,
+  more than 10 documents and nesting deeper than 64 (libyaml's composer crashes the process on 100,000 nested
+  brackets; the pre-scan does not), every shown string is flattened and redacted, and a name that is not a valid
+  Kubernetes name never reaches a next-step command.
 - `kube-noob code report` (and the MCP tool `code_report`, `insight` for a pasted SARIF, `gate --sarif-report`, and
   the Action, Tekton and GitLab input `sarif-reports`): what your SAST tools already found, where it ships and who
   runs it. kube-noob has no analysis engine of its own; it reads the SARIF 2.1.0 that Semgrep, Bandit,

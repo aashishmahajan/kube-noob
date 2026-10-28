@@ -141,7 +141,7 @@ class Bundle:
         }
 
 
-def _root_of(path: str) -> tuple[str, list[str]] | None:
+def root_of(path: str) -> tuple[str, list[str]] | None:
     """(gather root prefix, the parts after it) for paths under cluster-scoped-resources/ or namespaces/."""
     parts = path.split("/")
     for i, part in enumerate(parts[:-1]):
@@ -151,7 +151,7 @@ def _root_of(path: str) -> tuple[str, list[str]] | None:
 
 
 def _note(bundle: Bundle, path: str, kind: str) -> None:
-    found = _root_of(path)
+    found = root_of(path)
     if found is None:
         return
     prefix, rest = found

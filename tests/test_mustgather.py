@@ -64,11 +64,11 @@ def test_directory_and_archive_read_the_same(mg: object) -> None:
     d, t = ingest.open_bundle(_dir(mg)), ingest.open_bundle(_tgz(mg))
     top = mg.TOP + "/"  # type: ignore[attr-defined]
     assert sorted(d.files) == sorted(k.removeprefix(top) for k in t.files)
-    assert (d.listed, t.listed) == (23, 23) and d.skipped == t.skipped
+    assert (d.listed, t.listed) == (31, 31) and d.skipped == t.skipped
     (root,) = d.roots.values()
     assert root.version == "openshift/must-gather 4.20.3" and root.timestamp.startswith("2026-10-28 10:00:05")
-    assert root.resources["config.openshift.io/clusteroperators"] == 2 and len(root.pods) == 2 and root.logs == 2
-    assert root.namespaces == {"openshift-etcd", "shop", "openshift-operator-lifecycle-manager"}
+    assert root.resources["config.openshift.io/clusteroperators"] == 3 and len(root.pods) == 6 and root.logs == 2
+    assert root.namespaces == {"openshift-etcd", "shop", "openshift-operator-lifecycle-manager", "openshift-monitoring"}
 
 
 def test_secrets_are_never_read(mg: object, capsys: pytest.CaptureFixture[str]) -> None:

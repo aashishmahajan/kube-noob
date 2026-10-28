@@ -1029,13 +1029,25 @@ def build_parser() -> argparse.ArgumentParser:
         description="analyze opens a must-gather directory or a .tar, .tar.gz or .tgz archive of one (oc adm "
         "must-gather, oc adm inspect) without extracting or executing anything. An archive member with an absolute "
         "path or .. is refused; links, devices and nested archives are not followed or opened; files named like "
-        "Secrets are never read. Prints what was gathered, for which version and when. Example: kube-noob "
-        "must-gather analyze must-gather.tar.gz",
+        "Secrets are never read. Prints what was gathered, for which version and when, then what is wrong: the "
+        "cluster version and update, cluster operators, nodes, machine config pools, OLM operators, pods, warning "
+        "events and etcd log hints, ranked, each with its file, its signals and read-only next steps. Example: "
+        "kube-noob must-gather analyze must-gather.tar.gz --fail-on high",
     )
     mg_sub = mg.add_subparsers(dest="mg_cmd", required=True)
     _patch(mg_sub, common)
-    mga = mg_sub.add_parser("analyze", help="Open a must-gather safely and summarise what it holds")
+    mga = mg_sub.add_parser(
+        "analyze",
+        help="Open a must-gather safely and say what is wrong: cluster version, operators, nodes, machine config "
+        "pools, OLM operators, pods, events and etcd logs, ranked, with read-only next steps",
+    )
     mga.add_argument("path", help="a must-gather directory, or a .tar, .tar.gz or .tgz archive of one")
+    mga.add_argument(
+        "--fail-on",
+        default="never",
+        choices=["low", "medium", "high", "critical", "never"],
+        help="exit 1 when a finding is at or above this severity",
+    )
     ad = sub.add_parser(
         "admission",
         help="The kube-noob-admission webhook: admission warnings for every rule, denials only for enforced rules",
@@ -1843,17 +1855,18 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "code":
         return _code_cmd(a, s, fmt)
     if a.cmd == "must-gather":
-        from kube_noob.mustgather import ingest
+        from kube_noob.mustgather import analyse, ingest
 
         try:
             bundle = ingest.open_bundle(Path(a.path))
         except ingest.MustGatherError as exc:
             raise ConfigError(str(exc)) from exc
+        analysis = analyse.analyse(bundle)
         if a.format == "text":
-            _tprint(ingest.render_text(bundle))
+            _tprint(ingest.render_text(bundle) + "\n" + analyse.render_text(analysis))
         else:
-            _emit(bundle.as_dict(), fmt)
-        return 0
+            _emit({**bundle.as_dict(), **analysis.as_dict()}, fmt)
+        return 1 if analyse.failing(analysis, a.fail_on) else 0
     if a.cmd == "admission":
         return _admission_cmd(a, s, fmt)
     if a.cmd == "build":
