@@ -516,6 +516,22 @@ class CodeBuildIn(_In):
     target: str | None = Field(None, max_length=100, description="The --target stage, if the build sets one.")
 
 
+class MustGatherIn(_In):
+    path: str = Field(
+        ...,
+        min_length=2,
+        max_length=4096,
+        pattern=r"^[^\x00]+$",
+        description="Absolute path of a must-gather directory or .tar, .tar.gz or .tgz archive on the machine the "
+        "server runs on (under mustGather.allowedDir when it is set). Nothing is extracted or run; Secrets are never "
+        "read.",
+    )
+    top: int = Field(50, ge=1, le=500, description="How many findings to return, most severe first.")
+    case_draft: bool = Field(
+        False, description="Also return caseDraft: a support case draft with placeholders for what only you know."
+    )
+
+
 class CodeReportIn(_In):
     sarif: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
         default_factory=list,
@@ -1162,6 +1178,49 @@ class Toolkit:
         )
         self._observe(sorted({f"vuln:{fmt}" for img in out["images"] for fmt in img["formats"]}))
         return {**out, "findings": out["findings"][: max(p.top, 50)], "findingsTotal": len(out["findings"])}
+
+    def _must_gather_path(self, raw: str) -> Path:
+        """The path to open: absolute; with mustGather.allowedDir, resolved (links followed) and inside it. A shared
+        (HTTP) server without allowedDir reads nothing."""
+        given = Path(raw).expanduser()
+        if not given.is_absolute():
+            raise ValueError(f"{raw}: give an absolute path")
+        allowed = self.settings.must_gather.allowed_dir
+        if allowed is None:
+            if self.shared:
+                raise ValueError("this server reads no must-gather: mustGather.allowedDir is not set")
+            return given
+        root = allowed.resolve()
+        target = given.resolve()
+        if target != root and root not in target.parents:
+            raise ValueError(f"{raw}: outside mustGather.allowedDir ({allowed})")
+        return target
+
+    def analyze_must_gather(self, p: MustGatherIn) -> dict[str, Any]:
+        """What is wrong in a must-gather, ranked, with the known bugs and team memory that match each finding."""
+        from kube_noob.mustgather import analyse, ingest
+        from kube_noob.mustgather import report as mg_report
+
+        path = self._must_gather_path(p.path)
+        try:
+            bundle = ingest.open_bundle(path)
+        except ingest.MustGatherError as exc:
+            raise ValueError(str(exc)) from exc
+        analysis = analyse.analyse(bundle)
+        rep = mg_report.build(
+            bundle,
+            analysis,
+            data_dir=self.settings.data_dir,
+            memory_dirs=list(self.settings.memory.paths) or None,
+        )
+        out: dict[str, Any] = {k: v for k, v in bundle.as_dict().items() if k != "source"}
+        out.update(rep)
+        out["findingsTotal"] = len(rep["findings"])
+        out["findings"] = rep["findings"][: p.top]
+        if p.case_draft:
+            out["caseDraft"] = mg_report.case_draft(rep)
+        self._observe([f"signal:{s['kind']}:{s['name']}" for s in rep["signals"][:20]])
+        return out
 
     def code_report(self, p: CodeReportIn) -> dict[str, Any]:
         """Code findings from SARIF, merged across tools, followed into the images that ship them and the workloads
@@ -1931,6 +1990,28 @@ class Toolkit:
                     "layers.",
                     ContainerfileIn,
                     self.containerfile_audit,
+                )
+            )
+        if importlib.util.find_spec("kube_noob.mustgather.analyse") is not None and (  # not in the Claude plugin
+            not self.shared or self.settings.must_gather.allowed_dir is not None
+        ):
+            s.append(
+                ToolSpec(
+                    "analyze_must_gather",
+                    "Analyse a must-gather",
+                    "Open an OpenShift must-gather (or oc adm inspect output) safely and say what is wrong, most "
+                    "severe first: the cluster version and update, cluster operators, nodes, machine config pools, "
+                    "OLM operators, pods, warning events and etcd log hints. Each finding has its evidence file, its "
+                    "signals, read-only commands to confirm it, and the known OpenShift bugs and team memory entries "
+                    "that match it for the version the cluster runs. Nothing is extracted or run and Secrets are "
+                    "never read."
+                    + (
+                        f" Paths must be inside {self.settings.must_gather.allowed_dir}."
+                        if self.settings.must_gather.allowed_dir
+                        else " Local: reads the path you give on this machine."
+                    ),
+                    MustGatherIn,
+                    self.analyze_must_gather,
                 )
             )
         if self.settings.rhacs.enabled and importlib.util.find_spec("kube_noob.rhacs_central") is not None:

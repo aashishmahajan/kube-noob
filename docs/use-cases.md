@@ -268,6 +268,14 @@ kube-noob must-gather analyze must-gather.tar.gz --report case-01 --case-draft
 kube-noob demo must-gather
 ```
 
+From an MCP client, `kubenoob_analyze_must_gather` takes the must-gather's path. The local server reads any path
+you give it; a shared server on OpenShift reads only the must-gathers on the claim you mount
+(`mustGather.pvc.claimName`).
+
+```bash
+helm upgrade --install kube-noob deploy/helm/kube-noob --reuse-values --set mustGather.pvc.claimName=case-files
+```
+
 ```text
 OpenShift 4.20.3; updating to 4.20.4; platform AWS; 1/2 nodes Ready; 2/3 cluster operators Available, 1 Degraded
 findings: 2 critical, 8 high, 10 medium, 2 low, 2 info

@@ -326,6 +326,20 @@ jobs:
           assert cfg['memory'] == {'paths': ['/srv/kube-noob/memory']}, cfg
           assert [str(x) for x in Settings.model_validate(cfg).memory.paths] == ['/srv/kube-noob/memory']
           "
+          mt --set mustGather.pvc.claimName=case-files --set mustGather.pvc.subPath=gathers | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          assert {'name': 'must-gather', 'persistentVolumeClaim': {'claimName': 'case-files', 'readOnly': True}} in pod['volumes']
+          m = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == 'must-gather')
+          assert m == {'name': 'must-gather', 'mountPath': '/srv/kube-noob/must-gather', 'readOnly': True, 'subPath': 'gathers'}, m
+          cfg = yaml.safe_load(docs['ConfigMap']['data']['config.yaml'])
+          assert str(Settings.model_validate(cfg).must_gather.allowed_dir) == '/srv/kube-noob/must-gather', cfg
+          "
+          if mt --set 'mustGather.pvc.claimName=../x' >/dev/null 2>&1; then
+            echo "::error title=chart::an invalid mustGather.pvc.claimName must be refused by the schema"; exit 1
+          fi
           mt --set memory.source=pvc --set memory.pvc.claimName=team-memory --set memory.pvc.subPath=repo | python -c "
           import sys, yaml
           pod = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')['spec']['template']['spec']

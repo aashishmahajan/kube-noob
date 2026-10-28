@@ -34,7 +34,7 @@ Everything lives in the data directory: `~/.local/share/kube-noob` by default, o
 Nothing from a request is kept after it is answered. What is listed above stays until you delete it; the maintainers
 never receive it.
 
-`kube-noob bundle` writes a redacted evidence pack to the folder you name (default `./kube-noob-bundle`). The MCP
+`kube-noob must-gather analyze --report DIR` writes `report.md`, `report.json` and, with `--case-draft`, `case-draft.md` to the folder you name; they hold redacted findings from the must-gather, never its Secrets, and nothing is sent anywhere. `kube-noob bundle` writes a redacted evidence pack to the folder you name (default `./kube-noob-bundle`). The MCP
 server's log line records each tool name, argument sizes and duration, never argument contents.
 
 ## What it sends, and where

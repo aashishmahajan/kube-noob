@@ -306,6 +306,14 @@ spec:
               subPath: {{ . | quote }}
               {{- end }}
             {{- end }}
+            {{- with .Values.mustGather.pvc.claimName }}
+            - name: must-gather
+              mountPath: /srv/kube-noob/must-gather
+              readOnly: true
+              {{- with $.Values.mustGather.pvc.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
+            {{- end }}
             {{- if eq $memSource "configMap" }}
             - {name: memory, mountPath: /srv/kube-noob/memory/entries, readOnly: true}
             {{- else if eq $memSource "pvc" }}
@@ -339,6 +347,10 @@ spec:
         {{- else if eq $seedSource "pvc" }}
         - name: jira-seed
           persistentVolumeClaim: {claimName: {{ .Values.jira.seed.pvc.claimName | quote }}, readOnly: true}
+        {{- end }}
+        {{- with .Values.mustGather.pvc.claimName }}
+        - name: must-gather
+          persistentVolumeClaim: {claimName: {{ . | quote }}, readOnly: true}
         {{- end }}
         {{- if eq $memSource "configMap" }}
         - name: memory

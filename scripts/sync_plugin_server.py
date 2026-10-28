@@ -54,6 +54,13 @@ GUARDED_IMPORTS = frozenset(
         "kube_noob.build.image",
         "kube_noob.sources.advisories",
         "kube_noob.host_fips",
+        # Must-gather analysis reads paths on the user's machine: the CLI and the stdio server offer it; the Claude
+        # plugin does not (the directory asks plugins not to read the user's files on their own).
+        "kube_noob.mustgather",
+        "kube_noob.mustgather.analyse",
+        "kube_noob.mustgather.ingest",
+        "kube_noob.mustgather.report",
+        "kube_noob.mustgather.sample",
     }
 )
 # LLM SDKs never ship in the plugin, even if one returns to the core dependencies; the plugin runs the MCP server only.

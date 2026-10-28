@@ -355,6 +355,24 @@ class MemorySettings(_Base):
         return [p.expanduser() for p in v]
 
 
+class MustGatherSettings(_Base):
+    """Where the ``analyze_must_gather`` MCP tool may read must-gathers. The local stdio server reads any path the
+    user names (it runs as the user) unless this is set; the HTTP server offers the tool only when it is set, and
+    then only for paths that resolve inside it (links resolved first). ``$KUBE_NOOB_MUST_GATHER_DIR`` overrides it."""
+
+    allowed_dir: Path | None = None
+
+    @field_validator("allowed_dir")
+    @classmethod
+    def _absolute(cls, v: Path | None) -> Path | None:
+        if v is None:
+            return None
+        v = v.expanduser()
+        if not v.is_absolute():
+            raise ValueError("mustGather.allowedDir must be an absolute path")
+        return v
+
+
 class JiraSettings(_Base):
     """Local copy of Red Hat's public Jira (``kube-noob corpus jira``) for "has Red Hat seen this error?" answers.
 
@@ -418,6 +436,7 @@ class Settings(_Base):
     admission: AdmissionSettings = Field(default_factory=AdmissionSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    must_gather: MustGatherSettings = Field(default_factory=MustGatherSettings)
     probe: ProbeSettings = Field(default_factory=ProbeSettings)
     dry_run: DryRunSettings = Field(default_factory=DryRunSettings)
     itsm: ItsmSettings = Field(default_factory=ItsmSettings)
@@ -538,6 +557,9 @@ def _env_overrides() -> dict[str, Any]:
             for part in path[:-1]:
                 cur = cur.setdefault(part, {})
             cur[path[-1]] = val
+    must_gather = os.environ.get("KUBE_NOOB_MUST_GATHER_DIR")
+    if must_gather:
+        o["mustGather"] = {"allowedDir": must_gather}
     memory = os.environ.get("KUBE_NOOB_MEMORY_PATHS")
     if memory is not None:
         o["memory"] = {"paths": [p for p in memory.split(os.pathsep) if p.strip()]}

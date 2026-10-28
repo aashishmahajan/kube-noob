@@ -10,6 +10,11 @@
   elides their values; kube-noob does not open them at all); nested archives are listed, not opened. Caps bound the
   file count, the bytes processed (a gzip bomb stops at the cap), each file, what is kept in memory and the nesting
   depth; logs keep their last MiB. The layout was read from openshift/oc's `must-gather` and `inspect` source.
+- MCP tool `analyze_must_gather` (backlog G5): the must-gather report for a path on the machine the server runs on,
+  with the top findings (`top`) and, on request, the case draft as text. The local stdio server reads any absolute
+  path you give; the HTTP server offers the tool only with `mustGather.allowedDir` (`$KUBE_NOOB_MUST_GATHER_DIR`,
+  chart `mustGather.pvc.claimName`, mounted read-only at `/srv/kube-noob/must-gather`) and reads only paths that
+  resolve inside it, links resolved first. The tool is not in the Claude plugin, which reads no files of yours.
 - `must-gather analyze --report DIR [--case-draft]` (backlog G3) writes `report.md` and `report.json`: the summary
   (version, update state, platform, nodes, operators, the OLM operators installed), every finding ranked with its
   evidence files, signals and read-only commands, the OpenShift known issues and Jira cache tickets that match each

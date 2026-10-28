@@ -54,6 +54,10 @@ data:
       enabled: {{ .Values.notify.enabled }}
     gate:
       enabled: {{ .Values.gate.enabled }}
+    {{- if .Values.mustGather.pvc.claimName }}
+    mustGather:
+      allowedDir: /srv/kube-noob/must-gather
+    {{- end }}
     {{- if ne (include "kube-noob.memorySource" .) "none" }}
     memory:
       paths: [/srv/kube-noob/memory]

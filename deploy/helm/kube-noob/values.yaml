@@ -154,6 +154,13 @@ db:
   path: /kube-noob-db/kube-noob-db.tgz   # the archive inside the image
   sizeLimit: 2Gi             # the scratch volume the archive is copied to
 
+mustGather:
+  # A read-only volume of must-gathers for the analyze_must_gather MCP tool, mounted at /srv/kube-noob/must-gather.
+  # The tool reads only paths inside it (links resolved first); without a claim the HTTP service offers no such tool.
+  pvc:
+    claimName: ""            # a claim holding must-gather directories or .tar.gz archives, mounted read-only
+    subPath: ""
+
 memory:
   # Your team's memory repository (kube-noob memory init), mounted read-only at /srv/kube-noob/memory and read by
   # every tool; never uploaded or exported. source: none | configMap | pvc | git.

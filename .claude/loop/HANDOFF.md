@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (G1 and G2 done; SAST1 red-team fixes and G3 committed, CI next for both).
+right now; STATE.md says what is done. Updated 2026-10-28 (G1 and G2 done; SAST1 red-team fixes, G3 and G5 committed; CI 40693984760 covers SAST1+G3, then dispatch for G5).
 
 ## Repository and branch
 
@@ -92,7 +92,7 @@ right now; STATE.md says what is done. Updated 2026-10-28 (G1 and G2 done; SAST1
 
 ## Queue after that (from STATE.md)
 
-LT1 (blocked: owner's load image), VUL2 (blocked on DB1), RT2, then the older queue (G3 in CI, G5 next, I6, I1, N2, N1, N5, G4, E2, E1, E3, E4b, E5, I2, I9, I8,
+LT1 (blocked: owner's load image), VUL2 (blocked on DB1), RT2, then the older queue (G3 and G5 in CI, I6 next, I6, I1, N2, N1, N5, G4, E2, E1, E3, E4b, E5, I2, I9, I8,
 P1, P2, GATE1-3, V2, V3, N3, N4, A1-A5, I10, T3, I3, I4, I5, I7, GOV1-3, M13). Every enrichment that fetches anything
 must be jittered (random pause between requests, jittered first run and intervals).
 

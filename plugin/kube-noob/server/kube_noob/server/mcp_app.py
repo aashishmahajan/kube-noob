@@ -71,7 +71,9 @@ def _instructions(settings: Settings) -> str:
         "(Trivy, Grype, CycloneDX, SPDX, RHACS) use kubenoob_vuln_report with the manifests, and lead with rank 1 "
         "and its attack path; for SAST output (SARIF from Semgrep, Bandit, SpotBugs, ESLint, CodeQL) use "
         "kubenoob_code_report with the Containerfiles and manifests, and lead with rank 1 (shipped and exposed); "
-        "for 'what could go wrong with this app?' use kubenoob_threat_model; "
+        "for 'what could go wrong with this app?' use kubenoob_threat_model; for a must-gather on disk use "
+        "kubenoob_analyze_must_gather when it is offered, lead with the most severe finding and the bug it matches, "
+        "and offer its case draft; "
         "for 'can pod A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
         + (
