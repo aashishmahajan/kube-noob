@@ -17,10 +17,30 @@ from typing import Any
 
 from kube_noob.catalog import OPENSHIFT_FAMILY
 from kube_noob.memory.model import MemoryEntry, vkey
-from kube_noob.memory.repo import load_repo, require_repo
+from kube_noob.memory.repo import Loaded, entry_files, load_repo, require_repo
 
 MIN_SHARED_WORDS = 3
 _STATE_ORDER = {"fix": 0, "runbook": 1, "tried, did not work": 2, "retired": 3}
+
+
+_CACHE: dict[str, tuple[tuple[tuple[str, int, int], ...], list[Loaded]]] = {}
+_CACHE_MAX = 32
+
+
+def cached_repo(root: Path) -> list[Loaded]:
+    """``load_repo`` for repeated reads (every diagnose call): reloaded only when an entry file changes."""
+    require_repo(root)
+    files = entry_files(root)
+    stamp = tuple((p.name, (st := p.stat()).st_mtime_ns, st.st_size) for p in files)
+    key = str(root.resolve())
+    hit = _CACHE.get(key)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    loaded = load_repo(root)
+    if len(_CACHE) >= _CACHE_MAX:
+        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE[key] = (stamp, loaded)
+    return loaded
 
 
 def _words(text: str) -> set[str]:
@@ -118,7 +138,7 @@ def match(
     skipped = {"notApproved": 0, "notApplicable": 0, "unreadable": 0}
     repos = []
     for repo in dirs:
-        loaded = load_repo(require_repo(repo))
+        loaded = cached_repo(repo)
         repos.append({"path": str(repo), "entries": len(loaded)})
         for item in loaded:
             e = item.entry
@@ -162,6 +182,26 @@ def match(
     }
     if not rows:
         out["note"] = "No entry in your team's memory matches this text."
+    return out
+
+
+def for_answers(
+    dirs: list[Path], text: str, version: str | None, platform: str | None, limit: int = 3
+) -> dict[str, Any]:
+    """Memory matches to attach to another answer (diagnose, known-issues, debug, bundle): approved entries only, and
+    a note instead of an error when a configured repository cannot be read."""
+    readable, notes = [], []
+    for d in dirs:
+        try:
+            require_repo(d)
+        except (OSError, ValueError) as exc:
+            notes.append(str(exc))
+        else:
+            readable.append(d)
+    out: dict[str, Any] = {"matches": [], "notes": notes}
+    if readable:
+        found = match(readable, text, version=version, platform=platform, limit=limit)
+        out["matches"] = found["matches"]
     return out
 
 

@@ -69,6 +69,11 @@
   an init container (https:// or ssh:// with a deploy-key Secret, never credentials in the URL), opens egress only to
   `memory.git.egressCIDRs`, names the host in the EgressFirewall, and under `config.offline` accepts only an
   in-cluster host.
+- Memory in answers: with `memory.paths` set, `diagnose`, `known-issues`, `debug` and `bundle` carry your team's
+  approved entries for the same error as `[mem:MEM-<n>]` (fix, runbook, tried and did not work, or retired for your
+  version, with outcome counts); the bundle gets a "Team memory" section. New MCP tools `kubenoob_memory_match`
+  (read-only) and `kubenoob_memory_propose` (returns the entry's YAML; a local stdio server saves it as proposed only
+  after the user confirmed; the HTTP server never writes). Repository reads are cached until an entry file changes.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.

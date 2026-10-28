@@ -171,6 +171,11 @@ privileged SCC, cluster-admin, hostPath or wildcard RBAC fail unless the entry r
 `add` writes a proposed entry and never commits; `migrate-learning` turns confirmed learning notes into proposed
 entries. kube-noob reads the repository where it runs and never uploads, bundles or exports it.
 
+Set `memory.paths` (or `KUBE_NOOB_MEMORY_PATHS`) and `diagnose`, `known-issues`, `debug` and `bundle` add the
+matching approved entries to every answer, cited as `[mem:MEM-<n>]`. Over MCP, `kubenoob_memory_match` searches
+them and `kubenoob_memory_propose` turns a fix the user confirmed into an entry; only a local stdio server saves
+it (as proposed, after the user asks), and the HTTP server never writes.
+
 ### Always on: the incident watch
 
 `watch` polls your namespaces read-only (pods, events, deployments, replicasets; never Secrets) and turns what it sees

@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -184,6 +184,51 @@ class SignalsIn(_In):
         min_length=1,
         max_length=MAX_SIGNAL_TEXT,
         description="An Alertmanager payload, events, a ClusterOperator, pod status, logs or an error in words.",
+    )
+
+
+class MemorySignalIn(_In):
+    kind: Literal["alert", "co_condition", "event_reason", "pod_reason", "admission", "component", "error_template"]
+    name: str = Field(..., min_length=1, max_length=260)
+
+
+class MemoryMatchIn(_In):
+    text: str = Field(
+        ...,
+        min_length=3,
+        max_length=MAX_SIGNAL_TEXT,
+        description="An error, events, logs, a symptom in words or an Alertmanager webhook payload.",
+    )
+    version: str | None = Field(
+        None,
+        max_length=20,
+        pattern=r"^\d+\.\d+(\.\d+)?$",
+        description="The cluster's OpenShift version: entries already fixed there are shown as retired.",
+    )
+    platform: PlatformT | None = None
+    operators: dict[str, str] = Field(
+        default_factory=dict, max_length=20, description="Installed operators and their versions, name -> version."
+    )
+    include_proposed: bool = Field(False, description="Also show entries not yet approved by a reviewer.")
+    limit: int = Field(5, ge=1, le=20)
+
+
+class MemoryProposeIn(_In):
+    symptom: str = Field(..., min_length=3, max_length=500, description="What was observed, in one or two sentences.")
+    cause: str = Field(..., min_length=3, max_length=2000, description="The confirmed root cause, in words.")
+    fix: str = Field(..., min_length=3, max_length=2000, description="What fixed it (or what was tried), in words.")
+    kind: Literal["fix", "negative", "runbook"] = Field("fix", description="negative: tried and did not work.")
+    platform: PlatformT | None = None
+    signals: list[MemorySignalIn] = Field(default_factory=list, max_length=20)
+    commands: list[Annotated[str, Field(max_length=500)]] = Field(
+        default_factory=list, max_length=20, description="Commands, one per item; labelled by kube-noob's classifier."
+    )
+    fixed_in: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")
+    owners: list[Annotated[str, Field(max_length=100)]] = Field(default_factory=list, max_length=5)
+    repository: int = Field(0, ge=0, le=9, description="Which of the configured memory.paths to propose into.")
+    confirmed_by_user: bool = Field(
+        False,
+        description="True only after the user read the entry and asked to save it; otherwise only the YAML returns.",
     )
 
 
@@ -552,6 +597,7 @@ class Toolkit:
         out["knownIssues"] = reported["matches"]
         if reported["matches"]:
             self._observe([f"known-issue:{m['id']}" for m in reported["matches"]])
+        self._attach_memory(out, p.text, version, p.platform)
         denials = explain_denials(text, p.platform)["denials"]
         if denials:
             out["policyDenials"] = denials
@@ -561,6 +607,84 @@ class Toolkit:
     def known_issues(self, p: KnownIssuesIn) -> dict[str, Any]:
         out = known_issue_match(p.text, p.platform, p.version, p.limit, self.settings.data_dir)
         self._observe([f"known-issue:{m['id']}" for m in out["matches"]])
+        self._attach_memory(out, p.text, p.version, p.platform)
+        return out
+
+    def _attach_memory(self, out: dict[str, Any], text: str, version: str | None, platform: str | None) -> None:
+        """Approved team memory entries for the same text, cited as [mem:MEM-<n>], when memory.paths is set."""
+        if not self.settings.memory.paths:
+            return
+        from kube_noob.memory.match import for_answers
+
+        found = for_answers(list(self.settings.memory.paths), text, version, platform)
+        out["memory"] = found["matches"]
+        if found["notes"]:
+            out["memoryNotes"] = found["notes"]
+        self._observe([f"memory:{m['id']}" for m in found["matches"]])
+
+    # -- team memory -----------------------------------------------------------------------------------------
+    def memory_match(self, p: MemoryMatchIn) -> dict[str, Any]:
+        from kube_noob.memory.match import match
+
+        out = match(
+            list(self.settings.memory.paths),
+            p.text,
+            version=p.version,
+            platform=p.platform,
+            operators=p.operators,
+            include_proposed=p.include_proposed,
+            limit=p.limit,
+        )
+        self._observe([f"memory:{m['id']}" for m in out["matches"]])
+        return out
+
+    def memory_propose(self, p: MemoryProposeIn) -> dict[str, Any]:
+        """The entry as YAML and where it would go. It is written (as ``proposed``, never committed) only by a local
+        stdio server, only into a configured repository, and only when the user confirmed; the HTTP server never
+        writes."""
+        from datetime import date
+
+        from kube_noob.debug.steps import classify_step
+        from kube_noob.memory import MemoryEntry, dump_entry
+        from kube_noob.memory.repo import add_entry, next_number, require_repo
+
+        paths = list(self.settings.memory.paths)
+        if p.repository >= len(paths):
+            raise ValueError(f"repository {p.repository} is not configured; memory.paths has {len(paths)}")
+        root = require_repo(paths[p.repository])
+        fields: dict[str, Any] = {
+            "kind": p.kind,
+            "signals": [x.model_dump() for x in p.signals],
+            "symptom": p.symptom,
+            "platform": p.platform or self.settings.default_platform,
+            "versions": {"fixedIn": p.fixed_in} if p.fixed_in else {},
+            "cause": p.cause,
+            "fix": {
+                "text": p.fix,
+                "commands": [
+                    {"command": c, "label": "read-only" if classify_step(c) == "read" else "needs-approval"}
+                    for c in p.commands
+                ],
+            },
+            "owners": p.owners or ["unassigned"],
+        }
+        today = date.today()
+        preview = MemoryEntry.model_validate(
+            {**fields, "id": f"MEM-{next_number(root)}", "status": "proposed", "created": today, "updated": today}
+        )
+        out: dict[str, Any] = {
+            "yaml": dump_entry(preview),
+            "suggestedPath": str(root / "entries" / f"{preview.id}.yaml"),
+            "written": False,
+        }
+        if self.shared:
+            out["note"] = "This server never writes memory: open a pull request with the YAML above."
+        elif not p.confirmed_by_user:
+            out["note"] = "Show the YAML to the user; save it only when they confirm (confirmed_by_user: true)."
+        else:
+            path, entry = add_entry(root, fields, today)
+            out.update(written=True, path=str(path), id=entry.id, yaml=dump_entry(entry))
+            out["note"] = "Saved as proposed; a reviewer approves it in a pull request (kube-noob memory validate)."
         return out
 
     def ticket(self, p: TicketIn) -> dict[str, Any]:
@@ -703,6 +827,8 @@ class Toolkit:
             self.settings.data_dir,
         )
         self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
+        blob = "\n".join([*out.get("evidence", []), *out.get("logs", {}).values()])
+        self._attach_memory(out, blob, (out.get("cluster") or {}).get("openshift"), p.platform)
         return out
 
     def cluster_version(self, _: EmptyIn) -> dict[str, Any]:
@@ -1172,6 +1298,36 @@ class Toolkit:
                     WebFetchIn,
                     self.web_fetch,
                     open_world=True,
+                )
+            )
+        if self.settings.memory.paths:
+            s.append(
+                ToolSpec(
+                    "memory_match",
+                    "Search your team's memory",
+                    "Approved entries from your team's memory repositories (memory.paths) for an error, symptom or "
+                    "Alertmanager payload: signals first, then distinctive words. Each entry says whether it is a fix, "
+                    "a runbook, something tried that did not work, or retired for the given version, with how often "
+                    "it was applied and resolved. Cite as [mem:MEM-<n>].",
+                    MemoryMatchIn,
+                    self.memory_match,
+                )
+            )
+            s.append(
+                ToolSpec(
+                    "memory_propose",
+                    "Propose a memory entry",
+                    "Turn a confirmed fix (or a fix that did not work) into a memory entry: returns the YAML and its "
+                    "suggested path. "
+                    + (
+                        "This server never writes: the user opens a pull request with the YAML."
+                        if self.shared
+                        else "Saves it as proposed (never commits) only with confirmed_by_user after the user "
+                        "read it and asked to save it."
+                    ),
+                    MemoryProposeIn,
+                    self.memory_propose,
+                    read_only=self.shared,
                 )
             )
         if self.shared:

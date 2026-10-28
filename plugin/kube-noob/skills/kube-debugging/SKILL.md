@@ -22,7 +22,11 @@ are for the user to run: give them as copy-paste lines (no shell comments) and d
    An Alertmanager webhook payload goes in as it is; its `openshift_version` label stands in for the version (see
    `input`). Name the `signals` it found (alert names, reasons), then present `readOnlyNextSteps` first.
    `kubenoob_extract_signals` lists the signals alone, with the alerts the words imply and the playbooks they point at.
-3. If `knownIssues` is not empty, or the user asks "is this a known bug?", say so plainly: the issue id with its link,
+3. If `memory` is not empty, your team has seen this before: lead with the approved fix as `[mem:MEM-<n>]` and its
+   outcome summary ("matched 3 times, resolved 2"); say "tried, did not work" for negative entries and treat retired
+   entries as history for the user's version. After the user confirms a new fix, offer `kubenoob_memory_propose`
+   (it shows the YAML; it saves a proposed entry only when the user asks, and never on the HTTP server).
+   If `knownIssues` is not empty, or the user asks "is this a known bug?", say so plainly: the issue id with its link,
    what became of it (`status`; for Red Hat Jira tickets also `verdict`: fixed, fix in progress, open, not a bug, won't
    fix, cannot reproduce, obsolete or duplicate), and the `workaround` or `remarks` from the comments. A ticket closed
    as not a bug usually means configuration: lead with the remark that says why. Call `kubenoob_known_issues` directly

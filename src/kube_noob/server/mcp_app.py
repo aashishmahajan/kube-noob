@@ -63,6 +63,14 @@ def _instructions(settings: Settings) -> str:
         "kubenoob_explain_denial; for 'can pod "
         "A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
+        + (
+            ". Your team's memory is configured: diagnose and known-issue results carry `memory` entries; lead with an "
+            "approved fix as [mem:MEM-<n>] with its outcome counts, say 'tried, did not work' for negative entries and "
+            "treat retired entries as history; kubenoob_memory_match searches it, and kubenoob_memory_propose turns a "
+            "fix the user confirmed into an entry"
+            if settings.memory.paths
+            else ""
+        )
         + ". When asked what is wrong, read kubenoob_incidents first: the watch's open incidents with their diagnosis, "
         "what changed before they started and fixes the team confirmed for earlier occurrences"
         + (" (kubenoob_cluster_check_namespace polls a namespace now)" if settings.cluster.enabled else "")

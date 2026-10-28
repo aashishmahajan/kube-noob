@@ -391,6 +391,16 @@ def bundle_markdown(result: dict[str, Any]) -> str:
         lines += [
             f"- {x['kind']} {x['name']}" + (f" ({x['detail']})" if x.get("detail") else "") for x in result["signals"]
         ]
+    for m in result.get("memory", []):
+        state_label = {
+            "fix": "fix",
+            "runbook": "runbook",
+            "retired": "retired",
+            "tried, did not work": "tried, did not work",
+        }
+        lines += ["", f"## Team memory {m['citation']}: {state_label[m['state']]}", "", m["symptom"], ""]
+        lines += [f"- Cause: {m['cause']}", f"- Fix: {m['fix']['text']}", f"- {m['outcomes']['summary']}"]
+        lines += [f"- Note: {m['note']}"] if m.get("note") else []
     for m in result.get("knownIssues", []):
         lines += ["", f"## Reported issue {m['id']}", "", m["status"], "", m["summary"], "", f"- Issue: {m['url']}"]
         lines += [f"- Workaround: {m['workaround']}"] if m.get("workaround") else []
