@@ -360,3 +360,57 @@ def test_a_comment_inside_a_code_block_is_not_a_heading() -> None:
     chunk = get_store().get("kn:ocp-scc#4")
     assert chunk is not None and chunk.heading.startswith("openshift.io/required-scc")
     assert "openshift\\.io\\/scc" in chunk.text and "unless the SCC exists" in chunk.text
+
+
+# QA6 regrade gaps closed from the cited pages: kubernetes/website a4c4bc29 (determine-reason-pod-failure.md,
+# manage-resources-containers.md), helm-www e5a4c62 (topics/advanced.md), openshift-docs 1400f2c (enterprise-4.22:
+# rosa-hcp-classic-comparison.adoc, storage-multi-attach-error.adoc).
+
+
+def test_termination_message_and_limit_enforcement_have_sections(kit: tk.Toolkit) -> None:
+    exited = (
+        "The container dies with exit code 1 and kubectl describe shows no reason. How do I get its last log lines "
+        "into the termination message?"
+    )
+    assert _top(kit, exited)[:1] == ["kn:k8s-debug-pods#1"]
+    body = tk_chunk("kn:k8s-debug-pods#1")
+    assert "FallbackToLogsOnError" in body and "2048 bytes or 80 lines" in body and "lastState.terminated" in body
+    limits = (
+        "One pod just runs slowly at its CPU limit, another was OOMKilled above its memory limit. Are the two limits "
+        "enforced the same way?"
+    )
+    assert "kn:k8s-resources#2" in _top(kit, limits)
+    assert "reactively" in tk_chunk("kn:k8s-resources#2")
+
+
+def test_helm_adoption_and_multi_attach_name_the_documented_commands() -> None:
+    assert "--take-ownership" in tk_chunk("kn:helm-troubleshooting#1")
+    d = _diag("Multi-Attach error for volume pvc-1 Volume is already used by pod(s) db-0")
+    assert d["id"] == "DBG-MULTIATTACH"
+    assert "--grace-period=0" in _changes(d) and "six minutes" in _changes(d)
+    assert "six minutes" in tk_chunk("kn:storage-access-modes#1")
+
+
+def tk_chunk(chunk_id: str) -> str:
+    from kube_noob.knowledge.store import get_store
+
+    chunk = get_store().get(chunk_id)
+    assert chunk is not None, chunk_id
+    return chunk.text
+
+
+def test_generic_words_do_not_bring_the_pod_storage_or_limits_documents(kit: tk.Toolkit) -> None:
+    # Measured on the train half: once these documents gained sections, questions about ECS tasks, EBS volume sizes
+    # or C structs drew them on words such as container, volume and exit. Each now needs a word of its subject.
+    for text, doc in (
+        ("How can two containers in one AWS ECS task get different IAM roles?", "kn:k8s-debug-pods#"),
+        (
+            "How do I shrink an EBS volume from 1500 GB to 100 GB without losing data after a crash?",
+            "kn:storage-access-",
+        ),
+        (
+            "Why does my C program exit with an error when the struct is not aligned? How do I read the message?",
+            "kn:k8s-",
+        ),
+    ):
+        assert not [g for g in _top(kit, text) if g.startswith(doc)], text

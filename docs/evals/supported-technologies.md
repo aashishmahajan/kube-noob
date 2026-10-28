@@ -94,13 +94,13 @@ Golden results now, graded again by independent agents:
 
 | Technology | In scope: top finding answers | Out of scope left unanswered |
 |---|---|---|
-| Kubernetes | 13 of 16 (was 4) | 4 of 4 |
-| Helm 3 | 15 of 16 (was 1) | 4 of 4 (was 2) |
+| Kubernetes | 15 of 16 (was 4) | 4 of 4 |
+| Helm 3 | 16 of 16 (was 1) | 4 of 4 (was 2) |
 | OpenShift | 12 of 16 (was 1) | 3 of 3 |
-| ROSA HCP | 14 of 16 (was 1) | 2 of 4 (was 1) |
+| ROSA HCP | 16 of 16 (was 1) | 2 of 4 (was 1) |
 | RHACS | 14 of 16 (was 0) | 4 of 4 (was 2) |
-| Admission policy engines | 10 of 16 (was 0) | 3 of 4 |
-| **All** | **78 of 96 (was 7)** | **20 of 23 (was 15)** |
+| Admission policy engines | 11 of 16 (was 0) | 3 of 4 |
+| **All** | **84 of 96 (was 7)** | **20 of 23 (was 15)** |
 
 OpenShift and ROSA HCP items are now asked with their platform (`platform: openshift` or `rosa-hcp`), as kube-noob
 is configured on those clusters; without it, OpenShift-only content stays silent unless the question says OpenShift
@@ -120,6 +120,7 @@ answer:
 | Falco and NeuVector questions get no document | 2 | 2 | 0 | 0 |
 | Helm namespaced releases and template scope; last-sentence questions | 10 | 5 | 0 | 5 |
 | Comments in code blocks no longer split sections | 7 | 1 | 2 | 4 |
+| Six documented gap answers; pod, storage and limits documents need their subject's words | 66 | 32 | 12 | 22 |
 
 Most moved answers were wrong both before and after: real questions are dominated by Red Hat bug reports (the
 bundled release notes hold the key for few of them) and by products outside the box, which documentation content

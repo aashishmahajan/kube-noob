@@ -419,3 +419,18 @@ def test_other_container_security_products_get_no_documents(kit: tk.Toolkit) -> 
         "NeuVector admission control: how do I reject images pulled from registries we have not approved?",
     ):
         assert _top(kit, text) == [], text
+
+
+def test_rosa_hcp_and_classic_are_compared_in_one_section(kit: tk.Toolkit) -> None:
+    # openshift-docs 1400f2c rosa-hcp-classic-comparison.adoc
+    q = "Where does the control plane run in ROSA HCP compared with ROSA Classic, and do HCP clusters have infra nodes?"
+    assert _top(kit, q, platform="rosa-hcp")[:1] == ["kn:rosa-hcp#0"]
+    from kube_noob.knowledge.store import get_store
+
+    text = get_store().get("kn:rosa-hcp#0").text  # type: ignore[union-attr]
+    assert "Red Hat-owned AWS account" in text and "no" in text and "7 (single-AZ) or 9 (multi-AZ)" in text
+
+
+def test_a_vap_rollout_question_gets_the_validation_actions_section(kit: tk.Toolkit) -> None:
+    q = "How do I roll out a ValidatingAdmissionPolicy as warnings first and make it blocking later?"
+    assert _top(kit, q)[:1] == ["kn:k8s-validating-admission-policy#3"]

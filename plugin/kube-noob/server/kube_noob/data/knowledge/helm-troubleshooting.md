@@ -6,6 +6,7 @@ platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
 sources:
+  - {title: "Helm 3: Advanced techniques (--take-ownership)", url: "https://github.com/helm/helm-www/blob/e5a4c621283c8551426adce8cb27a2cc3f402ea8/versioned_docs/version-3/topics/advanced.md", license: MIT}
   - {title: "Helm documentation", url: "https://helm.sh/docs/", license: MIT}
 ---
 # Helm troubleshooting
@@ -18,7 +19,10 @@ if the very first install failed, `helm uninstall` and reinstall. Prevent with `
 ## "rendered manifests contain a resource that already exists" / "invalid ownership metadata"
 The object exists but was not created by this release. Either delete/rename it, or adopt it deliberately by adding the
 `app.kubernetes.io/managed-by=Helm` label and the `meta.helm.sh/release-name` / `meta.helm.sh/release-namespace`
-annotations.
+annotations. Helm can also adopt it for you: `helm install <release> ./chart --take-ownership` (or `helm upgrade
+... --take-ownership`) skips the ownership check, and later upgrades and uninstalls treat the object as part of the
+release. Review `--dry-run` output first so Helm does not take objects it should not manage; fields the chart never
+set stay on the object.
 
 ## "no matches for kind ... in version ..."
 The chart uses an API that the cluster does not serve: a removed API (e.g. `policy/v1beta1` PodDisruptionBudget on

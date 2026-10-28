@@ -6,6 +6,7 @@ platforms: [rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
 sources:
+  - {title: "OpenShift docs: Hosted Control Planes and Classic architecture comparison", url: "https://github.com/openshift/openshift-docs/blob/1400f2c8ebe0f2ec66005ecef2bd720cf4c97cad/modules/rosa-hcp-classic-comparison.adoc", license: Apache-2.0}
   - {title: "Red Hat OpenShift Service on AWS documentation", url: "https://docs.redhat.com/en/documentation/red_hat_openshift_service_on_aws/", license: CC-BY-SA-3.0}
   - {title: "openshift/hypershift", url: "https://github.com/openshift/hypershift", license: Apache-2.0}
   - {title: "Red Hat Cloud Experts - ROSA", url: "https://cloud.redhat.com/experts/rosa/", license: Apache-2.0}
@@ -13,9 +14,16 @@ sources:
 ---
 # ROSA: Classic vs Hosted Control Planes
 
-## ROSA Classic
-Control plane and infrastructure nodes run in the customer's AWS account alongside the workers (higher EC2 footprint:
-dedicated control plane and infra nodes).
+## ROSA HCP and ROSA Classic compared: control plane, infra nodes, upgrades
+- Control plane (API server, etcd): HCP runs it in a Red Hat-owned AWS account, always across several availability
+  zones, and workers reach it over AWS PrivateLink; Classic runs it in your AWS account, in your VPC, in one or more
+  zones.
+- Infrastructure nodes: HCP has none; ingress, the image registry and platform monitoring run on the workers. Classic
+  uses 2 (single-AZ) or 3 (multi-AZ) dedicated infra nodes for them.
+- Upgrades: on HCP the control plane and each machine pool upgrade separately; Classic upgrades the whole cluster at
+  once.
+- Machine pools: one AZ each on HCP; single- or multi-AZ on Classic. Minimum EC2 footprint: 2 instances for HCP,
+  7 (single-AZ) or 9 (multi-AZ) for Classic.
 
 ## ROSA with Hosted Control Planes (HCP)
 - Built on **HyperShift**: the control plane (API server, etcd, controllers) runs as pods in a **Red Hat-owned AWS

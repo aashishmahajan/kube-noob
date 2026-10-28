@@ -148,6 +148,18 @@
   answer: in scope 78 of 96 (OpenShift 12, policy 10). Community: train half 3 answers moved (1 better, 2 neither);
   test half 7 moved (1 better, 2 worse, 4 neither: the two worse rows moved because one document has fewer, longer
   sections, which shifts every search score a little).
+- Documented answers for six more golden gaps, each from the cited page: the termination message and
+  `terminationMessagePolicy: FallbackToLogsOnError` (kubernetes/website, Determine the Reason for Pod Failure), CPU
+  limits throttle while memory limits are enforced reactively by OOM kills (Resource Management for Pods and
+  Containers), `helm install/upgrade --take-ownership` (Helm 3 Advanced techniques), ROSA HCP and Classic compared
+  (control plane, infra nodes, upgrades, EC2 footprint) and the Multi-Attach recovery after a node crash
+  (`oc delete pod <old_pod> --force=true --grace-period=0`, the volume is released after six minutes) from the
+  OpenShift docs, and a task-led heading for rolling a ValidatingAdmissionPolicy out as `[Warn, Audit]` before
+  `[Deny]`. The pod-debugging, storage access mode and requests-and-limits documents now need a word of their subject
+  in the question (`requires`): with the new sections, generic words such as container, volume and exit had drawn
+  them to ECS, EBS and C questions. Golden in scope 84 of 96 (Helm 16, Kubernetes 15, policy 11, ROSA HCP 16).
+  Community: train half 66 answers moved (38 better, 8 worse, 20 neither); test half 66 moved (32 better, 12 worse,
+  22 neither), independent grader; most of the better rows are unrelated documents no longer given.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

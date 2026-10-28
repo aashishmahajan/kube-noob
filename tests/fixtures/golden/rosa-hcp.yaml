@@ -138,8 +138,9 @@
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/storage-multi-attach-error.adoc'
   outOfScope: false
   platform: rosa-hcp
-  status: miss
-  gap: 'playbook: Multi-Attach after node loss: oc delete pod --force --grace-period=0, volume freed in about six minutes'
+  status: pass
+  expect:
+  - DBG-MULTIATTACH
 - id: rosa-009
   technology: rosa-hcp
   kind: howto
@@ -242,8 +243,9 @@
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-classic-comparison.adoc'
   outOfScope: false
   platform: rosa-hcp
-  status: miss
-  gap: 'doc: ROSA HCP vs Classic: control plane in Red Hat account via PrivateLink, no infra nodes, separate upgrades'
+  status: pass
+  expect:
+  - 'kn:rosa-hcp#0'
 - id: rosa-015
   technology: rosa-hcp
   kind: concept
@@ -314,8 +316,8 @@
   outOfScope: true
   platform: rosa-hcp
   status: miss
-  gap: 'abstain: doc: kn:k8s-debug-pods#0 and kn:rosa-troubleshooting#0 should not fire for an application database connection
-    error'
+  gap: 'abstain: kn:rosa-troubleshooting#0 (ROSA install log and quota check) should not have fired on an app-level localhost
+    connection error'
 - id: rosa-020
   technology: rosa-hcp
   kind: out-of-scope

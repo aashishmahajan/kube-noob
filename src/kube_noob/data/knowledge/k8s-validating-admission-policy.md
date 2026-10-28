@@ -53,7 +53,7 @@ set, `messageExpression` is used; the fixed `message` is the fallback when the e
 returns several lines. `reason` sets the machine-readable reason and HTTP status code of the denial (`Unauthorized`,
 `Forbidden`, `Invalid` or `RequestEntityTooLarge`); without it the response uses `Invalid`.
 
-## validationActions: Deny, Warn and Audit on the ValidatingAdmissionPolicyBinding
+## Roll out a policy as warnings first: validationActions [Warn, Audit], then [Deny] to block
 
 Every binding lists one or more `validationActions`:
 

@@ -422,8 +422,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Use a StatefulSet with volumeClaimTemplates (one RWO volume per replica) or strategy: Recreate with "
             "replicas: 1, or a genuine RWX class if the app supports concurrent writers.",
-            "After a node loss, wait for detach (~6 min) or delete the stale VolumeAttachment only once the node is "
-            "confirmed down.",
+            "After a node crashed or shut down with an RWO volume, and once the node is confirmed down, force delete "
+            "the old pod on it: `oc delete pod <old_pod> --force=true --grace-period=0`; the stuck volume is released "
+            "after six minutes. Use ReadWriteMany where the storage supports it.",
         ),
         related_rules=("KN-ST002",),
         knowledge=("storage-access-modes",),

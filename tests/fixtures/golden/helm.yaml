@@ -117,8 +117,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/topics/advanced/'
   outOfScope: false
-  status: miss
-  gap: 'doc: helm install/upgrade --take-ownership to adopt existing objects, verified with --dry-run'
+  status: pass
+  expect:
+  - 'kn:helm-troubleshooting#1'
 - id: helm-008
   technology: helm
   kind: error

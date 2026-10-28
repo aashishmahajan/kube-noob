@@ -122,8 +122,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#validation-actions'
   outOfScope: false
-  status: miss
-  gap: 'doc: ValidatingAdmissionPolicyBinding validationActions Warn and Audit first, then Deny'
+  status: pass
+  expect:
+  - 'kn:k8s-validating-admission-policy#3'
 - id: pol-008
   technology: policy
   kind: error
