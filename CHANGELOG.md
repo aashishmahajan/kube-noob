@@ -26,6 +26,14 @@
   container reasons, each with the phrases people use for it, search terms, components, playbooks and the upstream
   rule file it comes from. Where OpenShift names differ from upstream both are listed (etcdGRPCReadRequestsSlow and
   etcdGRPCWriteRequestsSlow next to etcdGRPCRequestsSlow; the machine-config alert is MCCDrainError).
+- Known-issue matching uses signals: the query adds the terms of the alerts, event and container reasons the text
+  carries or implies ("leader changed" for etcd leader elections), and words meet their light stems ("draining"
+  meets "drain"). A match still needs rare words from the text itself. New frozen eval
+  `data/evals/known_issue_recall.yaml` (51 symptoms written as prose, firing alerts and event lines; 33 everyday
+  errors that must never match) gates recall at 0.8 and false matches at zero: recall went from 36/50 (one false
+  match) to 48/51 (none). `kube-noob known-issues 'etcd leader changed frequently, apiserver timeouts after
+  upgrade' --version 4.21.0` now finds OCPBUGS-73881 (4.20.5 finds OCPBUGS-73876; 4.21.2 and 4.20.13, which carry
+  the fixes, find nothing).
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.

@@ -1,10 +1,13 @@
 """Is this a reported issue? Match an error against the OpenShift release notes and the local Red Hat Jira copy.
 
 The index holds every known issue (open in a release) and every fixed issue (fixed in a release or update) that the
-release notes link to an issue id, for the minor releases in the bundled snapshot. A match is returned only when the
-text shares several rare words with the issue, so a generic error (OOMKilled, ImagePullBackOff) does not pull in an
-unrelated bug. Each match carries the issue link, the release-notes file it came from, whether a fix exists, and
-what that means for the version the user runs.
+release notes link to an issue id, for the minor releases in the bundled snapshot. The query is the text plus the
+terms of the signals it carries or implies (``kube_noob.signals``: an alert name, an event reason, "leader changed"
+for etcd leader elections). A match is returned only when the text itself shares rare words with the issue, backed by
+more rare words, a strong score or the signal's terms, so a generic error (OOMKilled, ImagePullBackOff) does not pull
+in an unrelated bug. The frozen eval ``data/evals/known_issue_recall.yaml`` gates recall and precision. Each match
+carries the issue link, the release-notes file it came from, whether a fix exists, and what that means for the
+version the user runs.
 
 Data: ``kube_noob/data/known_issues/*.json`` (refreshed with ``scripts/vendor_known_issues.py``) plus, when present,
 a newer copy in ``<dataDir>/known_issues/`` written by ``kube-noob corpus known-issues --online``.
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -32,8 +36,31 @@ RARE_SHARE = 0.03  # a word in at most 3% of issues is rare
 MIN_SCORE = 20.0  # BM25 score floor, set from tests/test_known_issues.py
 GENERAL_SHARE = 0.02  # and in at most 2% of the bundled Kubernetes and OpenShift docs
 RELATIVE_FLOOR = 0.75  # further matches must score at least 75% of the best one
+STRONG_SCORE = 40.0  # a score this high with two rare shared words, or one and a clear lead, is a match
+DOMINANCE = 2.0  # "a clear lead": at least twice the next applicable issue's score
+
+
+def stems(text: str, known: Callable[[str], bool] | None = None) -> str:
+    """Light stems so "restarted", "draining" and "uncordoning" meet "restart", "drain" and "uncordon": the word
+    without -ed or -ing, or with a final e ("updated" -> "update"). With ``known``, only stems that are real words
+    of the corpus are kept, so "exceed" never becomes "exce"."""
+    out: set[str] = set()
+    for tok in tokenize(text[:200_000]):
+        if not tok.isalpha() or len(tok) < 6 or tok.endswith("eed"):
+            continue
+        for suffix in ("ing", "ed"):
+            if tok.endswith(suffix) and len(tok) - len(suffix) >= 4:
+                stem = tok[: -len(suffix)]
+                if len(stem) >= 4 and stem[-1] == stem[-2] and stem[-1] not in "aeiouls":
+                    stem = stem[:-1]  # "running" -> "run"
+                for candidate in (stem, stem + "e"):
+                    if known is None or known(candidate):
+                        out.add(candidate)
+    return " ".join(sorted(out))
+
+
 _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(`])")
-_lock = threading.Lock()
+_lock = threading.RLock()  # re-entrant: building an index builds the general store too
 _cache: dict[str, Index] = {}
 _general: dict[str, KnowledgeStore] = {}
 
@@ -108,13 +135,18 @@ class Index:
     def __init__(self, issues: list[Issue], meta: dict[str, Any]) -> None:
         self.issues = issues
         self.meta = meta
+        raw: set[str] = set()
+        for i in issues:
+            raw.update(tokenize(f"{i.summary} {i.text}"))
+        general = _general_store()
+        self.known = lambda t: t in raw or general.doc_frequency(t) > 0
         self.store = KnowledgeStore(
             Chunk(
                 chunk_id=f"{i.id}@{i.version}#{n}",
                 doc_id=i.id,
                 title=i.summary,
                 heading="",
-                text=i.text,
+                text=f"{i.text}\n{stems(i.text, self.known)}",
                 url=i.url,
                 license="Apache-2.0",
                 origin="known-issues",
@@ -124,6 +156,7 @@ class Index:
             for n, i in enumerate(issues)
         )
         self.by_chunk = {f"{i.id}@{i.version}#{n}": i for n, i in enumerate(issues)}
+        self._token_cache: dict[str, set[str]] = {}
 
     def knowledge(self) -> dict[str, Any]:
         minors = sorted({i.minor for i in self.issues}, key=vkey)
@@ -133,40 +166,91 @@ class Index:
             "issues": len(self.issues),
         }
 
-    def _rare_shared(self, query_tokens: set[str], issue: Issue) -> list[str]:
-        """Words the text and the issue share that are rare among issues and in general Kubernetes writing, so
-        `spec`, `pod` or `securitycontext` never make a match on their own."""
-        doc = set(tokenize(f"{issue.summary} {issue.text}"))
+    def _tokens(self, issue: Issue) -> set[str]:
+        key = f"{issue.id}@{issue.version}"
+        if key not in self._token_cache:
+            text = f"{issue.summary} {issue.text}"
+            self._token_cache[key] = set(tokenize(text)) | set(tokenize(stems(text, self.known)))
+        return self._token_cache[key]
+
+    def _rare(self, shared: set[str]) -> list[str]:
+        """Words that are rare among issues and in general Kubernetes writing and are not everyday status vocabulary,
+        so `spec`, `pod`, `deadline exceeded` or `securitycontext` never make a match on their own."""
+        from kube_noob.tickets import GENERIC_WORDS
+
         general = _general_store()
         return sorted(
             t
-            for t in query_tokens & doc
-            if len(t) > 2 and self.store.doc_frequency(t) <= RARE_SHARE and general.doc_frequency(t) <= GENERAL_SHARE
+            for t in shared
+            if len(t) > 2
+            and t not in GENERIC_WORDS
+            and self.store.doc_frequency(t) <= RARE_SHARE
+            and general.doc_frequency(t) <= GENERAL_SHARE
         )
+
+    def _rare_shared(self, query_tokens: set[str], issue: Issue) -> list[str]:
+        return self._rare(query_tokens & self._tokens(issue))
 
     def match(
         self, text: str, platform: str | None = None, version: str | None = None, limit: int = 3
     ) -> dict[str, Any]:
+        """Issues that describe ``text``. Candidates come from text search on the words and on the signals the text
+        carries or implies (``kube_noob.signals``: an alert name, or "leader changed" for etcd leader elections);
+        a candidate counts only with rare shared words from the text itself, backed by more rare words, a strong
+        score or support from the signal's terms."""
         out: dict[str, Any] = {"knowledge": self.knowledge(), "matches": []}
         if platform and platform not in OPENSHIFT_FAMILY:
             out["note"] = "The index holds OpenShift release-note issues; it does not apply to plain Kubernetes."
             return out
+        from kube_noob.signals import extract
+        from kube_noob.signals.catalogue import infer, terms_for
+
+        text = text[:100_000]
         running = version if version and re.fullmatch(r"\d+\.\d+(\.\d+)?", version) else None
-        q = set(tokenize(text))
-        seen: set[str] = set()
-        top = 0.0
-        for hit in self.store.search(text, limit=40):
-            issue = self.by_chunk[hit.chunk.chunk_id]
-            if hit.score < MIN_SCORE or issue.id in seen or (top and hit.score < RELATIVE_FLOOR * top):
-                continue
+        signals = [x for x in extract(text) if x.kind in {"alert", "event_reason", "pod_reason"}] + infer(text)
+        sig_terms = terms_for(signals)
+        query = f"{text}\n{stems(text, self.known)}"
+        q_tokens = set(tokenize(query))
+        sig_tokens = set(tokenize(" ".join(sig_terms))) - q_tokens
+        scores: dict[str, tuple[float, float]] = {}  # chunk id -> (score on the text, score with signal terms)
+        for hit in self.store.search(query, limit=40):
+            scores[hit.chunk.chunk_id] = (hit.score, hit.score)
+        if sig_terms:
+            for hit in self.store.search(f"{query}\n{' '.join(sig_terms)}", limit=40):
+                own = scores.get(hit.chunk.chunk_id, (0.0, 0.0))[0]
+                scores[hit.chunk.chunk_id] = (own, max(hit.score, own))
+        rows: list[tuple[float, Issue, list[str], list[str]]] = []
+        best: dict[str, float] = {}
+        for chunk_id, (own, expanded) in scores.items():
+            issue = self.by_chunk[chunk_id]
             if running and not self._applies(issue, running):
                 continue
-            rare = self._rare_shared(q, issue)
-            if len(rare) < MIN_RARE_TERMS:
+            doc = self._tokens(issue)
+            r_text, r_sig = self._rare(q_tokens & doc), self._rare(sig_tokens & doc)
+            score = expanded if r_sig else own
+            if score <= best.get(issue.id, -1.0):
                 continue
-            seen.add(issue.id)
-            top = top or hit.score
-            out["matches"].append({**issue.as_dict(running, hit.score), "sharedTerms": rare[:8]})
+            best[issue.id] = score
+            rows.append((score, issue, r_text, r_sig))
+        rows = sorted((r for r in rows if best[r[1].id] == r[0]), key=lambda r: (-r[0], r[1].id))
+        top = 0.0
+        for n, (score, issue, r_text, r_sig) in enumerate(rows):
+            runner_up = rows[n + 1][0] if n + 1 < len(rows) else 0.0
+            if score < MIN_SCORE or (top and score < RELATIVE_FLOOR * top):
+                continue
+            accepted = (
+                len(r_text) >= MIN_RARE_TERMS
+                or (len(r_text) >= 1 and len(r_text) + len(r_sig) >= MIN_RARE_TERMS)
+                or (len(r_text) >= 2 and score >= STRONG_SCORE)
+                or (len(r_text) >= 1 and score >= STRONG_SCORE and score >= DOMINANCE * runner_up)
+            )
+            if not accepted:
+                continue
+            top = top or score
+            match = {**issue.as_dict(running, score), "sharedTerms": (r_text + r_sig)[:8]}
+            if r_sig:
+                match["signals"] = sorted({f"{x.kind}:{x.name}" for x in signals})[:5]
+            out["matches"].append(match)
             if len(out["matches"]) >= limit:
                 break
         if not out["matches"]:
