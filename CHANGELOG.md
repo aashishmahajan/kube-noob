@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `kube-noob build analytics --history <dir>`: build and test analytics from a CI history on disk (one folder per run:
+  the GitHub Actions run with its jobs and steps, JUnit XML reports, optional build logs). Flaky tests (passed and
+  failed on the same commit, or failed then passed on a rerun within a run, as Surefire reports), tests that fail
+  without being flaky, commits with a failed and a successful run, per-step mean, median, p90 and maximum with the
+  trend of the newest half against the oldest, the slowest tests, and failure classes per week (from the build logs).
+  A 200-run fixture history gives the exact flaky set and step times computed independently by its generator. JUnit
+  with a DOCTYPE or entities is refused. `kube-noob build history --github owner/repo -o <dir>` writes the run folders
+  from the GitHub Actions API (`ci.githubEnabled`; GET only, one host, no redirects, every attempt of every run, a
+  random pause between requests, token from `$GITHUB_TOKEN`).
 - `kube-noob gate`: the CI gate before deploy. One command over manifests, rendered charts (`--chart`, findings
   point at the template file) and Containerfiles runs the audit (with `--exceptions`), says for each finding whether
   the generated admission policy would refuse it in enforce mode, lists open reported issues in the target OpenShift

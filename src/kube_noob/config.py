@@ -262,6 +262,39 @@ class RhacsSettings(_Base):
         return self
 
 
+class CiSettings(_Base):
+    """Read CI run history from the GitHub Actions API for ``kube-noob build history`` (R4.4). Off by default.
+
+    GET only, to ``githubApiUrl``'s host only, no redirects, a random pause between requests; the token comes from
+    ``githubTokenEnv`` (a KUBE_NOOB_* variable; unset: the variable the GitHub CLI reads). Under the offline lock only
+    a loopback or in-cluster ``*.svc`` API (GitHub Enterprise Server behind a Service) is allowed."""
+
+    github_enabled: bool = False
+    github_api_url: str = "https://api.github.com"
+    github_token_env: str | None = None
+    max_runs: int = Field(default=200, ge=1, le=2000)
+
+    @field_validator("github_api_url")
+    @classmethod
+    def _api_root(cls, v: str) -> str:
+        v = v.strip().rstrip("/")
+        parts = urlsplit(v)
+        if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.query:
+            raise ValueError(f"ci.githubApiUrl must be an https:// URL without credentials or query, got {v!r}")
+        if parts.path not in {"", "/api/v3"}:
+            raise ValueError(
+                "ci.githubApiUrl must be https://api.github.com or a GitHub Enterprise https://<host>/api/v3"
+            )
+        return v
+
+    @field_validator("github_token_env")
+    @classmethod
+    def _gh_token_var(cls, v: str | None) -> str | None:
+        if v is not None and not _RHACS_TOKEN_VAR.match(v):
+            raise ValueError(f"ci.githubTokenEnv {v!r} must be a KUBE_NOOB_* variable; leave it unset for the default")
+        return v
+
+
 class ProbeSettings(_Base):
     """Tier P: ephemeral debug containers or probe Jobs. Off by default; every probe needs an approval."""
 
@@ -364,6 +397,7 @@ class Settings(_Base):
     watch: WatchSettings = Field(default_factory=WatchSettings)
     posture: PostureSettings = Field(default_factory=PostureSettings)
     rhacs: RhacsSettings = Field(default_factory=RhacsSettings)
+    ci: CiSettings = Field(default_factory=CiSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     probe: ProbeSettings = Field(default_factory=ProbeSettings)

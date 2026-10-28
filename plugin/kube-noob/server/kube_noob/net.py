@@ -7,6 +7,9 @@
 * ``Purpose.LLM``     - the configured model provider endpoint. Not web browsing; always permitted when an
                         LLM provider is configured. Under the offline lock every request (and no redirect, no proxy
                         from the environment) must target loopback or an in-cluster ``*.svc`` host.
+* ``Purpose.CI``      - the GitHub Actions API for CI run history. Requires ``ci.githubEnabled``; GET only, https only,
+                        to the configured API host only, no redirects. Under the offline lock only a loopback or
+                        in-cluster ``*.svc`` host.
 * ``Purpose.RHACS``   - RHACS Central's policy API. Requires ``rhacs.enabled``; GET only, https only, to the configured
                         endpoint's host and port only, no redirects. Under the offline lock only a loopback or
                         in-cluster ``*.svc`` Central, with no proxy from the environment.
@@ -36,6 +39,7 @@ class Purpose(enum.Enum):
     SOURCES = "sources"
     LLM = "llm"
     RHACS = "rhacs"
+    CI = "ci"
 
 
 def host_allowed(host: str, allowed: list[str]) -> bool:
@@ -109,9 +113,35 @@ def http_client(
 
         hooks["request"].append(_central_only)
 
+    if purpose is Purpose.CI:
+        ci = settings.ci
+        if not ci.github_enabled:
+            raise WebDisabledError(
+                "ci",
+                "Reading CI history from GitHub is off (ci.githubEnabled: false). Set ci.githubEnabled: true, or "
+                "analyse run folders on disk with kube-noob build analytics --history <dir>.",
+            )
+        if settings.offline and not is_local_url(ci.github_api_url):
+            raise WebDisabledError(
+                "ci",
+                "The offline lock only allows a loopback or in-cluster (*.svc) GitHub API; refused "
+                f"{urlsplit(ci.github_api_url).hostname}.",
+            )
+        api = urlsplit(ci.github_api_url)
+        api_host = (api.hostname or "").lower(), api.port or 443
+
+        def _api_only(request: httpx.Request) -> None:
+            if request.method != "GET":
+                raise WebDisabledError("ci", f"CI history is read-only: {request.method} is not allowed (GET).")
+            got = request.url.host.lower(), request.url.port or 443
+            if request.url.scheme != "https" or got != api_host:
+                raise DomainNotAllowedError(f"{request.url.host} (only ci.githubApiUrl {api_host[0]} is allowed)")
+
+        hooks["request"].append(_api_only)
+
     locked_llm = settings.offline and purpose is Purpose.LLM
-    no_redirects = locked_llm or purpose is Purpose.RHACS
-    no_env_proxy = settings.offline and purpose in (Purpose.LLM, Purpose.RHACS)
+    no_redirects = locked_llm or purpose in (Purpose.RHACS, Purpose.CI)
+    no_env_proxy = settings.offline and purpose in (Purpose.LLM, Purpose.RHACS, Purpose.CI)
     if locked_llm:
 
         def _local_only(request: httpx.Request) -> None:

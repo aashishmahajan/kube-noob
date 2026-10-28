@@ -273,6 +273,51 @@ def _build_cmd(a: argparse.Namespace, kit: Any, fmt: str) -> int:
         else:
             _emit(out, fmt)
         return 0
+    if a.build_cmd == "analytics":
+        from kube_noob.build import analytics
+
+        if not 1 <= a.top <= 200:
+            raise ConfigError("--top must be 1-200")
+        try:
+            out = analytics.analyse(analytics.load_history(Path(a.history)), top=a.top)
+        except analytics.HistoryError as exc:
+            raise ConfigError(str(exc)) from exc
+        if a.format == "text":
+            _tprint(
+                f"{out['runs']} runs of {out['commits']} commits, {out['from'][:10]} to {out['to'][:10]}: "
+                + ", ".join(f"{n} {k}" for k, n in sorted(out["conclusions"].items()))
+            )
+            _tprint(f"flaky tests ({len(out['flakyTests'])}):")
+            for f in out["flakyTests"]:
+                how = "rerun within a run" if f["rerunInRun"] and not f["commits"] else f"{len(f['commits'])} commit(s)"
+                _tprint(f"  {f['test']}  ({how}, {f['failures']} failures)")
+            for f in out["failingTests"]:
+                _tprint(f"failing, not flaky: {f['test']} ({f['failures']} failures)")
+            if out["flakyRuns"]:
+                _tprint(f"commits with a failed and a successful run: {len(out['flakyRuns'])}")
+            _tprint("slowest steps (mean, p90, trend):")
+            for r in out["slowestSteps"]:
+                trend = f"{r['trendPercent']:+.1f}%" if r["trendPercent"] is not None else "n/a"
+                _tprint(f"  {r['job']} / {r['step']}: {r['meanSeconds']} s, p90 {r['p90Seconds']} s, {trend}")
+            for week, counts in out["failureClasses"].items():
+                _tprint(f"failures {week}: " + ", ".join(f"{n} {c}" for c, n in counts.items()))
+        else:
+            _emit(out, fmt)
+        return 0
+    if a.build_cmd == "history":
+        from kube_noob.build import github_history
+
+        try:
+            done = github_history.fetch(
+                kit.settings, a.github, Path(a.output), workflow=a.workflow, branch=a.branch, max_runs=a.max_runs
+            )
+        except github_history.HistoryFetchError as exc:
+            raise ConfigError(str(exc)) from exc
+        _emit(done, fmt) if a.format != "text" else _tprint(
+            f"wrote {done['attempts']} run attempts of {done['runs']} runs to {done['folder']} ({done['requests']} "
+            "requests)"
+        )
+        return 0
     if not a.file and not a.image_layout:
         raise ConfigError("pass the Containerfile with -f, an image with --image-layout, or both")
     try:
@@ -504,6 +549,26 @@ def build_parser() -> argparse.ArgumentParser:
     bda.add_argument("--image-platform", default=None, help="os/arch to read from a multi-arch layout (linux/amd64)")
     bda.add_argument("--manifests", help="the workload YAML that runs the image: its probes satisfy KN-B007")
     bda.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
+    ban = bd_sub.add_parser(
+        "analytics",
+        help="Flaky tests, slow steps and their trend, failure classes over time, from a CI history folder",
+        description="Reads one folder per run: run.json (the GitHub Actions run with its jobs and steps), JUnit XML "
+        "reports and optional build logs. Example: kube-noob build analytics --history ci-history/",
+    )
+    ban.add_argument("--history", required=True, help="the folder of run folders")
+    ban.add_argument("--top", type=int, default=20, help="rows per table (1-200)")
+    bhi = bd_sub.add_parser(
+        "history",
+        help="Write a CI history folder from the GitHub Actions API (read-only; needs ci.githubEnabled)",
+        description="GET only, to ci.githubApiUrl only, with a random pause between requests and every attempt of "
+        "every run. Test reports and logs are not fetched: add JUnit artifacts with gh run download. Example: "
+        "GITHUB_TOKEN=<token> kube-noob build history --github acme/shop --workflow ci.yml -o ci-history",
+    )
+    bhi.add_argument("--github", required=True, help="owner/repo")
+    bhi.add_argument("--workflow", default=None, help="the workflow file (ci.yml) or id; default: every workflow")
+    bhi.add_argument("--branch", default=None, help="only runs on this branch")
+    bhi.add_argument("--max-runs", type=int, default=None, help="attempts to read (default ci.maxRuns, 200)")
+    bhi.add_argument("-o", "--output", required=True, help="the history folder to write")
     rh = sub.add_parser(
         "rhacs",
         help="Compare RHACS (StackRox) policies with kube-noob's rules: overlap, related, gaps, outside its scope",

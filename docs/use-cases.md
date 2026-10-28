@@ -402,6 +402,23 @@ the source workspace and `params: [{name: paths, value: k8s}]`. GitLab: include
 `deploy/gitlab/kube-noob-gate.gitlab-ci.yml` and extend `.kube-noob-gate` with `KUBE_NOOB_PATHS`; findings show in
 the merge request through the code quality report.
 
+### Which tests are flaky, and which steps got slower?
+
+`build analytics` reads a CI history on disk: one folder per run with `run.json` (the run, its jobs and steps, as the
+GitHub Actions API or `gh run view --json` writes it), the run's JUnit XML reports and, for failed runs, the build
+log. It lists the flaky tests (passed and failed on the same commit, or failed then passed on a rerun within a run),
+tests that fail without being flaky, commits with both a failed and a successful run, each step's mean, median, p90
+and maximum with its trend (newest half against oldest half), and the failure classes per week.
+
+```bash
+kube-noob build analytics --history ci-history/ --format text
+GITHUB_TOKEN=<token> kube-noob --config ci.yaml build history --github acme/shop --workflow ci.yml -o ci-history
+```
+
+`build history` needs `ci.githubEnabled: true` and reads only: every attempt of every run, with a random pause between
+requests. GitHub serves test reports and logs from another host, so add them with `gh run download <run-id> -D
+ci-history/run-<run-id>-<attempt>` for flaky-test analysis.
+
 ## Security: policy-aligned reviews and red-team scenarios
 
 Each audit finding maps to the RHACS (StackRox) policy that would fire. `redteam` shows how an attacker would use a
