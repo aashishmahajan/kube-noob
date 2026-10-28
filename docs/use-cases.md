@@ -169,7 +169,8 @@ kube-noob demo memory
 every patch is validated, audited and red-teamed, commands must carry the classifier's labels, and grants of the
 privileged SCC, cluster-admin, hostPath or wildcard RBAC fail unless the entry records who accepted the risk and why.
 `add` writes a proposed entry and never commits; `migrate-learning` turns confirmed learning notes into proposed
-entries. kube-noob reads the repository where it runs and never uploads, bundles or exports it.
+entries, and `import --from servicenow-json|servicenow-csv|jira-json|jira-csv -f export` turns resolved tickets into
+proposed entries with their outcomes, without the people in them. kube-noob reads the repository where it runs and never uploads, bundles or exports it.
 
 Set `memory.paths` (or `KUBE_NOOB_MEMORY_PATHS`) and `diagnose`, `known-issues`, `debug` and `bundle` add the
 matching approved entries to every answer, cited as `[mem:MEM-<n>]`. Over MCP, `kubenoob_memory_match` searches

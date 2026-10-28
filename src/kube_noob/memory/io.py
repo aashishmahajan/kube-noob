@@ -62,8 +62,10 @@ _Dumper.add_representer(str, _str)
 
 
 def _prune(value: Any) -> Any:
+    """Drop empty fields, innermost first, so a versions block with no versions is left out entirely."""
     if isinstance(value, dict):
-        return {k: _prune(v) for k, v in value.items() if v not in (None, [], {})}
+        pruned = {k: _prune(v) for k, v in value.items()}
+        return {k: v for k, v in pruned.items() if v not in (None, [], {})}
     if isinstance(value, list):
         return [_prune(v) for v in value]
     return value

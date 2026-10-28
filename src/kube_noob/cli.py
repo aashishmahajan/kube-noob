@@ -462,6 +462,23 @@ def build_parser() -> argparse.ArgumentParser:
     mst = msub.add_parser("stats", help="Entries and outcomes, optionally per cluster, signal or component")
     mst.add_argument("dir")
     mst.add_argument("--by", choices=["cluster", "signal", "component"])
+    mimp = msub.add_parser(
+        "import",
+        help="Turn resolved tickets from a ServiceNow or Jira export into proposed entries (people removed)",
+    )
+    mimp.add_argument("dir")
+    mimp.add_argument(
+        "--from",
+        dest="ticket_format",
+        required=True,
+        choices=["servicenow-json", "servicenow-csv", "jira-json", "jira-csv"],
+        help="the export's format (--format stays the output format)",
+    )
+    mimp.add_argument("-f", "--file", required=True, help="the export file, or '-' for stdin")
+    mimp.add_argument("--platform", choices=PLATFORMS)
+    mimp.add_argument("--owner", default="unassigned")
+    mimp.add_argument("--cluster", help="a cluster label for every imported outcome, e.g. prod-east")
+    mimp.add_argument("--dry-run", action="store_true", help="show what would be written; write nothing")
     mmig = msub.add_parser("migrate-learning", help="Turn confirmed learning notes into proposed entries (once)")
     mmig.add_argument("dir")
     mmig.add_argument("--owner", default="unassigned")
@@ -1244,6 +1261,33 @@ def _memory(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
                 _tprint(
                     f"  {g['key']:40} {len(g['entries'])} entries, applied {g['applied']}, resolved {g['resolved']}"
                 )
+        else:
+            _emit(out, fmt)
+        return 0
+    if cmd == "import":
+        from kube_noob.memory.importers import MAX_EXPORT, import_tickets
+
+        if a.file != "-" and not Path(a.file).is_file():
+            raise ConfigError(f"no export file {a.file}")
+        if a.file != "-" and Path(a.file).stat().st_size > MAX_EXPORT:
+            raise ConfigError(f"{a.file} is larger than {MAX_EXPORT // 1_000_000} MB; export fewer tickets at a time")
+        text = sys.stdin.read(MAX_EXPORT + 1) if a.file == "-" else Path(a.file).read_text(encoding="utf-8")
+        out = import_tickets(
+            Path(a.dir),
+            a.ticket_format,
+            text,
+            a.platform or s.default_platform or "kubernetes",
+            a.owner,
+            a.cluster,
+            a.dry_run,
+        )
+        if a.format == "text":
+            verb = "would write" if a.dry_run else "wrote"
+            for c in out["created"]:
+                _tprint(f"{c['ticket']} -> {c['entry']} ({c['outcome']}, proposed)")
+            for sk in out["skipped"]:
+                _tprint(f"{sk['ticket']} skipped: {sk['reason']}")
+            _tprint(f"{verb} {len(out['created'])} proposed entries; skipped {len(out['skipped'])} tickets")
         else:
             _emit(out, fmt)
         return 0

@@ -75,6 +75,13 @@
   version, with outcome counts); the bundle gets a "Team memory" section. New MCP tools `kubenoob_memory_match`
   (read-only) and `kubenoob_memory_propose` (returns the entry's YAML; a local stdio server saves it as proposed only
   after the user confirmed; the HTTP server never writes). Repository reads are cached until an entry file changes.
+- `kube-noob memory import <dir> --from servicenow-json|servicenow-csv|jira-json|jira-csv -f export`: resolved
+  tickets become proposed entries with signals from their text and an outcome (resolved, or partial for a
+  workaround) dated when they were resolved; tickets that are open, canceled, closed without a fix or without
+  resolution notes are listed with the reason, and a rerun skips what is already there. People never reach an entry:
+  assignee, caller, reporter and similar fields are not read, and emails, account ids, @mentions, phone numbers,
+  "Assigned to:" lines and "reported by <name>" are removed; a sentence that carries a credential is dropped whole.
+  `--dry-run` writes nothing. Fixed: an entry with no versions was written with an empty `versions: {}` block.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.
