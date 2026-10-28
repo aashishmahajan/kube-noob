@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (SAST1, G1, G2, G3 done; G5, I6 and QA1 waiting on CI; QA1 grading page with the owner; QA2 next).
+right now; STATE.md says what is done. Updated 2026-10-28 (SAST1, G1-G3, G5, I6, QA1 done; QA2 waiting on CI; grading page with the owner; QA3 next).
 
 ## Repository and branch
 
@@ -29,31 +29,28 @@ right now; STATE.md says what is done. Updated 2026-10-28 (SAST1, G1, G2, G3 don
 
 ## In flight (finish these first)
 
-1. CI: run 40704545772 on 117ae50 (plugin server crash fix: `toolkit._has_module`, find_spec raises for a missing
-   parent package). Green -> mark G5 (row 18) and I6 (row 20) done. Then dispatch CI for 8ad6ffa (QA1 grades) and
-   mark QA1 (row 20q) done when green. SAST1 (row 15s) is done (16 red-team findings fixed, each a test_rtN in
-   `tests/test_code_redteam.py`).
-2. QA1 cowork with the owner. The owner's CSV (25,292 Grok-sourced community questions) is third-party text: it stays
-   out of the repo (`/tmp/.../scratchpad/qa/questions.csv` in the session that ran it; ask the owner to re-attach
-   it). Committed: `scripts/eval_questions.py` (with `--grades`), `docs/evals/community-questions.md`,
-   `docs/evals/community-questions-grades.csv` (76 rows: id, topic, source, answer, top, verdict, note).
-   - Grading page for the owner (private artifact): https://claude.ai/artifact/5wagdbnLepUydgbVVHJfxZ . Store
-     collection `rows` (seeded by Claude, rule: write admin) holds each question, kube-noob's answer and Claude's
-     verdict; collection `verdicts` (doc id = row id) holds the owner's `{verdict, expected, updatedAt}`.
-   - To fold the owner's grades in: `ArtifactData list` on `verdicts` (limit 1000); for each doc with a verdict, set
-     that row's `verdict` in the grades CSV to the owner's (the owner wins) and put a short paraphrase of
-     `expected` in `note` (max 300 chars, no copied question text); rerun the eval with `--grades`; update the
-     graded table in docs/evals/community-questions.md; commit.
-   - Reference answers cannot be fetched here (api.stackexchange.com blocked; stackoverflow.com fetches need
-     per-URL approval). Asked the owner for an accepted-answer column.
-3. QA2 (next tuning round, not started): 8 of the 11 wrong answers in the graded sample are documents chosen on
-   word overlap from a 122-chunk knowledge base, and the 6 misses are core how-tos. Plan: add knowledge chunks,
-   each verified against kubernetes/website or openshift-docs (shallow clones via add_repo read access worked):
-   listing a Deployment's pods by label selector; kubelet will not start (journalctl -u kubelet, swap, cgroup
-   driver, certificates); etcd backup and restore (etcdctl/etcdutl snapshot; OpenShift cluster-backup.sh);
-   exposing an Ingress controller on bare metal (Service type LoadBalancer/NodePort, MetalLB) and its ports;
-   CreateContainerError / "OCI runtime create failed"; moving Compose apps to OpenShift. Then tighten the doc
-   gate (a shared term in the chunk heading, or 3+ shared specific terms) and re-grade only the `changed` rows.
+1. CI: run 40715183769 on 001b088 (QA2). Green -> mark QA2 (row 20r) done. G5, I6, QA1 and SAST1 are done.
+2. Owner grading page (private artifact): https://claude.ai/artifact/5wagdbnLepUydgbVVHJfxZ . Store `rows` holds
+   116 questions (76 graded sample, `set: graded`; 40 held-out, `set: held-out`) with kube-noob's answer and the
+   current verdict; `verdicts` (doc id = row id) holds the owner's `{verdict, expected, updatedAt}`. To fold the
+   owner's grades in: `ArtifactData list` on `verdicts`; for each doc with a verdict set that row's verdict in
+   `docs/evals/community-questions-grades.csv` or `docs/evals/community-questions-heldout.csv` (the owner wins), put
+   a short paraphrase of `expected` in `note` (max 300 chars, no copied question text), rerun
+   `scripts/eval_questions.py <csv> --out <dir> --grades <graded> --grades <heldout>`, update
+   docs/evals/community-questions.md, commit. When an answer changes, update that `rows` doc (pin `if_version`).
+   The owner's CSV is third-party text: never commit it; ask the owner to re-attach it in a new session.
+3. Reference answers: Stack Overflow is unreachable here (search excludes it, api.stackexchange.com is blocked,
+   direct fetches need per-URL approval; mirrors are off limits) and the GitHub API covers only attached repos.
+   Asked the owner to have Grok add `accepted_answer_summary`, `answer_score`, `answer_url` columns. Meanwhile two
+   independent agents graded 116 rows from official docs (agreement with Claude 67/76 exact). Their reference
+   answers are in the session scratchpad only (grade-agents/graded-*.jsonl), not in the repo.
+3b. QA3 (next tuning round, todo): knowledge for the in-scope misses the agents named, each checked against the
+   docs: CreateContainerError / "OCI runtime create failed" at pod start; kubeconfig exec credential plugins
+   ("exec: executable aws not found"); stopping `kubectl proxy`; finding the Ingresses that route to a Service;
+   is PodSecurityPolicy on (k8s-pss covers removal; the question did not reach it). Held-out wrong answers are
+   mostly docs answering questions about other tools (Istio, Argo CD, Trivy, Docker on a laptop): consider a
+   `requires` group on broad docs, measured on the held-out file. Measured and dropped: symptom-title posts as
+   questions (3,013 more answers, 2 of 25 helpful).
 4. Claude plugin directory (owner's 0.5.0 submission): held by directory policy for a reviewer, expected for any
    local stdio server. The new finding against 0.2.3 is most likely the kernel FIPS flag read, moved to
    `src/kube_noob/host_fips.py` and guarded out of the plugin
@@ -62,7 +59,7 @@ right now; STATE.md says what is done. Updated 2026-10-28 (SAST1, G1, G2, G3 don
 
 ## Queue after that (from STATE.md)
 
-QA2, LT1 (blocked: owner's load image), VUL2 (blocked on DB1), RT2, then the older queue (I1, N2, N1, N5, G4, E2, E1, E3, E4b, E5, I2, I9, I8,
+QA3, LT1 (blocked: owner's load image), VUL2 (blocked on DB1), RT2, then the older queue (I1, N2, N1, N5, G4, E2, E1, E3, E4b, E5, I2, I9, I8,
 P1, P2, GATE1-3, V2, V3, N3, N4, A1-A5, I10, T3, I3, I4, I5, I7, GOV1-3, M13). Every enrichment that fetches anything
 must be jittered (random pause between requests, jittered first run and intervals).
 
