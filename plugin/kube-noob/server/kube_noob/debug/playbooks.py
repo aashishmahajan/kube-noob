@@ -824,6 +824,32 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         weight=1.3,
     ),
     Playbook(
+        "DBG-ENTRYPOINT-NOT-FOUND",
+        "Container command not found in the image (executable file not found)",
+        (
+            r"executable file not found in \$PATH",
+            r"exec: \"[^\"\n]{1,200}\": stat [^\n]{1,200}: no such file or directory",
+            r"unable to start container process: exec: ",
+        ),
+        (
+            "The container's command (the pod's command, or the image's ENTRYPOINT and CMD) names a program that is "
+            "not in the image or not on its PATH: runc looks it up when it creates the container.",
+            "A multi-stage build left the program in an earlier stage (only what COPY --from copies reaches the "
+            "final image).",
+        ),
+        (
+            "kubectl get pod {pod} -n {ns} -o jsonpath='{{.spec.containers[*].command}} {{.spec.containers[*].args}}'",
+            "kubectl describe pod {pod} -n {ns}   # the Events carry the runtime's error with the program's name",
+            "docker image inspect <image> --format '{{{{.Config.Entrypoint}}}} {{{{.Config.Cmd}}}}'",
+        ),
+        (
+            "Point command at the program's full path inside the image, or install or copy it into the final image; "
+            "a path that exists but is not executable fails with permission denied instead (chmod +x in the build).",
+        ),
+        knowledge=("k8s-debug-pods",),
+        weight=1.2,
+    ),
+    Playbook(
         "DBG-QUOTA",
         "Rejected by ResourceQuota / LimitRange",
         (

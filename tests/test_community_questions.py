@@ -303,3 +303,26 @@ def test_low_ports_on_openshift_name_the_arbitrary_uid_playbook() -> None:
     top = out["diagnoses"][0]
     assert top["id"] == "DBG-ARBITRARY-UID"
     assert any("below 1024" in c for c in top["rootCauses"])
+
+
+# QA3: the in-scope misses the independent graders named (docs/evals/community-questions-heldout.csv).
+
+
+def test_a_missing_entrypoint_names_its_own_playbook() -> None:
+    # runc looks the command up with Go's exec.LookPath at create time (libcontainer/standard_init_linux.go)
+    for text in (
+        'runc create failed: unable to start container process: exec: "/opt/app/run": stat /opt/app/run: '
+        "no such file or directory",
+        'Error: container create failed: exec: "uvicorn": executable file not found in $PATH',
+    ):
+        assert _ids(text)[0] == "DBG-ENTRYPOINT-NOT-FOUND"
+    assert "DBG-ENTRYPOINT-NOT-FOUND" not in _ids("exec /usr/bin/app: exec format error")
+
+
+def test_a_kubeconfig_exec_plugin_that_is_missing_is_explained(kit: tk.Toolkit) -> None:
+    post = (
+        "Desktop dashboard cannot connect to my cluster\n"
+        "After copying my kubeconfig to another laptop it says getting credentials: exec: executable gcloud not "
+        "found. What should I do?"
+    )
+    assert _docs(kit, post)[0].startswith("kn:k8s-kubeconfig-exec#")

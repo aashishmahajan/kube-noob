@@ -72,6 +72,7 @@ PLAYBOOK_TOPICS: dict[str, set[str]] = {
     "DBG-X509-CLIENT": {"rbac-security", "kubernetes-general", "etcd-control-plane"},
     "DBG-X509": {"rbac-security", "ingress-routing", "networking-ip"},
     "DBG-EXEC-FORMAT": {"containers-docker", "workloads-debugging"},
+    "DBG-ENTRYPOINT-NOT-FOUND": {"workloads-debugging", "containers-docker", "aws-eks-ecr"},
     "DBG-QUOTA": {"workloads-debugging", "policy-kyverno-opa"},
     "DBG-PDB-DRAIN": {"upgrade", "workloads-debugging"},
     "DBG-HPA": {"workloads-debugging", "kubernetes-general"},

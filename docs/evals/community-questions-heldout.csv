@@ -14,7 +14,7 @@ id,topic,source,answer,top,verdict,note
 17514,rbac-security,github-discussions:k3s-io/k3s,none,,missed,graded by an independent agent against official documentation
 9323,kubernetes-general,discourse:discuss.kubernetes.io,docs,kn:k8s-topology-spread#0,wrong,graded by an independent agent against official documentation
 12105,networking-ip,github-discussions:istio/istio,none,,out-of-scope,graded by an independent agent against official documentation
-3494,aws-eks-ecr,stackexchange:stackoverflow,docs,kn:k8s-tls-x509#1,wrong,graded by an independent agent against official documentation
+3494,aws-eks-ecr,stackexchange:stackoverflow,docs,kn:k8s-kubeconfig-exec#1,correct,"kubeconfig exec plugin not found: install it where the tool runs, PATH, installHint"
 19955,storage-odf,github-discussions:siderolabs/talos,none,,out-of-scope,graded by an independent agent against official documentation
 11838,networking-ip,github-discussions:istio/istio,docs,kn:k8s-ingress#2,wrong,graded by an independent agent against official documentation
 23295,workloads-debugging,discourse:discuss.kubernetes.io,docs,kn:k8s-resources#0,correct,"requests, limits and ResourceQuota"

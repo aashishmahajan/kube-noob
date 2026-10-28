@@ -37,6 +37,10 @@
   counted over the whole section, not the 700-character preview. Checked on 40 held-out rows by an independent
   grader (docs/evals/community-questions-heldout.csv): wrong answers 33 to 14; `scripts/eval_questions.py` takes
   `--grades` more than once.
+- New playbook DBG-ENTRYPOINT-NOT-FOUND: `exec: "<cmd>": executable file not found in $PATH` or `stat ...: no such
+  file or directory` when a container is created means its command is not in the image (runc looks it up with Go's
+  `exec.LookPath` at create time). New knowledge on kubeconfig credential plugins (`exec`, `installHint`, relative
+  paths) for "getting credentials: exec: executable ... not found".
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

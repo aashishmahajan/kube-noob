@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (SAST1, G1-G3, G5, I6, QA1 done; QA2 waiting on CI; grading page with the owner; QA3 next).
+right now; STATE.md says what is done. Updated 2026-10-28 16:00 (SAST1, G1-G3, G5, I6, QA1 done; QA2 in CI; QA3 in progress; owner sent 3,732 answered questions: QA4).
 
 ## Repository and branch
 
@@ -29,28 +29,35 @@ right now; STATE.md says what is done. Updated 2026-10-28 (SAST1, G1-G3, G5, I6,
 
 ## In flight (finish these first)
 
-1. CI: run 40715183769 on 001b088 (QA2). Green -> mark QA2 (row 20r) done. G5, I6, QA1 and SAST1 are done.
-2. Owner grading page (private artifact): https://claude.ai/artifact/5wagdbnLepUydgbVVHJfxZ . Store `rows` holds
-   116 questions (76 graded sample, `set: graded`; 40 held-out, `set: held-out`) with kube-noob's answer and the
-   current verdict; `verdicts` (doc id = row id) holds the owner's `{verdict, expected, updatedAt}`. To fold the
-   owner's grades in: `ArtifactData list` on `verdicts`; for each doc with a verdict set that row's verdict in
-   `docs/evals/community-questions-grades.csv` or `docs/evals/community-questions-heldout.csv` (the owner wins), put
-   a short paraphrase of `expected` in `note` (max 300 chars, no copied question text), rerun
-   `scripts/eval_questions.py <csv> --out <dir> --grades <graded> --grades <heldout>`, update
-   docs/evals/community-questions.md, commit. When an answer changes, update that `rows` doc (pin `if_version`).
-   The owner's CSV is third-party text: never commit it; ask the owner to re-attach it in a new session.
-3. Reference answers: Stack Overflow is unreachable here (search excludes it, api.stackexchange.com is blocked,
-   direct fetches need per-URL approval; mirrors are off limits) and the GitHub API covers only attached repos.
-   Asked the owner to have Grok add `accepted_answer_summary`, `answer_score`, `answer_url` columns. Meanwhile two
-   independent agents graded 116 rows from official docs (agreement with Claude 67/76 exact). Their reference
-   answers are in the session scratchpad only (grade-agents/graded-*.jsonl), not in the repo.
-3b. QA3 (next tuning round, todo): knowledge for the in-scope misses the agents named, each checked against the
-   docs: CreateContainerError / "OCI runtime create failed" at pod start; kubeconfig exec credential plugins
-   ("exec: executable aws not found"); stopping `kubectl proxy`; finding the Ingresses that route to a Service;
-   is PodSecurityPolicy on (k8s-pss covers removal; the question did not reach it). Held-out wrong answers are
-   mostly docs answering questions about other tools (Istio, Argo CD, Trivy, Docker on a laptop): consider a
-   `requires` group on broad docs, measured on the held-out file. Measured and dropped: symptom-title posts as
-   questions (3,013 more answers, 2 of 25 helpful).
+1. CI: QA2 commit 001b088 (run 40715183769) and the QA3 commit after it. Green -> mark QA2 (row 20r) done; QA3
+   (row 20s) stays in-progress until its items below are done and CI is green.
+2. NEW (owner, 2026-10-28 15:29): answer files from Grok, third-party text, never commit them. Copies in the session
+   scratchpad `qa2in/hc.csv` (3,732 rows, high-confidence accepted answers) and `qa2in/all.xlsx`; originals at
+   /mnt/user-data/attachments/<session>/eb3fa585-questions_with_answers_high_confidence.csv and
+   079a2f22-questions_with_answers.xlsx (ask the owner to re-attach in a new session). Columns: the questions.csv
+   columns plus answer_text, answer_source_type (accepted_answer...), answer_confidence, answer_url, answer_score,
+   answer_author_role, resolution_status, has_answer. Sources: stackoverflow 2,153, OCPBUGS 948, serverfault 150,
+   DFBUGS 92, unix 67, repost 66, ROX 43, CMP 41. Plan (QA4): extend scripts/eval_questions.py with
+   `--answers <csv>` that scores kube-noob's top finding against answer_text (overlap of commands, flags, resource
+   kinds and error strings; report per answer kind, never store answer text in results), grade a stratified sample
+   with an independent agent against the accepted answers, then tune on a split (tune half, hold out half).
+3. Corpus experiment (QA3, not started): build the optional docs corpus
+   (`kube-noob corpus build --sources k8s-docs,ocp-docs --online` into a scratch data dir) and add an eval option to
+   reuse that data dir, to measure answers with official docs loaded vs the bundled ~140 chunks.
+4. Owner grading page (private artifact): https://claude.ai/artifact/5wagdbnLepUydgbVVHJfxZ . Store `rows` holds
+   116 questions (76 `set: graded`, 40 `set: held-out`) with kube-noob's answer and the current verdict; `verdicts`
+   (doc id = row id) holds the owner's `{verdict, expected, updatedAt}`. To fold in: `ArtifactData list` on
+   `verdicts`; the owner's verdict wins in docs/evals/community-questions-grades.csv or -heldout.csv; paraphrase
+   `expected` into `note` (max 300 chars, no question text); rerun the eval with both `--grades`; commit. When an
+   answer changes, update that `rows` doc (pin `if_version`). Row 3494 changed in QA3 (now kn:k8s-kubeconfig-exec#1,
+   correct): its `rows` doc still shows the QA2 answer.
+5. Stack Overflow pages cannot be read here (search excludes it, api.stackexchange.com blocked); the owner's answer
+   files replace that. Independent agents' reference answers (official docs) are in the scratchpad only.
+6. QA3 so far (committed with this handoff): DBG-ENTRYPOINT-NOT-FOUND playbook (runc libcontainer
+   standard_init_linux.go uses exec.LookPath; Go os/exec error text verified in go1.24.7 src), k8s-kubeconfig-exec
+   knowledge (requires group keeps it to kubeconfig questions), README "41 offline playbooks". Still to do in QA3:
+   abstain on questions about tools kube-noob does not cover (Istio, Argo CD, Trivy, Docker on a laptop) measured
+   on the held-out file; mine frequent error strings from the CSV into playbooks; the corpus experiment.
 4. Claude plugin directory (owner's 0.5.0 submission): held by directory policy for a reviewer, expected for any
    local stdio server. The new finding against 0.2.3 is most likely the kernel FIPS flag read, moved to
    `src/kube_noob/host_fips.py` and guarded out of the plugin
