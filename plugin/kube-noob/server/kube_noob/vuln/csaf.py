@@ -19,7 +19,7 @@ HOST = "security.access.redhat.com"
 BASE = f"https://{HOST}/data/csaf/v2/vex"
 MAX_DOC = 25_000_000  # bytes: one VEX document (OpenShift CVEs list thousands of components)
 MAX_STATEMENTS = 4000  # kept per CVE after filtering to the default products
-_CVE = re.compile(r"^CVE-(\d{4})-(\d{4,7})$")
+_CVE = re.compile(r"^CVE-(\d{4})-(\d{4,7})\Z")
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,7 @@ def _walk(node: Any, out: dict[str, dict[str, str]], depth: int = 0) -> None:
             "cpe": str(helper.get("cpe", ""))[:300] if isinstance(helper, dict) else "",
             "purl": str(helper.get("purl", ""))[:500] if isinstance(helper, dict) else "",
         }
-    for child in node.get("branches") or []:
+    for child in _list(node.get("branches")):
         _walk(child, out, depth + 1)
 
 
@@ -88,9 +88,9 @@ def _index(tree: Any) -> tuple[dict[str, dict[str, str]], dict[str, tuple[str, s
     full: dict[str, tuple[str, str]] = {}
     if not isinstance(tree, dict):
         return products, full
-    for branch in tree.get("branches") or []:
+    for branch in _list(tree.get("branches")):
         _walk(branch, products)
-    for rel in tree.get("relationships") or []:
+    for rel in _list(tree.get("relationships")):
         if not isinstance(rel, dict):
             continue
         fpn = rel.get("full_product_name") or {}
@@ -100,13 +100,31 @@ def _index(tree: Any) -> tuple[dict[str, dict[str, str]], dict[str, tuple[str, s
     return products, full
 
 
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def module_stream(purl: str, component: str = "") -> str:
+    """The RPM module stream (``nodejs:20``) a statement is about: the purl's ``rpmmod`` qualifier, or Red Hat's
+    ``<module>:<stream>/<package>`` component name; empty for a package outside a module."""
+    m = re.search(r"[?&]rpmmod=([^&#]+)", purl)
+    if m:
+        parts = m.group(1).replace("%3A", ":").replace("%3a", ":").split(":")
+        if len(parts) >= 2 and parts[0] and parts[1]:
+            return f"{parts[0]}:{parts[1]}"[:120]
+    m = re.match(r"^([A-Za-z0-9_.+-]+):([A-Za-z0-9_.+-]+)/[^/]+$", component)
+    return f"{m.group(1)}:{m.group(2)}"[:120] if m else ""
+
+
 def _component_name(purl: str, fallback: str) -> str:
     m = re.match(r"pkg:[a-z]+/(?:[^/@?]+/)*?([^/@?]+)(?:@|\?|$)", purl)
     if purl.startswith("pkg:oci/"):
         repo = re.search(r"repository_url=[^&]*?/([^&/]+/[^&/]+)(?:&|$)", purl)
         if repo:
             return repo.group(1)
-    return m.group(1) if m else fallback
+    if m:
+        return m.group(1)
+    return fallback.rsplit("/", 1)[-1] if re.match(r"^[A-Za-z0-9_.+-]+:[A-Za-z0-9_.+-]+/[^/]+$", fallback) else fallback
 
 
 def parse_vex(doc: Any, products: Iterable[str] = PRODUCTS, retrieved_at: str | None = None) -> dict[str, Any] | None:
@@ -129,22 +147,22 @@ def parse_vex(doc: Any, products: Iterable[str] = PRODUCTS, retrieved_at: str | 
         return names.get(prod_id, {}), names.get(comp_id, {})
 
     flags: dict[str, str] = {}
-    for f in vuln.get("flags") or []:
+    for f in _list(vuln.get("flags")):
         if isinstance(f, dict):
-            for pid in f.get("product_ids") or []:
+            for pid in _list(f.get("product_ids")):
                 flags[str(pid)] = str(f.get("label", ""))[:80]
     fixes: dict[str, dict[str, str]] = {}
-    for r in vuln.get("remediations") or []:
+    for r in _list(vuln.get("remediations")):
         if isinstance(r, dict):
             fix = {
                 "category": str(r.get("category", ""))[:40],
                 **({"url": str(r["url"])[:300]} if r.get("url") else {}),
                 **({"details": " ".join(str(r["details"]).split())[:300]} if r.get("details") else {}),
             }
-            for pid in r.get("product_ids") or []:
+            for pid in _list(r.get("product_ids")):
                 fixes.setdefault(str(pid), fix)
     statements: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str]] = set()
     total = 0
     status_map = vuln.get("product_status") if isinstance(vuln.get("product_status"), dict) else {}
     for raw_status, pids in (status_map or {}).items():
@@ -158,13 +176,19 @@ def parse_vex(doc: Any, products: Iterable[str] = PRODUCTS, retrieved_at: str | 
             if not cpe.startswith(prefixes):
                 continue
             purl = component.get("purl", "")
-            name = _component_name(purl, component.get("name", "") or pid.split(":", 1)[-1])
-            key = (cpe, name, status)
+            raw_name = component.get("name", "") or pid.split(":", 1)[-1]
+            name = _component_name(purl, raw_name)
+            stream = module_stream(purl, raw_name)
+            # one statement per product, package, status, module stream and fixed build: two streams of a module
+            # (nodejs:18 and nodejs:20) are fixed in different versions and must not collapse into one
+            key = (cpe, name, status, stream, purl if status == "fixed" else "")
             total += 1
             if key in seen:
                 continue
             seen.add(key)
             st: dict[str, Any] = {"product": product.get("name", ""), "cpe": cpe, "component": name, "status": status}
+            if stream:
+                st["stream"] = stream
             if purl:
                 st["purl"] = purl
             if status == "known_not_affected" and pid in flags:
@@ -174,7 +198,7 @@ def parse_vex(doc: Any, products: Iterable[str] = PRODUCTS, retrieved_at: str | 
             statements.append(st)
     if not statements:
         return None
-    statements.sort(key=lambda s: (s["cpe"], s["component"], s["status"]))
+    statements.sort(key=lambda s: (s["cpe"], s["component"], s.get("stream", ""), s["status"], s.get("purl", "")))
     cut = len(statements) > MAX_STATEMENTS
     statements = statements[:MAX_STATEMENTS]
     title = " ".join(str(vuln.get("title") or doc["document"].get("title") or cve).split())[:300]
@@ -183,7 +207,7 @@ def parse_vex(doc: Any, products: Iterable[str] = PRODUCTS, retrieved_at: str | 
     if isinstance(agg, dict):
         severity = str(agg.get("text", "")).lower()[:20]
     score = None
-    for s in vuln.get("scores") or []:
+    for s in _list(vuln.get("scores")):
         v3 = s.get("cvss_v3") if isinstance(s, dict) else None
         if isinstance(v3, dict) and isinstance(v3.get("baseScore"), (int, float)):
             score = float(v3["baseScore"])

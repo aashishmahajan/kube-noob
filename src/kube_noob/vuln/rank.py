@@ -26,11 +26,11 @@ from typing import Any
 
 from kube_noob.attack_paths import Capability, Reach, Step
 from kube_noob.vuln.kev import Kev
-from kube_noob.vuln.reports import Finding, ImageInfo
+from kube_noob.vuln.reports import Finding, ImageInfo, gating_severity
 
 SEVERITY_BASE = {"critical": 9.5, "high": 8.0, "medium": 5.5, "low": 2.5, "negligible": 0.5, "unknown": 5.0}
 KEV_FACTOR = 2.0
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 
 
 @dataclass(frozen=True)
@@ -140,6 +140,7 @@ def rank(
     top: int = 50,
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
+    per_workload: dict[str, dict[str, int]] = {}
     placed_images = 0
     for image, findings in per_image:
         placements = [_placement(r) for r in (reach or {}).values() if any(same_image(image, c) for c in r.images)]
@@ -178,9 +179,16 @@ def rank(
                         },
                     },
                     "workloads": [p.reach.ref for p in placements][:20],
+                    "workloadsTotal": len(placements),
                     "attackPath": _path(f, image, best),
                 }
             )
+            gate = gating_severity(f.severity, f.cvss, exploited)
+            bad = exploited or (bool(f.fix_versions) and gate in {"critical", "high"})
+            for p in placements:  # every workload, not only the 20 shown
+                cur = per_workload.setdefault(p.reach.ref, {"findings": 0, "fixableHighOrExploited": 0})
+                cur["findings"] += 1
+                cur["fixableHighOrExploited"] += int(bad)
     rows.sort(
         key=lambda r: (
             -r["score"],
@@ -190,16 +198,8 @@ def rank(
             r["finding"]["package"]["name"],
         )
     )
-    serious = {"critical", "high"}
-    per_workload: dict[str, dict[str, int]] = {}
     for i, r in enumerate(rows, 1):
         r["rank"] = i
-        f = r["finding"]
-        bad = r["factors"]["exploited"]["value"] > 1 or (bool(f["fixVersion"]) and f["severity"] in serious)
-        for w in r["workloads"]:
-            cur = per_workload.setdefault(w, {"findings": 0, "fixableHighOrExploited": 0})
-            cur["findings"] += 1
-            cur["fixableHighOrExploited"] += int(bad)
     return {
         "workloads": dict(sorted(per_workload.items())),
         "ranked": rows[:top],

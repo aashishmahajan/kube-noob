@@ -21,17 +21,19 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from kube_noob.vuln import rpmver
+from kube_noob.vuln.csaf import module_stream
 from kube_noob.vuln.reports import Finding, Package, parse_purl, severity
 
 MAX_SHARD_BYTES = 2_000_000_000
 MAX_LINE = 30_000_000
-MAX_DOCUMENTS = 50_000
+MAX_DOCUMENTS = 100_000
 
 
 class VexError(ValueError):
@@ -53,6 +55,7 @@ class Statement:
     cvss: float | None = None
     updated: str = ""
     origin: str = ""
+    stream: str = ""  # the RPM module stream (nodejs:20), empty for a package outside a module
 
     @property
     def fixed_version(self) -> str:
@@ -75,6 +78,8 @@ class Statement:
             "document": f"https://security.access.redhat.com/data/csaf/v2/vex/{year}/{self.cve.lower()}.json",
             "source": self.origin,
         }
+        if self.stream:
+            out["stream"] = self.stream
         if self.justification:
             out["justification"] = self.justification
         if self.status == "fixed" and self.fixed_version:
@@ -123,13 +128,19 @@ class VexIndex:
             if not isinstance(st, dict):
                 continue
             fix = st.get("fix") if isinstance(st.get("fix"), dict) else {}
+            component = str(st.get("component") or "")[:300]
+            purl = str(st.get("purl") or "")[:2000]
+            stream = str(st.get("stream") or "")[:120] or module_stream(purl, component)
+            if "/" in component and module_stream("", component):  # records written before streams were kept
+                component = component.rsplit("/", 1)[-1]
             s = Statement(
                 cve=cve,
                 status=str(st.get("status") or ""),
                 product=str(st.get("product") or "")[:300],
                 cpe=str(st.get("cpe") or "")[:300],
-                component=str(st.get("component") or "")[:300],
-                purl=str(st.get("purl") or "")[:2000],
+                component=component,
+                purl=purl,
+                stream=stream,
                 justification=str(st.get("justification") or "")[:80],
                 fix_category=str((fix or {}).get("category") or "")[:40],
                 fix_url=str((fix or {}).get("url") or "")[:300],
@@ -183,7 +194,12 @@ def _documents(path: Path) -> Iterator[Any]:
         return
     if path.is_dir():
         files = sorted(p for p in path.rglob("*.json") if p.is_file() and not p.is_symlink())
-        for f in files[:MAX_DOCUMENTS]:
+        if len(files) > MAX_DOCUMENTS:
+            raise VexError(
+                f"{path}: {len(files)} VEX documents, more than {MAX_DOCUMENTS}: point --vex at the years you need "
+                "(csaf_vex/2024 csaf_vex/2025), or load them once with kube-noob corpus advisories"
+            )
+        for f in files:
             if f.stat().st_size > MAX_DOC:
                 continue
             try:
@@ -248,12 +264,112 @@ def load(
     return index
 
 
+_CPE_PREFIX = re.compile(r"^cpe:/[aho]:[a-z0-9_.-]+:[a-z0-9_.-]+:[0-9][a-z0-9_.-]*(?::[A-Za-z0-9_.:-]*)?\Z")
+# Red Hat's dist tags: el9, el9_4, el9_4.1, and module builds (module+el9.3.0+...); a vendor suffix (.ngx) is not one
+_RED_HAT_RELEASE = re.compile(r"(?:^|\.)el\d+(?:_\d+)*(?:\.\d+)*\Z|\.module[+_]el\d+[.\d]*(?:\+[A-Za-z0-9.+_]+)?\Z")
+_MODULAR = re.compile(r"\.module[+_]el\d")
+
+
+def validate_products(products: Iterable[str]) -> tuple[str, ...]:
+    """CPE prefixes down to a release (cpe:/o:redhat:enterprise_linux:9): a prefix without one would let a RHEL 8
+    statement speak for a RHEL 9 image."""
+    out = tuple(products)
+    bad = [p for p in out if not _CPE_PREFIX.match(p)]
+    if bad:
+        raise VexError(
+            f"product CPE prefixes must name a release, like cpe:/o:redhat:enterprise_linux:9: {', '.join(bad[:3])}"
+        )
+    return out
+
+
 def _red_hat_rpm(pkg: Package) -> bool:
-    return pkg.ecosystem == "rpm" and pkg.namespace in {"", "redhat"}
+    """An RPM Red Hat built: purl namespace redhat or none (Trivy and syft write redhat for every RPM of a RHEL image,
+    RHACS writes no purl), and a Red Hat dist tag in the release, which a vendor's own build (nginx.org's
+    1.26.1-2.el9.ngx, Fedora's fc40) does not end with."""
+    if pkg.ecosystem != "rpm" or pkg.namespace not in {"", "redhat"}:
+        return False
+    release = pkg.version.rsplit("-", 1)[-1] if "-" in pkg.version else ""
+    return bool(_RED_HAT_RELEASE.search(release))
 
 
 def _names(pkg: Package) -> list[str]:
     return list(dict.fromkeys(n for n in (pkg.source, pkg.name) if n))
+
+
+def _package_stream(pkg: Package, candidates: set[str]) -> str:
+    """The module stream of an installed package: its purl's rpmmod qualifier, else the one stream among the
+    statements whose stream version is the package's version or a dotted prefix of it (nodejs:20 for 20.5.0)."""
+    p = parse_purl(pkg.purl)
+    label = (p.qualifiers.get("rpmmod") or p.qualifiers.get("modularitylabel") or "") if p else ""
+    if label:
+        parts = label.split(":")
+        if len(parts) >= 2:
+            return f"{parts[0]}:{parts[1]}"
+    upstream = pkg.version.split(":", 1)[-1].rsplit("-", 1)[0]
+    hits = [s for s in candidates if upstream == s.split(":", 1)[-1] or upstream.startswith(s.split(":", 1)[-1] + ".")]
+    return hits[0] if len(hits) == 1 else ""
+
+
+def _valid_versions(stmts: list[Statement]) -> list[str]:
+    out = []
+    for s in stmts:
+        v = s.fixed_version
+        try:
+            rpmver.split_evr(v)
+        except ValueError:
+            continue
+        out.append(v)
+    return sorted(set(out), key=_evr_key)
+
+
+@dataclass
+class Decision:
+    drop: str | None = None  # why the finding drops out, when it does
+    cited: list[Statement] = field(default_factory=list)
+    fix: str | None = None  # the fixed version Red Hat names, when the installed one is older
+    state: str | None = None
+    note: str = ""
+
+
+def decide(pkg: Package, stmts: list[Statement]) -> Decision:
+    """What Red Hat's statements (already this CVE, this package and this product) say about this installed package.
+    Statements for a module stream apply only to that stream's packages, and stream-less ones only to packages
+    outside a module. A finding drops out only when every applicable statement agrees it is not affected or fixed at
+    or below the installed version; statements that disagree keep it."""
+    streams = {s.stream for s in stmts if s.stream}
+    modular = bool(_MODULAR.search(pkg.version)) or "rpmmod=" in pkg.purl
+    stream = _package_stream(pkg, streams) if (modular or streams) else ""
+    if modular or stream:
+        use = [s for s in stmts if s.stream and s.stream == stream]
+        if not use:
+            why = f"module stream {stream or 'unknown'}: no Red Hat statement for it" if streams or modular else ""
+            return Decision(note=why)
+    else:
+        use = [s for s in stmts if not s.stream]
+        if not use:
+            return Decision()
+    not_affected = [s for s in use if s.status == "known_not_affected"]
+    fixed = [s for s in use if s.status == "fixed"]
+    affected = [s for s in use if s.status in {"known_affected", "under_investigation"}]
+    versions = _valid_versions(fixed)
+    installed_has_fix = bool(versions) and _installed_has_fix(pkg.version, versions)
+    still_vulnerable = bool(affected) or (bool(versions) and not installed_has_fix)
+    if not_affected and still_vulnerable:
+        return Decision(cited=use, note="Red Hat VEX statements disagree (not affected and affected): kept")
+    if not_affected:
+        just = not_affected[0].justification
+        return Decision("Red Hat VEX: known not affected" + (f" ({just})" if just else ""), not_affected)
+    if installed_has_fix and not affected:
+        return Decision(f"Red Hat VEX: fixed in {versions[-1]}, installed {pkg.version}", fixed)
+    d = Decision(cited=use)
+    if versions and not installed_has_fix:
+        d.fix, d.state = versions[-1], "fixed"
+    elif affected:
+        no_plan = any(s.fix_category == "no_fix_planned" for s in affected)
+        d.state = "wont-fix" if no_plan else "not-fixed"
+    if fixed and not versions:
+        d.note = "a fixed statement names no readable version"
+    return d
 
 
 @dataclass
@@ -272,6 +388,10 @@ def _installed_has_fix(installed: str, fixed: list[str]) -> bool:
         return False
 
 
+def _status_note(stmts: list[Statement]) -> str:
+    return "Red Hat VEX: " + ", ".join(sorted({s.status.replace("_", " ") for s in stmts}))
+
+
 def apply(findings: list[Finding], index: VexIndex, prefixes: tuple[str, ...]) -> Applied:
     kept: list[Finding] = []
     excluded: list[dict[str, Any]] = []
@@ -279,10 +399,11 @@ def apply(findings: list[Finding], index: VexIndex, prefixes: tuple[str, ...]) -
     notes: list[str] = []
     if not prefixes:
         notes.append("the image's Red Hat product is not known (no RHEL distro in the report): pass --product")
-    no_source = 0
+    no_source = vendor = 0
     for f in findings:
         if not prefixes or not _red_hat_rpm(f.package):
             outside += 1
+            vendor += bool(prefixes) and f.package.ecosystem == "rpm"
             kept.append(f)
             continue
         no_source += not f.package.source
@@ -291,37 +412,21 @@ def apply(findings: list[Finding], index: VexIndex, prefixes: tuple[str, ...]) -
             unmatched += 1
             kept.append(f)
             continue
-        not_affected = [s for s in stmts if s.status == "known_not_affected"]
-        if not_affected:
-            just = not_affected[0].justification
-            excluded.append(
-                {
-                    "finding": f.as_dict(),
-                    "reason": "Red Hat VEX: known not affected" + (f" ({just})" if just else ""),
-                    "statements": [s.cite() for s in not_affected],
-                }
-            )
+        d = decide(f.package, stmts)
+        if d.drop:
+            excluded.append({"finding": f.as_dict(), "reason": d.drop, "statements": [s.cite() for s in d.cited]})
             continue
-        fixed = [s for s in stmts if s.status == "fixed" and s.fixed_version]
-        if fixed:
-            versions = sorted({s.fixed_version for s in fixed})
-            if _installed_has_fix(f.package.version, versions):
-                excluded.append(
-                    {
-                        "finding": f.as_dict(),
-                        "reason": f"Red Hat VEX: fixed in {max(versions, key=_evr_key)}, installed {f.package.version}",
-                        "statements": [s.cite() for s in fixed],
-                    }
-                )
-                continue
-            if not f.fix_versions:
-                f.fix_versions = (max(versions, key=_evr_key),)
-                f.fix_state = "fixed"
-        cited = [s.cite() for s in stmts]
-        f.notes.append("Red Hat VEX: " + ", ".join(sorted({s.status.replace("_", " ") for s in stmts})))
-        if any(s.status == "known_affected" and s.fix_category == "no_fix_planned" for s in stmts):
-            f.fix_state = "wont-fix"
-        f.vex = cited
+        if d.fix and not f.fix_versions:
+            f.fix_versions = (d.fix,)
+        if f.fix_versions:
+            f.fix_state = "fixed"
+        elif d.state:
+            f.fix_state = d.state
+        if d.cited:
+            f.notes.append(_status_note(d.cited))
+            f.vex = [s.cite() for s in d.cited]
+        if d.note:
+            f.notes.append(d.note)
         kept.append(f)
     if no_source:
         notes.append(
@@ -329,6 +434,8 @@ def apply(findings: list[Finding], index: VexIndex, prefixes: tuple[str, ...]) -
             "--list-all-pkgs, name binary packages only); Red Hat's not-affected statements name source RPMs, so "
             "some may be missed: give the image's SBOM too"
         )
+    if vendor:
+        notes.append(f"{vendor} RPM findings are not Red Hat builds (no Red Hat dist tag): Red Hat VEX not applied")
     return Applied(kept, excluded, outside, unmatched, notes)
 
 
@@ -360,39 +467,24 @@ def match_packages(packages: list[Package], index: VexIndex, prefixes: tuple[str
             stmts = index.statements(cve, names, prefixes)
             if not stmts:
                 continue
+            d = decide(pkg, stmts)
             first = stmts[0]
             finding = Finding(
-                cve,
-                cve,
-                pkg,
-                severity=first.severity or "unknown",
-                cvss=first.cvss,
-                sources=["sbom+vex"],
+                cve, cve, pkg, severity=first.severity or "unknown", cvss=first.cvss, sources=["sbom+vex"]
             )
-            not_affected = [s for s in stmts if s.status == "known_not_affected"]
-            if not_affected:
-                just = not_affected[0].justification
-                excluded.append(
-                    {
-                        "finding": finding.as_dict(),
-                        "reason": "Red Hat VEX: known not affected" + (f" ({just})" if just else ""),
-                        "statements": [s.cite() for s in not_affected],
-                    }
-                )
-                continue
-            fixed = [s for s in stmts if s.status == "fixed" and s.fixed_version]
-            if fixed:
-                versions = sorted({s.fixed_version for s in fixed})
-                if _installed_has_fix(pkg.version, versions):
-                    continue  # fixed in the installed version: not a finding, and nothing to cite against
-                finding.fix_versions = (max(versions, key=_evr_key),)
-                finding.fix_state = "fixed"
-            elif any(s.status == "known_affected" for s in stmts):
-                no_plan = any(s.fix_category == "no_fix_planned" for s in stmts)
-                finding.fix_state = "wont-fix" if no_plan else "not-fixed"
-            else:
-                finding.fix_state = "unknown"
-            finding.notes.append("Red Hat VEX: " + ", ".join(sorted({s.status.replace("_", " ") for s in stmts})))
-            finding.vex = [s.cite() for s in stmts]
+            if d.drop:
+                if d.drop.startswith("Red Hat VEX: known not affected"):
+                    excluded.append(
+                        {"finding": finding.as_dict(), "reason": d.drop, "statements": [s.cite() for s in d.cited]}
+                    )
+                continue  # fixed in the installed version: not a finding
+            if not d.cited:
+                continue  # no statement for this package's stream: nothing to say
+            finding.fix_versions = (d.fix,) if d.fix else ()
+            finding.fix_state = d.state or "unknown"
+            finding.notes.append(_status_note(d.cited))
+            if d.note:
+                finding.notes.append(d.note)
+            finding.vex = [s.cite() for s in d.cited]
             findings.append(finding)
     return Applied(findings, excluded, outside, 0, notes)

@@ -212,6 +212,7 @@ def run(
     scanner_reports: list[tuple[str, str]] | None = None,
     vex_paths: list[Path] | None = None,
     kev_path: Path | None = None,
+    trust_report_vex: bool = False,
 ) -> dict[str, Any]:
     from kube_noob.audit import exceptions as exc
     from kube_noob.audit.engine import analyze
@@ -281,7 +282,7 @@ def run(
                     "helpUri": (f.get("sources") or [{"url": INFO_URI}])[0]["url"],
                 }
             )
-    vulns = _vulnerabilities(scanner_reports, combined, vex_paths or [], kev_path, data_dir, fail_on)
+    vulns = _vulnerabilities(scanner_reports, combined, vex_paths or [], kev_path, data_dir, fail_on, trust_report_vex)
     findings.extend(vulns["findings"])
     if vulns["failing"]:
         failures.append(
@@ -336,6 +337,7 @@ def _vulnerabilities(
     kev_path: Path | None,
     data_dir: Path | None,
     fail_on: str,
+    trust_report_vex: bool = False,
 ) -> dict[str, Any]:
     """Scanner findings as gate findings: VEX applied, KEV marked, ranked against the manifests. A finding fails the
     gate at ``fail_on`` only when it is fixable or known exploited (an unfixable finding is reported, not blocked)."""
@@ -358,7 +360,7 @@ def _vulnerabilities(
             if manifests
             else None
         )
-        out = assess.assess(parsed, vex=index, kev=kev, reach=reach, top=200)
+        out = assess.assess(parsed, vex=index, kev=kev, reach=reach, top=200, trust_report_vex=trust_report_vex)
     except (rep.ReportError, vexmod.VexError, kevmod.KevError, assess.AssessError) as exc:
         raise GateError(str(exc)) from exc
     uri_of: dict[str, str] = {}
@@ -368,8 +370,10 @@ def _vulnerabilities(
     findings: list[dict[str, Any]] = []
     failing = 0
     floor = Severity.parse(fail_on) if fail_on != "never" else None
+    from kube_noob.vuln.reports import gating_severity
+
     for f in out["findings"]:
-        sev = _VULN_SEVERITY.get(f["severity"], "medium")
+        sev = _VULN_SEVERITY.get(gating_severity(f["severity"], f["cvss"], f["knownExploited"]), "medium")
         r = ranked.get((f["image"], f["id"]))
         where = f"; ranked {r['rank']} (score {r['score']}): {r['attackPath']['summary']}" if r else ""
         fix = f["fixVersion"] or "no fix yet"
@@ -481,13 +485,22 @@ def codequality(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _cell(text: Any) -> str:
-    return str(text).replace("|", "\\|").replace("\n", " ")[:300]
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029]+")
+_MD_ESCAPE = {"&": "&amp;", "<": "&lt;", ">": "&gt;", "|": "\\|"} | {c: "\\" + c for c in "\\`*_[]!#~"}
+
+
+def _cell(text: Any, limit: int = 300) -> str:
+    """One line of Markdown text from untrusted input (an image name or package from a scanner report, a manifest
+    path): control characters and line breaks become spaces so nothing starts a new heading or table row, HTML
+    is entity-escaped and link, image, emphasis and code syntax is backslash-escaped, so a report cannot render as
+    a different verdict, an image or a link in the job summary (red team, VUL1)."""
+    flat = _CONTROL.sub(" ", str(text))[:limit]
+    return "".join(_MD_ESCAPE.get(c, c) for c in flat)
 
 
 def markdown(report: dict[str, Any], top: int = 25) -> str:
     verdict = "passed" if report["passed"] else "failed"
-    target = report["platform"] + (f" {report['version']}" if report["version"] else "")
+    target = _cell(report["platform"] + (f" {report['version']}" if report["version"] else ""), 60)
     lines = [
         f"## kube-noob gate {verdict}",
         "",
@@ -506,8 +519,8 @@ def markdown(report: dict[str, Any], top: int = 25) -> str:
         for r in report["findings"][:top]:
             where = f"{r['uri']}:{r['line']}" if r.get("line") else r["uri"]
             lines.append(
-                f"| {r['severity']} | {r['ruleId']} | {_cell(where)} | {_cell(r['resource'] + ': ' + r['message'])} "
-                f"| {_cell(r['admission'])} |"
+                f"| {r['severity']} | {_cell(r['ruleId'], 80)} | {_cell(where)} "
+                f"| {_cell(r['resource'] + ': ' + r['message'])} | {_cell(r['admission'])} |"
             )
         if len(report["findings"]) > top:
             lines.append(f"\n{len(report['findings']) - top} more in the SARIF file.")
@@ -523,18 +536,19 @@ def markdown(report: dict[str, Any], top: int = 25) -> str:
     v = report.get("vulnerabilities")
     if v:
         lines += [
-            f"Vulnerabilities in {', '.join(v['images'])}: {v['reported']} reported, {v['excludedByVex']} excluded by "
-            f"VEX, {v['findings']} findings, {v['fixable']} fixable, {v['knownExploited']} known exploited.",
+            f"Vulnerabilities in {_cell(', '.join(v['images']), 600)}: {v['reported']} reported, "
+            f"{v['excludedByVex']} excluded by VEX, {v['findings']} findings, {v['fixable']} fixable, "
+            f"{v['knownExploited']} known exploited.",
             "",
         ]
     if report["knownIssues"]:
         lines += ["### Reported issues in this release (informational)", ""]
         for k in report["knownIssues"]:
-            lines.append(f"- [{k['id']}]({k['url']}) ({', '.join(k['kinds'])}): {_cell(k['summary'])}")
+            lines.append(f"- [{_cell(k['id'], 40)}]({k['url']}) ({', '.join(k['kinds'])}): {_cell(k['summary'])}")
         lines.append("")
     if report.get("skipped"):
-        lines += ["### Skipped", "", *[f"- {_cell(x['file'])}: {x['why']}" for x in report["skipped"][:50]], ""]
-    lines += ["### Not run", "", *[f"- {n}" for n in report["notRun"]], ""]
+        lines += ["### Skipped", "", *[f"- {_cell(x['file'])}: {_cell(x['why'])}" for x in report["skipped"][:50]], ""]
+    lines += ["### Not run", "", *[f"- {_cell(n)}" for n in report["notRun"]], ""]
     return "\n".join(lines)
 
 

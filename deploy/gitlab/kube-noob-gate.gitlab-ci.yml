@@ -17,6 +17,7 @@
     KUBE_NOOB_SCANNER_REPORTS: ""
     KUBE_NOOB_VEX: ""
     KUBE_NOOB_KEV: ""
+    KUBE_NOOB_TRUST_REPORT_VEX: "false"
     KUBE_NOOB_PLATFORM: kubernetes
     KUBE_NOOB_VERSION: ""
     KUBE_NOOB_EXCEPTIONS: ""
@@ -30,6 +31,7 @@
       for r in $KUBE_NOOB_SCANNER_REPORTS; do set -- "$@" --scanner-report "$r"; done
       for x in $KUBE_NOOB_VEX; do set -- "$@" --vex "$x"; done
       if [ -n "$KUBE_NOOB_KEV" ]; then set -- "$@" --kev "$KUBE_NOOB_KEV"; fi
+      if [ "$KUBE_NOOB_TRUST_REPORT_VEX" = "true" ]; then set -- "$@" --trust-report-vex; fi
       if [ -n "$KUBE_NOOB_VERSION" ]; then set -- "$@" --version "$KUBE_NOOB_VERSION"; fi
       if [ -n "$KUBE_NOOB_EXCEPTIONS" ]; then set -- "$@" --exceptions "$KUBE_NOOB_EXCEPTIONS"; fi
       kube-noob gate "$@" --sarif kube-noob.sarif --summary kube-noob-summary.md \

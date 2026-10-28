@@ -17,7 +17,7 @@ from typing import Any
 
 MAX_BYTES = 20_000_000
 MAX_ENTRIES = 100_000
-_CVE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
+_CVE = re.compile(r"^CVE-\d{4}-\d{4,7}\Z")
 SOURCE_URL = "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
 
 

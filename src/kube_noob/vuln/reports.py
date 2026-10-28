@@ -39,10 +39,10 @@ MAX_BYTES = 64_000_000
 MAX_FINDINGS = 200_000
 MAX_PACKAGES = 200_000
 MAX_DEPTH = 12  # nested CycloneDX components
-_CVE = re.compile(r"^CVE-\d{4}-\d{4,7}$", re.I)
-_VULN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{2,79}$")
+_CVE = re.compile(r"^CVE-\d{4}-\d{4,7}\Z", re.I)
+_VULN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{2,79}\Z")
 _RECOMMEND = re.compile(r"Upgrade (\S+) to version ([^;]+)")
-_VERS_FIX = re.compile(r"^vers:[a-z0-9.+-]+/>=([^|]+)$")
+_VERS_FIX = re.compile(r"^vers:[a-z0-9.+-]+/>=([^|]+)\Z")
 SEVERITIES = ("critical", "high", "medium", "low", "negligible", "unknown")
 SEVERITY_RANK = {s: len(SEVERITIES) - i for i, s in enumerate(SEVERITIES)}
 _SEVERITY_WORDS = {
@@ -161,13 +161,34 @@ def srpm_name(srpm: str) -> str:
     return parts[0] if len(parts) == 3 else base
 
 
+_CVSS_BANDS = ((9.0, "critical"), (7.0, "high"), (4.0, "medium"), (0.1, "low"))
+
+
+def gating_severity(sev: str, cvss: float | None, known_exploited: bool) -> str:
+    """The severity a gate compares with ``--fail-on``: the higher of the report's severity and the band of its CVSS
+    base score; ``unknown`` with no score counts as medium; a known-exploited finding counts as high at least."""
+    ranked = [sev if sev in SEVERITY_RANK and sev != "unknown" else ("medium" if cvss is None else "negligible")]
+    if cvss is not None:
+        ranked.append(next((name for floor, name in _CVSS_BANDS if cvss >= floor), "negligible"))
+    if known_exploited:
+        ranked.append("high")
+    return max(ranked, key=lambda s: SEVERITY_RANK[s])
+
+
 def severity(value: Any) -> str:
     word = str(value or "").strip().lower().removesuffix("_vulnerability_severity")
     return _SEVERITY_WORDS.get(word, "unknown")
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029]+")
+
+
 def _s(value: Any, limit: int = 300) -> str:
-    return str(value)[:limit] if isinstance(value, (str, int, float)) and not isinstance(value, bool) else ""
+    """A bounded one-line string from a report: control characters and line breaks become a space, so a package or
+    image name cannot start a new line in a log, SARIF message or job summary."""
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        return ""
+    return _CONTROL.sub(" ", str(value)[:limit])
 
 
 def _list(value: Any) -> list[Any]:
@@ -303,6 +324,11 @@ class ImageInfo:
     image_id: str = ""
     distro: tuple[str, str] | None = None  # ("rhel", "9.4")
 
+    def __post_init__(self) -> None:
+        self.names = [n for n in (_s(x, 500).strip() for x in self.names) if n]
+        self.digests = [d for d in (_s(x, 500).strip() for x in self.digests) if d]
+        self.image_id = _s(self.image_id, 200).strip()
+
     @property
     def label(self) -> str:
         return (self.names or self.digests or [self.image_id or "unnamed image"])[0]
@@ -325,7 +351,7 @@ class ScanReport:
     findings: list[Finding]
     packages: list[Package]
     sbom: bool  # True when the document lists packages but no vulnerabilities
-    excluded: list[dict[str, Any]] = field(default_factory=list)  # the document's own VEX (CycloneDX analysis)
+    own_vex: list[dict[str, Any]] = field(default_factory=list)  # the document's own VEX (CycloneDX analysis)
     notes: list[str] = field(default_factory=list)
 
 
@@ -345,18 +371,33 @@ def _distro_from_purls(packages: list[Package]) -> tuple[str, str] | None:
 
 
 def _cve(vuln_id: str, aliases: list[str]) -> str:
+    vuln_id = vuln_id.strip()
     if _CVE.match(vuln_id):
         return vuln_id.upper()
     for a in aliases:
-        if _CVE.match(a):
-            return a.upper()
+        if _CVE.match(a.strip()):
+            return a.strip().upper()
     return vuln_id
+
+
+class _Findings(list[Finding]):
+    """Findings of one report, with the entries that could not be read counted (never dropped silently)."""
+
+    rejected: list[str]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rejected = []
 
 
 def _add(out: list[Finding], f: Finding, where: str) -> None:
     if len(out) >= MAX_FINDINGS:
         raise ReportError(f"{where}: more than {MAX_FINDINGS} findings")
+    f.vuln_id = f.vuln_id.strip()
+    f.cve = f.cve.strip()
     if not _VULN_ID.match(f.vuln_id) or not f.package.name:
+        if isinstance(out, _Findings):
+            out.rejected.append(f"{f.vuln_id[:40]!r} in {f.package.name[:40] or '?'!r}")
         return
     out.append(f)
 
@@ -379,7 +420,7 @@ def _trivy(doc: dict[str, Any], where: str) -> ScanReport:
         image_id=_s(meta.get("ImageID"), 100),
         distro=(distro_id(os_.get("Family")), _s(os_.get("Name"), 20)) if os_.get("Family") else None,
     )
-    findings: list[Finding] = []
+    findings = _Findings()
     packages: list[Package] = []
     for res in _dicts(doc.get("Results")):
         rtype = _s(res.get("Type"), 40).lower()
@@ -460,7 +501,7 @@ def _grype(doc: dict[str, Any], where: str) -> ScanReport:
         image_id=_s(target.get("imageID"), 100),
         distro=(distro_id(distro.get("name")), _s(distro.get("version"), 20)) if distro.get("name") else None,
     )
-    findings: list[Finding] = []
+    findings = _Findings()
     for m in _dicts(doc.get("matches")):
         v, a = _dict(m.get("vulnerability")), _dict(m.get("artifact"))
         upstreams = [_dict(u) for u in _list(a.get("upstreams"))]
@@ -557,7 +598,7 @@ def _cdx(doc: dict[str, Any], where: str) -> ScanReport:
     image.distro = distro or _distro_from_purls(packages)
     if "vulnerabilities" not in doc:
         return ScanReport("cyclonedx", image, [], packages, sbom=True)
-    findings: list[Finding] = []
+    findings = _Findings()
     excluded: list[dict[str, Any]] = []
     for raw in _list(doc.get("vulnerabilities")):
         v = _dict(raw)
@@ -604,8 +645,12 @@ def _cdx(doc: dict[str, Any], where: str) -> ScanReport:
                 sources=["cyclonedx"],
             )
             if state in {"not_affected", "resolved", "resolved_with_pedigree", "false_positive"}:
+                # the report's own VEX: kept as a finding unless the caller trusts it (assess(trust_report_vex=...))
+                finding.notes.append(f"the report's own analysis says {state}")
+                _add(findings, finding, where)
                 excluded.append(
                     {
+                        "key": list(finding.key),
                         "finding": finding.as_dict(),
                         "reason": f"the CycloneDX document's own analysis says {state}",
                         "statements": [
@@ -624,7 +669,7 @@ def _cdx(doc: dict[str, Any], where: str) -> ScanReport:
                 )
                 continue
             _add(findings, finding, where)
-    return ScanReport("cyclonedx", image, findings, packages, sbom=False, excluded=excluded)
+    return ScanReport("cyclonedx", image, findings, packages, sbom=False, own_vex=excluded)
 
 
 # -- SPDX ------------------------------------------------------------------------------------------------------------
@@ -676,7 +721,7 @@ def _rhacs(doc: dict[str, Any], where: str) -> ScanReport:
         digests=[d for d in [_s(doc.get("id"), 100)] if d.startswith("sha256:")],
         distro=(family, version[:20]) if family else None,
     )
-    findings: list[Finding] = []
+    findings = _Findings()
     packages: list[Package] = []
     for raw in _list(scan.get("components")):
         c = _dict(raw)
@@ -748,6 +793,13 @@ def parse(data: str | bytes, where: str = "report") -> ScanReport:
         raise ReportError(f"{where}: not a JSON object")
     fmt = detect(doc)
     report = {"trivy": _trivy, "grype": _grype, "cyclonedx": _cdx, "spdx": _spdx, "rhacs": _rhacs}[fmt](doc, where)
+    rejected = getattr(report.findings, "rejected", [])
+    if rejected:
+        report.notes.append(
+            f"{len(rejected)} findings were not read: no usable vulnerability id or package name (first: "
+            f"{', '.join(rejected[:3])})"
+        )
+    report.findings = list(report.findings)
     return report
 
 

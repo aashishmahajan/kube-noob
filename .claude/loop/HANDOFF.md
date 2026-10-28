@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28.
+right now; STATE.md says what is done. Updated 2026-10-28 (after the VUL1 red-team fixes).
 
 ## Repository and branch
 
@@ -27,15 +27,14 @@ right now; STATE.md says what is done. Updated 2026-10-28.
 
 ## In flight (finish these first)
 
-1. CI for VUL1: run 40669926452 failed only `test (3.11)`: three Jira sync-lock tests. Root cause found:
-   `tests/test_seal.py::test_sync_on_states_its_jittered_schedule` ran `kube-noob serve` with `jira.syncEnabled`
-   and left the background sync thread running; 30-600 s later it ran a real sync holding the in-process lock while
-   `tests/test_tickets.py` ran. Fixed in the working tree (the test now stops the thread). Commit, push, dispatch CI,
-   and mark VUL1 done in STATE when every job is green (gate-ci must show the scanner-report step failing as planned
-   with 22 CVEs in SARIF and none of the 12 VEX-excluded).
-2. Independent red team of VUL1: a reviewer agent was asked to report reproduced findings (false negatives, crashes,
-   injection, gate bypass, leaks). If its report never arrived, rerun it on a detached worktree; fix every reproduced
-   finding with a regression test (guidance G57), then log it in STATE.
+1. CI for VUL1: the red-team fixes are committed on top of a26b95b (see the newest STATE log entry). Dispatch CI on
+   the branch head and mark VUL1 (row 15m) done only when every job is green; gate-ci must show the scanner-report
+   step failing as planned, with the kept CVEs in SARIF and none of the 12 VEX-excluded. CI 40669926452 had failed only
+   on the leaked Jira sync thread in tests/test_seal.py, fixed in a26b95b.
+2. VUL1 red team: done. 12 reproduced findings fixed, one regression test each in `tests/test_vuln_redteam.py`
+   (guidance G72). The repro scripts are not in the repo (they lived in the session scratchpad); the tests replace them.
+   Follow-up, not a red-team finding: `yamlio.load_documents` uses the pure-Python SafeLoader (~14 s for 860 KB of
+   JSON, bounded by MAX_NODE_VISITS); a CSafeLoader path with the same line marks would make large inputs fast.
 3. ADM1 (R3.3, STATE row 15n), partly built in the working tree, not committed yet:
    - Done: `src/kube_noob/admission.py` (AdmissionReview v1 review, warn by default, enforce per rule, UPDATE denies
      only new findings, system namespaces and owned Pods/ReplicaSets/Jobs skipped, fails open, exceptions file,

@@ -33,24 +33,35 @@ class _Image:
     reports: list[ScanReport] = field(default_factory=list)
 
 
-def _identities(info: ImageInfo) -> set[str]:
+def _identities(info: ImageInfo, n: int) -> set[str]:
+    """What names one image: a manifest digest, an image id, or registry/repository:tag when a tag is written. A
+    reference by digest alone says nothing about tags, and an unnamed report is an image of its own."""
     from kube_noob.vuln.rank import parse_ref
 
     out = {"digest:" + d.rpartition("@")[2] for d in info.digests if "sha256:" in d}
     if info.image_id:
         out.add("id:" + info.image_id)
-    for n in info.names:
-        r = parse_ref(n)
-        if r.repository:
-            out.add(f"name:{r.registry}/{r.repository}:{r.tag or 'latest'}")
-    return out or {"name:" + info.label}
+    for name in info.names:
+        r = parse_ref(name)
+        if r.digest:
+            out.add("digest:" + r.digest)
+        elif r.repository and r.tag:
+            out.add(f"name:{r.registry}/{r.repository}:{r.tag}")
+    return out or {f"report:{n}"}
+
+
+def _compatible(a: tuple[str, str] | None, b: tuple[str, str] | None) -> bool:
+    """Two reports describe one image only if they agree on its distro release (or one does not say)."""
+    if a is None or b is None:
+        return True
+    return a[0] == b[0] and a[1].split(".")[0] == b[1].split(".")[0]
 
 
 def _group(reports: list[ScanReport], image: str | None) -> list[_Image]:
-    """Reports about the same image together: the same digest, image id or registry/repository:tag (or all of them
-    when ``image`` names it)."""
+    """Reports about the same image together: the same digest, image id or registry/repository:tag, and the same
+    distro release (or all of them when ``image`` names it)."""
     groups: list[tuple[set[str], _Image]] = []
-    for r in reports:
+    for n, r in enumerate(reports):
         if image:
             info = ImageInfo(
                 names=[image.split("@")[0]] if not image.startswith("sha256:") else [],
@@ -58,11 +69,13 @@ def _group(reports: list[ScanReport], image: str | None) -> list[_Image]:
             )
             ids = {"forced"}
         else:
-            info, ids = r.image, _identities(r.image)
-        hits = [g for g in groups if g[0] & ids]
+            info, ids = r.image, _identities(r.image, n)
+        hits = [g for g in groups if g[0] & ids and _compatible(g[1].info.distro, r.image.distro)]
         if hits:
             target = hits[0]
-            for other in hits[1:]:  # this report links two groups: join them
+            for other in hits[1:]:  # this report links two groups: join them when they agree on the distro
+                if not _compatible(target[1].info.distro, other[1].info.distro):
+                    continue
                 target[0].update(other[0])
                 target[1].reports.extend(other[1].reports)
                 _absorb(target[1].info, other[1].info)
@@ -108,11 +121,18 @@ def assess(
     products: tuple[str, ...] = (),
     image: str | None = None,
     top: int = 50,
+    trust_report_vex: bool = False,
 ) -> dict[str, Any]:
+    """``trust_report_vex``: honour a CycloneDX report's own analysis (not_affected, resolved, false_positive); by
+    default those findings stay, with the report's claim in their notes."""
     if not reports:
         raise AssessError("give at least one scanner report or SBOM")
     if len(reports) > MAX_REPORTS:
         raise AssessError(f"more than {MAX_REPORTS} reports")
+    try:
+        products = vexmod.validate_products(products)
+    except vexmod.VexError as exc:
+        raise AssessError(str(exc)) from exc
     index = vex or VexIndex()
     images_out: list[dict[str, Any]] = []
     all_kept: list[tuple[ImageInfo, list[Finding]]] = []
@@ -123,7 +143,12 @@ def assess(
         packages = [p for r in img.reports for p in r.packages]
         scanner = [f for r in img.reports if not r.sbom for f in r.findings]
         prefixes = products or vexmod.rhel_products(img.info.distro)
-        own_excluded = [x for r in img.reports for x in r.excluded]
+        own = [x for r in img.reports for x in r.own_vex]
+        own_excluded: list[dict[str, Any]] = []
+        if trust_report_vex and own:
+            drop = {tuple(x["key"]) for x in own}
+            scanner = [f for f in scanner if f.key not in drop]
+            own_excluded = [{k: v for k, v in x.items() if k != "key"} for x in own]
         if any(not r.sbom for r in img.reports):
             findings = merge(_with_sources(scanner, packages))
             applied = vexmod.apply(findings, index, prefixes) if index.by_cve else None
@@ -150,6 +175,11 @@ def assess(
                     f"{outside} packages are not Red Hat RPMs: SBOM matching reads Red Hat VEX only, so they were not "
                     "checked (give a scanner report for language packages)"
                 )
+        if own and not trust_report_vex:
+            img_notes.append(
+                f"{len(own)} findings the report's own analysis marks not affected or resolved are kept: pass "
+                "--trust-report-vex to accept the report's VEX"
+            )
         n_reported = len(kept) + len(img_excluded) + len(own_excluded)
         reported += n_reported
         img_excluded = [*own_excluded, *img_excluded]

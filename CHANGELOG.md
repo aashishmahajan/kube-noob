@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Vulnerability assessment, after an independent red team of `vuln report`, `vuln threat` and `gate
+  --scanner-report` (each finding has a regression test in `tests/test_vuln_redteam.py`):
+  - A Red Hat VEX statement for one module stream (`nodejs:18`) no longer decides a package from another
+    (`nodejs:20`); when statements for one package disagree, the finding stays.
+  - Two reports are one image only by digest, image id, or the same tag and RHEL release: two images tagged
+    `latest`, or two unnamed reports, no longer share VEX scoping (a RHEL 9 statement could drop a RHEL 8 finding).
+  - A vendor's own RPM (nginx.org's `.el9.ngx` build) is outside Red Hat VEX and keeps its finding.
+  - A finding with no severity is graded by its CVSS score (medium without one) and a known-exploited one counts as at
+    least high, in `vuln report --fail-on` and in the gate: neither passed before.
+  - A CycloneDX report's own analysis (`not_affected`, `resolved`, `false_positive`) no longer clears its findings;
+    `--trust-report-vex` (CLI, gate, MCP `trust_report_vex`, Action, Tekton and GitLab inputs) restores it.
+  - Report text (an image or package name) can no longer add headings, links, images or table rows to the gate's
+    Markdown summary, or line breaks to SARIF and logs; ids with trailing whitespace still match KEV.
+  - Malformed VEX shapes are skipped instead of crashing; more VEX files than the limit is an error, not a silent cut.
+  - `--product` (and the MCP `products`) must name a release (`cpe:/o:redhat:enterprise_linux:9`).
+  - Every workload that runs a vulnerable image is counted, not the first 20.
+  - Attack-path reachability is linear in the input (16,000 objects in under a second; it was cubic).
+
 - The Claude plugin no longer reads the kernel's FIPS flag (`/proc/sys/crypto/fips_enabled`): the plugin directory's
   scan flags reads outside the plugin's own folders, and it held 0.5.0 for it. `kube-noob doctor` and the service
   still report it; the plugin reports OpenSSL's FIPS mode and says the kernel flag was not read. A test keeps host

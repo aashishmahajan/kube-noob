@@ -22,8 +22,8 @@ from kube_noob.rhacs import MAX_BYTES, RhacsError
 DEFAULT_TOKEN_ENV = "ROX_API_TOKEN"  # noqa: S105 - the variable roxctl reads; a name, not a token
 
 
-_POLICY_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_POLICY_ID = re.compile(r"^[A-Za-z0-9-]{1,64}\Z")
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 
 
 class CentralClient:

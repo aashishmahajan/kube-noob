@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-_EVR = re.compile(r"^(?:(\d{1,10}):)?([^:\s]+)$")
+_EVR = re.compile(r"^(?:(\d{1,10}):)?([^:\s]+)\Z")
 MAX_LEN = 256
 
 

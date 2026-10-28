@@ -455,7 +455,8 @@ class RhacsCompareIn(_In):
     )
 
 
-_CPE = r"^cpe:/[aho]:[a-z0-9_.-]+:[a-z0-9_.-]+(?::[A-Za-z0-9_.:-]*)?$"
+# Down to a release (cpe:/o:redhat:enterprise_linux:9): without one a RHEL 8 statement could speak for a RHEL 9 image
+_CPE = r"^cpe:/[aho]:[a-z0-9_.-]+:[a-z0-9_.-]+:[0-9][a-z0-9_.-]*(?::[A-Za-z0-9_.:-]*)?$"
 
 
 class VulnReportIn(_In):
@@ -493,6 +494,11 @@ class VulnReportIn(_In):
         None, max_length=500, description="Treat every report as this image (registry/repo:tag or @sha256:...)."
     )
     top: int = Field(20, ge=1, le=200, description="How many ranked findings to return.")
+    trust_report_vex: bool = Field(
+        False,
+        description="Honour a CycloneDX report's own analysis (not_affected, resolved, false_positive). Off by "
+        "default: the findings it marks are kept, with a note.",
+    )
 
 
 class ThreatModelIn(_In):
@@ -1093,7 +1099,14 @@ class Toolkit:
         """Normalised findings from scanner output, Red Hat VEX applied (each dropped finding cites its statement),
         ranked by exposure, privileges and known exploitation with the attack path."""
         out = self._vuln(
-            list(p.reports), list(p.vex), p.kev, p.manifests, products=tuple(p.products), image=p.image, top=p.top
+            list(p.reports),
+            list(p.vex),
+            p.kev,
+            p.manifests,
+            products=tuple(p.products),
+            image=p.image,
+            top=p.top,
+            trust_report_vex=p.trust_report_vex,
         )
         self._observe(sorted({f"vuln:{fmt}" for img in out["images"] for fmt in img["formats"]}))
         return {**out, "findings": out["findings"][: max(p.top, 50)], "findingsTotal": len(out["findings"])}

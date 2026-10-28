@@ -50,6 +50,11 @@ spec:
       type: string
       description: The CISA KEV catalog JSON in the workspace, for the scanner reports.
       default: ""
+    - name: trust-report-vex
+      type: string
+      description: >-
+        "true" honours a CycloneDX report's own analysis (not_affected, resolved, false_positive); off by default.
+      default: "false"
     - name: platform
       type: string
       description: kubernetes, openshift, rosa-classic or rosa-hcp.
@@ -85,6 +90,7 @@ spec:
         - {name: KN_SCANNER_REPORTS, value: $(params.scanner-reports)}
         - {name: KN_VEX, value: $(params.vex)}
         - {name: KN_KEV, value: $(params.kev)}
+        - {name: KN_TRUST_REPORT_VEX, value: $(params.trust-report-vex)}
         - {name: KN_PLATFORM, value: $(params.platform)}
         - {name: KN_VERSION, value: $(params.version)}
         - {name: KN_EXCEPTIONS, value: $(params.exceptions)}
@@ -108,6 +114,7 @@ spec:
         for r in $KN_SCANNER_REPORTS; do args+=(--scanner-report "$r"); done
         for x in $KN_VEX; do args+=(--vex "$x"); done
         if [ -n "$KN_KEV" ]; then args+=(--kev "$KN_KEV"); fi
+        if [ "$KN_TRUST_REPORT_VEX" = "true" ]; then args+=(--trust-report-vex); fi
         if [ -n "$KN_VERSION" ]; then args+=(--version "$KN_VERSION"); fi
         if [ -n "$KN_EXCEPTIONS" ]; then args+=(--exceptions "$KN_EXCEPTIONS"); fi
         out=/tmp

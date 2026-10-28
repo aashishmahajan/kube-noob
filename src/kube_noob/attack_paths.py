@@ -587,16 +587,15 @@ def _api_capabilities(inv: Inventory, grants: list[Grant]) -> list[Capability]:
     return list(found.values())
 
 
-def _token(inv: Inventory, w: dict[str, Any], spec: dict[str, Any]) -> tuple[str, str] | None:
-    """(ServiceAccount, evidence) when the pod mounts a token, else None."""
+def _token(no_automount: set[tuple[str, str]], w: dict[str, Any], spec: dict[str, Any]) -> tuple[str, str] | None:
+    """(ServiceAccount, evidence) when the pod mounts a token, else None. ``no_automount``: the ServiceAccounts that
+    turn automount off, by (namespace, name)."""
     sa = str(spec.get("serviceAccountName") or spec.get("serviceAccount") or "default")
     pod_flag = spec.get("automountServiceAccountToken")
     if pod_flag is False:
         return None
-    if pod_flag is not True:
-        for obj in inv.of("ServiceAccount"):
-            if _ns(obj) == _ns(w) and _name(obj) == sa and obj.get("automountServiceAccountToken") is False:
-                return None
+    if pod_flag is not True and (_ns(w), sa) in no_automount:
+        return None
     how = "automountServiceAccountToken=true" if pod_flag is True else "token mounted (automount not turned off)"
     return sa, f"spec.serviceAccountName={sa}; {how}"
 
@@ -649,24 +648,53 @@ class Reach:
         return list(best[0][2]) if best else []
 
 
+@dataclass
+class _Index:
+    """What every workload's reach needs, built once per scan: which entries reach each workload (through the
+    Service whose selector matches its pod template, found through a label index rather than by testing every
+    entry against every workload) and which ServiceAccounts turn token automount off. Looking these up per
+    workload made the scan cubic in the size of the input (red team, VUL1)."""
+
+    selects: dict[int, list[tuple[int, Entry, dict[str, Any]]]]  # id(workload) -> (entry index, entry, selector)
+    no_automount: set[tuple[str, str]]
+
+    @classmethod
+    def build(cls, inv: Inventory, entries: list[Entry]) -> _Index:
+        services: dict[tuple[str, str], dict[str, Any]] = {}
+        for s in inv.of("Service"):
+            services.setdefault((_ns(s), _name(s)), s)  # the first of a duplicated name, as kubectl apply would keep
+        workloads = inv.of(*_WORKLOAD_KINDS)
+        labels = [_template_labels(w) for w in workloads]
+        by_label: dict[tuple[str, str, str], list[int]] = {}
+        for n, w in enumerate(workloads):
+            for k, v in labels[n].items():
+                by_label.setdefault((_ns(w), k, v), []).append(n)
+        selects: dict[int, list[tuple[int, Entry, dict[str, Any]]]] = {}
+        for i, e in enumerate(entries):
+            svc = services.get((e.namespace, e.service))
+            selector = _get(svc, "spec", "selector") if svc else None
+            if not isinstance(selector, dict) or not selector:
+                continue
+            candidates = min((by_label.get((e.namespace, str(k), str(v)), []) for k, v in selector.items()), key=len)
+            for n in candidates:
+                if selector_matches({"matchLabels": selector}, labels[n]):
+                    selects.setdefault(id(workloads[n]), []).append((i, e, selector))
+        no_automount = {
+            (_ns(sa), _name(sa)) for sa in inv.of("ServiceAccount") if sa.get("automountServiceAccountToken") is False
+        }
+        return cls(selects, no_automount)
+
+
 def _reach(
     inv: Inventory,
     w: dict[str, Any],
     spec: dict[str, Any],
-    entries: list[Entry],
+    index: _Index,
     sa_caps: dict[tuple[str, str], list[Capability]],
 ) -> Reach:
     ref = _ref(w)
     reach_entries: list[tuple[int, Entry, list[Step]]] = []
-    for i, entry in enumerate(entries):
-        if _ns(w) != entry.namespace:
-            continue
-        svc = next((s for s in inv.of("Service") if _ns(s) == entry.namespace and _name(s) == entry.service), None)
-        selector = _get(svc, "spec", "selector") if svc else None
-        if not isinstance(selector, dict) or not selector:
-            continue
-        if not selector_matches({"matchLabels": selector}, _template_labels(w)):
-            continue
+    for i, entry, selector in index.selects.get(id(w), []):
         to_w = Step(
             f"Service/{entry.namespace}/{entry.service}",
             ref,
@@ -675,7 +703,7 @@ def _reach(
         )
         reach_entries.append((i, entry, [*entry.steps, to_w]))
     api: list[tuple[Capability, list[Step]]] = []
-    tok = _token(inv, w, spec)
+    tok = _token(index.no_automount, w, spec)
     if tok is not None:
         sa, evidence = tok
         key = (_ns(w), sa)
@@ -700,7 +728,7 @@ def _reach(
 
 def workload_reach(inv: Inventory) -> dict[str, Reach]:
     """Every workload (not owned by another) with its exposures, node and API capabilities, keyed by Kind/ns/name."""
-    entries = _entries(inv)
+    index = _Index.build(inv, _entries(inv))
     sa_caps: dict[tuple[str, str], list[Capability]] = {}
     out: dict[str, Reach] = {}
     for w in inv.of(*_WORKLOAD_KINDS):
@@ -708,7 +736,7 @@ def workload_reach(inv: Inventory) -> dict[str, Reach]:
             continue
         spec = _pod_spec(w)
         if spec is not None:
-            out[_ref(w)] = _reach(inv, w, spec, entries, sa_caps)
+            out[_ref(w)] = _reach(inv, w, spec, index, sa_caps)
     return out
 
 
@@ -717,16 +745,18 @@ def scan(inv: Inventory, *, top: int = DEFAULT_TOP) -> dict[str, Any]:
         raise ScanError(f"top must be 1-{MAX_PATHS}")
     workloads = [w for w in inv.of(*_WORKLOAD_KINDS) if not _owned(w)]
     entries = _entries(inv)
+    index = _Index.build(inv, entries)
     sa_caps: dict[tuple[str, str], list[Capability]] = {}
     reach: list[Reach] = []
     for w in workloads:
         spec = _pod_spec(w)
         if spec is not None:
-            reach.append(_reach(inv, w, spec, entries, sa_caps))
-    paths: list[AttackPath] = []
-    for i in range(len(entries)):
-        for r in reach:
-            paths.extend(r.paths_from(i))
+            reach.append(_reach(inv, w, spec, index, sa_caps))
+    by_entry: dict[int, list[AttackPath]] = {}
+    for r in reach:  # each workload's paths, grouped by entry in workload order, as the scan always listed them
+        for i in dict.fromkeys(i for i, _, _ in r.entries):
+            by_entry.setdefault(i, []).extend(r.paths_from(i))
+    paths: list[AttackPath] = [p for i in range(len(entries)) for p in by_entry.get(i, [])]
     paths.sort(key=lambda p: (-p.score, len(p.steps), p.as_dict(0)["summary"]))
     out_paths = [p.as_dict(i + 1) for i, p in enumerate(paths[:top])]
     head = out_paths[0]["summary"] if out_paths else "no path from an exposure to a node or to API rights"

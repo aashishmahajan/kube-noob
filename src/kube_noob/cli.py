@@ -229,6 +229,7 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             scanner_reports=[(p, _read(p)) for p in a.scanner_report],
             vex_paths=[Path(v) for v in a.vex],
             kev_path=Path(a.kev) if a.kev else None,
+            trust_report_vex=a.trust_report_vex,
         )
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
@@ -457,7 +458,14 @@ def _vuln_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             text = "\n---\n".join(_read(m) for m in a.manifests)
             placed = dict(workload_reach(PathInventory.from_documents(d.data for d in load_documents(text))))
         out = assess.assess(
-            reports, vex=index, kev=kev, reach=placed, products=tuple(a.product), image=a.image, top=a.top
+            reports,
+            vex=index,
+            kev=kev,
+            reach=placed,
+            products=tuple(a.product),
+            image=a.image,
+            top=a.top,
+            trust_report_vex=a.trust_report_vex,
         )
     except (rep.ReportError, vexmod.VexError, kevmod.KevError, assess.AssessError, threat.ThreatError) as exc:
         raise ConfigError(str(exc)) from exc
@@ -467,10 +475,14 @@ def _vuln_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         _emit(out, fmt)
     if a.fail_on == "never":
         return 0
-    order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-    floor = order[a.fail_on]
+    from kube_noob.vuln.reports import SEVERITY_RANK, gating_severity
+
+    floor = SEVERITY_RANK[a.fail_on]
     bad = [
-        f for f in out["findings"] if order.get(f["severity"], 0) >= floor and (f["fixVersion"] or f["knownExploited"])
+        f
+        for f in out["findings"]
+        if SEVERITY_RANK[gating_severity(f["severity"], f["cvss"], f["knownExploited"])] >= floor
+        and (f["fixVersion"] or f["knownExploited"])
     ]
     return 1 if bad else 0
 
@@ -669,6 +681,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gt.add_argument("--vex", action="append", default=[], help="Red Hat CSAF VEX for --scanner-report; repeat")
     gt.add_argument("--kev", default=None, help="the CISA KEV catalog JSON for --scanner-report")
+    gt.add_argument(
+        "--trust-report-vex",
+        action="store_true",
+        help="honour a CycloneDX report's own analysis (not_affected, resolved, false_positive); off by default: "
+        "whoever wrote the report could otherwise clear its findings",
+    )
 
     bd = sub.add_parser(
         "build",
@@ -788,6 +806,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Red Hat product CPE prefix (default: from the report's RHEL release, cpe:/o:redhat:enterprise_linux:9)",
     )
     vr.add_argument("--kev", default=None, help="the CISA KEV catalog (known_exploited_vulnerabilities.json, CC0)")
+    vr.add_argument(
+        "--trust-report-vex",
+        action="store_true",
+        help="honour a CycloneDX report's own analysis (not_affected, resolved, false_positive); off by default: "
+        "the findings it marks are kept, with a note",
+    )
     vr.add_argument(
         "-m",
         "--manifests",

@@ -500,8 +500,17 @@ ROX_API_TOKEN=<token> kube-noob --config rhacs.yaml vuln report --rhacs-image sh
 ```
 
 VEX for RHEL speaks about Red Hat RPMs only; Python, Java and JavaScript packages keep the scanner's verdict, and the
-output says how many were outside VEX. RHACS and Trivy without `--list-all-pkgs` name binary packages only; give the
-image's SBOM too so not-affected statements, which name source RPMs, can match.
+output says how many were outside VEX. A vendor's own RPM (nginx.org's `1.26.1-2.el9.ngx`) is not Red Hat's build,
+so Red Hat's statements leave it alone. A module stream's statement (`nodejs:18`) applies to that stream only, and
+when statements for one package disagree the finding stays. RHACS and Trivy without `--list-all-pkgs` name binary
+packages only; give the image's SBOM too so not-affected statements, which name source RPMs, can match.
+
+Reports of the same image (same digest or image id, or the same tag and the same RHEL release) are assessed
+together; two images never share VEX scoping. A finding with no severity in the report is graded by its CVSS score,
+or medium without one, and a known-exploited one counts as at least high, so it cannot slip past `--fail-on`. A
+CycloneDX report's own analysis (`not_affected`, `resolved`) does not clear its findings unless you pass
+`--trust-report-vex`: whoever wrote the report could otherwise empty it. `--product` takes CPE prefixes down to a
+release (`cpe:/o:redhat:enterprise_linux:9`), so RHEL 8 statements never speak for a RHEL 9 image.
 
 ### What could go wrong with this application? A threat model
 
