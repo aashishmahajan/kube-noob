@@ -213,6 +213,44 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         knowledge=("k8s-debug-pods",),
     ),
     Playbook(
+        "DBG-INVALID-UTF8",
+        "A string sent over gRPC is not valid UTF-8 (string field contains invalid UTF-8)",
+        (
+            r"string field (?:'[\w.]{1,120}' )?contains invalid UTF-8",
+            r"contains invalid UTF-8 data when serializing a protocol buffer",
+            r"error (?:un)?marshall?ing request:? string field contains invalid UTF-8",
+        ),
+        (
+            "An environment variable from a Secret or ConfigMap (env valueFrom or envFrom) holds bytes that are not "
+            "valid UTF-8, so the container runtime rejects the gRPC request (error unmarshalling request: string "
+            "field contains invalid UTF-8) and the pod stays in CreateContainerError: "
+            "typically a value base64-encoded twice under the Secret's data (Kubernetes decodes it once, leaving "
+            "random bytes) or binary data such as a key or keystore.",
+            "Reported after node upgrades to containerd 2.2: pods using the same Secret failed on the new nodes and "
+            "still started on nodes running containerd 2.1.",
+            "RHACS Collector in CrashLoopBackOff with String field 'storage.ProcessSignal.args' contains invalid "
+            "UTF-8 data: a process on the host has arguments that are not UTF-8 (RHACS 4.5, tracked as ROX-26025; "
+            "no workaround published).",
+        ),
+        (
+            "oc describe pod {pod} -n {ns}",
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.spec.containers[*].envFrom}}{{.spec.containers[*].env}}'",
+            "oc get secret <secret> -n {ns} "
+            "-o go-template='{{{{range $k, $v := .data}}}}{{{{$k}}}}{{{{\"\\n\"}}}}{{{{end}}}}'",
+            "oc get nodes -o wide",
+        ),
+        (
+            "Store each value so that it decodes to valid UTF-8 text: plain text under stringData, or base64-encoded "
+            "exactly once under data; check a suspect key yourself by decoding it (base64 -d) on your workstation.",
+            "For binary data (keys, keystores), mount the key as a file from a Secret volume instead of an "
+            "environment variable, or base64-encode it once more and decode it in the application.",
+            "RHACS Collector: follow ROX-26025 and the Red Hat article; send oc logs <collector-pod> -c collector "
+            "-n stackrox to Red Hat support.",
+        ),
+        knowledge=("k8s-invalid-utf8",),
+        weight=1.4,
+    ),
+    Playbook(
         "DBG-RUNASROOT",
         "Pod refuses to start because the image runs as root",
         (

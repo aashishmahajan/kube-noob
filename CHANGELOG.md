@@ -169,6 +169,17 @@
   16 neither) and a random 100 of the other moved test rows (84 better, 3 worse, 13 neither); on the answered train
   rows 85 moved: 63 better, 3 worse, 19 neither. Golden unchanged in scope (84 of 96); an AWS IAM question no longer
   gets the image document, so out of scope 21 of 23 are left unanswered.
+- New playbook DBG-INVALID-UTF8 for `grpc: error unmarshalling request: string field contains invalid UTF-8` (asked by
+  the owner; kube-noob had answered it with generic gather steps only). Its causes come from public reports and say
+  so: an environment variable from a Secret or ConfigMap that decodes to bytes that are not UTF-8 (often a value
+  base64-encoded twice, or binary data), rejected by the container runtime with the pod in `CreateContainerError`,
+  reported after nodes moved to containerd 2.2; and the RHACS Collector case
+  (`String field 'storage.ProcessSignal.args' contains invalid UTF-8 data`, RHACS 4.5, ROX-26025). Fixes: plain text
+  under `stringData` or base64 encoded exactly once under `data`, binary data as a mounted file. The read-only steps
+  list a Secret's key names, never its values. Its document (`k8s-invalid-utf8`, citing the reports and the
+  Kubernetes Secret and ConfigMap pages) answers only questions that name UTF-8. Golden unchanged. Community: train
+  6 answers moved (4 better, 2 worse), test 6 moved (3 better, 3 worse; a new document shifts every search score a
+  little).
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

@@ -16,8 +16,8 @@ is exactly what it carries for that technology:
 
 | Technology | Playbooks | Knowledge documents | Reported issues | Rules and engines |
 |---|---|---|---|---|
-| Kubernetes (upstream, kubectl, kubeadm) | 48 that apply everywhere | 42 (incl. the Helm, RHACS and policy-engine docs), incl. pods, probes, DNS, Services, Ingress, storage, scheduling, RBAC, Pod Security, TLS, kubelet, etcd backup, kubeconfig exec, kubeadm first-day problems, Deployment rollouts | none (upstream Kubernetes bugs not indexed) | audit rules and strict schemas (Kubernetes 1.35), removed APIs, NetworkPolicy reachability, Pod Security and RBAC denial explainers |
-| OpenShift 4.x | 48 shared + 10 OpenShift-only (SCC, Route 503, ClusterOperator, arbitrary UID, EgressIP, build image quota, CNI not ready, OLM OperatorGroup, image prune registry, CRI-O storage) | 13 OpenShift docs (SCC, Routes, operators, DeploymentConfig, EgressFirewall, EgressIP, arbitrary UID, install and bootstrap, ClusterOperator conditions and stuck updates, etcd quota, pod security label sync, service serving certificates, overview) | 921 bugs from the 4.20-4.22 release notes | SCC, Route and EgressFirewall schemas; must-gather analysis; SCC denial explainer |
+| Kubernetes (upstream, kubectl, kubeadm) | 49 that apply everywhere | 43 (incl. the Helm, RHACS and policy-engine docs), incl. pods, probes, DNS, Services, Ingress, storage, scheduling, RBAC, Pod Security, TLS, kubelet, etcd backup, kubeconfig exec, kubeadm first-day problems, Deployment rollouts, invalid UTF-8 in runtime requests | none (upstream Kubernetes bugs not indexed) | audit rules and strict schemas (Kubernetes 1.35), removed APIs, NetworkPolicy reachability, Pod Security and RBAC denial explainers |
+| OpenShift 4.x | 49 shared + 10 OpenShift-only (SCC, Route 503, ClusterOperator, arbitrary UID, EgressIP, build image quota, CNI not ready, OLM OperatorGroup, image prune registry, CRI-O storage) | 13 OpenShift docs (SCC, Routes, operators, DeploymentConfig, EgressFirewall, EgressIP, arbitrary UID, install and bootstrap, ClusterOperator conditions and stuck updates, etcd quota, pod security label sync, service serving certificates, overview) | 921 bugs from the 4.20-4.22 release notes | SCC, Route and EgressFirewall schemas; must-gather analysis; SCC denial explainer |
 | ROSA HCP and classic | shared + 9 ROSA playbooks (HCP nodes, OCM5011 capacity, OCM5010 subnet tags, ELB service-linked role, user-role not linked, expired rosa token, Karpenter discovery tag and CreateTags) | 5 (ROSA HCP, EFS, egress zero, HCP lifecycle: console, subnet tags, upgrades, break glass, deletion; troubleshooting: install logs, quota, private NLB) | HyperShift bugs within the OpenShift release notes | ROSA HCP self-test cases |
 | Helm 3 | DBG-HELM-LOCK, DBG-HELM-OWNERSHIP, DBG-HELM-REPO-EXISTS, DBG-HELM-REMOVED-API, DBG-HELM-YAML, DBG-IMMUTABLE-SELECTOR | 5 (basics, troubleshooting, values and templates, CLI operations: `--set` syntax, OCI, rollback, three-way merge, paths; chart authoring: `crds/`, hooks, library charts, whitespace, comments) | none | chart audit and generation |
 | RHACS / StackRox | DBG-STACKROX-ADMISSION + 6 (break glass, webhook failure policy, Scanner registry and CVE data, Collector to Sensor, roxctl image check) | 6 (overview, admission denials, enforcement, policy rules and scope, roxctl in CI, secured cluster troubleshooting) | none (ROX bugs only through a Jira sync) | RHACS policy comparison, scanner-report and image reads |
@@ -104,7 +104,8 @@ Golden results now, graded again by independent agents:
 
 OpenShift and ROSA HCP items are now asked with their platform (`platform: openshift` or `rosa-hcp`), as kube-noob
 is configured on those clusters; without it, OpenShift-only content stays silent unless the question says OpenShift
-(G83), and OpenShift scores 5 of 16 instead of 11. The baseline above was measured without a platform.
+(G83), and OpenShift scores 6 of 16 instead of 12 (ROSA HCP questions name ROSA, so they score 16 either way). The
+baseline above was measured without a platform.
 
 These golden items said what to add, so their rise is a fit to them, not evidence that kube-noob generalises; they
 stay as regression tests. The honest check is the community test half (1,788 answered rows, retired rows left out),
@@ -122,11 +123,13 @@ answer:
 | Comments in code blocks no longer split sections | 7 | 1 | 2 | 4 |
 | Six documented gap answers; pod, storage and limits documents need their subject's words | 66 | 32 | 12 | 22 |
 | 19 frequent documents need their subject's words (answered rows; a random 100 of the rest) | 80; 100 | 60; 84 | 4; 3 | 16; 13 |
+| Invalid UTF-8 playbook and its narrowly gated document | 6 | 3 | 3 | 0 |
 
 Most moved answers were wrong both before and after: real questions are dominated by Red Hat bug reports (the
 bundled release notes hold the key for few of them) and by products outside the box, which documentation content
-does not reach. The bug-matcher change helped most because it stopped weak matches to unrelated bugs, letting the
-answer point at the bug the report itself names. Rarity in the bundled docs is a count of sections (at most 2), not
+does not reach. What helped real posts most was saying less: the bug-matcher change stopped weak matches to
+unrelated bugs (letting the answer point at the bug the report itself names), and the subject gates stopped the most
+used documents from answering posts about something else. Rarity in the bundled docs is a count of sections (at most 2), not
 a share, so adding documents never makes more words rare; as a share it had made four rows that pointed at the
 right bug name an unrelated one. A count of documents was tried and measured worse (33 test-half answers moved: 4
 better, 24 worse, 5 neither; most rows with no answer started naming an unrelated bug), so it was not kept and those

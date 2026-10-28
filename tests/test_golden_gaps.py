@@ -432,3 +432,38 @@ def test_frequent_documents_need_a_word_of_their_subject(kit: tk.Toolkit) -> Non
 
     gated = {c.doc_id for c in builtin_chunks() if c.extra.get("requires")}
     assert {"kubernetes", "stackrox", "k8s-common-errors", "k8s-images", "helm", "k8s-pss", "learning-paths"} <= gated
+
+
+def test_invalid_utf8_in_a_runtime_request_has_its_own_playbook(kit: tk.Toolkit) -> None:
+    # Owner question 2026-10-28. Public reports (aws/containers-roadmap#2791, ministryofjustice/cloud-platform#8186,
+    # giantswarm/giantswarm-platform-manager#280): CreateContainerError with this message when an environment
+    # variable from a Secret decodes to bytes that are not UTF-8; Red Hat KB 7086811 for the RHACS Collector case.
+    bare = _diag("grpc error unmarshalling request; string field contains invalid UTF-8")
+    assert bare["id"] == "DBG-INVALID-UTF8"
+    event = _diag(
+        "Warning  Failed  12s  kubelet  Error: grpc: error unmarshalling request: string field contains invalid "
+        "UTF-8\n  Reason: CreateContainerError"
+    )
+    assert event["id"] == "DBG-INVALID-UTF8"
+    assert "Secret" in _causes(event) and "stringData" in _changes(event) and "volume" in _changes(event)
+    out = kit.insight(tk.InsightIn(text="grpc error unmarshalling request; string field contains invalid UTF-8"))
+    top = out["findings"][0]
+    assert top["id"] == "DBG-INVALID-UTF8" and "Secret" in top["cause"]
+    collector = kit.insight(
+        tk.InsightIn(
+            text="collector in CrashLoopBackOff: String field 'storage.ProcessSignal.args' contains invalid UTF-8 "
+            "data when serializing a protocol buffer",
+            platform="openshift",
+        )
+    )
+    first = collector["findings"][0]
+    assert first["id"] == "DBG-INVALID-UTF8" and "Collector" in first["cause"]
+    from kube_noob.debug.playbooks import PLAYBOOKS
+    from kube_noob.debug.steps import classify_step
+
+    pb = next(p for p in PLAYBOOKS if p.pid == "DBG-INVALID-UTF8")
+    assert all(classify_step(c.format(pod="web", ns="shop")) == "read" for c in pb.checks)
+    assert not any(".data" in c and "base64" in c for c in pb.checks)  # key names only, never a Secret's values
+    assert pb.knowledge == ("k8s-invalid-utf8",)
+    keystore = "How do I store a Java keystore in a Kubernetes Secret and mount it into my pod?"
+    assert not [g for g in _top(kit, keystore) if g.startswith("kn:k8s-invalid-utf8")]
