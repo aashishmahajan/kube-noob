@@ -69,7 +69,9 @@ def _instructions(settings: Settings) -> str:
         "that kube-noob does not?' pass the policy export to kubenoob_rhacs_compare; for a failed CI build pass the "
         "log to kubenoob_build_diagnose and a Containerfile to kubenoob_containerfile_audit; for scanner output "
         "(Trivy, Grype, CycloneDX, SPDX, RHACS) use kubenoob_vuln_report with the manifests, and lead with rank 1 "
-        "and its attack path; for 'what could go wrong with this app?' use kubenoob_threat_model; "
+        "and its attack path; for SAST output (SARIF from Semgrep, Bandit, SpotBugs, ESLint, CodeQL) use "
+        "kubenoob_code_report with the Containerfiles and manifests, and lead with rank 1 (shipped and exposed); "
+        "for 'what could go wrong with this app?' use kubenoob_threat_model; "
         "for 'can pod A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
         + (

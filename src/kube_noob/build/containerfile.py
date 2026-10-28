@@ -294,6 +294,21 @@ def _kv(text: str, *, arg: bool = False) -> dict[str, str]:
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]{0,60})(?::?[-+]([^}]{0,200}))?\}|\$([A-Za-z_][A-Za-z0-9_]{0,60})")
 
 
+def expand(value: str, env: dict[str, str]) -> str:
+    """``$NAME`` and ``${NAME}`` (with ``:-`` defaults) from ``env``; unknown names stay as written."""
+    return _expand(value, env)
+
+
+def words(text: str) -> list[str]:
+    """An instruction's arguments split as the shell form splits them."""
+    return _words(text)
+
+
+def kv(text: str, *, arg: bool = False) -> dict[str, str]:
+    """ENV KEY=VALUE pairs (or ARG NAME[=default]; a missing default is ``\\x00``)."""
+    return _kv(text, arg=arg)
+
+
 def _expand(value: str, env: dict[str, str]) -> str:
     def sub(m: re.Match[str]) -> str:
         name = m.group(1) or m.group(3)
@@ -387,19 +402,24 @@ def _secret_values(ins: Instruction, where: str) -> list[secrets.Hit]:
     return secrets.scan_text(text, where, assignments=ins.cmd in {"ENV", "ARG", "LABEL"})
 
 
+def ignore_rules(text: str) -> list[tuple[bool, re.Pattern[str]]]:
+    """A .containerignore or .dockerignore as (exception, pattern) rules, in order; the last match wins."""
+    rules = []
+    for raw in text.splitlines()[:5000]:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        neg = line.startswith("!")
+        pat = os.path.normpath(line.lstrip("!").strip().lstrip("/")).replace(os.sep, "/")
+        rules.append((neg, re.compile(_glob(pat))))
+    return rules
+
+
 def _ignore_patterns(context: Path) -> list[tuple[bool, re.Pattern[str]]]:
     for name in (".containerignore", ".dockerignore"):
         f = context / name
         if f.is_file() and not f.is_symlink():
-            rules = []
-            for raw in f.read_text(encoding="utf-8", errors="replace").splitlines()[:5000]:
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                neg = line.startswith("!")
-                pat = os.path.normpath(line.lstrip("!").strip().lstrip("/")).replace(os.sep, "/")
-                rules.append((neg, re.compile(_glob(pat))))
-            return rules
+            return ignore_rules(f.read_text(encoding="utf-8", errors="replace"))
     return []
 
 
@@ -430,6 +450,11 @@ def _glob(pat: str) -> str:
             out += re.escape(ch)
         i += 1
     return f"^{out}$"
+
+
+def ignored(rel: str, rules: list[tuple[bool, re.Pattern[str]]]) -> bool:
+    """Whether the build context leaves out ``rel`` (a path relative to the context)."""
+    return _ignored(rel, rules)
 
 
 def _ignored(rel: str, rules: list[tuple[bool, re.Pattern[str]]]) -> bool:

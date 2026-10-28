@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (VUL1 done; ADM1 waiting for CI).
+right now; STATE.md says what is done. Updated 2026-10-28 (VUL1 and ADM1 done; SAST1 built, CI and red team next).
 
 ## Repository and branch
 
@@ -32,19 +32,10 @@ right now; STATE.md says what is done. Updated 2026-10-28 (VUL1 done; ADM1 waiti
 1. VUL1: done (CI 40676198576 on f75fcbe, every job green). The red-team fixes and `tests/test_vuln_redteam.py` are
    in; follow-up only: `yamlio.load_documents` uses the pure-Python SafeLoader (~14 s for 860 KB of JSON, bounded by
    MAX_NODE_VISITS); a CSafeLoader path with the same line marks would make large inputs fast.
-2. ADM1 (R3.3, STATE row 15n): everything is built and committed; only CI is left. Dispatch CI on the branch head and
-   watch two places:
-   - `helm-and-dogfood`, step "Admission webhook chart (R3.3) ...": renders `templates/admission.yaml` in the three
-     certificate modes (openshift-service-ca, cert-manager, secret), checks the objects in Python, audits them clean
-     and checks six refusals. Helm is not installed in the container (get.helm.sh is blocked), so the template has
-     only been checked by CI; a Go-template mistake shows up here first.
-   - `admission-kind`: openssl CA, chart install in warn mode (`Warning: [KN-S001]`), an in-cluster Job running
-     `scripts/admission_kind_load.py` (600 fuzzed reviews never denied, 50 rps for 30 s, p99 < 50 ms), enforce mode
-     (denies `priv2`, a plain Deployment still warns, a label update of the existing privileged `priv` is admitted),
-     scale to zero admits in under 15 s. Read failures from the job's annotations
-     (`gh api repos/aashishmahajan/kube-noob/check-runs/<job id>/annotations`); the Diagnostics step prints the
-     webhook's logs, pods and the ValidatingWebhookConfiguration.
-   When both are green (and the rest of CI), set row 15n to `done` with the run id, and log it.
+2. ADM1: done (CI 40678575926, admission-kind green: p99 1.64 ms at 50 rps in cluster, dead webhook admits in 0 s).
+   SAST1 (R4.5-R4.7, row 15s) is built and committed; next: dispatch CI (gate-ci has a new step "GitHub Action with
+   SARIF from five SAST tools"), then an independent red team of `kube_noob/code` (SARIF parser, ship map, deps,
+   gate --sarif-report, MCP code_report), fixing each reproduced finding with a regression test, then mark done.
 3. Claude plugin directory (owner's 0.5.0 submission): held by directory policy for a reviewer, which is expected for
    any local stdio server. The one new finding against 0.2.3 is most likely the kernel FIPS flag read; the read moved
    to `src/kube_noob/host_fips.py`, guarded out of the plugin, with

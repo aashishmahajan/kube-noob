@@ -512,6 +512,37 @@ CycloneDX report's own analysis (`not_affected`, `resolved`) does not clear its 
 `--trust-report-vex`: whoever wrote the report could otherwise empty it. `--product` takes CPE prefixes down to a
 release (`cpe:/o:redhat:enterprise_linux:9`), so RHEL 8 statements never speak for a RHEL 9 image.
 
+### Which code findings matter? SAST output, the images that ship it and the pods that run it
+
+`code report` reads the SARIF your SAST tools already write: Semgrep, Bandit, SpotBugs with FindSecBugs, ESLint and
+CodeQL (kube-noob has no analysis engine of its own). The same file, line and CWE reported by several tools becomes
+one finding with every tool as a source; suppressed results, results the baseline says are fixed and non-failing
+results are excluded with the reason, and lint or quality results are counted but never ranked. Severity comes from
+the tool's `security-severity` score (bands as GitHub code scanning uses them), Bandit's issue severity, or the SARIF
+level.
+
+With the Containerfiles (`-c PATH=IMAGE`), each file is followed into the images that ship it: copied (with its path
+in the image) or built (an input of a stage the final image copies from), and the `.dockerignore` is honoured. With
+the manifests, findings rank by exposure and privileges like image vulnerabilities, each with its attack path, so an
+SQL injection behind a Route ranks above the same weakness in an internal worker, and a finding in `tests/` that no
+image ships is listed apart. With the images' scanner reports (`-r`), every language-package vulnerability points at
+the line to change: the lockfile the image copied, and the manifest that declares the package.
+
+```bash
+semgrep --config auto --sarif -o semgrep.sarif
+bandit -r web -f sarif -o bandit.sarif
+kube-noob code report -s semgrep.sarif -s bandit.sarif -s codeql.sarif \
+  -c web/Containerfile=quay.io/acme/shop-web -c worker/Containerfile=quay.io/acme/shop-worker \
+  -m deploy/ -r trivy-web.json --source-root "$GITHUB_WORKSPACE" --fail-on high
+kube-noob gate -f deploy/ --containerfile web/Containerfile --sarif-report semgrep.sarif --fail-on high
+```
+
+Bandit writes SARIF with its `sarif` extra (`pip install "bandit[sarif]"`), ESLint with
+`@microsoft/eslint-formatter-sarif`, SpotBugs with `-sarif`, CodeQL with `codeql database analyze --format=sarif-latest`.
+Pass `--source-root` with the directory the tools ran in when their SARIF has absolute paths (ESLint always writes
+them; SpotBugs names its source directories). In the gate, a finding fails the build only when one of the gate's
+Containerfiles ships its file.
+
 ### What could go wrong with this application? A threat model
 
 `vuln threat` builds a STRIDE threat model per application (workloads sharing `app.kubernetes.io/part-of`, else a

@@ -274,6 +274,7 @@ class Finding:
     title: str = ""
     notes: list[str] = field(default_factory=list)
     vex: list[dict[str, Any]] = field(default_factory=list)  # the VEX statements that speak to it
+    paths: tuple[str, ...] = ()  # where in the image the scanner found the package (lockfile, site-packages, jar)
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -314,7 +315,41 @@ class Finding:
             out["notes"] = self.notes
         if self.vex:
             out["vex"] = self.vex
+        if self.paths:
+            out["paths"] = list(self.paths[:10])
         return out
+
+
+_LOCKFILES = frozenset(
+    {
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "requirements.txt",
+        "Pipfile.lock",
+        "poetry.lock",
+        "uv.lock",
+        "go.mod",
+        "go.sum",
+        "Gemfile.lock",
+        "Cargo.lock",
+        "composer.lock",
+        "packages.lock.json",
+        "pom.xml",
+        "gradle.lockfile",
+    }
+)
+
+
+def _image_paths(values: Any) -> tuple[str, ...]:
+    """Absolute paths in the image: Trivy writes them without the leading slash, Grype and syft with it."""
+    out: list[str] = []
+    for v in values:
+        s = _s(v, 1000).strip()
+        if s and not s.startswith(("http://", "https://")) and ".." not in s.split("/"):
+            out.append(s if s.startswith("/") else "/" + s)
+    return tuple(dict.fromkeys(out))[:20]
 
 
 @dataclass
@@ -425,6 +460,10 @@ def _trivy(doc: dict[str, Any], where: str) -> ScanReport:
     for res in _dicts(doc.get("Results")):
         rtype = _s(res.get("Type"), 40).lower()
         eco = _ECOSYSTEM_BY_TRIVY.get(rtype, "generic")
+        target = _s(res.get("Target"), 1000) if _s(res.get("Class"), 40) == "lang-pkgs" else ""
+        # a lockfile's path ("usr/src/app/package-lock.json"); "Python", "Node.js" and "Java" name installed packages,
+        # whose own path is the vulnerability's PkgPath
+        lockfile = target if "/" in target or target in _LOCKFILES else ""
         sources: dict[tuple[str, str], str] = {}
         for raw in _dicts(res.get("Packages")):
             ident = _dict(raw.get("Identifier"))
@@ -471,6 +510,7 @@ def _trivy(doc: dict[str, Any], where: str) -> ScanReport:
                     sources=["trivy"],
                     layer=_s(layer.get("Digest") or layer.get("DiffID"), 100),
                     title=_s(v.get("Title"), 200),
+                    paths=_image_paths([v.get("PkgPath") or lockfile] if (v.get("PkgPath") or lockfile) else []),
                 ),
                 where,
             )
@@ -536,6 +576,7 @@ def _grype(doc: dict[str, Any], where: str) -> ScanReport:
                 score,
                 known_exploited=bool(_list(v.get("knownExploited"))),
                 sources=["grype"],
+                paths=_image_paths(_dict(loc).get("path") for loc in _list(a.get("locations"))),
             ),
             where,
         )
@@ -549,8 +590,11 @@ def _grype(doc: dict[str, Any], where: str) -> ScanReport:
 # -- CycloneDX -------------------------------------------------------------------------------------------------------
 
 
+_CDX_PATH = re.compile(r"^(?:aquasecurity:trivy:FilePath|syft:location:\d{1,3}:path)\Z")
+
+
 def _cdx_components(
-    doc: dict[str, Any], where: str
+    doc: dict[str, Any], where: str, paths_by_ref: dict[str, tuple[str, ...]] | None = None
 ) -> tuple[dict[str, Package], list[Package], tuple[str, str] | None]:
     by_ref: dict[str, Package] = {}
     packages: list[Package] = []
@@ -578,6 +622,10 @@ def _cdx_components(
         ref = _s(c.get("bom-ref"), 2000)
         if ref:
             by_ref[ref] = pkg
+            if paths_by_ref is not None:
+                found = _image_paths(v for k, v in props.items() if _CDX_PATH.match(k))
+                if found:
+                    paths_by_ref[ref] = found
     return by_ref, packages, distro
 
 
@@ -593,7 +641,8 @@ def _cdx_image(doc: dict[str, Any]) -> ImageInfo:
 
 
 def _cdx(doc: dict[str, Any], where: str) -> ScanReport:
-    by_ref, packages, distro = _cdx_components(doc, where)
+    paths_by_ref: dict[str, tuple[str, ...]] = {}
+    by_ref, packages, distro = _cdx_components(doc, where, paths_by_ref)
     image = _cdx_image(doc)
     image.distro = distro or _distro_from_purls(packages)
     if "vulnerabilities" not in doc:
@@ -643,6 +692,7 @@ def _cdx(doc: dict[str, Any], where: str) -> ScanReport:
                 sev,
                 score,
                 sources=["cyclonedx"],
+                paths=paths_by_ref.get(ref, ()),
             )
             if state in {"not_affected", "resolved", "resolved_with_pedigree", "false_positive"}:
                 # the report's own VEX: kept as a finding unless the caller trusts it (assess(trust_report_vex=...))
@@ -825,6 +875,8 @@ def merge(findings: list[Finding]) -> list[Finding]:
             cur.fix_versions = tuple(sorted(set(cur.fix_versions) | set(f.fix_versions)))
             cur.fix_state = "fixed"
         cur.known_exploited = cur.known_exploited or f.known_exploited
+        if f.paths:
+            cur.paths = tuple(dict.fromkeys((*cur.paths, *f.paths)))[:20]
         if not cur.package.source and f.package.source:
             cur.package = f.package
     return sorted(out.values(), key=lambda f: (f.package.ecosystem, f.package.name, f.package.version, f.cve))

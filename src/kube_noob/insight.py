@@ -43,7 +43,7 @@ PENDING = {
 UNREAD = {  # recognised, but in a form the vulnerability reader does not take
     "sbom": "only JSON SBOMs are read: export SPDX 2.3 or CycloneDX JSON (syft -o spdx-json, trivy image -f "
     "cyclonedx) and run kube-noob vuln report -r <file>",
-    "scanner-report": "scanner tables and SARIF are not read here: give the JSON (trivy image -f json "
+    "scanner-report": "scanner tables are not read here: give the JSON (trivy image -f json "
     "--list-all-pkgs, grype -o json) to kube-noob vuln report -r <file>",
 }
 
@@ -456,6 +456,17 @@ def _vulnerabilities(kit: Any, text: str) -> dict[str, Any] | str:
         return f"not read: {str(exc).splitlines()[0][:300]}"
 
 
+def _code(kit: Any, text: str) -> dict[str, Any] | str:
+    from pydantic import ValidationError
+
+    from kube_noob import toolkit as tk
+
+    try:
+        return dict(kit.code_report(tk.CodeReportIn(sarif=[text[: tk.MAX_SCAN_REPORT]], top=10)))
+    except (ValueError, ValidationError) as exc:
+        return f"not read: {str(exc).splitlines()[0][:300]}"
+
+
 def _containerfile(kit: Any, text: str) -> dict[str, Any] | str:
     from kube_noob import toolkit as tk
 
@@ -594,6 +605,30 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                 )
     vuln_kinds = names & {"sbom", "scanner-report"}
     unread = set(vuln_kinds)
+    is_sarif = isinstance(doc, dict) and isinstance(doc.get("runs"), list) and "Results" not in doc
+    if "scanner-report" in vuln_kinds and is_sarif:
+        vuln_kinds = vuln_kinds - {"scanner-report"}
+        unread.discard("scanner-report")
+        rep_code = budget.run("code", lambda: _code(kit, text))
+        if isinstance(rep_code, str):
+            ran.remove("code")
+            skipped.append({"kind": "scanner-report", "why": rep_code})
+        elif rep_code:
+            for r in rep_code["ranking"]["ranked"][:10]:
+                f = r["finding"]
+                loc = f["location"]
+                findings.append(
+                    {
+                        "source": "code",
+                        "id": f["cwe"][0] if f["cwe"] else f["sources"][0]["ruleId"],
+                        "title": f"{f['title'][:120]} ({', '.join(f['tools'])})",
+                        "severity": f["severity"],
+                        "resource": f"{loc['path']}:{loc.get('line', '?')}",
+                        "rank": 12 - _SEVERITY.get(str(f["severity"]), 0),
+                    }
+                )
+            c = rep_code["counts"]
+            context["code"] = {k: c[k] for k in ("results", "findings", "excluded", "quality")}
     if vuln_kinds and isinstance(doc, dict):
         rep = budget.run("vulnerabilities", lambda: _vulnerabilities(kit, text))
         if isinstance(rep, str):
@@ -685,7 +720,17 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         )
     for k in sorted(names & (set(PENDING) | set(NOT_YET))):
         skipped.append({"kind": k, "why": PENDING.get(k) or NOT_YET[k]})
-    evidence = {"playbook", "policy", "rule", "ticket", "reported-issue", "team-memory", "build", "vulnerability"}
+    evidence = {
+        "playbook",
+        "policy",
+        "rule",
+        "ticket",
+        "reported-issue",
+        "team-memory",
+        "build",
+        "vulnerability",
+        "code",
+    }
     if not steps and not any(f["source"] in evidence for f in findings) and (names & textual or not names):
         ns = context.get("namespace")
         steps = gather_steps(platform, ns if isinstance(ns, str) else None)

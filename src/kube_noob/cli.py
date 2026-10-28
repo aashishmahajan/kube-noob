@@ -230,6 +230,8 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             vex_paths=[Path(v) for v in a.vex],
             kev_path=Path(a.kev) if a.kev else None,
             trust_report_vex=a.trust_report_vex,
+            sarif_reports=[(p, _read(p)) for p in a.sarif_report],
+            source_roots=[str(Path.cwd().resolve()), *(r.rstrip("/") for r in a.source_root if r.startswith("/"))],
         )
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
@@ -487,6 +489,122 @@ def _vuln_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     return 1 if bad else 0
 
 
+_BUILD_SPEC = re.compile(r"^(?P<path>[^=,]{1,500})(?:=(?P<image>[^,]{1,500}))?(?P<opts>(?:,[a-z]{1,10}=[^,]{1,500})*)$")
+
+
+def _code_builds(specs: list[str], repo: Path) -> list[Any]:
+    from kube_noob.code import ship
+
+    builds = []
+    for spec in specs:
+        m = _BUILD_SPEC.match(spec.strip())
+        if not m:
+            raise ConfigError(f"-c {spec!r}: expected PATH[=IMAGE][,context=DIR][,target=STAGE]")
+        opts = dict(o.split("=", 1) for o in m.group("opts").split(",") if o)
+        unknown = sorted(set(opts) - {"context", "target"})
+        if unknown:
+            raise ConfigError(f"-c {spec!r}: unknown option {', '.join(unknown)} (context, target)")
+        rel = m.group("path").strip()
+        path = (repo / rel).resolve()
+        if not path.is_file() or repo.resolve() not in path.parents:
+            raise ConfigError(f"-c {rel}: no such Containerfile in {repo}")
+        context = opts.get("context", str(Path(rel).parent))
+        ctx_dir = (repo / context).resolve()
+        if ctx_dir != repo.resolve() and repo.resolve() not in ctx_dir.parents:
+            raise ConfigError(f"-c {rel}: context {context!r} is outside the repository")
+        ignore = ""
+        for name in (".containerignore", ".dockerignore"):
+            f = ctx_dir / name
+            if f.is_file() and not f.is_symlink():
+                ignore = f.read_text(encoding="utf-8", errors="replace")[:1_000_000]
+                break
+        try:
+            builds.append(
+                ship.parse_build(
+                    ship.Build(
+                        rel,
+                        path.read_text(encoding="utf-8", errors="replace"),
+                        (m.group("image") or "").strip(),
+                        context,
+                        ignore,
+                        opts.get("target", ""),
+                    )
+                )
+            )
+        except ship.ShipError as exc:
+            raise ConfigError(str(exc)) from exc
+    return builds
+
+
+def _dependency_files(repo: Path) -> dict[str, str]:
+    import os
+
+    from kube_noob.code import deps
+
+    out: dict[str, str] = {}
+    root = repo.resolve()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in deps.SKIP_DIRS and not d.startswith("."))
+        for fn in sorted(filenames):
+            if not deps.is_dependency_file(fn):
+                continue
+            f = Path(dirpath) / fn
+            if f.is_symlink() or f.stat().st_size > deps.MAX_FILE_BYTES:
+                continue
+            out[f.relative_to(root).as_posix()] = f.read_text(encoding="utf-8", errors="replace")
+            if len(out) >= deps.MAX_FILES:
+                return out
+    return out
+
+
+def _code_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob.attack_paths import Inventory as PathInventory
+    from kube_noob.attack_paths import workload_reach
+    from kube_noob.code import assess, sarif
+    from kube_noob.vuln import reports as vr
+    from kube_noob.yamlio import load_documents
+
+    if not a.sarif and not a.scanner_report:
+        raise ConfigError("pass SARIF with -s (Semgrep, Bandit, SpotBugs, ESLint, CodeQL) or scanner reports with -r")
+    if not 1 <= a.top <= 200:
+        raise ConfigError("--top must be 1-200")
+    repo = Path(a.repo)
+    if not repo.is_dir():
+        raise ConfigError(f"--repo {a.repo}: not a directory")
+    roots = [str(repo.resolve()), *(r.rstrip("/") for r in a.source_root)]
+    bad = [r for r in roots if not r.startswith("/")]
+    if bad:
+        raise ConfigError(f"--source-root must be absolute: {', '.join(bad)}")
+    try:
+        sarifs = []
+        for path in a.sarif:
+            if path != "-" and Path(path).is_file() and Path(path).stat().st_size > sarif.MAX_BYTES:
+                raise ConfigError(f"{path}: larger than {sarif.MAX_BYTES} bytes")
+            sarifs.append(sarif.parse(_read(path), path, roots=roots))
+        builds = _code_builds(list(a.containerfile), repo)
+        reach = None
+        if a.manifests:
+            text = "\n---\n".join(_read(m) for m in a.manifests)
+            reach = dict(workload_reach(PathInventory.from_documents(d.data for d in load_documents(text))))
+        scans = []
+        for path in a.scanner_report:
+            if Path(path).is_file() and Path(path).stat().st_size > vr.MAX_BYTES:
+                raise ConfigError(f"{path}: larger than {vr.MAX_BYTES} bytes")
+            scans.append(vr.parse(_read(path), path))
+        files = _dependency_files(repo) if scans else None
+        out = assess.assess(sarifs, builds, reach, scans, files, top=a.top, include_quality=a.include_quality)
+    except (sarif.SarifError, vr.ReportError) as exc:
+        raise ConfigError(str(exc)) from exc
+    if a.format == "text":
+        _tprint(assess.render_text(out, top=a.top))
+    else:
+        _emit(out, fmt)
+    why = assess.failing(out, a.fail_on)
+    for w in why:
+        print(f"fail: {w}", file=sys.stderr)
+    return 1 if why else 0
+
+
 def _admission_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob import admission
 
@@ -682,6 +800,19 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--vex", action="append", default=[], help="Red Hat CSAF VEX for --scanner-report; repeat")
     gt.add_argument("--kev", default=None, help="the CISA KEV catalog JSON for --scanner-report")
     gt.add_argument(
+        "--sarif-report",
+        action="append",
+        default=[],
+        help="SARIF 2.1.0 from Semgrep, Bandit, SpotBugs, ESLint or CodeQL; repeat. Security findings at --fail-on "
+        "fail the gate unless no --containerfile ships the file",
+    )
+    gt.add_argument(
+        "--source-root",
+        action="append",
+        default=[],
+        help="an absolute directory the SAST tools ran in (the current directory always is one); repeat",
+    )
+    gt.add_argument(
         "--trust-report-vex",
         action="store_true",
         help="honour a CycloneDX report's own analysis (not_affected, resolved, false_positive); off by default: "
@@ -838,6 +969,60 @@ def build_parser() -> argparse.ArgumentParser:
     vt.add_argument("--platform", choices=PLATFORMS)
     vt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     vt.add_argument("-r", "--report", action="append", default=[], help="a scanner report of an image; repeat")
+    cd = sub.add_parser(
+        "code",
+        help="Code findings from SAST tools (SARIF), the images that ship them, the pods that run them",
+        description="report reads the SARIF 2.1.0 that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint and CodeQL "
+        "write (kube-noob has no analysis engine of its own), merges the same file, line and CWE across tools, drops "
+        "suppressed and fixed results with the reason, follows each file through the Containerfiles into the images "
+        "that ship it (copied or built), and with the manifests ranks findings by exposure and privileges with their "
+        "attack path. With scanner reports of the images (-r), each language-package vulnerability points at the "
+        "dependency file and line to change. Offline. Example: kube-noob code report -s semgrep.sarif -s codeql.sarif "
+        "-c web/Containerfile=quay.io/acme/web -m deploy/ -r trivy-web.json",
+    )
+    cd_sub = cd.add_subparsers(dest="code_cmd", required=True)
+    _patch(cd_sub, common)
+    cr = cd_sub.add_parser(
+        "report",
+        help="Normalise SARIF, map files to images and workloads, rank; dependency fixes from scanner reports",
+        description="Exit 1 when a security finding in shipped code, or a fixable or known-exploited dependency "
+        "vulnerability, is at or above --fail-on (default never). Without -c every finding counts as shipped.",
+    )
+    cr.add_argument("-s", "--sarif", action="append", default=[], help="a SARIF 2.1.0 file; repeat")
+    cr.add_argument(
+        "-c",
+        "--containerfile",
+        action="append",
+        default=[],
+        help="PATH[=IMAGE][,context=DIR][,target=STAGE]: a Containerfile in the repository and the image it builds "
+        "(context defaults to the Containerfile's directory); repeat",
+    )
+    cr.add_argument("--repo", default=".", help="the repository on disk (default: the current directory)")
+    cr.add_argument(
+        "--source-root",
+        action="append",
+        default=[],
+        help="an absolute directory the scanners ran in (CI checkout path), so absolute paths in SARIF map to the "
+        "repository; the --repo path is always one; repeat",
+    )
+    cr.add_argument(
+        "-m", "--manifests", action="append", default=[], help="YAML that runs the images (file or directory); repeat"
+    )
+    cr.add_argument(
+        "-r",
+        "--scanner-report",
+        action="append",
+        default=[],
+        help="Trivy or Grype JSON or a CycloneDX report of an image, for dependency fixes; repeat",
+    )
+    cr.add_argument("--include-quality", action="store_true", help="list lint and quality results too")
+    cr.add_argument("--top", type=int, default=20, help="ranked findings to show (1-200)")
+    cr.add_argument(
+        "--fail-on",
+        default="never",
+        choices=["low", "medium", "high", "critical", "never"],
+        help="exit 1 at or above this severity (shipped code findings; fixable or exploited dependencies)",
+    )
     ad = sub.add_parser(
         "admission",
         help="The kube-noob-admission webhook: admission warnings for every rule, denials only for enforced rules",
@@ -1642,6 +1827,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _rhacs_cmd(a, s, fmt)
     if a.cmd == "vuln":
         return _vuln_cmd(a, s, fmt)
+    if a.cmd == "code":
+        return _code_cmd(a, s, fmt)
     if a.cmd == "admission":
         return _admission_cmd(a, s, fmt)
     if a.cmd == "build":

@@ -213,17 +213,21 @@ def run(
     vex_paths: list[Path] | None = None,
     kev_path: Path | None = None,
     trust_report_vex: bool = False,
+    sarif_reports: list[tuple[str, str]] | None = None,
+    source_roots: list[str] | None = None,
 ) -> dict[str, Any]:
     from kube_noob.audit import exceptions as exc
     from kube_noob.audit.engine import analyze
 
     containerfiles = containerfiles or []
     scanner_reports = scanner_reports or []
+    sarif_reports = sarif_reports or []
     skipped = [{"file": s.uri, "why": s.skip} for s in sources if s.skip]
     sources = [s for s in sources if not s.skip]
-    if not sources and not containerfiles and not scanner_reports:
+    if not sources and not containerfiles and not scanner_reports and not sarif_reports:
         raise GateError(
-            "nothing to check: pass manifests with -f, Containerfiles with --containerfile, or --scanner-report"
+            "nothing to check: pass manifests with -f, Containerfiles with --containerfile, --scanner-report or "
+            "--sarif-report"
         )
     findings: list[dict[str, Any]] = []
     failures: list[str] = []
@@ -288,12 +292,22 @@ def run(
         failures.append(
             f"{vulns['failing']} vulnerability finding(s) at {fail_on} or above that are fixable or known exploited"
         )
+    code = _code_findings(sarif_reports, containerfiles, source_roots or [], fail_on)
+    findings.extend(code["findings"])
+    if code["failing"]:
+        where = "in shipped code" if containerfiles else "(no --containerfile: shipping not known)"
+        failures.append(f"{code['failing']} code finding(s) at {fail_on} or above {where}")
+    failures.extend(code["errors"])
     order = {s: i for i, s in enumerate(SEVERITIES)}
     findings.sort(key=lambda r: (-order[r["severity"]], r["uri"], r.get("line") or 0, r["ruleId"]))
     counts = {s: sum(1 for r in findings if r["severity"] == s) for s in reversed(SEVERITIES)}
     if fail_on != "never":
         floor = Severity.parse(fail_on)
-        over = [r for r in findings if Severity.parse(r["severity"]) >= floor and not r.get("vulnerability")]
+        over = [
+            r
+            for r in findings
+            if Severity.parse(r["severity"]) >= floor and not r.get("vulnerability") and not r.get("code")
+        ]
         if over:
             failures.append(f"{len(over)} finding(s) at {fail_on} or above")
     known = _known(kinds, platform, version, data_dir)
@@ -318,13 +332,90 @@ def run(
         },
         "knownIssues": known,
         "vulnerabilities": vulns["summary"],
-        "notRun": []
-        if scanner_reports
-        else [
-            "vulnerability checks: pass the images' scanner output with --scanner-report (Trivy or Grype JSON, a "
-            "CycloneDX or SPDX SBOM, or an RHACS image scan)"
+        "code": code["summary"],
+        "notRun": [
+            *(
+                []
+                if scanner_reports
+                else [
+                    "vulnerability checks: pass the images' scanner output with --scanner-report (Trivy or Grype "
+                    "JSON, a CycloneDX or SPDX SBOM, or an RHACS image scan)"
+                ]
+            ),
+            *(
+                []
+                if sarif_reports
+                else [
+                    "code checks: pass your SAST tools' SARIF with --sarif-report (Semgrep, Bandit, SpotBugs, ESLint, "
+                    "CodeQL)"
+                ]
+            ),
         ],
     }
+
+
+def _code_findings(
+    reports: list[tuple[str, str]], containerfiles: list[tuple[str, str]], roots: list[str], fail_on: str
+) -> dict[str, Any]:
+    """SAST findings from SARIF as gate findings. With Containerfiles, a finding in a file no image ships (tests,
+    tools, files the .dockerignore leaves out cannot be known here) is reported but does not fail the gate."""
+    if not reports:
+        return {"findings": [], "failing": 0, "errors": [], "summary": None}
+    from kube_noob.code import sarif, ship
+
+    errors: list[str] = []
+    parsed = []
+    for uri, text in reports:
+        try:
+            parsed.append(sarif.parse(text, uri, roots=roots))
+        except sarif.SarifError as err:
+            raise GateError(str(err)) from err
+    builds = []
+    for uri, text in containerfiles:
+        try:
+            builds.append(ship.parse_build(ship.Build(uri, text, "", str(Path(uri).parent))))
+        except ship.ShipError as err:
+            errors.append(str(err))
+    merged = sarif.merge([f for r in parsed for f in r.findings])
+    floor = Severity.parse(fail_on) if fail_on != "never" else None
+    findings: list[dict[str, Any]] = []
+    failing = 0
+    not_shipped = 0
+    for f in merged:
+        shipped = ship.where(builds, f.location.path) if builds else []
+        unshipped = bool(builds) and not shipped
+        not_shipped += int(unshipped)
+        cwe = ", ".join(f"CWE-{c}" for c in f.cwe)
+        tools = ", ".join(sorted({s["tool"] for s in f.sources}))
+        findings.append(
+            {
+                "ruleId": f.sources[0]["ruleId"],
+                "title": f.title,
+                "severity": f.severity,
+                "message": (f"{cwe}: " if cwe else "")
+                + f"{f.message} ({tools})"
+                + (" - not shipped in any image" if unshipped else ""),
+                "resource": ", ".join(sorted({s.image for s in shipped})) or "code",
+                "path": "",
+                "uri": f.location.path,
+                "line": f.location.line,
+                "remediation": f"fix {f.location.path}:{f.location.line or '?'} as the {tools} rule describes",
+                "admission": "a code finding, not an admission policy",
+                "code": True,
+                "helpUri": f.help_uri
+                or (f"https://cwe.mitre.org/data/definitions/{f.cwe[0]}.html" if f.cwe else INFO_URI),
+            }
+        )
+        if floor is not None and not unshipped and Severity.parse(f.severity) >= floor:
+            failing += 1
+    summary = {
+        "tools": sorted({t for r in parsed for t in r.tools}),
+        "findings": len(merged),
+        "excluded": sum(len(r.excluded) for r in parsed),
+        "quality": sum(len(r.quality) for r in parsed),
+        "notShipped": not_shipped if builds else None,
+    }
+    return {"findings": findings, "failing": failing, "errors": errors, "summary": summary}
 
 
 _VULN_SEVERITY = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "negligible": "info"}
@@ -533,6 +624,14 @@ def markdown(report: dict[str, Any], top: int = 25) -> str:
     ]
     if report["excepted"]:
         lines += [f"{report['excepted']} finding(s) accepted by the exception list.", ""]
+    c = report.get("code")
+    if c:
+        shipped = "" if c["notShipped"] is None else f", {c['notShipped']} in files no image ships"
+        lines += [
+            f"Code findings from {_cell(', '.join(c['tools']), 300)}: {c['findings']} security findings{shipped}, "
+            f"{c['excluded']} excluded (suppressed or fixed), {c['quality']} lint or quality results not gated.",
+            "",
+        ]
     v = report.get("vulnerabilities")
     if v:
         lines += [

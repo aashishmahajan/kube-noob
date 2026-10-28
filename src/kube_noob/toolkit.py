@@ -501,6 +501,58 @@ class VulnReportIn(_In):
     )
 
 
+class CodeBuildIn(_In):
+    path: str = Field(
+        ..., min_length=1, max_length=500, description="Its path in the repository, e.g. web/Containerfile."
+    )
+    text: str = Field(..., min_length=5, max_length=1_000_000, description="The Containerfile.")
+    image: str | None = Field(
+        None, max_length=500, description="The image it builds (registry/repository[:tag]); places it in workloads."
+    )
+    context: str | None = Field(
+        None, max_length=500, description="Build context in the repository (default: the Containerfile's directory)."
+    )
+    ignore: str | None = Field(None, max_length=1_000_000, description="The context's .dockerignore text.")
+    target: str | None = Field(None, max_length=100, description="The --target stage, if the build sets one.")
+
+
+class CodeReportIn(_In):
+    sarif: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="SARIF 2.1.0 as JSON text from Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL (any SARIF "
+        "producer works). The same file, line and CWE from several tools become one finding.",
+    )
+    containerfiles: list[CodeBuildIn] = Field(
+        default_factory=list, max_length=20, description="Containerfiles, to know which images ship each file."
+    )
+    manifests: str | None = Field(
+        None, max_length=MAX_MANIFEST_CHARS, description="YAML that runs the images: ranks by exposure and privileges."
+    )
+    reports: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Trivy or Grype JSON or a CycloneDX report of an image: each language-package vulnerability "
+        "points at the dependency file and line that declares it.",
+    )
+    dependency_files: dict[
+        Annotated[str, Field(min_length=1, max_length=500)], Annotated[str, Field(max_length=5_000_000)]
+    ] = Field(
+        default_factory=dict,
+        max_length=200,
+        description="Dependency files by repository path (requirements.txt, package.json, package-lock.json, "
+        "pom.xml, go.mod, ...), to find the line that declares a vulnerable package.",
+    )
+    source_roots: list[Annotated[str, Field(pattern=r"^/[^\x00]{0,499}$")]] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Absolute directories the scanners ran in (the CI checkout), so absolute paths map to the "
+        "repository.",
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked findings to return.")
+    include_quality: bool = Field(False, description="Also list lint and quality results (never ranked).")
+
+
 class ThreatModelIn(_In):
     manifests: str = Field(..., min_length=10, max_length=MAX_MANIFEST_CHARS, description="The application's YAML.")
     platform: PlatformT | None = None
@@ -1111,6 +1163,52 @@ class Toolkit:
         self._observe(sorted({f"vuln:{fmt}" for img in out["images"] for fmt in img["formats"]}))
         return {**out, "findings": out["findings"][: max(p.top, 50)], "findingsTotal": len(out["findings"])}
 
+    def code_report(self, p: CodeReportIn) -> dict[str, Any]:
+        """Code findings from SARIF, merged across tools, followed into the images that ship them and the workloads
+        that run them; dependency vulnerabilities pointed at the file and line to change."""
+        from kube_noob.attack_paths import Inventory as PathInventory
+        from kube_noob.attack_paths import workload_reach
+        from kube_noob.code import assess, sarif, ship
+        from kube_noob.vuln import reports as vr
+        from kube_noob.yamlio import load_documents
+
+        if not p.sarif and not p.reports:
+            raise ValueError("pass SARIF (sarif) or scanner reports (reports)")
+        try:
+            sarifs = [sarif.parse(x, f"SARIF {i + 1}", roots=list(p.source_roots)) for i, x in enumerate(p.sarif)]
+            builds = [
+                ship.parse_build(
+                    ship.Build(
+                        c.path,
+                        c.text,
+                        c.image or "",
+                        c.context if c.context is not None else (c.path.rsplit("/", 1)[0] if "/" in c.path else "."),
+                        c.ignore or "",
+                        c.target or "",
+                    )
+                )
+                for c in p.containerfiles
+            ]
+            reach = (
+                dict(workload_reach(PathInventory.from_documents(d.data for d in load_documents(p.manifests))))
+                if p.manifests
+                else None
+            )
+            scans = [vr.parse(r, f"report {i + 1}") for i, r in enumerate(p.reports)]
+        except (sarif.SarifError, ship.ShipError, vr.ReportError) as exc:
+            raise ValueError(str(exc)) from exc
+        out = assess.assess(
+            sarifs,
+            builds,
+            reach,
+            scans,
+            dict(p.dependency_files) if p.dependency_files else None,
+            top=p.top,
+            include_quality=p.include_quality,
+        )
+        self._observe(sorted({f"code:{t.split()[0].lower()}" for t in out["tools"]}))
+        return out
+
     def threat_model(self, p: ThreatModelIn) -> dict[str, Any]:
         """A STRIDE threat model per application: entry points, trust boundaries, data stores and identities from
         the manifests, each threat with the rules and policies that mitigate it and MITRE ATT&CK technique ids."""
@@ -1617,6 +1715,18 @@ class Toolkit:
                 "against Red Hat VEX. Local only.",
                 VulnReportIn,
                 self.vuln_report,
+            ),
+            ToolSpec(
+                "code_report",
+                "Assess SAST findings: where the code ships and who runs it",
+                "Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has no "
+                "analysis engine of its own): one finding per file, line and CWE across tools, suppressed and fixed "
+                "results excluded with the reason, lint kept apart. With Containerfiles, each file is followed into "
+                "the images that ship it (copied or built; tests and tools are not shipped); with manifests, findings "
+                "rank by exposure and privileges with the attack path. With scanner reports and dependency files, "
+                "each language-package vulnerability points at the file and line to change. Local only.",
+                CodeReportIn,
+                self.code_report,
             ),
             ToolSpec(
                 "threat_model",

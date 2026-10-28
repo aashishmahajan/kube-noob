@@ -41,6 +41,12 @@ inputs:
     description: The CISA KEV catalog JSON (known_exploited_vulnerabilities.json) for the scanner reports.
     required: false
     default: ""
+  sarif-reports:
+    description: >-
+      SARIF 2.1.0 from your SAST tools (Semgrep, Bandit, SpotBugs, ESLint, CodeQL), separated by spaces. Security
+      findings at fail-on fail the gate unless no Containerfile in containerfiles ships the file.
+    required: false
+    default: ""
   trust-report-vex:
     description: >-
       "true" honours a CycloneDX report's own analysis (not_affected, resolved, false_positive). Off by default:
@@ -105,6 +111,7 @@ runs:
         KN_VEX: ${{ inputs.vex }}
         KN_KEV: ${{ inputs.kev }}
         KN_TRUST_REPORT_VEX: ${{ inputs.trust-report-vex }}
+        KN_SARIF_REPORTS: ${{ inputs.sarif-reports }}
         KN_PLATFORM: ${{ inputs.platform }}
         KN_VERSION: ${{ inputs.version }}
         KN_EXCEPTIONS: ${{ inputs.exceptions }}
@@ -121,6 +128,7 @@ runs:
         for x in $KN_VEX; do args+=(--vex "$x"); done
         if [ -n "$KN_KEV" ]; then args+=(--kev "$KN_KEV"); fi
         if [ "$KN_TRUST_REPORT_VEX" = "true" ]; then args+=(--trust-report-vex); fi
+        for s in $KN_SARIF_REPORTS; do args+=(--sarif-report "$s"); done
         if [ -n "$KN_VERSION" ]; then args+=(--version "$KN_VERSION"); fi
         if [ -n "$KN_EXCEPTIONS" ]; then args+=(--exceptions "$KN_EXCEPTIONS"); fi
         rc=0

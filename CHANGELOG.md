@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- `kube-noob code report` (and the MCP tool `code_report`, `insight` for a pasted SARIF, `gate --sarif-report`, and
+  the Action, Tekton and GitLab input `sarif-reports`): what your SAST tools already found, where it ships and who
+  runs it. kube-noob has no analysis engine of its own; it reads the SARIF 2.1.0 that Semgrep, Bandit,
+  SpotBugs/FindSecBugs, ESLint and CodeQL write (shapes read from each tool's source: rules in CodeQL's query-pack
+  extensions, SpotBugs' message arguments and hashed source-root bases, ESLint's absolute file URIs, Bandit's
+  issue severity, Semgrep's CWE tags). The same file, line and CWE from several tools is one finding; suppressed,
+  fixed (baseline) and non-failing results are excluded with the reason; lint and quality results are kept apart and
+  never ranked. Each file is followed through the Containerfiles (multi-stage aware, `.dockerignore` honoured) into
+  the images that ship it, copied or built, and with the manifests findings rank by exposure and privileges with
+  their attack path; a finding in tests or tools no image ships is listed, not ranked. With scanner reports of the
+  images (`-r`), each language-package vulnerability points at the dependency file and line to change (the lockfile
+  the image copied, then `requirements.txt`, `package.json`, `pom.xml`, `go.mod` and the rest by name). Trivy, Grype
+  and CycloneDX findings now record where in the image the package was found. A four-service fixture (five tools,
+  15 results) gives 8 findings, 3 merged across tools, the internet-facing SQL injection ranked first and the
+  three dependency lines; 400 fuzzed SARIF documents never crash the reader.
 - `kube-noob-admission` (chart `admission.enabled`, `kube-noob admission serve`, capability tier A): a validating
   webhook that runs the audit on every created or updated object and returns each finding as an admission warning,
   so `kubectl` and `oc` print it. It denies nothing until a rule is listed in `admission.enforce`, then only that

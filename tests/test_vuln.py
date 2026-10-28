@@ -396,7 +396,8 @@ def test_cli_report_threat_and_gate(fx: Path, tmp_path: Path, capsys: pytest.Cap
     vuln_args = ["--scanner-report", str(fx / "trivy.json"), "--vex", str(fx / "vex")]
     assert main([*args, *vuln_args, "--fail-on", "never", "--format", "json"]) == 0
     rep = json.loads(capsys.readouterr().out)
-    assert rep["notRun"] == [] and rep["vulnerabilities"]["findings"] == 28
+    assert not any(n.startswith("vulnerability checks") for n in rep["notRun"]), rep["notRun"]
+    assert rep["vulnerabilities"]["findings"] == 28
     ids = {r["ruleId"] for r in json.loads(sarif.read_text())["runs"][0]["results"]}
     assert "CVE-2099-1010" in ids and "CVE-2099-1024" not in ids, "VEX-excluded findings are not in SARIF"
     assert main([*args, *vuln_args, "--fail-on", "critical", "--format", "json"]) == 1

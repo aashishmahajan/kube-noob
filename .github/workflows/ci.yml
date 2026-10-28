@@ -893,19 +893,35 @@ jobs:
           version: "4.20"
           fail-on: critical
           sarif: /tmp/kn-vuln.sarif
+      - name: SAST fixtures for the code gate (R4.5)
+        run: python tests/fixtures/code/generate.py /tmp/kn-code
+      - id: code
+        name: GitHub Action with SARIF from five SAST tools (must fail on shipped highs)
+        continue-on-error: true
+        uses: ./
+        with:
+          sarif-reports: >-
+            /tmp/kn-code/semgrep.sarif /tmp/kn-code/bandit.sarif /tmp/kn-code/spotbugs.sarif
+            /tmp/kn-code/eslint.sarif /tmp/kn-code/codeql.sarif
+          platform: openshift
+          version: "4.20"
+          fail-on: high
+          sarif: /tmp/kn-code.sarif
       - name: The action's verdicts and SARIF 2.1.0 schema
         env:
           GOOD: ${{ steps.good.outputs.result }}
           BAD: ${{ steps.bad.outputs.result }}
           VULN: ${{ steps.vuln.outputs.result }}
+          CODE: ${{ steps.code.outputs.result }}
         run: |
           set -euo pipefail
           test "$GOOD" = passed || { echo "::error title=gate action::our chart: $GOOD"; exit 1; }
           test "$BAD" = failed || { echo "::error title=gate action::bad fixtures: $BAD"; exit 1; }
           test "$VULN" = failed || { echo "::error title=gate action::scanner report: $VULN"; exit 1; }
+          test "$CODE" = failed || { echo "::error title=gate action::SARIF input: $CODE"; exit 1; }
           python -m pip install --quiet check-jsonschema==0.38.2
           check-jsonschema --schemafile https://json.schemastore.org/sarif-2.1.0.json /tmp/kn-good.sarif /tmp/kn-bad.sarif \
-            /tmp/kn-vuln.sarif
+            /tmp/kn-vuln.sarif /tmp/kn-code.sarif
           python -c "
           import json
           bad = json.load(open('/tmp/kn-bad.sarif'))['runs'][0]['results']
@@ -917,6 +933,10 @@ jobs:
           assert cves == want, (sorted(cves ^ want))
           assert not cves & dropped, sorted(cves & dropped)
           print('::notice title=gate action::scanner report: failed as planned;', len(cves), 'CVEs in SARIF after VEX dropped', len(dropped))
+          code = {r['ruleId'] for r in json.load(open('/tmp/kn-code.sarif'))['runs'][0]['results']}
+          assert {'B602', 'no-unsanitized/property', 'security/detect-child-process'} <= code, sorted(code)
+          assert 'no-unused-vars' not in code and 'security/detect-eval-with-expression' not in code, sorted(code)
+          print('::notice title=gate action::SARIF input: failed as planned;', len(code), 'code findings (suppressed, fixed and lint left out)')
           "
       - name: Build the image the Tekton Task and the GitLab template run
         run: |

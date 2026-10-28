@@ -17,7 +17,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. No network call
 
 - **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles;
-  scanner findings with VEX, KEV and reachability; STRIDE threat models.
+  scanner and SAST findings ranked by reachability (VEX, KEV); STRIDE threat models.
 - **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno) and webhook; CI gate.
 - **Debug**: 40 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
   denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
@@ -25,7 +25,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. No network call
 - **Learn**: 5 tracks, 16 lessons, graded exercises; your team's fixes as code.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
-Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
+Design requests run a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
 
 ## Who does the thinking
 
@@ -70,7 +70,7 @@ Any MCP client:
 
 ## Run on OpenShift
 
-As a token-protected service, a loopback-only sidecar, or a tool for OpenShift Lightspeed:
+As a token-protected service, loopback-only sidecar, or OpenShift Lightspeed tool:
 [docs/openshift.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/openshift.md). The chart ships
 NetworkPolicies and runs under `restricted-v2`.
 
