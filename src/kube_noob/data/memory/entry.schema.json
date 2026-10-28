@@ -1,0 +1,445 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "kube-noob memory entry",
+  "description": "One file per entry at entries/MEM-<n>.yaml. Shape only: `kube-noob memory validate` also checks content (command labels, credentials, raw logs, the fix verifier).",
+  "$defs": {
+    "Command": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "maxLength": 500,
+          "title": "Command",
+          "type": "string"
+        },
+        "label": {
+          "enum": [
+            "read-only",
+            "needs-approval"
+          ],
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "label"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "url",
+            "ticket",
+            "citation",
+            "bundle"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "maxLength": 900,
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Fix": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "minLength": 3,
+          "title": "Text",
+          "type": "string"
+        },
+        "patch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Kubernetes manifests (YAML) that apply the fix; never a Secret.",
+          "title": "Patch"
+        },
+        "commands": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "maxItems": 20,
+          "title": "Commands",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "Fix",
+      "type": "object"
+    },
+    "OperatorRange": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One or two comparators: '>=0.28.0 <0.29.0', '=4.16.2'.",
+          "title": "Range"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "OperatorRange",
+      "type": "object"
+    },
+    "Outcome": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "resolved",
+            "not-resolved",
+            "partial"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "ticket": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,99}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ticket"
+        },
+        "cluster": {
+          "anyOf": [
+            {
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cluster"
+        }
+      },
+      "required": [
+        "date",
+        "result"
+      ],
+      "title": "Outcome",
+      "type": "object"
+    },
+    "RiskAccepted": {
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._@/+-]{0,99}$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "expires": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires"
+        }
+      },
+      "required": [
+        "owner",
+        "reason"
+      ],
+      "title": "RiskAccepted",
+      "type": "object"
+    },
+    "SignalRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "alert",
+            "co_condition",
+            "event_reason",
+            "pod_reason",
+            "admission",
+            "component",
+            "error_template"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 260,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "SignalRef",
+      "type": "object"
+    },
+    "Versions": {
+      "additionalProperties": false,
+      "properties": {
+        "introduced": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Introduced"
+        },
+        "fixedIn": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixedin"
+        }
+      },
+      "title": "Versions",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^MEM-[1-9]\\d{0,6}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "proposed",
+        "approved",
+        "retired"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "fix",
+        "negative",
+        "runbook"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "signals": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SignalRef"
+      },
+      "maxItems": 20,
+      "title": "Signals",
+      "type": "array"
+    },
+    "symptom": {
+      "title": "Symptom",
+      "type": "string"
+    },
+    "platform": {
+      "enum": [
+        "kubernetes",
+        "openshift",
+        "rosa-classic",
+        "rosa-hcp"
+      ],
+      "title": "Platform",
+      "type": "string"
+    },
+    "versions": {
+      "$ref": "#/$defs/Versions",
+      "default": {
+        "introduced": null,
+        "fixedIn": null
+      }
+    },
+    "operators": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OperatorRange"
+      },
+      "maxItems": 20,
+      "title": "Operators",
+      "type": "array"
+    },
+    "cause": {
+      "title": "Cause",
+      "type": "string"
+    },
+    "fix": {
+      "$ref": "#/$defs/Fix"
+    },
+    "evidence": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "maxItems": 30,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "outcomes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Outcome"
+      },
+      "maxItems": 1000,
+      "title": "Outcomes",
+      "type": "array"
+    },
+    "owners": {
+      "items": {
+        "maxLength": 100,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._@/+-]{0,99}$",
+        "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Owners",
+      "type": "array"
+    },
+    "sources": {
+      "default": [],
+      "items": {
+        "maxLength": 900,
+        "pattern": "^https://[A-Za-z0-9.-]{1,253}(:\\d{1,5})?(/[^\\s<>\\\"'`]{0,800})?$",
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Sources",
+      "type": "array"
+    },
+    "created": {
+      "format": "date",
+      "title": "Created",
+      "type": "string"
+    },
+    "updated": {
+      "format": "date",
+      "title": "Updated",
+      "type": "string"
+    },
+    "reviewBy": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reviewby"
+    },
+    "riskAccepted": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RiskAccepted"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id",
+    "status",
+    "kind",
+    "symptom",
+    "platform",
+    "cause",
+    "fix",
+    "owners",
+    "created",
+    "updated"
+  ],
+  "type": "object"
+}

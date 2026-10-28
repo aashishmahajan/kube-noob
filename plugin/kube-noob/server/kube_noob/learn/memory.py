@@ -125,15 +125,16 @@ def mask_credentials(text: str) -> tuple[str, int]:
     return masked, count
 
 
-def check_text(field: str, value: str, limit: int) -> str:
-    """Reject anything that is not a short human summary: credentials, manifests, raw log excerpts."""
+def check_text(field: str, value: str, limit: int, what: str = "learning notes") -> str:
+    """Reject anything that is not a short human summary: credentials, manifests, raw log excerpts. ``what`` names
+    the store in the message (learning notes, memory entries)."""
     v = value.strip()
     if not v:
         raise ValueError(f"{field} is empty")
     if len(v) > limit:
         raise ValueError(f"{field} is longer than {limit} characters; store a summary, not raw output")
     if contains_credential(v):
-        raise ValueError(f"{field} looks like it contains a credential; learning notes never store secrets")
+        raise ValueError(f"{field} looks like it contains a credential; {what} never store secrets")
     if "|" in v:
         raise ValueError(f"{field} contains a command pipeline ('|'); describe the fix in words instead")
     if len(_MANIFEST_KEYS.findall(v)) >= 2 or (_API_VERSION.search(v) and _KIND.search(v)):

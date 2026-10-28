@@ -44,6 +44,13 @@
 - New playbook DBG-ETCD (39 in all): leader changes, slow disk (WAL fsync and backend commit latency), no leader,
   members down and the database space alarm, with read-only checks for OpenShift and kubeadm clusters, from the etcd
   FAQ and maintenance guide and the OpenShift etcd procedures. Every etcd alert in the catalogue points at it.
+- Fixes-as-code memory, entry format: one reviewed YAML file per lesson (`entries/MEM-<n>.yaml`) with signals,
+  symptom, platform, introduced and fixed versions, operator ranges, cause, fix (text, optional patch, commands),
+  evidence references, outcomes per cluster, owners, sources, dates and an optional risk acceptance. A Pydantic
+  model and a JSON Schema (`kube_noob/data/memory/entry.schema.json`) ship in the package. Prose is a summary
+  (credentials, raw logs, event rows, stack traces, pipelines and manifests are rejected), a command carries the
+  label the playbook classifier gives it and never prints a Secret, a patch holds manifests but never a Secret,
+  evidence is a URL, ticket key, citation or bundle path, and versions must be quoted.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.
