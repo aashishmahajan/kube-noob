@@ -99,8 +99,8 @@ Golden results now, graded again by independent agents:
 | OpenShift | 13 of 16 (was 1) | 3 of 3 |
 | ROSA HCP | 16 of 16 (was 1) | 2 of 4 (was 1) |
 | RHACS | 15 of 16 (was 0) | 4 of 4 (was 2) |
-| Admission policy engines | 13 of 16 (was 0) | 4 of 4 (was 3) |
-| **All** | **88 of 96 (was 7)** | **21 of 23 (was 15)** |
+| Admission policy engines | 14 of 16 (was 0) | 4 of 4 (was 3) |
+| **All** | **89 of 96 (was 7)** | **21 of 23 (was 15)** |
 
 OpenShift and ROSA HCP items are now asked with their platform (`platform: openshift` or `rosa-hcp`), as kube-noob
 is configured on those clusters; without it, OpenShift-only content stays silent unless the question says OpenShift

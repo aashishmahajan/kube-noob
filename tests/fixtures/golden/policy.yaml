@@ -68,10 +68,9 @@
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
     url: 'https://kyverno.io/docs/guides/exceptions/'
   outOfScope: false
-  status: miss
+  status: pass
   expect:
   - 'kn:kyverno-troubleshooting#1'
-  gap: 'rank: kn:kyverno-troubleshooting#1 PolicyException doc should outrank the generic kyverno match'
 - id: pol-005
   technology: policy
   kind: concept

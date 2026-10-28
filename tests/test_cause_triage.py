@@ -533,3 +533,14 @@ def test_rhel_or_rhacs_alone_does_not_make_the_cluster_openshift() -> None:
 def test_the_rhacs_name_alone_is_not_a_blocked_deployment(text: str) -> None:
     ids = [d["id"] for d in diagnose(text).as_dict()["diagnoses"]]
     assert "DBG-STACKROX-ADMISSION" not in ids, ids
+
+
+def test_a_question_about_exempting_from_a_kyverno_policy_gets_the_exception_doc_first(kit: tk.Toolkit) -> None:
+    denial = (
+        'Error from server: error when creating "job.yaml": admission webhook "vpol.validate.kyverno.svc-fail" denied '
+        "the request: Policy require-team-label failed: label 'team' is required."
+    )
+    exempt = kit.insight(tk.InsightIn(text=denial + " How do I exempt only this Job without editing the policy?"))
+    assert exempt["findings"][0]["id"] == "kn:kyverno-troubleshooting#1", [f["id"] for f in exempt["findings"]]
+    fix = kit.insight(tk.InsightIn(text=denial + " What do I add to the Job?"))
+    assert fix["findings"][0]["source"] == "policy", [f["id"] for f in fix["findings"]]

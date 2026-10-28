@@ -628,12 +628,27 @@ def _engine_playbook_first(findings: list[dict[str, Any]], text: str) -> None:
     asked = " ".join(s for s in _SENTENCE_END.split(text[-2000:]) if s.rstrip().endswith("?"))
     policy_side = bool(_POLICY_SIDE.search(asked))
     ranks = {f["id"]: f["rank"] for f in findings if f["source"] == "playbook"}
+    words = _specific_terms(asked, kubernetes_words=True)
     for f in findings:
         if f["source"] != "policy":
             continue
         pid = _ENGINE_PLAYBOOK.get(str(f.get("id") or "").split("/", 1)[0])
         if pid in ranks and (policy_side or not f.get("fix")):
             f["rank"] = ranks[pid] + 0.5
+        elif pid is None and policy_side:
+            # Kyverno and Gatekeeper have no playbook of their own: the document section on the asked mechanism
+            # (a PolicyException, an exempt namespace) answers a question about the policy itself.
+            doc = next(
+                (
+                    d
+                    for d in sorted(findings, key=lambda d: d["rank"])
+                    if d["source"] == "doc"
+                    and len(words & _specific_terms(str(d.get("title") or ""), kubernetes_words=True)) >= 2
+                ),
+                None,
+            )
+            if doc is not None:
+                doc["rank"] = f["rank"] - 0.5
 
 
 def _explain_first(findings: list[dict[str, Any]], query: str, asked: set[str]) -> None:
