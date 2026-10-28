@@ -88,6 +88,19 @@
   `--as-of-ticket-date` only entries created before it count (imported entries are dated when their ticket was
   resolved). The Markdown and JSON report gives the hit rate, hits per signal kind, the misses with their signals and,
   with labels, the useful-match rate against the 30% gate.
+- The Red Hat Jira copy as a main copy nobody waits for. Each sync now records every ticket whose status,
+  resolution or fix versions changed (fixed, not a bug, won't fix, duplicate, reopened, given a fix version, opened)
+  in `jira/changes.jsonl` (owner-only, capped at 200,000 events), and a new copy fetches each project's open tickets
+  first. `kube-noob corpus jira-changes [--since 2d|36h|2026-10-25] [--project] [--kind]` reconciles what changed and
+  lists the open tickets per project and verdict, offline and under the offline lock; the MCP tool
+  `kubenoob_ticket_changes` returns the same, read-only. `kube-noob corpus jira-snapshot -o file.tgz` packs tickets,
+  sync state and change log into one owner-only file; `corpus import` checks its checksums and that it comes from
+  the same Jira before copying anything, and the importing install resumes with the "updated since" pass only.
+  `kube-noob serve` imports the newest `<dataDir>/seed/*.tgz` once when it has no copy; chart `jira.seed.source`
+  `image` (a private, pinned seed image copied by an init container) or `pvc`. `corpus-refresh` keeps the main copy
+  daily (repository variable `JIRA_EVERY_DAYS=2` for every two days), continues the previous run's encrypted copy,
+  writes the changes and open tickets to the run summary, and uploads the new copy only encrypted
+  (`jira-main-copy-encrypted`); Git docs and release history stay weekly.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.

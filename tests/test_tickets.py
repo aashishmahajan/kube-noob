@@ -319,6 +319,8 @@ class FakeJira:
         pool = sorted(self.issues[project], key=lambda i: -int(i["key"].split("-")[1]))
         if "updated >=" in jql:
             pool = list(self.updated.values())
+        if 'statusCategory in ("To Do", "In Progress")' in jql:
+            pool = [i for i in pool if i["fields"]["status"]["statusCategory"]["key"] != "done"]
         if " key < " in jql:
             below = int(jql.split(" key < ", 1)[1].split()[0].split("-")[1])
             pool = [i for i in pool if int(i["key"].split("-")[1]) < below]
@@ -363,8 +365,14 @@ def test_sync_copies_every_status_then_only_changes(tmp_path: Path) -> None:
     fake = FakeJira({"OCPBUGS": [ROUTER, MIRROR, OVN, ROUTER_DUP], "ROX": [SENSOR]})
     sleeps: list[float] = []
     out = sync_projects(_client(fake, sleeps), ["OCPBUGS", "ROX"], tmp_path, BASE, NOW)
-    assert [p["fetched"] for p in out["projects"]] == [4, 1] and all(p["complete"] for p in out["projects"])
-    assert fake.jql == ["project = OCPBUGS ORDER BY key DESC", "project = ROX ORDER BY key DESC"]
+    # open tickets first (OCPBUGS-103 is open), then everything by key: the open one is fetched twice
+    assert [p["fetched"] for p in out["projects"]] == [5, 1] and all(p["complete"] for p in out["projects"])
+    assert fake.jql == [
+        'project = OCPBUGS AND statusCategory in ("To Do", "In Progress") ORDER BY key DESC',
+        "project = OCPBUGS ORDER BY key DESC",
+        'project = ROX AND statusCategory in ("To Do", "In Progress") ORDER BY key DESC',
+        "project = ROX ORDER BY key DESC",
+    ]
     assert all(s >= CRAWL_DELAY for s in sleeps) and len(sleeps) == out["requests"] - 1
     state = load_state(tmp_path)
     assert state["projects"]["OCPBUGS"]["lowestKey"] == "OCPBUGS-101"
@@ -385,11 +393,13 @@ def test_a_budget_stops_cleanly_and_the_next_run_resumes(tmp_path: Path) -> None
     fake = FakeJira({"OCPBUGS": [ROUTER, MIRROR, OVN, ROUTER_DUP], "ROX": [SENSOR]}, page=1)
     out = sync_projects(_client(fake, [], budget=2), ["OCPBUGS", "ROX"], tmp_path, BASE, NOW)
     assert out["stoppedBy"] == "budget" and out["skipped"] == ["ROX"]
-    assert out["projects"][0]["fetched"] == 2 and not out["projects"][0]["complete"]
-    assert load_state(tmp_path)["projects"]["OCPBUGS"]["lowestKey"] == "OCPBUGS-103"
+    assert out["projects"][0]["fetched"] == 2 and not out["projects"][0]["complete"]  # the open ticket, then one more
+    assert load_state(tmp_path)["projects"]["OCPBUGS"]["lowestKey"] == "OCPBUGS-104"
+    assert load_state(tmp_path)["projects"]["OCPBUGS"]["openDone"] is True
     fake.jql.clear()
     out = sync_projects(_client(fake, []), ["OCPBUGS", "ROX"], tmp_path, BASE, NOW + timedelta(minutes=5))
-    assert "project = OCPBUGS AND key < OCPBUGS-103 ORDER BY key DESC" in fake.jql
+    assert "project = OCPBUGS AND key < OCPBUGS-104 ORDER BY key DESC" in fake.jql
+    assert not any("statusCategory" in q for q in fake.jql if "OCPBUGS" in q)  # the open pass is done
     assert out["projects"][0]["total"] == 4 and out["projects"][0]["complete"] and out["projects"][1]["fetched"] == 1
 
 
@@ -534,7 +544,7 @@ def test_a_replaced_or_old_style_shard_restarts_the_backfill(tmp_path: Path) -> 
     write_shard(tmp_path, "jira-rox", old)  # what `corpus jira` wrote before the full sync existed
     fake = FakeJira({"ROX": [SENSOR, _issue("ROX-150", "older", "older ticket", status="New")]})
     out = sync_projects(_client(fake, []), ["ROX"], tmp_path, BASE, NOW)
-    assert fake.jql == ["project = ROX ORDER BY key DESC"] and out["projects"][0]["complete"]
+    assert fake.jql[-1] == "project = ROX ORDER BY key DESC" and out["projects"][0]["complete"]
     assert out["projects"][0]["total"] == 2
     _seed(tmp_path, [SENSOR])  # `corpus import` replaces the shard: the stored state no longer describes it
     fake.jql.clear()
@@ -548,7 +558,7 @@ def test_a_foreign_lowest_key_cannot_stall_the_backfill(tmp_path: Path) -> None:
     fake = FakeJira({"ROX": [SENSOR]})
     state = {"lowestKey": "OCPBUGS-1", "complete": False}
     res = sync_project(_client(fake, []), "ROX", {}, state, BASE, NOW)
-    assert res.complete and state["lowestKey"] == "ROX-201" and fake.jql == ["project = ROX ORDER BY key DESC"]
+    assert res.complete and state["lowestKey"] == "ROX-201" and fake.jql[-1] == "project = ROX ORDER BY key DESC"
 
 
 def test_backfill_steps_past_a_key_the_server_rejects(tmp_path: Path) -> None:

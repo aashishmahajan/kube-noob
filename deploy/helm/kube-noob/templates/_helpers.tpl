@@ -47,3 +47,12 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- $i := .Values.memory.git.image -}}
 {{- if $i.digest -}}{{ $i.repository }}@{{ $i.digest }}{{- else -}}{{ $i.repository }}:{{ $i.tag }}{{- end -}}
 {{- end -}}
+
+{{- define "kube-noob.seedSource" -}}
+{{- ((.Values.jira | default dict).seed | default dict).source | default "none" -}}
+{{- end -}}
+
+{{- define "kube-noob.seedImage" -}}
+{{- $i := .Values.jira.seed.image -}}
+{{- if $i.digest -}}{{ $i.repository }}@{{ $i.digest }}{{- else -}}{{ $i.repository }}:{{ $i.tag }}{{- end -}}
+{{- end -}}

@@ -77,5 +77,11 @@ flowchart LR
   repository is mounted read-only; the git source is cloned by an init container (no credentials in the URL, a
   deploy key from a Secret, strict host keys), with egress only to the git host's CIDRs and, under the offline
   lock, only from an in-cluster host.
+- The Red Hat Jira copy is local data that is not redistributable. Each sync appends status, resolution and
+  fix-version changes to `jira/changes.jsonl` (owner-only, atomic, capped); reconciliation reads it and the ticket
+  index offline. A snapshot (`corpus jira-snapshot`) is owner-only; `corpus import` validates its file names,
+  sizes, checksums and that it comes from the same Jira before copying anything. `serve` imports a seed from
+  `<dataDir>/seed/` only when there is no copy, and the chart mounts the seed read-only (an init container copies it
+  from a pinned image, or a read-only claim). The scheduled main copy leaves the runner only encrypted.
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.

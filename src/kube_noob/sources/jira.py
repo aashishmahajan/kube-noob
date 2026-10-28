@@ -29,7 +29,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +67,11 @@ LONG_JQL = 1500  # characters; above this the search request is sent as POST
 MAX_RETRY_AFTER = 120.0  # seconds; a larger Retry-After is capped so a pull cannot hang for hours
 CRAWL_DELAY = 1.0  # robots.txt on redhat.atlassian.net: "Crawl-delay: 1" for every crawler (checked 2026-10-28)
 OVERLAP_MINUTES = 10  # forward syncs reach this far before the last run, so clock skew cannot lose an update
+# Open tickets first on a new copy, so the tickets people reconcile are there within minutes; the JQL form is the one
+# Atlassian documents (https://support.atlassian.com/jira/kb/how-to-search-using-statuscategory-statuscategorychangeddate-function-with-jql/).
+OPEN_JQL = 'statusCategory in ("To Do", "In Progress")'
+TRACKED = ("status", "statusCategory", "resolution", "fixVersions")
+MAX_CHANGES = 200_000  # lines kept in jira/changes.jsonl, newest last
 
 
 class JiraError(KubeNoobError):
@@ -674,6 +679,43 @@ class ProjectSync:
         return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
+def change_event(
+    prev: dict[str, Any] | None, rec: dict[str, Any], phase: str, since: datetime | None
+) -> dict[str, Any] | None:
+    """What changed for one ticket between the copy and the server: status, status category, resolution or fix
+    versions, as a verdict ("fixed", "not-a-bug", "reopened", "fix-version", ...). A ticket the copy did not hold is
+    "opened" only when the forward pass finds it created since the last sync; the backfill only fills history."""
+    from kube_noob.tickets import verdict
+
+    key = str(rec["id"]).removeprefix("jira-")
+    to = {k: rec.get(k) for k in TRACKED}
+    to["verdict"] = verdict(rec.get("issueType"), rec.get("status"), rec.get("resolution"))
+    base = {
+        "key": key,
+        "project": str(rec.get("sourceId", "")).removeprefix("jira:"),
+        "at": rec.get("retrievedAt"),
+        "type": rec.get("issueType"),
+    }
+    if prev is None:
+        created = _parse_iso(rec.get("created"))
+        if phase == "forward" and since is not None and created is not None and created >= since:
+            return {**base, "kind": "opened", "to": to}
+        return None
+    before = {k: prev.get(k) for k in TRACKED}
+    if before == {k: to[k] for k in TRACKED}:
+        return None
+    before["verdict"] = verdict(prev.get("issueType"), prev.get("status"), prev.get("resolution"))
+    if before.get("statusCategory") == "done" and to.get("statusCategory") != "done":
+        kind = "reopened"
+    elif before["verdict"] != to["verdict"]:
+        kind = str(to["verdict"])
+    elif before.get("fixVersions") != to.get("fixVersions"):
+        kind = "fix-version"
+    else:
+        kind = "status"
+    return {**base, "kind": kind, "from": before, "to": to}
+
+
 def sync_project(
     client: JiraClient,
     project: str,
@@ -682,13 +724,16 @@ def sync_project(
     base_url: str,
     now: datetime | None = None,
     target_field: str = DEFAULT_TARGET_FIELD,
+    changes: list[dict[str, Any]] | None = None,
 ) -> ProjectSync:
-    """Update ``records`` (id -> record) and ``state`` for one project, in place.
+    """Update ``records`` (id -> record) and ``state`` for one project, in place; append what changed to ``changes``.
 
     1. Forward: issues updated since the last completed forward pass. The window ``updated >= -Nm`` is relative to the
        server's clock, and N comes from this machine's clock read just before the search, so time zones and a steady
        clock offset never matter; ``OVERLAP_MINUTES`` covers drift. ``lastSyncAt`` only moves when the pass finished.
-    2. Backfill: issues below the lowest key held, newest first, until the project is complete.
+    2. Open tickets, once per copy: every ticket still to do or in progress, newest first, so the tickets people
+       reconcile are in a new copy first.
+    3. Backfill: issues below the lowest key held, newest first, until the project is complete.
     """
     if not PROJECT_KEY.fullmatch(project):
         raise JiraError(f"not a Jira project key: {project!r}")
@@ -696,12 +741,18 @@ def sync_project(
     retrieved = _iso(started)
     fields = f"{SYNC_FIELDS},{target_field}" if target_field else SYNC_FIELDS
     res = ProjectSync(project)
+    phase = "forward"
+    since: datetime | None = None
 
     def keep(issue: dict[str, Any]) -> str:
         key = str(issue.get("key") or "")
         if not ISSUE_KEY.fullmatch(key) or not key.startswith(project + "-"):
             return ""
         rec = issue_to_record(issue, base_url, project, [], "sync", retrieved, target_field, SYNC_MAX_TEXT)
+        if changes is not None:
+            event = change_event(records.get(rec["id"]), rec, phase, since)
+            if event:
+                changes.append(event)
         records[rec["id"]] = rec
         res.fetched += 1
         return key
@@ -712,11 +763,16 @@ def sync_project(
     last = _parse_iso(state.get("lastSyncAt")) if state.get("lastSyncAt") else None
     try:
         if last is not None:
+            since = last - timedelta(minutes=OVERLAP_MINUTES)
             minutes = max(0, -int(-(started - last).total_seconds() // 60)) + OVERLAP_MINUTES  # rounded up
             for issue in client.search(f"project = {project} AND updated >= -{minutes}m ORDER BY updated ASC", fields):
                 keep(issue)
         state["lastSyncAt"] = retrieved  # the forward pass finished (or this is the first run): changes from here on
+        if not state.get("complete") and not state.get("openDone"):
+            phase = "open"
+            _open_pass(client, project, fields, state, keep)
         if not state.get("complete"):
+            phase = "backfill"
             _backfill(client, project, fields, records, state, keep, res)
     except BudgetExhausted:
         res.stopped = "budget"
@@ -725,6 +781,34 @@ def sync_project(
     res.complete = bool(state.get("complete"))
     res.total = len(records)
     return res
+
+
+def _open_pass(
+    client: JiraClient,
+    project: str,
+    fields: str,
+    state: dict[str, Any],
+    keep: Callable[[dict[str, Any]], str],
+) -> None:
+    """Every open ticket, newest first, resuming below the lowest key fetched when a budget stopped the last run."""
+    anchor = str(state.get("openLowestKey") or "")
+    if not (ISSUE_KEY.fullmatch(anchor) and anchor.startswith(project + "-")):
+        anchor = ""
+    below = f" AND key < {anchor}" if anchor else ""
+    try:
+        for issue in client.search(f"project = {project} AND {OPEN_JQL}{below} ORDER BY key DESC", fields):
+            key = keep(issue)
+            low = str(state.get("openLowestKey") or "")
+            if key and (not low or key_number(key) < key_number(low)):
+                state["openLowestKey"] = key
+    except BudgetExhausted:
+        raise
+    except JiraError as exc:
+        if not (anchor and "400" in str(exc)):
+            raise
+        # the key is gone (moved or deleted): the backfill reaches every ticket anyway, so the open pass ends here
+    state["openDone"] = True
+    state.pop("openLowestKey", None)
 
 
 def _backfill(
@@ -849,13 +933,19 @@ def sync_projects_locked(
     state["baseUrl"] = base_url
     results: list[dict[str, Any]] = []
     all_records: list[dict[str, Any]] = []
+    changed: dict[str, int] = {}
     for project in projects:
         records = load_shard(data_dir, project)
         current = per.get(project)
         if not isinstance(current, dict) or current.get("shardSha256") != _shard_sha(data_dir, project):
             # no state, or the shard was replaced since (corpus import, an older kube-noob): derive it from the copy
             per[project] = state_from_records(records, project) if records else {}
-        res = sync_project(client, project, records, per[project], base_url, now, target_field)
+        changes: list[dict[str, Any]] = []
+        res = sync_project(client, project, records, per[project], base_url, now, target_field, changes)
+        if changes:
+            append_changes(data_dir, changes)
+            for c in changes:
+                changed[c["kind"]] = changed.get(c["kind"], 0) + 1
         if records:
             ordered = sorted(records.values(), key=lambda r: -key_number(str(r["id"]).removeprefix("jira-")))
             entry = write_shard(data_dir, shard_name(project), ordered)
@@ -874,8 +964,36 @@ def sync_projects_locked(
         "requests": client.stats.requests,
         "retries": client.stats.retries,
         "stoppedBy": "budget" if any(r.get("stopped") == "budget" for r in results) else None,
+        "changes": dict(sorted(changed.items())),
         "records": all_records,
     }
+
+
+def changes_path(data_dir: Path) -> Path:
+    from kube_noob.ticket_changes import changes_path as path
+
+    return path(data_dir)
+
+
+def append_changes(data_dir: Path, events: list[dict[str, Any]]) -> None:
+    """Add change events to ``jira/changes.jsonl`` (owner-only; newest last; at most ``MAX_CHANGES`` lines)."""
+    path = changes_path(data_dir)
+    jira_dir(data_dir)
+    lines: list[str] = []
+    if path.is_file():
+        with path.open(encoding="utf-8") as fh:
+            lines = fh.readlines()
+    lines += [json.dumps(e, sort_keys=True) + "\n" for e in events]
+    lines = lines[-MAX_CHANGES:]
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".changes.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------------------------------------------------------------

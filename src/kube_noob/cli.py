@@ -68,6 +68,31 @@ def _emit(obj: Any, fmt: str) -> None:
 _REMARK_LABELS = {"cause": "cause", "expected": "why closed", "fix": "fix note"}
 
 
+def _print_ticket_changes(res: dict[str, Any], opened: dict[str, Any]) -> None:
+    counts = ", ".join(f"{n} {k}" for k, n in res["counts"].items()) or "none"
+    _tprint(f"changes since {res['since']} (last sync {res['lastSync'] or 'never'}): {counts}")
+    for c in res["changes"]:
+        before = (c.get("from") or {}).get("verdict")
+        after = (c.get("to") or {}).get("verdict")
+        fix = ", ".join((c.get("to") or {}).get("fixVersions") or [])
+        move = f"{before} -> {after}" if before else after
+        _tprint(f"  {c['key']:16} {c['kind']:16} {move}{f' (fix {fix})' if fix else ''}  {c['title'][:70]}")
+    if res.get("truncated"):
+        _tprint(f"  ... {res['truncated']} more (--limit)")
+    if res.get("note"):
+        _tprint(res["note"])
+    if opened.get("available"):
+        per = "; ".join(
+            f"{proj} " + ", ".join(f"{n} {v}" for v, n in sorted(vs.items()))
+            for proj, vs in opened["byProject"].items()
+        )
+        _tprint(f"open tickets: {opened['open']} ({per or 'none'})")
+        if opened["topComponents"]:
+            _tprint("busiest components: " + ", ".join(f"{c} {n}" for c, n in opened["topComponents"][:5]))
+    else:
+        _tprint(opened["note"])
+
+
 def _print_ticket_lines(m: dict[str, Any]) -> None:
     if m.get("workaround"):
         _tprint(f"  workaround: {m['workaround']}")
@@ -530,6 +555,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cj.add_argument("--max-requests", type=int, help="request budget for this run (default jira.maxRequests)")
     cj.add_argument("--online", action="store_true")
+    cjs = csub.add_parser(
+        "jira-snapshot",
+        help="Pack the local Jira copy (tickets, sync state, change log) into one file other installs import",
+    )
+    cjs.add_argument("-o", "--out", default="jira-snapshot.tgz", help="output file (keep it inside your organisation)")
+    cjc = csub.add_parser(
+        "jira-changes",
+        help="Reconcile: tickets fixed, closed, reopened or opened since a date, and the open tickets by project",
+    )
+    cjc.add_argument("--since", default="2d", help="2d, 36h, 90m or a date such as 2026-10-25 (default 2d)")
+    cjc.add_argument("--project", help="one project key, e.g. OCPBUGS")
+    cjc.add_argument("--kind", action="append", default=[], help="fixed, not-a-bug, reopened, opened... (repeat)")
+    cjc.add_argument("--limit", type=int, default=100)
     cjp = csub.add_parser("jira-projects", help="List the projects on Red Hat's public Jira, marking the default set")
     cjp.add_argument("--online", action="store_true")
     ch = csub.add_parser("history", help="Release timelines from Git tags")
@@ -902,6 +940,15 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             s.server.host = a.host
         if a.port:
             s.server.port = a.port
+        from kube_noob.sources.jira_snapshot import seed_on_start
+
+        try:  # a pod starts with the organisation's Jira copy instead of waiting for a first sync
+            seeded = seed_on_start(s.data_dir)
+        except (OSError, ValueError, KubeNoobError) as exc:
+            print(f"jira seed not imported: {exc}", file=sys.stderr)
+        else:
+            if seeded:
+                print(f"jira seed imported from {seeded['seed']}: {', '.join(seeded['imported'])}", file=sys.stderr)
         app = http_app(s, allow_unauthenticated=a.allow_unauthenticated)
         if a.watch or s.watch.enabled:
             from kube_noob.watch import start_background
@@ -1476,6 +1523,10 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
                 f"{out['requests']} requests, {out['retries']} retries; index: {idx.get('tickets', 0)} tickets "
                 f"retrieved {idx.get('asOf')}"
             )
+            changed = out.get("changes") or {}
+            if changed:
+                counts = ", ".join(f"{n} {k}" for k, n in changed.items())
+                print(f"changes recorded: {counts} (kube-noob corpus jira-changes --since 1d)")
         else:
             _emit(out, fmt)
         errors = [p for p in out["projects"] if p.get("error")]
@@ -1503,6 +1554,34 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         from kube_noob.sources.org_docs import ingest_org_docs
 
         _emit(ingest_org_docs(Path(a.path), s.data_dir, a.source, a.base_url), fmt)
+        return 0
+    if cc == "jira-snapshot":
+        from kube_noob.sources.jira_snapshot import export_snapshot
+
+        out = export_snapshot(s.data_dir, Path(a.out))
+        if a.format == "text":
+            project_list = ", ".join(out["projects"])
+            _tprint(
+                f"{out['snapshot']}: {out['tickets']} tickets ({project_list}), {out['changes']} changes, "
+                f"last sync {out['lastSync']}, {out['bytes'] // 1_000_000} MB"
+            )
+            _tprint(out["note"])
+        else:
+            _emit(out, fmt)
+        return 0
+    if cc == "jira-changes":
+        from kube_noob import ticket_changes
+
+        try:
+            since = ticket_changes.parse_since(a.since)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        res = ticket_changes.changes(s.data_dir, since, a.project, a.kind, max(1, min(a.limit, 5000)))
+        opened = ticket_changes.open_summary(s.data_dir, a.project)
+        if a.format == "text":
+            _print_ticket_changes(res, opened)
+        else:
+            _emit({**res, "openTickets": opened}, fmt)
         return 0
     if cc == "import":
         from kube_noob.sources.corpus import import_corpus

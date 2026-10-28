@@ -62,7 +62,8 @@ def test_image_build_context_has_every_wheel_input() -> None:
 
 
 def test_scheduled_cadences_and_rox_corpus_scope() -> None:
-    """Weekly risk review, weekly corpus refresh, and a Red Hat Jira copy that covers ROX (every version, so RHACS
+    """Weekly risk review; the Jira main copy every day (or every 2 days) continuing the previous encrypted copy, with
+    a reconciliation summary; the docs corpus weekly; and a Red Hat Jira copy that covers ROX (every version, so RHACS
     4.10 onward included) with room for well over 1000 issues."""
     import yaml
 
@@ -73,7 +74,26 @@ def test_scheduled_cadences_and_rox_corpus_scope() -> None:
     triggers = risk.get("on") or risk.get(True)
     assert re.fullmatch(r"\d+ \d+ \* \* \d", triggers["schedule"][0]["cron"])
     ctriggers = corpus.get("on") or corpus.get(True)
-    assert re.fullmatch(r"\d+ \d+ \* \* \d", ctriggers["schedule"][0]["cron"])
+    crons = [s["cron"] for s in ctriggers["schedule"]]
+    assert re.fullmatch(r"\d+ \d+ \* \* \*", crons[0]) and re.fullmatch(r"\d+ \d+ \* \* \d", crons[1])
+    assert f"github.event.schedule == '{crons[1]}'" in corpus_text  # the weekly run is the full one
+    assert "vars.JIRA_EVERY_DAYS || '1'" in corpus_text and "1|2)" in corpus_text
+    assert corpus["permissions"] == {"contents": "read", "actions": "read"}
+    assert corpus["concurrency"] == {"group": "corpus-refresh", "cancel-in-progress": False}
+    steps = corpus["jobs"]["corpus"]["steps"]
+    restore = next(s for s in steps if s.get("name", "").startswith("Restore the previous main copy"))
+    assert "-n jira-main-copy-encrypted" in restore["run"] and "openssl enc -d -aes-256-cbc -pbkdf2" in restore["run"]
+    assert "kube-noob corpus import previous/jira-snapshot.tgz" in restore["run"]
+    assert "rm -f previous/jira-snapshot.tgz" in restore["run"]  # the plain copy never lingers
+    recon = next(s for s in steps if s.get("name", "").startswith("Reconciliation"))
+    assert "kube-noob corpus jira-changes --since 2d" in recon["run"] and "GITHUB_STEP_SUMMARY" in recon["run"]
+    enc = next(s for s in steps if s.get("name", "").startswith("Encrypt the Jira main copy"))
+    assert "kube-noob corpus jira-snapshot -o jira-snapshot.tgz" in enc["run"] and "rm jira-snapshot.tgz" in enc["run"]
+    uploads = {s["with"]["name"]: s["with"] for s in steps if "upload-artifact" in s.get("uses", "")}
+    assert uploads["jira-main-copy-encrypted"]["path"] == "jira-snapshot.tgz.enc"  # never the plain snapshot
+    assert uploads["corpus-full-encrypted"]["path"] == "corpus-full.tgz.enc"
+    uploaded = [line.strip() for u in uploads.values() for line in str(u["path"]).splitlines()]
+    assert not any(path.endswith(".tgz") for path in uploaded), uploaded  # nothing unencrypted
     from kube_noob.jira_catalog import DEFAULT_PROJECTS
 
     assert '--projects "$JIRA_PROJECTS"' in corpus_text and "inputs.jira_projects || 'default'" in corpus_text

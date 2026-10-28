@@ -232,6 +232,36 @@ class MemoryProposeIn(_In):
     )
 
 
+class TicketChangesIn(_In):
+    since: str = Field(
+        "2d",
+        max_length=32,
+        pattern=r"^(\d{1,4}[dhm]|\d{4}-\d{2}-\d{2}([T ][0-9:+.Z-]{0,20})?)$",
+        description="How far back: 2d, 36h, 90m or a date such as 2026-10-25.",
+    )
+    project: str | None = Field(None, max_length=30, pattern=r"^[A-Za-z][A-Za-z0-9_]{1,29}$")
+    kinds: list[
+        Literal[
+            "fixed",
+            "done",
+            "closed",
+            "not-a-bug",
+            "wont-fix",
+            "duplicate",
+            "cannot-reproduce",
+            "obsolete",
+            "reopened",
+            "fix-in-progress",
+            "fix-proposed",
+            "fix-version",
+            "opened",
+            "open",
+            "status",
+        ]
+    ] = Field(default_factory=list, max_length=15)
+    limit: int = Field(50, ge=1, le=500)
+
+
 class PolicyExplainIn(_In):
     text: str = Field(
         ...,
@@ -731,6 +761,14 @@ class Toolkit:
         self._observe([f"signal:{c['id']}" for c in catalogue][:20])  # catalogued (public) names only
         return out
 
+    def ticket_changes(self, p: TicketChangesIn) -> dict[str, Any]:
+        from kube_noob import ticket_changes
+
+        since = ticket_changes.parse_since(p.since)
+        out = ticket_changes.changes(self.settings.data_dir, since, p.project, list(p.kinds), p.limit)
+        out["openTickets"] = ticket_changes.open_summary(self.settings.data_dir, p.project)
+        return out
+
     def explain_denial(self, p: PolicyExplainIn) -> dict[str, Any]:
         out = explain_denials(p.text, p.platform)
         self._observe([f"policy:{d['engine']}" for d in out["denials"]])
@@ -1094,6 +1132,15 @@ class Toolkit:
                 "and offline.",
                 SignalsIn,
                 self.extract_signals,
+            ),
+            ToolSpec(
+                "ticket_changes",
+                "What changed in Red Hat Jira",
+                "Reconcile the local copy of Red Hat's public Jira: tickets fixed (with fix versions), closed as "
+                "not a bug, won't fix or duplicate, reopened, given a fix version or opened since a date, with links, "
+                "and the open tickets per project and verdict. Read-only and local; each sync records the changes.",
+                TicketChangesIn,
+                self.ticket_changes,
             ),
             ToolSpec(
                 "known_issues",

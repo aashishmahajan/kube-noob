@@ -177,6 +177,60 @@
               "maximum": 20000
             }
           }
+        },
+        "seed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": [
+                "none",
+                "image",
+                "pvc"
+              ]
+            },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "pattern": "^([a-z0-9][a-z0-9._/:-]{0,254})?$"
+                },
+                "tag": {
+                  "type": "string",
+                  "pattern": "^([A-Za-z0-9_][A-Za-z0-9._-]{0,127})?$"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^(sha256:[a-f0-9]{64})?$"
+                }
+              }
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,8}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\\.tgz$"
+            },
+            "pvc": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "claimName": {
+                  "type": "string",
+                  "pattern": "^([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?)?$"
+                },
+                "subPath": {
+                  "type": "string",
+                  "pattern": "^([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}(/[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}){0,5})?$"
+                }
+              }
+            },
+            "sizeLimit": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,4}(Mi|Gi)$"
+            }
+          }
         }
       }
     },

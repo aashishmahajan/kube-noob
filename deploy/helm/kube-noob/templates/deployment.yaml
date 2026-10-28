@@ -27,6 +27,21 @@
 {{- if and (.Values.config.offline | default false) .Values.config.webEnabled }}
 {{- fail "config.offline locks web access off; unset config.webEnabled (the two contradict each other)" }}
 {{- end }}
+{{- $seedSource := include "kube-noob.seedSource" . }}
+{{- if eq $seedSource "image" }}
+{{- if not .Values.jira.seed.image.repository }}
+{{- fail "jira.seed.source image needs jira.seed.image.repository (a private image holding the snapshot and cp)" }}
+{{- end }}
+{{- if hasPrefix "/kube-noob-seed/" .Values.jira.seed.path }}
+{{- fail "jira.seed.path is the snapshot inside the seed image; /kube-noob-seed/ is where the chart copies it to" }}
+{{- end }}
+{{- if not (or .Values.jira.seed.image.tag .Values.jira.seed.image.digest) }}
+{{- fail "jira.seed.image needs a tag or a digest: the seed is the copy every new pod starts from, so pin it" }}
+{{- end }}
+{{- end }}
+{{- if and (eq $seedSource "pvc") (not .Values.jira.seed.pvc.claimName) }}
+{{- fail "jira.seed.source pvc needs jira.seed.pvc.claimName" }}
+{{- end }}
 {{- $memSource := include "kube-noob.memorySource" . }}
 {{- $memSsh := false }}
 {{- if and (eq $memSource "configMap") (not .Values.memory.configMap.name) }}
@@ -110,8 +125,26 @@ spec:
       {{- with .Values.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if eq $memSource "git" }}
+      {{- if or (eq $memSource "git") (eq $seedSource "image") }}
       initContainers:
+      {{- end }}
+      {{- if eq $seedSource "image" }}
+        - name: jira-seed
+          image: {{ include "kube-noob.seedImage" . | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["cp", "--", {{ .Values.jira.seed.path | quote }}, "/kube-noob-seed/jira-snapshot.tgz"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: jira-seed, mountPath: /kube-noob-seed}
+      {{- end }}
+      {{- if eq $memSource "git" }}
         - name: memory-clone
           image: {{ include "kube-noob.memoryGitImage" . | quote }}
           imagePullPolicy: IfNotPresent
@@ -195,6 +228,16 @@ spec:
             - {name: config, mountPath: /etc/kube-noob, readOnly: true}
             - {name: data, mountPath: /var/lib/kube-noob}
             - {name: tmp, mountPath: /tmp}
+            {{- if eq $seedSource "image" }}
+            - {name: jira-seed, mountPath: /var/lib/kube-noob/seed, readOnly: true}
+            {{- else if eq $seedSource "pvc" }}
+            - name: jira-seed
+              mountPath: /var/lib/kube-noob/seed
+              readOnly: true
+              {{- with .Values.jira.seed.pvc.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
+            {{- end }}
             {{- if eq $memSource "configMap" }}
             - {name: memory, mountPath: /srv/kube-noob/memory/entries, readOnly: true}
             {{- else if eq $memSource "pvc" }}
@@ -216,8 +259,15 @@ spec:
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim: {claimName: {{ include "kube-noob.fullname" . }}-data}
           {{- else }}
-          emptyDir: {sizeLimit: 2Gi}
+          emptyDir: {sizeLimit: {{ if eq $seedSource "none" }}2Gi{{ else }}8Gi{{ end }}}
           {{- end }}
+        {{- if eq $seedSource "image" }}
+        - name: jira-seed
+          emptyDir: {sizeLimit: {{ .Values.jira.seed.sizeLimit }}}
+        {{- else if eq $seedSource "pvc" }}
+        - name: jira-seed
+          persistentVolumeClaim: {claimName: {{ .Values.jira.seed.pvc.claimName | quote }}, readOnly: true}
+        {{- end }}
         {{- if eq $memSource "configMap" }}
         - name: memory
           configMap: {name: {{ .Values.memory.configMap.name | quote }}}

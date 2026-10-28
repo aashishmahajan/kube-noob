@@ -91,8 +91,20 @@ jira:
   sync:
     enabled: false
     projects: default        # default (OpenShift, ROSA, ACM, RHACS...), all, or keys such as OCPBUGS,ROX,HOSTEDCP
-    intervalHours: 24
+    intervalHours: 24        # 24 = every day, 48 = every 2 days; each run records what changed (corpus jira-changes)
     maxRequests: 600         # per run, one second or more apart: about 60,000 tickets a run at most
+  # Start every new pod from your organisation's main copy instead of waiting hours for a first sync: kube-noob serve
+  # imports the newest *.tgz in <dataDir>/seed/ when it holds no Jira copy yet, and the sync (when enabled) then only
+  # fetches what changed since the snapshot. Make the snapshot with kube-noob corpus jira-snapshot. It holds Red Hat
+  # ticket text: keep the image or volume private to your organisation. source: none | image | pvc.
+  seed:
+    source: none
+    image: {repository: "", tag: "", digest: ""}   # a private image with cp and the snapshot (docs/use-cases.md)
+    path: /seed/jira-snapshot.tgz                   # the snapshot inside the image
+    pvc:
+      claimName: ""          # a claim holding the snapshot (read-only)
+      subPath: ""            # the folder inside the claim that holds *.tgz
+    sizeLimit: 4Gi           # the scratch volume the image's snapshot is copied to
 
 memory:
   # Your team's memory repository (kube-noob memory init), mounted read-only at /srv/kube-noob/memory and read by

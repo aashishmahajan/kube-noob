@@ -30,8 +30,9 @@ are for the user to run: give them as copy-paste lines (no shell comments) and d
    what became of it (`status`; for Red Hat Jira tickets also `verdict`: fixed, fix in progress, open, not a bug, won't
    fix, cannot reproduce, obsolete or duplicate), and the `workaround` or `remarks` from the comments. A ticket closed
    as not a bug usually means configuration: lead with the remark that says why. Call `kubenoob_known_issues` directly
-   for a symptom with no playbook and `kubenoob_ticket` for a key the user names. Never claim a bug is reported unless
-   the tool returned it.
+   for a symptom with no playbook and `kubenoob_ticket` for a key the user names. For "what changed in Jira since
+   yesterday?" or reconciling open tickets, call `kubenoob_ticket_changes` (fixed with fix versions, closed, reopened,
+   opened, and the open tickets per project). Never claim a bug is reported unless the tool returned it.
 4. If the request was denied by a policy (`policyDenials` in the diagnosis, or a Kyverno, Gatekeeper, Pod Security,
    SCC, RHACS, quota or RBAC message), call `kubenoob_explain_denial` and name each policy and rule, the failing field
    and the fix (its `patch` for Pod Security and RBAC). Exceptions, quota increases and new permissions are the policy

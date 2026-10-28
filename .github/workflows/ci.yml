@@ -308,6 +308,46 @@ jobs:
           "
           mt $git $gimg $gcidr --api-versions security.openshift.io/v1 \
             | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          seed="--set jira.seed.source=image --set jira.seed.image.repository=quay.io/acme/kn-seed"
+          for args in "--set jira.seed.source=image" "$seed" "--set jira.seed.source=pvc" "--set jira.seed.source=s3" \
+              "$seed --set jira.seed.image.tag=1 --set jira.seed.path=/seed/../x.tgz" \
+              "$seed --set jira.seed.image.tag=1 --set jira.seed.path=/kube-noob-seed/x.tgz" \
+              "$seed --set jira.seed.image.tag=1 --set jira.seed.sizeLimit=1Ti"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::jira.seed values must fail to render: $args"; exit 1
+            fi
+          done
+          mt $seed --set jira.seed.image.tag=2026-10-28 $git $gimg $gcidr | python -c "
+          import sys, yaml
+          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
+          pod = dep['spec']['template']['spec']
+          names = [c['name'] for c in pod['initContainers']]
+          assert names == ['jira-seed', 'memory-clone'], names
+          init = pod['initContainers'][0]
+          assert init['image'] == 'quay.io/acme/kn-seed:2026-10-28', init
+          assert init['command'] == ['cp', '--', '/seed/jira-snapshot.tgz', '/kube-noob-seed/jira-snapshot.tgz'], init
+          assert init['securityContext']['readOnlyRootFilesystem'] is True, init
+          assert init['volumeMounts'] == [{'name': 'jira-seed', 'mountPath': '/kube-noob-seed'}], init
+          mounts = pod['containers'][0]['volumeMounts']
+          assert {'name': 'jira-seed', 'mountPath': '/var/lib/kube-noob/seed', 'readOnly': True} in mounts, mounts
+          assert {'name': 'jira-seed', 'emptyDir': {'sizeLimit': '4Gi'}} in pod['volumes'], pod['volumes']
+          assert {'name': 'data', 'emptyDir': {'sizeLimit': '8Gi'}} in pod['volumes'], pod['volumes']
+          "
+          mt --set jira.seed.source=pvc --set jira.seed.pvc.claimName=jira-main --set jira.seed.pvc.subPath=jira \
+            --set persistence.enabled=true --set replicaCount=1 | python -c "
+          import sys, yaml
+          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
+          pod = dep['spec']['template']['spec']
+          assert 'initContainers' not in pod, pod.get('initContainers')
+          assert {'name': 'jira-seed', 'persistentVolumeClaim': {'claimName': 'jira-main', 'readOnly': True}} in pod['volumes']
+          m = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == 'jira-seed')
+          assert m == {'name': 'jira-seed', 'mountPath': '/var/lib/kube-noob/seed', 'readOnly': True, 'subPath': 'jira'}, m
+          "
+          mt $seed --set jira.seed.image.digest=sha256:$(printf '0%.0s' $(seq 64)) --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if mt | grep -q "jira-seed"; then
+            echo "::error title=chart::jira-seed must not render with jira.seed.source none"; exit 1
+          fi
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"

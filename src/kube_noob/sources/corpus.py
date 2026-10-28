@@ -92,6 +92,9 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
         if not manifest_file.is_file():
             raise ValueError(f"{root}: MANIFEST.json not found")
         manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        from kube_noob.sources.jira_snapshot import check_extras, restore_extras
+
+        checked = check_extras(root, manifest, data_dir)  # a Jira snapshot: validated before anything is copied
         target = corpus_dir(data_dir)
         current = read_manifest(data_dir)
         imported: list[str] = []
@@ -119,7 +122,8 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
             current.setdefault("shards", {})[name] = entry
             imported.append(name)
         (target / "MANIFEST.json").write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"imported": imported, "dataDir": str(data_dir)}
+        extras = restore_extras(checked, data_dir) if checked else {}  # its sync state and change log
+    return {"imported": imported, "dataDir": str(data_dir), **({"jira": extras} if extras else {})}
 
 
 def verify(data_dir: Path) -> list[str]:

@@ -119,6 +119,48 @@ your data directory (`corpus/jira-*.jsonl` plus a search index in `jira/`), kube
 `--projects all` or `--projects OCPBUGS,ROX` choose other projects. In the cluster, `jira.sync.enabled` keeps the copy
 current from the service; offline clusters import a copy built elsewhere with `corpus import`.
 
+### One main copy for the whole organisation, and what changed since yesterday
+
+Nobody should wait hours for a first sync. Keep one main copy, refresh it daily (or every two days), and start every
+other install from it:
+
+```bash
+kube-noob corpus jira --online
+kube-noob corpus jira-snapshot -o jira-snapshot.tgz
+kube-noob corpus import jira-snapshot.tgz
+```
+
+The snapshot holds the tickets, the sync state and the change log; an install that imports it answers at once and its
+own sync (if any) only fetches what changed since. A brand-new copy fetches each project's open tickets first, so the
+tickets people reconcile arrive in the first run. Every sync records what moved, and reconciliation reads it offline:
+
+```bash
+kube-noob corpus jira-changes --since 1d
+kube-noob corpus jira-changes --since 2026-10-25 --project OCPBUGS --kind fixed --kind reopened
+```
+
+You get the tickets fixed (and in which versions), closed as not a bug, won't fix or duplicate, reopened, given a fix
+version or opened, each with its link, and the open tickets per project and verdict. Over MCP the same is the
+`kubenoob_ticket_changes` tool.
+
+The `corpus-refresh` workflow keeps the main copy in GitHub Actions: daily at 05:17 UTC (set the repository variable
+`JIRA_EVERY_DAYS` to `2` for every two days), continuing the previous run's copy, with the changes and open tickets in
+the run summary, and the new copy uploaded only encrypted with your `CORPUS_PASSPHRASE`. In OpenShift, put the
+snapshot in a private image and set `jira.seed` so every new pod starts from it (an init container copies it; the
+image needs `cp` and must run as non-root):
+
+```bash
+gh run download "$(gh run list --repo aashishmahajan/kube-noob --workflow corpus-refresh.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')" --repo aashishmahajan/kube-noob -n jira-main-copy-encrypted -D seed
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in seed/jira-snapshot.tgz.enc -out seed/jira-snapshot.tgz -pass env:CORPUS_PASSPHRASE
+printf 'FROM registry.access.redhat.com/ubi9/ubi-micro:latest\nCOPY --chmod=0444 jira-snapshot.tgz /seed/jira-snapshot.tgz\nUSER 1001\n' > seed/Containerfile
+podman build -t registry.example.com/platform/kube-noob-jira-seed:2026-10-28 seed
+podman push registry.example.com/platform/kube-noob-jira-seed:2026-10-28
+helm upgrade --install kube-noob deploy/helm/kube-noob --reuse-values --set jira.seed.source=image --set jira.seed.image.repository=registry.example.com/platform/kube-noob-jira-seed --set jira.seed.image.tag=2026-10-28
+```
+
+`jira.seed.source: pvc` reads the snapshot from a read-only claim instead. Keep the image, bucket or volume private:
+the tickets are public but not licensed for redistribution.
+
 ### Why was this denied?
 
 `policy explain` reads a denial and explains it policy by policy: Kyverno, OPA Gatekeeper, ValidatingAdmissionPolicy,
