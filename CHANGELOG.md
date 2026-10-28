@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Cause-linked triage: the 17 playbooks that answer most real posts (CrashLoopBackOff, image pull, pull secret,
+  OOM, config errors, invalid UTF-8, pending resources, PVC pending, mounts, probes, Service endpoints, RHACS
+  admission, eviction, DNS, NetworkPolicy, x509, ROSA HCP nodes) tie each root cause to the words that point at it,
+  the read-only steps that confirm it and its fixes. The answer shows the cause the input points at, that cause's fix,
+  and its steps first; an OpenShift- or ROSA-only cause is not chosen when no platform is given and the text never
+  says OpenShift or ROSA, and such text gets `kubectl` steps. Owner report: "ImagePullBackOff when the pull secret
+  sits in a different namespace from the pod." had shown the OpenShift internal-registry cause and the image-puller
+  fix; it now shows the pod-namespace cause, `kubectl create secret docker-registry ... && kubectl patch
+  serviceaccount ...`, and `kubectl get secrets -A --field-selector metadata.name=<secret>`. New steps and fixes:
+  the Deployment's image, pull secrets and ServiceAccount for image pulls; DNS full Service names, upstream resolvers
+  and cluster DNS health; cloud firewalls for blocked traffic; certificate subjectAltName; missing volume sources;
+  the RHACS Collector pods and logs. Measured on a held-out set of 114 questions written by an agent that saw only
+  each playbook's causes (`tests/fixtures/triage`, `scripts/eval_triage.py`, gated by `tests/test_triage.py`): the
+  labelled cause is shown for 63 (was 50). On the community test half, an independent grader compared what users see
+  (cause, fix, first steps) on 121 answered rows that changed: 78 better, 7 worse, 36 neither.
+- Documents that answer a pasted post are marked related reading (`related: true`); the generic gather steps (get
+  pods, describe, events, logs) appear only when the text or the platform names a cluster, otherwise the answer says
+  to paste the error, events or logs; a typed conceptual question ("What is the difference between Degraded and
+  Available...") whose only playbook is a weak match (confidence below 0.4) gets the document section that explains
+  it first when its heading shares two specific words. Golden ocp-016 now answers: in scope 85 of 96.
+
 - `kube-noob must-gather analyze <dir|.tar|.tar.gz|.tgz>`: opens a must-gather (or `oc adm inspect` output) safely
   and offline, and says what it holds: each gather image's directory with its `version` and `timestamp`, the
   resource files by group and resource, namespaces, pods and logs. Nothing is extracted to disk and nothing is run:

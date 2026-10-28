@@ -96,11 +96,11 @@ Golden results now, graded again by independent agents:
 |---|---|---|
 | Kubernetes | 15 of 16 (was 4) | 4 of 4 |
 | Helm 3 | 16 of 16 (was 1) | 4 of 4 (was 2) |
-| OpenShift | 12 of 16 (was 1) | 3 of 3 |
+| OpenShift | 13 of 16 (was 1) | 3 of 3 |
 | ROSA HCP | 16 of 16 (was 1) | 2 of 4 (was 1) |
 | RHACS | 14 of 16 (was 0) | 4 of 4 (was 2) |
 | Admission policy engines | 11 of 16 (was 0) | 4 of 4 (was 3) |
-| **All** | **84 of 96 (was 7)** | **21 of 23 (was 15)** |
+| **All** | **85 of 96 (was 7)** | **21 of 23 (was 15)** |
 
 OpenShift and ROSA HCP items are now asked with their platform (`platform: openshift` or `rosa-hcp`), as kube-noob
 is configured on those clusters; without it, OpenShift-only content stays silent unless the question says OpenShift
@@ -124,6 +124,12 @@ answer:
 | Six documented gap answers; pod, storage and limits documents need their subject's words | 66 | 32 | 12 | 22 |
 | 19 frequent documents need their subject's words (answered rows; a random 100 of the rest) | 80; 100 | 60; 84 | 4; 3 | 16; 13 |
 | Invalid UTF-8 playbook and its narrowly gated document | 6 | 3 | 3 | 0 |
+| Cause-linked triage on 17 playbooks (what users see: cause, fix, first steps) | 121 | 78 | 7 | 36 |
+
+Cause choice has its own held-out set (`tests/fixtures/triage/`, 114 questions, one typed and one pasted per cause,
+written by an agent that saw only the causes): the answer names the labelled cause for 63 (50 before cause-linked
+triage); the right playbook is among the findings for 83 and first for 76. `python scripts/eval_triage.py` prints it
+per playbook.
 
 Most moved answers were wrong both before and after: real questions are dominated by Red Hat bug reports (the
 bundled release notes hold the key for few of them) and by products outside the box, which documentation content

@@ -1,0 +1,1241 @@
+# Held-out cause-level set (2026-10-28): written by an agent that saw only each playbook's root causes, one typed
+# question and one pasted error per cause, labelled with playbook and cause index. Never tuned on.
+# status: pass = the answer names the labelled cause (scripts/eval_triage.py); a pass must stay a pass.
+- id: crashloop-0a
+  playbook: DBG-CRASHLOOP
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Our payments-worker deployment goes straight into CrashLoopBackOff after every rollout and the container is only alive for a second or two. Where do I look to find out why it exits?
+  status: miss
+- id: crashloop-0b
+  playbook: DBG-CRASHLOOP
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl logs billing-7c9f6d5b8-xk2lp -n finance --previous
+    Error: required setting DATABASE_URL is empty
+        at loadConfig (/app/dist/config.js:41:11)
+        at Object.<anonymous> (/app/dist/server.js:7:16)
+    $ kubectl get pod billing-7c9f6d5b8-xk2lp -n finance
+    NAME                      READY   STATUS             RESTARTS      AGE
+    billing-7c9f6d5b8-xk2lp   0/1     CrashLoopBackOff   6 (45s ago)   8m
+    Exit code is 1 every single time. Why does this keep restarting?
+  status: pass
+- id: crashloop-1a
+  playbook: DBG-CRASHLOOP
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My Spring Boot pod goes into CrashLoopBackOff, but its own logs look perfectly normal right up until something terminates it. describe shows liveness check failures just before each restart, so what is going on?
+  status: miss
+- id: crashloop-1b
+  playbook: DBG-CRASHLOOP
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Containers:
+      search-indexer:
+        State:          Waiting
+          Reason:       CrashLoopBackOff
+        Last State:     Terminated
+          Reason:       Error
+          Exit Code:    143
+        Restart Count:  9
+        Liveness:       http-get http://:8080/actuator/health delay=10s timeout=1s period=10s #success=1 #failure=3
+    Events:
+      Warning  Unhealthy  3m12s (x27 over 21m)  kubelet  Liveness probe failed: Get "http://10.244.2.41:8080/actuator/health": dial tcp 10.244.2.41:8080: connect: connection refused
+      Normal   Killing    3m12s (x9 over 20m)   kubelet  Container search-indexer failed liveness probe, will be restarted
+    Last log line before every kill: "Initializing Lucene index shards... (38/120)"
+    Is the app broken or is it the cluster?
+  status: pass
+- id: crashloop-2a
+  playbook: DBG-CRASHLOOP
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    My pod sits in CrashLoopBackOff and describe shows the last termination reason as OOMKilled, always within a few seconds of the container starting. It has barely done anything yet, so why is it already out of memory?
+  status: pass
+- id: crashloop-2b
+  playbook: DBG-CRASHLOOP
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       OOMKilled
+      Exit Code:    137
+      Started:      Tue, 27 Oct 2026 14:02:11 +0000
+      Finished:     Tue, 27 Oct 2026 14:02:19 +0000
+    Restart Count:  11
+    Limits:
+      memory:  256Mi
+    Requests:
+      memory:  128Mi
+    It dies 8 seconds after start, every time. What should I look at?
+  status: pass
+- id: crashloop-3a
+  playbook: DBG-CRASHLOOP
+  cause: 3
+  kind: typed
+  platform: openshift
+  text: |
+    Our nginx-based image runs fine locally and on plain Kubernetes but crashloops on OpenShift with "Permission denied" when it tries to create files under /var/cache/nginx. Why would OpenShift behave differently?
+  status: miss
+- id: crashloop-3b
+  playbook: DBG-CRASHLOOP
+  cause: 3
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc logs deploy/legacy-reports -n reporting
+    /entrypoint.sh: line 12: /opt/app/run/app.pid: Permission denied
+    mkdir: cannot create directory '/opt/app/logs': Permission denied
+    $ oc get pod legacy-reports-5d9b6c8f7-t4w2n -n reporting -o yaml | grep -E "scc|runAsUser"
+        openshift.io/scc: restricted-v2
+        runAsUser: 1000680000
+    Pod is in CrashLoopBackOff. The image was built by another team with USER 0. What is the cause?
+  status: pass
+- id: crashloop-4a
+  playbook: DBG-CRASHLOOP
+  cause: 4
+  kind: typed
+  platform: null
+  text: |
+    What does CrashLoopBackOff actually mean? Is it the error itself, and why does the wait before each restart keep getting longer?
+  status: pass
+- id: crashloop-4b
+  playbook: DBG-CRASHLOOP
+  cause: 4
+  kind: pasted
+  platform: null
+  text: |
+    NAME       READY   STATUS             RESTARTS         AGE
+    worker-0   0/1     CrashLoopBackOff   14 (4m51s ago)   52m
+
+    Events:
+      Warning  BackOff  3m (x201 over 52m)  kubelet  Back-off restarting failed container worker in pod worker-0_batch(8c1e...)
+
+    Is CrashLoopBackOff the problem itself or just a status? How long does the delay between restarts grow, and when does it start over?
+  status: pass
+- id: imagepull-0a
+  playbook: DBG-IMAGEPULL
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    The checkout service deployment is stuck in ImagePullBackOff and the registry answers "manifest unknown". CI was supposed to push v2.3.1 yesterday, so how do I work out what is wrong?
+  status: pass
+- id: imagepull-0b
+  playbook: DBG-IMAGEPULL
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Failed   12s (x3 over 52s)  kubelet  Failed to pull image "quay.io/acme-labs/inventory:1.4.0-rc1": rpc error: code = NotFound desc = failed to pull and unpack image "quay.io/acme-labs/inventory:1.4.0-rc1": failed to resolve reference "quay.io/acme-labs/inventory:1.4.0-rc1": quay.io/acme-labs/inventory:1.4.0-rc1: not found
+    Warning  Failed   12s (x3 over 52s)  kubelet  Error: ErrImagePull
+    Normal   BackOff  2s (x3 over 51s)   kubelet  Back-off pulling image "quay.io/acme-labs/inventory:1.4.0-rc1"
+    Why can't it find the image?
+  status: miss
+- id: imagepull-1a
+  playbook: DBG-IMAGEPULL
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My pod is in ImagePullBackOff with an "unauthorized" error from our company Harbor registry, yet the same image pulls fine on my laptop after docker login. What is the cluster missing?
+  status: pass
+- id: imagepull-1b
+  playbook: DBG-IMAGEPULL
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Failed to pull image "registry.internal.example.com/payments/gateway:3.8.2": rpc error: code = Unknown desc = failed to pull and unpack image "registry.internal.example.com/payments/gateway:3.8.2": failed to resolve reference "registry.internal.example.com/payments/gateway:3.8.2": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+    Back-off pulling image "registry.internal.example.com/payments/gateway:3.8.2"
+    The repo definitely exists and is private. What am I missing?
+  status: pass
+- id: imagepull-2a
+  playbook: DBG-IMAGEPULL
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Since this afternoon a lot of pods across the cluster are stuck ImagePullBackOff on public images like nginx and redis from Docker Hub, right after we scaled up a bunch of workloads. Nothing about the image names changed.
+  status: pass
+- id: imagepull-2b
+  playbook: DBG-IMAGEPULL
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Failed  31s  kubelet  Failed to pull image "docker.io/library/redis:7.2": rpc error: code = Unknown desc = failed to copy: httpReadSeeker: failed open: unexpected status code https://registry-1.docker.io/v2/library/redis/manifests/sha256:9f3c...: 429 Too Many Requests - Server message: toomanyrequests: You have reached your unauthenticated pull rate limit. https://www.docker.com/increase-rate-limit
+    Is this a cluster problem?
+  status: pass
+- id: imagepull-3a
+  playbook: DBG-IMAGEPULL
+  cause: 3
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    On our private ROSA HCP cluster, new pods time out pulling images from quay.io and sit in ImagePullBackOff, while the same images pull fine on a public cluster. The VPC has no direct internet route for the workers, so what should I check?
+  status: miss
+- id: imagepull-3b
+  playbook: DBG-IMAGEPULL
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Failed to pull image "artifactory.corp.example.net:5000/base/python:3.11-slim": rpc error: code = Unknown desc = failed to pull and unpack image "artifactory.corp.example.net:5000/base/python:3.11-slim": failed to resolve reference: failed to do request: Head "https://artifactory.corp.example.net:5000/v2/base/python/manifests/3.11-slim": tls: failed to verify certificate: x509: certificate signed by unknown authority
+    docker pull works from the build servers. Why not from the nodes?
+  status: pass
+- id: imagepull-4a
+  playbook: DBG-IMAGEPULL
+  cause: 4
+  kind: typed
+  platform: null
+  text: |
+    My image pulls successfully but the container then dies with "exec format error". I built it on my M2 Mac and the nodes are amd64. Is this an image pull problem?
+  status: miss
+- id: imagepull-4b
+  playbook: DBG-IMAGEPULL
+  cause: 4
+  kind: pasted
+  platform: null
+  text: |
+    Normal   Pulled   18s   kubelet  Successfully pulled image "ghcr.io/dev-team/api:dev" in 3.1s
+    Normal   Created  18s   kubelet  Created container api
+    Normal   Started  18s   kubelet  Started container api
+    $ kubectl logs api-5d8b7c6f4-wq9zt
+    exec /usr/local/bin/api: exec format error
+    The pull worked, so why is this showing up? Is it an ImagePullBackOff thing?
+  status: pass
+- id: imagepull-5a
+  playbook: DBG-IMAGEPULL
+  cause: 5
+  kind: typed
+  platform: null
+  text: |
+    I built myapp with docker build -t myapp . on my machine and it shows in docker images, but my pod in minikube says ErrImagePull. Why can't the cluster find an image that is right there?
+  status: pass
+- id: imagepull-5b
+  playbook: DBG-IMAGEPULL
+  cause: 5
+  kind: pasted
+  platform: null
+  text: |
+    Events:
+      Normal   Scheduled  12s  default-scheduler  Successfully assigned default/myapp-6f7d9c5b44-4zbqs to minikube
+      Normal   Pulling    10s  kubelet            Pulling image "myapp:latest"
+      Warning  Failed     8s   kubelet            Failed to pull image "myapp:latest": Error response from daemon: pull access denied for myapp, repository does not exist or may require 'docker login': denied: requested access to the resource is denied
+      Warning  Failed     8s   kubelet            Error: ErrImagePull
+  status: miss
+- id: pullsecret-0a
+  playbook: DBG-PULLSECRET
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Pod events in namespace team-a say it can't retrieve the image pull secret regcred. I created regcred in the default namespace a few days ago and it shows up there fine, so why isn't the pod using it?
+  status: miss
+- id: pullsecret-0b
+  playbook: DBG-PULLSECRET
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedToRetrieveImagePullSecret  4s (x6 over 71s)  kubelet  Unable to retrieve some image pull secrets (harbor-cred); attempting to pull the image may not succeed.
+    $ kubectl get secret harbor-cred -A
+    NAMESPACE         NAME          TYPE                             DATA   AGE
+    platform-shared   harbor-cred   kubernetes.io/dockerconfigjson   1      3d
+    The failing pod is in namespace checkout. The secret is clearly there, so what is wrong?
+  status: pass
+- id: pullsecret-1a
+  playbook: DBG-PULLSECRET
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Pods in staging keep warning that they couldn't retrieve their image pull secret. kubectl get secrets -n staging only lists a docker-registry secret called gitlab-pull, and the Deployment YAML was copied from another team's repo. Where should I look?
+  status: miss
+- id: pullsecret-1b
+  playbook: DBG-PULLSECRET
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedToRetrieveImagePullSecret  9s  kubelet  Unable to retrieve some image pull secrets (old-registry-secret); attempting to pull the image may not succeed.
+    $ kubectl get sa builder-sa -n ci -o yaml
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: builder-sa
+      namespace: ci
+    imagePullSecrets:
+    - name: old-registry-secret
+    $ kubectl get secrets -n ci
+    NAME                 TYPE                             DATA   AGE
+    nexus-pull-2026      kubernetes.io/dockerconfigjson   1      6d
+    The pod spec itself has no imagePullSecrets. Where is that name coming from?
+  status: miss
+- id: pullsecret-2a
+  playbook: DBG-PULLSECRET
+  cause: 2
+  kind: typed
+  platform: openshift
+  text: |
+    On OpenShift, my pod in project web-frontend can't pull an image from an ImageStream in project shared-base (internal registry). I already tried creating a pull secret in web-frontend and it still complains, so what am I missing?
+  status: miss
+- id: pullsecret-2b
+  playbook: DBG-PULLSECRET
+  cause: 2
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc describe pod portal-5c88d7f6b-lm2tq -n web-frontend
+    Events:
+      Warning  Failed  7s  kubelet  Failed to pull image "image-registry.openshift-image-registry.svc:5000/shared-base/ubi-runtime:9.4": rpc error: code = Unknown desc = reading manifest 9.4 in image-registry.openshift-image-registry.svc:5000/shared-base/ubi-runtime: unauthorized: authentication required
+      Warning  Failed  7s  kubelet  Error: ErrImagePull
+    The image lives in another project on the same cluster. Why is the pull unauthorized?
+  status: miss
+- id: oom-0a
+  playbook: DBG-OOM
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Our Java service keeps getting OOMKilled (exit 137) once real traffic arrives. The container limit is 512Mi and the JAVA_OPTS were copied from our old VM setup, so how should I investigate?
+  status: pass
+- id: oom-0b
+  playbook: DBG-OOM
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Containers:
+      render-api:
+        Image:  registry.example.com/web/render-api:5.2.0
+        Last State:  Terminated
+          Reason:    OOMKilled
+          Exit Code: 137
+        Limits:
+          memory:  512Mi
+        Requests:
+          memory:  256Mi
+        Environment:
+          NODE_OPTIONS:  --max-old-space-size=2048
+    Node process gets killed as soon as it processes a big request. Why?
+  status: pass
+- id: oom-1a
+  playbook: DBG-OOM
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Memory usage of one of our pods climbs steadily for hours and then it gets OOMKilled and starts over, roughly every six hours. How can I tell whether this is the app's fault or just a limit that is too small?
+  status: miss
+- id: oom-1b
+  playbook: DBG-OOM
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl top pod session-gateway-6b9c4d7f5-h8x2n --containers   (sampled every 30 min)
+    13:00   session-gateway   212Mi
+    13:30   session-gateway   298Mi
+    14:00   session-gateway   391Mi
+    14:30   session-gateway   476Mi
+    15:00   session-gateway   OOMKilled, restarted (Restart Count: 4)
+    Traffic is flat the whole time and the graph never plateaus. What kind of problem is this?
+  status: miss
+- id: oom-2a
+  playbook: DBG-OOM
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Several unrelated pods on the same worker node were killed at the same moment and the node's kernel log shows the OOM killer choosing processes. Most workloads on that node have no resource limits set, where do I start?
+  status: miss
+- id: oom-2b
+  playbook: DBG-OOM
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl describe node ip-10-0-143-22.ec2.internal
+    Events:
+      Type     Reason      Age   From             Message
+      ----     ------      ----  ----             -------
+      Warning  SystemOOM   2m    kubelet          System OOM encountered, victim process: java, pid: 28811
+      Warning  OOMKilling  2m    kernel-monitor   Memory cgroup out of memory: Killed process 28811 (java) total-vm:9461284kB, anon-rss:7420312kB, file-rss:0kB
+    The pod that was running that java process was one of four BestEffort pods on the node. Why did it get killed when its own container hadn't hit any limit?
+  status: pass
+- id: configerr-0a
+  playbook: DBG-CONFIGERR
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My pod is stuck in CreateContainerConfigError. It reads DB_PASSWORD from a secret through secretKeyRef, and I'm not sure where to look.
+  status: pass
+- id: configerr-0b
+  playbook: DBG-CONFIGERR
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    NAME                    READY   STATUS                       RESTARTS   AGE
+    api-6d58f9c4b7-r2mzt    0/1     CreateContainerConfigError   0          2m
+    Events:
+      Warning  Failed  14s (x5 over 62s)  kubelet  Error: couldn't find key db-password in Secret production/mysql-auth
+    The secret exists. Why does the pod not start?
+  status: pass
+- id: configerr-1a
+  playbook: DBG-CONFIGERR
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    After I added runAsNonRoot: true to our pod securityContext, the pod went into CreateContainerConfigError. The image is a stock one from Docker Hub, so why can't the container be created?
+  status: pass
+- id: configerr-1b
+  playbook: DBG-CONFIGERR
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Failed  6s (x4 over 40s)  kubelet  Error: container has runAsNonRoot and image has non-numeric user (appuser), cannot verify user is non-root (pod: "metrics-exporter-7f4c9d6b5-n8qkd_monitoring(2f6a...)", container: exporter)
+    Pod status is CreateContainerConfigError. The Dockerfile has USER appuser.
+  status: pass
+- id: configerr-2a
+  playbook: DBG-CONFIGERR
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    I'm mounting a single file from a ConfigMap using subPath and the pod stays in CreateContainerConfigError, although mounting the whole ConfigMap as a directory worked before. What could be going on?
+  status: pass
+- id: configerr-2b
+  playbook: DBG-CONFIGERR
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    volumeMounts:
+    - name: app-config
+      mountPath: /etc/app/settings.yaml
+      subPath: settings.yaml
+    volumes:
+    - name: app-config
+      configMap:
+        name: app-config   # has key "settings.yml"
+    Events:
+      Warning  Failed  9s (x3 over 30s)  kubelet  Error: failed to prepare subPath for volumeMount "app-config" of container "app"
+    Status is CreateContainerConfigError. What did I get wrong?
+  status: pass
+- id: invalid-utf8-0a
+  playbook: DBG-INVALID-UTF8
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My pod is stuck in CreateContainerError and the event says "string field contains invalid UTF-8". It pulls all its environment variables from a Secret I wrote by hand with base64 values. What could cause that?
+  status: pass
+- id: invalid-utf8-0b
+  playbook: DBG-INVALID-UTF8
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl create secret generic app-keystore --from-file=KEYSTORE=./keystore.jks
+    $ kubectl get pod gateway-5c7b8d9f6-p4tlz
+    NAME                      READY   STATUS                 RESTARTS   AGE
+    gateway-5c7b8d9f6-p4tlz   0/1     CreateContainerError   0          1m
+    Events:
+      Warning  Failed  8s (x3 over 30s)  kubelet  Error: rpc error: code = Internal desc = error unmarshalling request: string field contains invalid UTF-8
+    The deployment uses envFrom with secretRef app-keystore. Why does this fail?
+  status: pass
+- id: invalid-utf8-1a
+  playbook: DBG-INVALID-UTF8
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    We just rolled our worker nodes to containerd 2.2 and now pods using a particular Secret fail with an invalid UTF-8 error on the upgraded nodes, while the same pods still start on the older nodes. Is this a known thing?
+  status: miss
+- id: invalid-utf8-1b
+  playbook: DBG-INVALID-UTF8
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get pods -l app=reports -o wide
+    NAME                 READY   STATUS                 RESTARTS   AGE   NODE
+    reports-6d7f8-abc12  0/1     CreateContainerError   0          3m    node-new-02
+    reports-6d7f8-def34  1/1     Running                0          3m    node-old-01
+    $ kubectl get nodes -o wide
+    node-new-02   Ready   v1.34.1   containerd://2.2.0
+    node-old-01   Ready   v1.34.1   containerd://2.1.4
+    Event on node-new-02: Error: ... error unmarshalling request: string field contains invalid UTF-8
+    Same pod spec, same Secret. Why only on the new nodes?
+  status: miss
+- id: invalid-utf8-2a
+  playbook: DBG-INVALID-UTF8
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    After we upgraded to RHACS 4.5 the Collector pod on one of our nodes went into CrashLoopBackOff, and its log complains about invalid UTF-8 in some process arguments. Is there a fix or a workaround?
+  status: miss
+- id: invalid-utf8-2b
+  playbook: DBG-INVALID-UTF8
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get pods -n stackrox
+    collector-xk7lq   1/2   CrashLoopBackOff   9 (2m ago)   31m
+    $ kubectl logs collector-xk7lq -n stackrox -c collector --previous
+    [libprotobuf ERROR] String field 'storage.ProcessSignal.args' contains invalid UTF-8 data when serializing a protocol buffer. Use the 'bytes' type if you want to send raw bytes.
+    terminate called after throwing an instance of 'std::runtime_error'
+    Only one node is affected. What is causing it?
+  status: pass
+- id: pending-resources-0a
+  playbook: DBG-PENDING-RESOURCES
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My new pod is Pending forever and the scheduler says there are no nodes with enough memory. I requested 12Gi and the nodes only have 16GB, so how do I find out what is actually free?
+  status: miss
+- id: pending-resources-0b
+  playbook: DBG-PENDING-RESOURCES
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedScheduling  22s  default-scheduler  0/5 nodes are available: 3 Insufficient cpu, 2 Insufficient memory. preemption: 0/5 nodes are available: 5 No preemption victims found for incoming pod.
+    $ kubectl describe node worker-3 | grep -A6 "Allocated resources"
+      Resource  Requests       Limits
+      cpu       3850m (97%)    6200m (157%)
+      memory    14.1Gi (91%)   18Gi (116%)
+    How do I get this pod to run?
+  status: pass
+- id: pending-resources-1a
+  playbook: DBG-PENDING-RESOURCES
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    A tiny static-site pod is Pending with Insufficient cpu, but kubectl top nodes shows everything at around 15% usage. The manifest came from the example values in a Helm chart README, so why can't it schedule?
+  status: miss
+- id: pending-resources-1b
+  playbook: DBG-PENDING-RESOURCES
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedScheduling  41s  default-scheduler  0/3 nodes are available: 3 Insufficient memory.
+    Requests:
+      cpu:     2
+      memory:  8Gi
+    $ kubectl top pod static-site-0 -n web      (earlier, on a bigger test cluster)
+    NAME            CPU(cores)   MEMORY(bytes)
+    static-site-0   3m           14Mi
+    $ kubectl top nodes
+    NAME       CPU%   MEMORY%
+    worker-1   9%     18%
+    worker-2   11%    21%
+    worker-3   8%     16%
+    Memory looks mostly free. Why is it Pending?
+  status: miss
+- id: pending-resources-2a
+  playbook: DBG-PENDING-RESOURCES
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Pods are Pending with Insufficient cpu and we expected the cluster to grow automatically, but the node count hasn't changed in hours. Where do I look?
+  status: miss
+- id: pending-resources-2b
+  playbook: DBG-PENDING-RESOURCES
+  cause: 2
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc get pod batch-runner-0 -n analytics
+    batch-runner-0   0/1   Pending   0   47m
+    Events:
+      Warning  FailedScheduling  47m  default-scheduler  0/6 nodes are available: 3 node(s) had untolerated taint, 3 Insufficient cpu.
+    $ oc get machineautoscaler -n openshift-machine-api
+    NAME            REF KIND     REF NAME                      MIN   MAX   AGE
+    ma-workers-a    MachineSet   prod-x7k2p-worker-us-east-1a  1     3     90d
+    $ oc get machineset -n openshift-machine-api
+    prod-x7k2p-worker-us-east-1a   3   3   3   3   90d
+    Why is the cluster not adding nodes?
+  status: miss
+- id: pvc-pending-0a
+  playbook: DBG-PVC-PENDING
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    I asked for a ReadWriteMany PVC on the gp3-csi storage class so three replicas can share a folder, and it has been Pending for an hour. Why won't it provision?
+  status: miss
+- id: pvc-pending-0b
+  playbook: DBG-PVC-PENDING
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl describe pvc shared-uploads -n media
+    Access Modes:  RWX
+    StorageClass:  gp3-csi
+    Events:
+      Warning  ProvisioningFailed  5s (x9 over 2m)  ebs.csi.aws.com_ebs-csi-controller-6f9d8b7c4-x2jq5_3a1f...  failed to provision volume with StorageClass "gp3-csi": rpc error: code = InvalidArgument desc = Volume capability not supported
+  status: pass
+- id: pvc-pending-1a
+  playbook: DBG-PVC-PENDING
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    I created a PVC without a storageClassName on our new kubeadm cluster and it just sits in Pending with an event saying no persistent volumes are available and no storage class is set. Why?
+  status: miss
+- id: pvc-pending-1b
+  playbook: DBG-PVC-PENDING
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get pvc data-postgres-0 -n db
+    NAME              STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+    data-postgres-0   Pending                                      premium-rwo    6m
+    Events:
+      Warning  ProvisioningFailed  persistentvolume-controller  storageclass.storage.k8s.io "premium-rwo" not found
+  status: pass
+- id: pvc-pending-2a
+  playbook: DBG-PVC-PENDING
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    I created a PVC and it has been Pending for a while with no actual error, only an event saying it is waiting for a first consumer to be created before binding. Is something broken?
+  status: miss
+- id: pvc-pending-2b
+  playbook: DBG-PVC-PENDING
+  cause: 2
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc get pvc -n monitoring
+    NAME           STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+    prom-storage   Pending                                      gp3-csi        4m
+    $ oc describe pvc prom-storage -n monitoring
+    Events:
+      Normal  WaitForFirstConsumer  3s (x18 over 4m)  persistentvolume-controller  waiting for first consumer to be created before binding
+    Do I need to worry about this?
+  status: miss
+- id: pvc-pending-3a
+  playbook: DBG-PVC-PENDING
+  cause: 3
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    On our ROSA HCP cluster I created an EFS StorageClass and a PVC, and the claim stays Pending with only a message that it is waiting for a volume to be created by the external provisioner efs.csi.aws.com. Nothing else shows up in events.
+  status: pass
+- id: pvc-pending-3b
+  playbook: DBG-PVC-PENDING
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Warning  ProvisioningFailed  14s (x6 over 1m)  efs.csi.aws.com_efs-csi-controller-7d8c5b6f9-k9wzr_1b2c...  failed to provision volume with StorageClass "efs-sc": rpc error: code = Unauthenticated desc = Failed to create Access point in File System fs-0a1b2c3d4e5f67890: AccessDeniedException: User: arn:aws:sts::111122223333:assumed-role/efs-csi-role/session is not authorized to perform: elasticfilesystem:CreateAccessPoint
+    The EFS file system exists and is healthy. What is wrong?
+  status: pass
+- id: mount-0a
+  playbook: DBG-MOUNT
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My pod sits in ContainerCreating and the events show FailedMount saying a secret for one of its volumes can't be found. The same Helm release works in dev, so where do I look?
+  status: pass
+- id: mount-0b
+  playbook: DBG-MOUNT
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedMount  51s (x9 over 3m)  kubelet  MountVolume.SetUp failed for volume "tls-certs" : secret "ingest-tls" not found
+    Warning  FailedMount  12s               kubelet  Unable to attach or mount volumes: unmounted volumes=[tls-certs], unattached volumes=[tls-certs kube-api-access-8hx2c]: timed out waiting for the condition
+  status: pass
+- id: mount-1a
+  playbook: DBG-MOUNT
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My Postgres pod on plain Kubernetes can't write to its mounted data volume and logs "permission denied" on /var/lib/postgresql/data. The PVC is bound and mounted fine and the container runs as UID 999.
+  status: miss
+- id: mount-1b
+  playbook: DBG-MOUNT
+  cause: 1
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc logs mongo-0 -n databases
+    mkdir: cannot create directory '/data/db/journal': Permission denied
+    $ oc exec mongo-0 -n databases -- ls -ld /data/db
+    drwxr-xr-x. 2 root root 4096 Oct 27 08:11 /data/db
+    $ oc get pod mongo-0 -n databases -o jsonpath='{.metadata.annotations.openshift\.io/scc}'
+    restricted-v2
+    /data/db is the PVC mount. Why can't the pod write to it?
+  status: miss
+- id: mount-2a
+  playbook: DBG-MOUNT
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    We turned on readOnlyRootFilesystem: true as a hardening step and now the app crashes with "Read-only file system" when writing to /tmp and /var/run, even though I mounted an emptyDir at /data. What did I miss?
+  status: pass
+- id: mount-2b
+  playbook: DBG-MOUNT
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    2026/10/27 09:14:02 [emerg] 1#1: mkdir() "/var/cache/nginx/client_temp" failed (30: Read-only file system)
+    nginx: [emerg] mkdir() "/var/cache/nginx/client_temp" failed (30: Read-only file system)
+    securityContext:
+      readOnlyRootFilesystem: true
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  status: pass
+- id: mount-3a
+  playbook: DBG-MOUNT
+  cause: 3
+  kind: typed
+  platform: null
+  text: |
+    Pods on our EKS cluster that mount an EFS volume hang in ContainerCreating and the mount eventually times out, although the file system is in the same VPC. Where do I check?
+  status: miss
+- id: mount-3b
+  playbook: DBG-MOUNT
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedMount  2m  kubelet  MountVolume.SetUp failed for volume "pv-efs-shared" : rpc error: code = Internal desc = Could not mount "fs-0a1b2c3d4e5f67890:/" at "/var/lib/kubelet/pods/6e1d.../volumes/kubernetes.io~csi/pv-efs-shared/mount": mount failed: exit status 32
+    Output: mount.nfs4: Connection timed out
+    Only the nodes in the eu-west-1b subnet have this problem.
+  status: pass
+- id: probe-0a
+  playbook: DBG-PROBE
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My pod stays 0/1 Running and describe shows "Readiness probe failed: HTTP probe failed with statuscode: 404", yet the app answers fine through kubectl port-forward. What could make the probe get a 404?
+  status: pass
+- id: probe-0b
+  playbook: DBG-PROBE
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  8s (x14 over 2m)  kubelet  Readiness probe failed: Get "http://10.244.1.17:8080/healthz": dial tcp 10.244.1.17:8080: connect: connection refused
+    $ kubectl logs notifier-76c5d8f94-2xvbn
+    INFO  Server started, listening on :3000
+    readinessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+  status: pass
+- id: probe-1a
+  playbook: DBG-PROBE
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    The probes get "connection refused", but if I kubectl exec into the pod and curl localhost:8080 it returns 200. Why can't the kubelet reach something that works from inside the container?
+  status: miss
+- id: probe-1b
+  playbook: DBG-PROBE
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  6s (x20 over 3m)  kubelet  Readiness probe failed: Get "http://10.131.0.54:5000/ready": dial tcp 10.131.0.54:5000: connect: connection refused
+    $ kubectl exec flask-api-7b6c9d5f8-q4wzn -- netstat -tlnp
+    Proto Recv-Q Send-Q Local Address   Foreign Address   State    PID/Program name
+    tcp        0      0 127.0.0.1:5000  0.0.0.0:*         LISTEN   1/python
+    The app is running and responds locally. What is going on?
+  status: pass
+- id: probe-2a
+  playbook: DBG-PROBE
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Our pods flip between Ready and NotReady all day and the probe errors say "Client.Timeout exceeded while awaiting headers". The health route calls a couple of other services, so why does it keep failing?
+  status: pass
+- id: probe-2b
+  playbook: DBG-PROBE
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  14s (x27 over 3h)  kubelet  Liveness probe failed: Get "http://10.0.3.22:8080/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8080
+      periodSeconds: 10
+      timeoutSeconds: 1
+      failureThreshold: 3
+    The endpoint answers in about 1.5s when I curl it. Why does the pod get restarted?
+  status: pass
+- id: probe-3a
+  playbook: DBG-PROBE
+  cause: 3
+  kind: typed
+  platform: null
+  text: |
+    Our legacy app needs about three minutes to load its caches on boot, so the probes fail for the first few minutes. How should we configure things so it gets enough time before being judged?
+  status: miss
+- id: probe-3b
+  playbook: DBG-PROBE
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  2m10s  kubelet  Readiness probe failed: HTTP probe failed with statuscode: 503
+    Warning  Unhealthy  1m     kubelet  Liveness probe failed: HTTP probe failed with statuscode: 503
+    app log:
+      12:04:03 Loading reference data (2/9)...
+      12:06:41 Ready to serve
+    livenessProbe:
+      initialDelaySeconds: 10
+      failureThreshold: 3
+      periodSeconds: 10
+  status: miss
+- id: no-endpoints-0a
+  playbook: DBG-NO-ENDPOINTS
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    kubectl get endpoints for my service shows <none> even though three pods are Running and Ready. I renamed the app label in the Deployment yesterday, so what should I check?
+  status: miss
+- id: no-endpoints-0b
+  playbook: DBG-NO-ENDPOINTS
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get svc cart -o wide
+    NAME   TYPE        CLUSTER-IP     PORT(S)   AGE   SELECTOR
+    cart   ClusterIP   10.96.201.14   80/TCP    3d    app=cart-service
+    $ kubectl get endpoints cart
+    NAME   ENDPOINTS   AGE
+    cart   <none>      3d
+    $ kubectl get pods --show-labels
+    cart-5f8c7d9b6-lq2tn   1/1   Running   0   3d   app=cart,tier=backend
+  status: miss
+- id: no-endpoints-1a
+  playbook: DBG-NO-ENDPOINTS
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My Service has an Endpoints object but the address list is empty and everything sits under notReadyAddresses. The pods show Running but 0/1, so why aren't they part of the service?
+  status: miss
+- id: no-endpoints-1b
+  playbook: DBG-NO-ENDPOINTS
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get endpoints api -o yaml
+    subsets:
+    - notReadyAddresses:
+      - ip: 10.244.2.9
+        targetRef:
+          kind: Pod
+          name: api-6c8f7d5b9-vh4kd
+      ports:
+      - port: 8080
+    $ kubectl get pods -l app=api
+    api-6c8f7d5b9-vh4kd   0/1   Running   0   5m
+    Events: Warning Unhealthy kubelet Readiness probe failed: HTTP probe failed with statuscode: 500
+  status: miss
+- id: no-endpoints-2a
+  playbook: DBG-NO-ENDPOINTS
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    kubectl get endpoints shows <none> even though the selector matches Ready pods exactly. The Service uses targetPort: web-port, a value I copied from another chart, so what could be off?
+  status: miss
+- id: no-endpoints-2b
+  playbook: DBG-NO-ENDPOINTS
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl describe svc grafana -n observability
+    Selector:          app=grafana
+    Port:              service  80/TCP
+    TargetPort:        grafana-ui/TCP
+    Endpoints:         <none>
+    $ kubectl get pod grafana-85d6f7c9b4-t7xqp -n observability -o jsonpath='{.spec.containers[0].ports}'
+    [{"containerPort":3000,"name":"http","protocol":"TCP"}]
+  status: pass
+- id: stackrox-admission-0a
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My deployment was rejected with "admission webhook policyeval.stackrox.io denied the request" and a violation about the Latest tag. What does this mean and why did it block me?
+  status: pass
+- id: stackrox-admission-0b
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Error from server (Failed currently enforced policies from StackRox): error when creating "node-agent.yaml": admission webhook "policyeval.stackrox.io" denied the request:
+    The attempted operation violated 1 enforced policy, described below:
+
+    Policy: Privileged Container
+      - Description:
+        ↳ Alert on deployments with containers running in privileged mode
+      - Rationale:
+        ↳ Privileged containers can perform almost any operation on the host.
+      - Violations:
+        - Container 'agent' in 'Deployment/node-agent' is privileged
+    Which policy is stopping this?
+  status: pass
+- id: stackrox-admission-1a
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Since last week's RHACS 4.9 upgrade our deployments get rejected cluster-wide, whereas before it only logged violations. What setting makes the admission controller actually block things?
+  status: miss
+- id: stackrox-admission-1b
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    apiVersion: platform.stackrox.io/v1alpha1
+    kind: SecuredCluster
+    metadata:
+      name: stackrox-secured-cluster-services
+      namespace: stackrox
+    spec:
+      admissionControl:
+        enforce: Enabled
+        bypass: BreakGlassAnnotation
+    $ kubectl apply -f web.yaml
+    Error from server (Failed currently enforced policies from StackRox): admission webhook "policyeval.stackrox.io" denied the request: ... Policy: No resource requests or limits specified
+    Why is this being enforced at all?
+  status: pass
+- id: evicted-0a
+  playbook: DBG-EVICTED
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    A bunch of pods on one node show status Evicted with "The node was low on resource: memory", but the node itself is fine. Why were these particular pods picked?
+  status: pass
+- id: evicted-0b
+  playbook: DBG-EVICTED
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Status:   Failed
+    Reason:   Evicted
+    Message:  The node was low on resource: memory. Threshold quantity: 100Mi, available: 84Mi. Container worker was using 3412Mi, request is 0, has larger consumption of memory.
+    $ kubectl describe node worker-7 | grep -i pressure
+      MemoryPressure   True   KubeletHasInsufficientMemory   kubelet has insufficient memory available
+  status: pass
+- id: evicted-1a
+  playbook: DBG-EVICTED
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Our pod was evicted with "Pod ephemeral local storage usage exceeds the total limit of containers", and the app writes uploads and logs into the container's own filesystem. Why did that get it evicted?
+  status: pass
+- id: evicted-1b
+  playbook: DBG-EVICTED
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Evicted  3m  kubelet  Pod ephemeral local storage usage exceeds the total limit of containers 1Gi.
+    $ kubectl exec exporter-5d7c8b6f9-m2xkp -- du -sh /tmp/exports /var/log/app
+    2.4G    /tmp/exports
+    612M    /var/log/app
+    Neither path has a volume mounted. What is happening?
+  status: pass
+- id: dns-0a
+  playbook: DBG-DNS
+  cause: 0
+  kind: typed
+  platform: openshift
+  text: |
+    On OpenShift, after I applied an egress NetworkPolicy in our project that allows UDP and TCP 53 to the openshift-dns namespace, pods still can't resolve any hostname. Before the policy everything resolved, so what's wrong?
+  status: miss
+- id: dns-0b
+  playbook: DBG-DNS
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    / # nslookup kubernetes.default
+    ;; connection timed out; no servers could be reached
+    $ kubectl get networkpolicy -n shop
+    NAME                 POD-SELECTOR   AGE
+    default-deny-egress  <none>         2d
+    allow-db-egress      app=orders     2d      (egress: 10.0.0.0/8 tcp/5432)
+    DNS worked before these policies were applied.
+  status: miss
+- id: dns-1a
+  playbook: DBG-DNS
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    From my app pod, curl http://orders returns "Could not resolve host", although the orders service is running in a different namespace called sales. Short names worked in my old cluster, so why not here?
+  status: miss
+- id: dns-1b
+  playbook: DBG-DNS
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl exec -it web-0 -n frontend -- nslookup inventory-api
+    Server:    10.96.0.10
+    Address:   10.96.0.10#53
+
+    ** server can't find inventory-api.frontend.svc.cluster.local: NXDOMAIN
+    ** server can't find inventory-api.svc.cluster.local: NXDOMAIN
+    ** server can't find inventory-api.cluster.local: NXDOMAIN
+    $ kubectl get svc -A | grep inventory-api
+    warehouse   inventory-api   ClusterIP   10.96.88.41   8080/TCP   12d
+  status: pass
+- id: dns-2a
+  playbook: DBG-DNS
+  cause: 2
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    Pods on our private ROSA HCP cluster resolve cluster services fine, but external names like api.stripe.com fail with "Temporary failure in name resolution". The cluster lives in a custom VPC we built ourselves.
+  status: pass
+- id: dns-2b
+  playbook: DBG-DNS
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    [ERROR] plugin/errors: 2 www.github.com. A: read udp 10.244.1.4:41234->10.0.0.2:53: i/o timeout
+    [ERROR] plugin/errors: 2 s3.eu-west-1.amazonaws.com. AAAA: read udp 10.244.1.4:52611->10.0.0.2:53: i/o timeout
+    Names like kubernetes.default and my-svc.prod.svc.cluster.local resolve without trouble. Only external lookups fail.
+  status: miss
+- id: dns-3a
+  playbook: DBG-DNS
+  cause: 3
+  kind: typed
+  platform: null
+  text: |
+    Every DNS lookup inside the cluster fails, even kubernetes.default, and the CoreDNS pods in kube-system are not in Running state. Where do I start?
+  status: pass
+- id: dns-3b
+  playbook: DBG-DNS
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    [ERROR] plugin/kubernetes: pkg/mod/k8s.io/client-go@v0.31.2/tools/cache/reflector.go:243: Failed to watch *v1.EndpointSlice: failed to list *v1.EndpointSlice: endpointslices.discovery.k8s.io is forbidden: User "system:serviceaccount:kube-system:coredns" cannot list resource "endpointslices" in API group "discovery.k8s.io" at the cluster scope
+    Pods get SERVFAIL for every cluster name. What does this mean?
+  status: miss
+- id: netpol-0a
+  playbook: DBG-NETPOL
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    I added a default-deny ingress NetworkPolicy to our payments namespace and now the frontend pods time out connecting to the api on port 8080. Everything worked before the policy, so why is traffic dropped?
+  status: miss
+- id: netpol-0b
+  playbook: DBG-NETPOL
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl exec -it web-6f7d9c5b44-4zbqs -n frontend -- curl -v -m 10 http://api.payments.svc:8080/health
+    * connect to 10.96.45.12 port 8080 failed: Connection timed out
+    curl: (28) Connection timed out after 10001 milliseconds
+    $ kubectl get netpol -n payments
+    NAME       POD-SELECTOR   AGE
+    deny-all   <none>         12m
+  status: pass
+- id: netpol-1a
+  playbook: DBG-NETPOL
+  cause: 1
+  kind: typed
+  platform: openshift
+  text: |
+    On OpenShift with OVN-Kubernetes, pods in our ci-builds project can't reach github.com even though other projects can. That project has an EgressFirewall with a deny-all rule first and an Allow for GitHub's range after it, and the Allow never seems to take effect. Why?
+  status: pass
+- id: netpol-1b
+  playbook: DBG-NETPOL
+  cause: 1
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc get egressfirewall default -n ci-builds -o yaml
+    spec:
+      egress:
+      - type: Deny
+        to:
+          cidrSelector: 0.0.0.0/0
+      - type: Allow
+        to:
+          cidrSelector: 140.82.112.0/20
+    $ oc rsh deploy/runner curl -m 5 https://github.com
+    curl: (28) Connection timed out after 5001 milliseconds
+  status: pass
+- id: netpol-2a
+  playbook: DBG-NETPOL
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Pod-to-pod traffic works and there is no NetworkPolicy in the namespace, yet our pods time out connecting to the RDS database on 5432 even though it is in the same VPC. What else could be blocking it?
+  status: miss
+- id: netpol-2b
+  playbook: DBG-NETPOL
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl exec -it app-0 -- nc -zv orders-db.cluster-abc123xyz.eu-west-1.rds.amazonaws.com 5432
+    nc: connect to orders-db.cluster-abc123xyz.eu-west-1.rds.amazonaws.com (10.0.21.57) port 5432 (tcp) failed: Connection timed out
+    $ kubectl get networkpolicy -A
+    No resources found
+    The same connection also times out when run on a node over SSH.
+  status: miss
+- id: x509-0a
+  playbook: DBG-X509
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Clients suddenly get "x509: certificate has expired or is not yet valid" when calling our ingress, and the cert comes from cert-manager. What should I check?
+  status: pass
+- id: x509-0b
+  playbook: DBG-X509
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Get "https://vault.internal.example.com:8200/v1/sys/health": tls: failed to verify certificate: x509: certificate signed by unknown authority
+    The cert was issued by our internal PKI. The same call from a laptop with the corporate CA installed works. Why does it fail in the pod?
+  status: pass
+- id: x509-1a
+  playbook: DBG-X509
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Calling our service as https://payments.internal.example.com works, but from inside the cluster as https://payments.shop.svc it fails with a TLS error about the name. The cert is valid and not expired, so why?
+  status: miss
+- id: x509-1b
+  playbook: DBG-X509
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Post "https://api.example.com/v1/token": tls: failed to verify certificate: x509: certificate is valid for ingress.example.com, www.example.com, not api.example.com
+    notAfter=Mar 14 10:22:07 2027 GMT
+    The cert is not expired and the CA is trusted. What is wrong?
+  status: miss
+- id: rosa-hcp-nodes-0a
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 0
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    I created a new machine pool on our private ROSA HCP cluster. The EC2 instances launch but never show up in oc get nodes, so what would stop them from joining?
+  status: pass
+- id: rosa-hcp-nodes-0b
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 0
+  kind: pasted
+  platform: rosa-hcp
+  text: |
+    $ rosa describe machinepool --cluster=eu-private-01 --machinepool=workers-b
+    ID:              workers-b
+    Replicas:        0/3
+    Instance type:   m5.xlarge
+    Subnet:          subnet-0a1b2c3d4e5f60718
+    $ aws ec2 get-console-output --instance-id i-0123456789abcdef0 | grep kubelet
+    kubelet: "Unable to register node with API server" err="Post \"https://10.0.4.88:443/api/v1/nodes\": dial tcp 10.0.4.88:443: i/o timeout"
+    ROSA HCP, instances are running in EC2 but nodes stay missing. Why?
+  status: miss
+- id: rosa-hcp-nodes-1a
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 1
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    On ROSA HCP I added a subnet I created by hand to the VPC and made a machine pool in it, but no nodes ever appear and the pool reports the subnet as unusable. What should I verify about the subnet?
+  status: pass
+- id: rosa-hcp-nodes-1b
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 1
+  kind: pasted
+  platform: rosa-hcp
+  text: |
+    $ rosa describe machinepool --cluster=prod-hcp-02 --machinepool=scale-out
+    Replicas:   3/8
+    Message:    failed to create instances: InsufficientFreeAddressesInSubnet: There are not enough free addresses in subnet 'subnet-0abc123def4567890' to satisfy the requested number of instances.
+    ROSA HCP machine pool stuck at 3 of 8 nodes.
+  status: pass
+- id: rosa-hcp-nodes-2a
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 2
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    I created a ROSA HCP machine pool with GPU instances in a single AZ and it never gets any nodes. How do I find out why?
+  status: miss
+- id: rosa-hcp-nodes-2b
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 2
+  kind: pasted
+  platform: rosa-hcp
+  text: |
+    $ rosa describe machinepool --cluster=ml-hcp-01 --machinepool=gpu-pool
+    Replicas:   0/2
+    Instance type:   p4d.24xlarge
+    Message:    failed to launch instances: VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit of 128 allows for the instance bucket that the specified instance type belongs to.
+    Why are no nodes coming up on this ROSA HCP cluster?
+  status: pass

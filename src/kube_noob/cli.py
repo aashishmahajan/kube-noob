@@ -74,7 +74,8 @@ def _print_insight(res: dict[str, Any]) -> None:
         _tprint("ran: " + ", ".join(res["ran"]))
     for f in res["findings"]:
         extra = f.get("verdict") or f.get("severity") or f.get("confidence") or f.get("cite") or ""
-        _tprint(f"  {f['source']:15} {f.get('id')!s:28} {str(f.get('title') or '')[:90]}  {extra}")
+        source = "related doc" if f.get("related") else f["source"]
+        _tprint(f"  {source:15} {f.get('id')!s:28} {str(f.get('title') or '')[:90]}  {extra}")
         if f.get("cause"):
             _tprint(f"  {'':15} cause: {f['cause'][:150]}")
         if f.get("fix"):

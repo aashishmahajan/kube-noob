@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from kube_noob.debug.cluster import Backend, redact_text
-from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Playbook
+from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Cause, Playbook
 from kube_noob.debug.steps import classify_step, split_comment
 from kube_noob.errors import ClusterAccessError
 from kube_noob.signals import Signal, for_text, playbooks_for
@@ -55,14 +55,17 @@ class Diagnosis:
     checks: list[str]
     fixes: list[str] | None = None  # the playbook's fixes with the names from the input filled in
     causes: list[str] | None = None  # the same for its root causes
+    likely: tuple[str, list[str]] | None = None  # the cause the input points at and its fixes (cause-linked triage)
 
     def as_dict(self) -> dict[str, Any]:
         p = self.playbook
+        likely = {"likelyCause": self.likely[0], "likelyFixes": self.likely[1]} if self.likely is not None else {}
         return {
             "id": p.pid,
             "title": p.title,
             "confidence": round(min(1.0, self.score / 3.0), 2),
             "evidence": self.evidence,
+            **likely,
             "rootCauses": list(p.root_causes if self.causes is None else self.causes),
             # Diagnose before change: read-only evidence first; anything that executes or mutates needs approval.
             "readOnlyNextSteps": [_step(c) for c in self.checks if classify_step(c) == "read"],
@@ -231,6 +234,58 @@ def _fix_applies(fix: str, platform: str | None) -> bool:
 
 
 _ROSA_CONTEXT = re.compile(r"(?i)\b(?:rosa|hypershift|hosted control planes?|hcp)\b")
+_TAG = re.compile(r"^(?:\[(OCP|ROSA|K8S)\]|On (OpenShift|ROSA)\b)")
+_WHEN: dict[tuple[str, int], tuple[re.Pattern[str], ...]] = {
+    (p.pid, c.cause): tuple(re.compile(w, re.IGNORECASE) for w in c.when) for p in PLAYBOOKS for c in p.causes
+}
+
+
+def _tag(text: str) -> str | None:
+    m = _TAG.match(text)
+    if not m:
+        return None
+    return (m.group(1) or ("OCP" if m.group(2) == "OpenShift" else "ROSA")).upper()
+
+
+def _fits(text: str, platform: str | None, openshift: bool, rosa: bool) -> bool:
+    """Whether a cause or fix marked [OCP], [ROSA], [K8S] (or "On OpenShift") fits: the platform decides when it is
+    given; without one, an OpenShift or ROSA cause needs the text to say so (G83), and a [K8S] one needs it not to."""
+    tag = _tag(text)
+    if tag is None:
+        return True
+    if platform == "kubernetes":
+        return tag == "K8S"
+    if platform:
+        return tag != "K8S"
+    if tag == "K8S":
+        return not (openshift or rosa)
+    return rosa if tag == "ROSA" else openshift or rosa
+
+
+def likely_cause(p: Playbook, text: str, platform: str | None, openshift: bool, rosa: bool) -> Cause | None:
+    """The cause ``text`` points at: three points for each of the cause's own patterns it matches, plus the
+    rarity-weighted words it shares with the cause and its fixes; the playbook's order breaks ties. A cause that
+    does not fit the platform (``_fits``) is never chosen."""
+    if not p.causes:
+        return None
+    from kube_noob.insight import _playbook_word_counts, _specific_terms
+
+    df = _playbook_word_counts()
+    want = _specific_terms(text[:20_000], kubernetes_words=True)
+    best: Cause | None = None
+    best_score = -1.0
+    for c in p.causes:
+        cause = p.root_causes[c.cause]
+        if not _fits(cause, platform, openshift, rosa):
+            continue
+        hits = sum(1 for w in _WHEN[(p.pid, c.cause)] if w.search(text))
+        words = _specific_terms(" ".join([cause, *(p.fixes[i] for i in c.fixes)]), kubernetes_words=True)
+        score = 3.0 * hits + sum(1.0 / df.get(t, 1) for t in want & words)
+        if score > best_score:
+            best, best_score = c, score
+    return best
+
+
 # Patterns too common to name an OpenShift playbook when the text does not say it is OpenShift: a bare "Permission
 # denied" is a Docker entrypoint without +x as often as an arbitrary UID. The playbook's specific patterns (nginx's
 # "mkdir() ... failed (13: Permission denied)") still name it.
@@ -262,6 +317,9 @@ def diagnose(
 
         openshift = openshift_context(text)
         rosa = bool(_ROSA_CONTEXT.search(text))
+    # Steps as the user's platform spells them; with none given, text that never says OpenShift or ROSA gets kubectl
+    # and no OpenShift-only steps (G83).
+    steps_platform = platform or (None if openshift or rosa else "kubernetes")
     for p in PLAYBOOKS:
         if platform and platform not in p.platforms:
             continue
@@ -289,10 +347,20 @@ def diagnose(
         boost = SIGNAL_WEIGHT if p.pid in linked else 0.0
         if hits or boost:
             score = (hits + boost) * p.weight
-            checks = [_for_platform(_fill(c, ctx), platform) for c in p.checks]
+            cause = likely_cause(p, text, platform, openshift, rosa)
+            order = list(range(len(p.checks)))
+            if cause is not None:  # the steps that confirm the likely cause first
+                order = [*cause.checks, *(i for i in order if i not in cause.checks)]
+            checks = [_for_platform(_fill(p.checks[i], ctx), steps_platform) for i in order]
             fixes = [_fill(f, ctx) for f in p.fixes if _fix_applies(f, platform)]
             causes = [_fill(c, ctx) for c in p.root_causes if _fix_applies(c, platform)]
-            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c], fixes, causes))
+            likely = None
+            if cause is not None:
+                likely = (
+                    _fill(p.root_causes[cause.cause], ctx),
+                    [_fill(p.fixes[i], ctx) for i in cause.fixes if _fits(p.fixes[i], platform, openshift, rosa)],
+                )
+            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c], fixes, causes, likely))
     results.sort(key=lambda d: (-d.score, d.playbook.pid))
     codes = {int(c) for c in _EXIT_PATTERN.findall(text)}
     exit_info = {c: EXIT_CODES[c] for c in sorted(codes) if c in EXIT_CODES}

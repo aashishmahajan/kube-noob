@@ -59,7 +59,8 @@ def test_diagnosis_orders_read_only_steps_first_and_gates_the_rest() -> None:
     assert steps and all(classify_step(s.get("command") or s["instruction"]) == "read" for s in steps)
     assert all(c["requiresApproval"] for c in d["diagnosticCommands"] + d["proposedChanges"])
     probe = diagnose("Readiness probe failed: HTTP probe failed with statuscode: 503 pod/api-1").as_dict()
-    rsh = [c for dg in probe["diagnoses"] for c in dg["diagnosticCommands"] if "rsh" in c["command"]]
+    # no platform and nothing that says OpenShift: `oc rsh` is spelled `kubectl exec` (G83), and still needs approval
+    rsh = [c for dg in probe["diagnoses"] for c in dg["diagnosticCommands"] if " exec " in c["command"]]
     assert rsh and all(c["requiresApproval"] for c in rsh)
 
 
@@ -169,7 +170,12 @@ def test_x509_rbac_and_platform_specific_steps() -> None:
         'Error from server (Forbidden): pods is forbidden: User "dev" cannot list resource "pods" in API group "" '
         'in the namespace "shop"'
     ).as_dict()["diagnoses"][0]
-    assert rbac["readOnlyNextSteps"][0]["command"] == "oc auth can-i list pods -n shop --as=dev"
+    assert rbac["readOnlyNextSteps"][0]["command"] == "kubectl auth can-i list pods -n shop --as=dev"
+    ocp = diagnose(
+        'oc get pods: Error from server (Forbidden): pods is forbidden: User "dev" cannot list resource "pods" in API '
+        'group "" in the project "shop"'
+    ).as_dict()["diagnoses"][0]
+    assert ocp["readOnlyNextSteps"][0]["command"].startswith("oc auth can-i list pods")
     nginx = diagnose('[emerg] mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)').as_dict()
     assert nginx["diagnoses"][0]["id"] == "DBG-ARBITRARY-UID"
     k8s = diagnose("Reason: OOMKilled\nExit Code: 137", platform="kubernetes").as_dict()["diagnoses"][0]

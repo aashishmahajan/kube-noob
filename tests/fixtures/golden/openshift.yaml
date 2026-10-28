@@ -248,7 +248,7 @@
   outOfScope: false
   platform: openshift
   status: miss
-  gap: 'rank: kn:ocp-cluster-update-status#1 first, plus doc: meaning of Available, Progressing, Degraded, Upgradeable'
+  gap: 'doc: ClusterOperator condition types Available, Progressing, Degraded and Upgradeable defined side by side'
 - id: ocp-015
   technology: openshift
   kind: concept
@@ -281,10 +281,9 @@
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-psa-synchronization.adoc'
   outOfScope: false
   platform: openshift
-  status: miss
+  status: pass
   expect:
   - 'kn:ocp-pod-security-admission#0'
-  gap: 'rank: kn:ocp-pod-security-admission#0 label-sync doc should outrank DBG-PSA playbook'
 - id: ocp-017
   technology: openshift
   kind: out-of-scope

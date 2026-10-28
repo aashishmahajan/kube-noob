@@ -236,7 +236,9 @@ def test_pending_kinds_are_named_with_what_to_do_today(kit: tk.Toolkit) -> None:
     assert {"KN-B001", "KN-B007"} <= {f["id"] for f in cf["findings"]}
     unknown = kit.insight(tk.InsightIn(text="lorem ipsum dolor sit amet\nconsectetur adipiscing elit\nsed do"))
     assert unknown["kinds"] == [{"kind": "unknown", "evidence": "nothing recognised"}]
-    assert unknown["ran"] == ["diagnose", "gather"]
+    # nothing names a cluster: no generic pod steps, the answer says what to paste instead
+    assert unknown["ran"] == ["diagnose"] and unknown["readOnlyNextSteps"] == []
+    assert "names no Kubernetes or OpenShift" in unknown["approach"]
 
 
 def test_input_bounds_and_hostile_text(kit: tk.Toolkit) -> None:

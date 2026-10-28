@@ -397,6 +397,22 @@ GATHER = (
     ("{cli} logs <pod> -n {ns} --previous --tail=200", "the last run's logs when the container restarted"),
 )
 GATHER_NOTE = " Nothing here was evidence enough to diagnose: run the steps and paste what they print."
+NO_CLUSTER_NOTE = (
+    " The text names no Kubernetes or OpenShift object, so no cluster steps are suggested: paste the error, events or "
+    "logs from the cluster, or give the platform."
+)
+# Words that say the text is about a cluster (the generic gather steps read pods, events and logs).
+_CLUSTER_WORDS = re.compile(
+    r"(?i)\b(?:pods?|kubectl|oc|kubernetes|k8s|openshift|ocp|rosa|kubelet|namespaces?|deployments?|statefulsets?|"
+    r"daemonsets?|replicasets?|containers?|nodes?|clusters?|helm|ingress|services?|configmaps?|secrets?|pvcs?|"
+    r"crashloopbackoff|imagepullbackoff|pending)\b"
+)
+# A typed question that asks what something is or why the platform behaves a certain way, not "here is my error".
+_CONCEPTUAL = re.compile(
+    r"(?i)^(?:what(?:'s| is| are| does| do| decides)|why (?:do|does|is|are)|how does|explain|what is the difference)\b"
+)
+_ERRORISH = re.compile(r"(?i)\b(?:error|failed|failure|denied|forbidden|refused|timeout|cannot|can't)\b|\w+: \w+")
+WEAK_PLAYBOOK = 0.4  # a playbook below this confidence matched on a word or two, not on an error
 NOT_YET: dict[str, str] = {}
 
 
@@ -587,6 +603,24 @@ class _DocFit:
         return all(any(w in words for w in group) for group in extra.get("requires") or [])
 
 
+def _explain_first(findings: list[dict[str, Any]], query: str, asked: set[str]) -> None:
+    """A typed conceptual question ("What is the difference between Degraded and Available...") whose only playbook
+    is a weak word match gets the document section that explains it first, when the section's heading shares two
+    specific words with the question. A question that quotes an error keeps the playbook first."""
+    if "\n" in query or not _CONCEPTUAL.match(query.strip()) or _ERRORISH.search(query):
+        return
+    playbooks = [f for f in findings if f["source"] == "playbook"]
+    if not playbooks or any(float(f.get("confidence") or 0) >= WEAK_PLAYBOOK for f in playbooks):
+        return
+    for f in findings:
+        if f["source"] != "doc":
+            continue
+        heading = str(f.get("title") or "").split(" > ", 1)[-1]
+        if len(asked & _specific_terms(heading, kubernetes_words=True)) >= 2:
+            f["rank"] = 9  # before the playbooks (10 and up), after policy and build findings
+            return
+
+
 def _closest(options: list[str], text: str, hint: str = "") -> str:
     """The option that shares the most specific words with ``text``, then with ``hint`` at half weight (the first on
     a tie): a playbook lists every cause and fix it knows, and the finding should show the one this input points at.
@@ -663,7 +697,12 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         d = d or {}
         signals = list(d.get("signals") or [])
         for i, x in enumerate(d.get("diagnoses", [])[:3]):
-            likely = _closest(x.get("rootCauses") or [], tail)
+            if "likelyCause" in x:  # cause-linked triage: the cause the input points at and its own fix
+                likely = str(x["likelyCause"])
+                fix = str((x.get("likelyFixes") or [""])[0])
+            else:
+                likely = _closest(x.get("rootCauses") or [], tail)
+                fix = _closest([c.get("change", "") for c in x.get("proposedChanges") or []], tail, likely)
             findings.append(
                 {
                     "source": "playbook",
@@ -671,7 +710,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                     "title": x["title"],
                     "confidence": x["confidence"],
                     "cause": likely,
-                    "fix": _closest([c.get("change", "") for c in x.get("proposedChanges") or []], tail, likely),
+                    "fix": fix,
                     "rank": 10 + i,
                 }
             )
@@ -877,9 +916,13 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                     "id": h["chunkId"],
                     "title": h.get("title"),
                     "sharedTerms": sorted(shared)[:6],
+                    # A pasted post is answered by its evidence; a document that shares its words is related reading
+                    # (QA4: word-matched documents answered 2 of 30 pasted posts).
+                    **({} if typed else {"related": True}),
                     "rank": 30 + len(seen),
                 }
             )
+        _explain_first(findings, query, asked)
     if "manifests" in names:
         from kube_noob.errors import ManifestError
 
@@ -940,7 +983,13 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         "vulnerability",
         "code",
     }
-    if not steps and not any(f["source"] in evidence for f in findings) and (names & textual or not names):
+    about_a_cluster = bool(platform) or bool(_CLUSTER_WORDS.search(text[:20_000]))
+    if (
+        not steps
+        and not any(f["source"] in evidence for f in findings)
+        and (names & textual or not names)
+        and about_a_cluster
+    ):
         ns = context.get("namespace")
         steps = gather_steps(platform, ns if isinstance(ns, str) else None)
         ran.append("gather")
@@ -956,5 +1005,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         "context": context,
         "skipped": skipped,
         "approach": "Read-only first: every step listed here only reads; changes come from the playbook or rule "
-        "with a person's approval." + (GATHER_NOTE if "gather" in ran else ""),
+        "with a person's approval."
+        + (GATHER_NOTE if "gather" in ran else "")
+        + ("" if about_a_cluster or findings else NO_CLUSTER_NOTE),
     }

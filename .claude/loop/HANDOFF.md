@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 night (QA6 and 20x done, CI green through cdf96a7; row 20w needs the owner's ranking decision).
+right now; STATE.md says what is done. Updated 2026-10-28 late night (QA8 cause-linked triage in progress, row 20y; Claude made the 20w ranking calls as the owner asked: explain-first for weak playbooks on conceptual questions, related reading for pasted posts, cluster-context gather steps).
 
 ## Repository and branch
 

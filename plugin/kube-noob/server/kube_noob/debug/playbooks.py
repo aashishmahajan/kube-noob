@@ -11,6 +11,17 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class Cause:
+    """One root cause of a playbook, tied to what points at it and what to do about it, so an answer can show the
+    cause the user's words point at, its fix, and the read-only steps that confirm it (in that order)."""
+
+    cause: int  # index into the playbook's root_causes
+    when: tuple[str, ...] = ()  # case-insensitive regexes: words in the input that point at this cause
+    checks: tuple[int, ...] = ()  # indexes into checks: the steps that confirm or rule it out, most telling first
+    fixes: tuple[int, ...] = ()  # indexes into fixes, best first; empty when the cause is a pointer, not a fault
+
+
+@dataclass(frozen=True)
 class Playbook:
     pid: str
     title: str
@@ -23,6 +34,7 @@ class Playbook:
     knowledge: tuple[str, ...] = ()
     weight: float = 1.0
     tags: tuple[str, ...] = field(default=())
+    causes: tuple[Cause, ...] = ()  # cause-linked triage (every root cause once); empty: causes are not linked yet
 
 
 PLAYBOOKS: tuple[Playbook, ...] = (
@@ -57,6 +69,52 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         related_rules=("KN-C003", "KN-C005"),
         knowledge=("k8s-debug-pods", "ocp-arbitrary-uid"),
         weight=0.9,  # a symptom, not a cause: a specific cause (OOM, probe, UID) with equal evidence ranks first
+        causes=(
+            Cause(
+                0,
+                (
+                    r"\bexit(?:ed)?\s+(?:with\s+)?(?:code|status)\b",
+                    r"\b(?:panic|traceback|exception|fatal|segfault)\b",
+                    r"\b(?:env(?:ironment)?\s+var(?:iable)?s?|config(?:uratio"
+                    r"n)?|database|migration|missing\s+(?:file|key|secret))\b",
+                ),
+                (0, 1, 3, 2),
+                (0, 1),
+            ),
+            Cause(
+                1,
+                (
+                    r"liveness",
+                    r"\bprobe\b",
+                    r"slow(?:ly)?\s+start|(?:takes?|needs?)\s+(?:\w+\s+){0,3}(?:seconds|minutes)\s+to\s+start",
+                    r"\b143\b",
+                ),
+                (2, 3, 0),
+                (2,),
+            ),
+            Cause(2, (r"OOMKilled", r"\b137\b", r"out of memory|memory limit"), (1, 2), (1,)),
+            Cause(
+                3,
+                (
+                    r"permission denied|EACCES",
+                    r"read-only file system|cannot (?:create|write|open)",
+                    r"\b(?:uid|gid|runAsUser|root user|as root)\b",
+                ),
+                (0, 1),
+                (3,),
+            ),
+            Cause(
+                4,
+                (
+                    r"\bwhat (?:does|is)\b",
+                    r"\bmean(?:s|ing)?\b",
+                    r"back-?off (?:time|delay|interval|period)|how long",
+                    r"restart (?:delay|interval)",
+                ),
+                (2, 1),
+                (),
+            ),
+        ),
     ),
     Playbook(
         # Local images: kubernetes/website concepts/containers/images.md (no tag or :latest -> Always) and
@@ -89,19 +147,69 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "oc get pod {pod} -n {ns} -o jsonpath='{{.spec.containers[*].image}}'",
             "oc get sa {sa} -n {ns} -o jsonpath='{{.imagePullSecrets}}'",
             "skopeo inspect docker://<image>   # from a workstation with the same credentials",
+            "oc get deploy <deployment> -n {ns} -o jsonpath='{{.spec.template.spec.containers[*].image}} "
+            "{{.spec.template.spec.imagePullSecrets}} {{.spec.template.spec.serviceAccountName}}'   # image, pull "
+            "secrets and ServiceAccount the pods get",
         ),
         (
             "Correct the image reference; prefer digests.",
-            "oc create secret docker-registry <name> --docker-server=<registry> --docker-username=... "
+            "[OCP] oc create secret docker-registry <name> --docker-server=<registry> --docker-username=... "
             "--docker-password=... -n {ns} && oc secrets link {sa} <name> --for=pull -n {ns}",
             "Mirror public images to a private registry (Quay, ECR) to avoid rate limits.",
             "[OCP] add the registry CA via image.config.openshift.io/cluster additionalTrustedCA.",
             "Local image on minikube: minikube image load <image> (or build with eval $(minikube docker-env)) and set "
             "imagePullPolicy: IfNotPresent or Never.",
+            "[K8S] kubectl create secret docker-registry <name> --docker-server=<registry> --docker-username=... "
+            "--docker-password=... -n {ns} && kubectl patch serviceaccount {sa} -n {ns} -p "
+            '\'{{"imagePullSecrets": [{{"name": "<name>"}}]}}\'',
         ),
         related_rules=("KN-S012", "KN-C013"),
         knowledge=("k8s-images",),
         weight=0.9,  # a symptom with several causes: a playbook that names the cause ranks first on equal evidence
+        causes=(
+            Cause(
+                0,
+                (
+                    r"manifest unknown|not found: manifest|manifest for \S{1,200} not found",
+                    r"repository does not exist|repository \S{1,200} not found",
+                    r"\b(?:tag|typo|misspel\w*|wrong image)\b",
+                ),
+                (0, 4, 1, 3),
+                (0,),
+            ),
+            Cause(
+                1,
+                (
+                    r"pull access denied",
+                    r"unauthorized|authentication required|403 forbidden|denied: requested access",
+                    r"\bprivate\b|docker login|credential|pull[- ]?secret|imagepullsecret",
+                ),
+                (0, 4, 2, 3),
+                (5, 1),
+            ),
+            Cause(2, (r"toomanyrequests|too many requests", r"rate limit", r"docker ?hub|docker\.io"), (0, 4), (2,)),
+            Cause(
+                3,
+                (
+                    r"x509|certificate|\btls\b",
+                    r"i/o timeout|connection refused|no such host|dial tcp|context deadline",
+                    r"\bproxy\b|egress|private cluster|nat gateway|vpc endpoint",
+                ),
+                (0, 3),
+                (3,),
+            ),
+            Cause(4, (r"exec format error", r"architecture|\barm64\b|\bamd64\b|multi-arch|aarch64"), (0,), ()),
+            Cause(
+                5,
+                (
+                    r"minikube|kind load|built (?:it )?locally|local(?:ly built)? image"
+                    r"|docker build|my (?:laptop|machine|workstation)",
+                    r"imagePullPolicy|:latest\b",
+                ),
+                (1, 4, 0),
+                (4,),
+            ),
+        ),
     ),
     Playbook(
         # kubelet emits FailedToRetrieveImagePullSecret when a name in imagePullSecrets is not found in the pod's own
@@ -156,6 +264,38 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         related_rules=("KN-C013",),
         knowledge=("k8s-images",),
         weight=2.0,  # one named cause: ranks above the image-pull symptom that matches the same events
+        causes=(
+            Cause(
+                0,
+                (
+                    r"pull[- ]?secrets?\b[^.\n]{0,40}\b(?:in|from)\s+(?:a\s+|a"
+                    r"n\s+)?(?:different|another|other)\s+(?:namespace|project)",
+                    r"(?:different|another|other)\s+(?:namespace|project)[^.\n]{0,60}\bpull[- ]?secret",
+                    r"(?:copy|share|use|reuse)\s+(?:a\s+|the\s+)?pull[- ]?s"
+                    r"ecrets?\s+(?:across|between)\s+(?:namespaces|projects)",
+                    r"(?:different|another|other)\s+namespace",
+                    r"FailedToRetrieveImagePullSecret|Unable to retrieve some image pull secrets",
+                ),
+                (0, 1, 4, 2),
+                (1, 0, 2),
+            ),
+            Cause(
+                1,
+                (r"service ?account|\bsa\b", r"\blink(?:ed|s)?\b", r"(?:wrong|different|another) name|renamed|typo"),
+                (1, 2, 3, 0),
+                (1, 0),
+            ),
+            Cause(
+                2,
+                (
+                    r"internal registry|image-registry\.openshift-image-registry|image ?stream",
+                    r"image-puller",
+                    r"another project",
+                ),
+                (1, 0),
+                (4,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-OOM",
@@ -185,6 +325,25 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C004", "KN-C005"),
         knowledge=("k8s-resources",),
+        causes=(
+            Cause(0, (r"\b(?:jvm|java|heap|xmx|node\.?js|max-old-space-size|python)\b", r"\blimit\b"), (0, 1), (0, 1)),
+            Cause(
+                1,
+                (r"\bleak", r"\bgrow(?:s|ing)?\b|increas\w+ (?:over time|steadily)|after (?:a few )?(?:hours|days)"),
+                (1, 0),
+                (0,),
+            ),
+            Cause(
+                2,
+                (
+                    r"OOMKilling",
+                    r"\bnode\b.{0,40}(?:oom|out of memory)|system oom"
+                    r"|no (?:memory )?limits|without (?:memory )?limits|BestEffort",
+                ),
+                (2, 0),
+                (2,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-CONFIGERR",
@@ -211,6 +370,21 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "reference optional: true if the app tolerates absence.",
         ),
         knowledge=("k8s-debug-pods",),
+        causes=(
+            Cause(
+                0,
+                (
+                    r"secret \"?[\w.-]+\"? not found",
+                    r"configmap \"?[\w.-]+\"? not found",
+                    r"couldn't find key [\w.-]+ in (?:Secret|ConfigMap)",
+                    r"\bnot found\b",
+                ),
+                (0, 1, 2),
+                (0,),
+            ),
+            Cause(1, (r"runAsNonRoot|non-?root|run as root|image will run as root",), (0,), ()),
+            Cause(2, (r"subPath|sub path|\bmount\b",), (0, 2), (0,)),
+        ),
     ),
     Playbook(
         "DBG-INVALID-UTF8",
@@ -238,6 +412,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "oc get secret <secret> -n {ns} "
             "-o go-template='{{{{range $k, $v := .data}}}}{{{{$k}}}}{{{{\"\\n\"}}}}{{{{end}}}}'",
             "oc get nodes -o wide",
+            "oc get pods -n stackrox",
+            "oc logs <collector-pod> -c collector -n stackrox --previous",
         ),
         (
             "Store each value so that it decodes to valid UTF-8 text: plain text under stringData, or base64-encoded "
@@ -249,6 +425,24 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         knowledge=("k8s-invalid-utf8",),
         weight=1.4,
+        causes=(
+            Cause(
+                0,
+                (r"CreateContainerError", r"\b(?:secrets?|configmaps?|envFrom|env vars?|environment)\b", r"base64"),
+                (0, 1, 2),
+                (0, 1),
+            ),
+            Cause(1, (r"containerd", r"upgrad\w+|new nodes?|node group|\bami\b|node pool"), (3, 1, 2), (0, 1)),
+            Cause(
+                2,
+                (
+                    r"contains invalid UTF-8 data when serializing a protocol buffer",
+                    r"collector|ProcessSignal|stackrox|\brhacs\b",
+                ),
+                (4, 5),
+                (2,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-RUNASROOT",
@@ -371,6 +565,29 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C004",),
         knowledge=("k8s-resources",),
+        causes=(
+            Cause(
+                0,
+                (r"Insufficient (?:cpu|memory|nvidia\.com/gpu|ephemeral-storage)", r"0/\d+ nodes are available"),
+                (0, 1),
+                (0,),
+            ),
+            Cause(
+                1,
+                (
+                    r"requests? (?:are |is )?(?:too|very|far) (?:big|large|high)"
+                    r"|over-?(?:provision|request)\w*|copied|default requests",
+                ),
+                (1, 0),
+                (0,),
+            ),
+            Cause(
+                2,
+                (r"autoscal\w*", r"machine ?pool|node ?pool|scale up|max(?:imum)? (?:size|nodes|replicas)"),
+                (2, 3, 0),
+                (1, 0),
+            ),
+        ),
     ),
     Playbook(
         "DBG-PENDING-PLACEMENT",
@@ -438,6 +655,21 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         related_rules=("KN-ST001", "KN-ST004", "KN-ST005"),
         knowledge=("storage-access-modes", "rosa-efs"),
         weight=1.2,
+        causes=(
+            Cause(0, (r"ReadWriteMany|\bRWX\b|access mode", r"gp[23](?:-csi)?|\bebs\b|\brbd\b"), (0, 1), (0,)),
+            Cause(
+                1,
+                (
+                    r"storageclass\.storage\.k8s\.io \"?[\w.-]+\"? not found",
+                    r"no default storage ?class|storageClassName"
+                    r"|storage ?class \S{0,40} ?(?:missing|not found|does not exist)",
+                ),
+                (1, 0),
+                (1,),
+            ),
+            Cause(2, (r"waiting for first consumer|WaitForFirstConsumer",), (0,), ()),
+            Cause(3, (r"\bcsi\b|\bdriver\b|\befs\b|provisioner|AccessDenied|ExternalProvisioning",), (2, 3, 0), (0,)),
+        ),
     ),
     Playbook(
         "DBG-MULTIATTACH",
@@ -494,9 +726,27 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Vanilla Kubernetes: set pod securityContext.fsGroup; OpenShift assigns fsGroup from the namespace range.",
             "Mount an emptyDir at every path the app writes when using a read-only root filesystem.",
             "[ROSA/EKS + EFS] allow NFS (2049/tcp) from worker node security groups to the EFS mount targets.",
+            "Create the missing Secret or ConfigMap in the pod's namespace, or mark the volume optional: true if the "
+            "app can start without it.",
         ),
         related_rules=("KN-S007",),
         knowledge=("ocp-arbitrary-uid",),
+        causes=(
+            Cause(
+                0,
+                (r"secrets? \"?[\w.-]+\"? not found|configmaps? \"?[\w.-]+\"? not found", r"\bnot found\b"),
+                (0,),
+                (3,),
+            ),
+            Cause(1, (r"permission denied", r"fsGroup|\buid\b|\bgid\b|\bowner\b|chown"), (1, 0), (0,)),
+            Cause(2, (r"read-only file system|readOnlyRootFilesystem",), (0,), (1,)),
+            Cause(
+                3,
+                (r"\bnfs\b|\befs\b|2049|mount target|security group", r"timed out waiting for the condition"),
+                (0,),
+                (2,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-PROBE",
@@ -527,6 +777,25 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C001", "KN-C002", "KN-C003"),
         knowledge=("k8s-probes",),
+        causes=(
+            Cause(
+                0,
+                (
+                    r"statuscode: 404|\b404\b|wrong (?:port|path)|/healthz?\b|named port",
+                    r"HTTP probe failed with statuscode",
+                ),
+                (0, 1),
+                (0,),
+            ),
+            Cause(1, (r"connection refused", r"127\.0\.0\.1|localhost|0\.0\.0\.0|\bbind"), (1, 2), (0,)),
+            Cause(
+                2,
+                (r"Client\.Timeout|timeoutSeconds|timed? ?out|deadline", r"dependenc\w+|database|downstream"),
+                (0, 2),
+                (1,),
+            ),
+            Cause(3, (r"startup|slow(?:ly)? (?:start|boot)|takes? .{0,30}to start|warm-?up",), (0, 2), (2,)),
+        ),
     ),
     Playbook(
         "DBG-ROUTE-503",
@@ -588,6 +857,11 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-V011", "KN-V012"),
         knowledge=("k8s-services",),
+        causes=(
+            Cause(0, (r"selector|\blabels?\b",), (0, 2, 1), (0,)),
+            Cause(1, (r"not ready|readiness|0/\d+\s+(?:ready|running)",), (1, 2), (0,)),
+            Cause(2, (r"targetPort|port name|named port|containerPort",), (0, 1), (0,)),
+        ),
     ),
     Playbook(
         "DBG-RBAC",
@@ -727,6 +1001,20 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         related_rules=("KN-S001", "KN-S012", "KN-C004", "KN-S003"),
         knowledge=("stackrox-admission", "rhacs-enforcement"),
         weight=1.4,
+        causes=(
+            Cause(
+                0,
+                (r"violated .{0,40}polic", r"privileged|latest tag|resource requests|root user|\bpolicy\b"),
+                (0, 1),
+                (0, 1, 2),
+            ),
+            Cause(
+                1,
+                (r"enforce\w*|admissionControl|enforceOn(?:Creates|Updates)", r"\benabled\b|turn(?:ed)? on"),
+                (2, 0),
+                (1, 2),
+            ),
+        ),
     ),
     Playbook(
         "DBG-HELM-LOCK",
@@ -819,6 +1107,15 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C004", "KN-C005"),
         knowledge=("k8s-resources",),
+        causes=(
+            Cause(
+                0,
+                (r"low on resource: (?:memory|cpu)|MemoryPressure|DiskPressure", r"BestEffort|Burstable|node pressure"),
+                (1, 0),
+                (0,),
+            ),
+            Cause(1, (r"ephemeral|local storage usage exceeds", r"\blogs?\b|/tmp|emptyDir|temp files"), (0, 1), (0, 1)),
+        ),
     ),
     Playbook(
         "DBG-DNS",
@@ -854,8 +1151,31 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Allow egress to the cluster DNS pods (port 5353 TCP/UDP to namespace openshift-dns on OpenShift; 53 to "
             "kube-system elsewhere).",
+            "Call a Service in another namespace by its full name, <svc>.<ns>.svc.cluster.local (or <svc>.<ns>): a "
+            "short name resolves only in the pod's own namespace.",
+            "External names: check the upstream resolver the cluster DNS forwards to; on ROSA private clusters the "
+            "VPC needs DNS hostnames and DNS resolution enabled.",
+            "Restore cluster DNS: its pods Running (openshift-dns on OpenShift, CoreDNS in kube-system elsewhere), the "
+            "kube-dns Service with endpoints, and the system:coredns ClusterRole able to list and watch Services and "
+            "EndpointSlices.",
         ),
         knowledge=("k8s-networkpolicy",),
+        causes=(
+            Cause(0, (r"network ?polic|networkpolicy|\begress\b|default-deny|deny-all",), (5, 6, 0), (0,)),
+            Cause(
+                1,
+                (
+                    r"NXDOMAIN|no such host",
+                    r"svc\.cluster\.local|service name|another namespace|other namespace|short name",
+                ),
+                (1, 0),
+                (1,),
+            ),
+            Cause(
+                2, (r"external|upstream|internet|public (?:name|domain)|\bvpc\b|private cluster|forward",), (0, 1), (2,)
+            ),
+            Cause(3, (r"coredns|kube-dns|SERVFAIL|dns pods?|openshift-dns",), (2, 3, 4, 6), (3,)),
+        ),
     ),
     Playbook(
         "DBG-NETPOL",
@@ -882,10 +1202,22 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Add explicit allow rules (podSelector/namespaceSelector + ports).",
             "Order EgressFirewall rules: specific Allow first, catch-all Deny last; the object must be named "
             "'default'.",
+            "Allow the traffic in the cloud security groups, network ACLs or firewall between the nodes and the "
+            "destination: they sit outside Kubernetes.",
         ),
         related_rules=("KN-N006", "KN-V015", "KN-N001"),
         knowledge=("k8s-networkpolicy", "ocp-egressfirewall"),
         weight=0.8,
+        causes=(
+            Cause(0, (r"network ?polic|networkpolicy|default-deny|deny-all|podSelector",), (0, 2), (0,)),
+            Cause(1, (r"egress ?firewall",), (1, 2), (1,)),
+            Cause(
+                2,
+                (r"security groups?|\bfirewall\b|\bnacl\b|network acl|\baws\b|\bazure\b|\bgcp\b|\bvpc\b|outbound",),
+                (2,),
+                (2,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-X509-CLIENT",
@@ -943,8 +1275,27 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Renew/rotate the certificate (cert-manager, OpenShift service CA); add the CA to the client trust bundle "
             "(OpenShift: config map with label config.openshift.io/inject-trusted-cabundle=true).",
+            "Reissue the certificate with the host the client calls in its subjectAltName (a Route host, a Service DNS "
+            "name), or call the host the certificate was issued for.",
         ),
         knowledge=("ocp-routes",),
+        causes=(
+            Cause(
+                0,
+                (
+                    r"certificate has expired|not yet valid|\bexpired\b",
+                    r"unknown authority|self-signed|not trusted|ca bundle|\bclock\b",
+                ),
+                (2, 0),
+                (0,),
+            ),
+            Cause(
+                1,
+                (r"certificate is valid for", r"\bsan\b|subject ?alt\w*|hostname|does(?:n't| not) match"),
+                (2, 1),
+                (1,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-EXEC-FORMAT",
@@ -1077,8 +1428,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"ClusterOperator\w* .*Degraded",
             r"Degraded\s+True",
             # an `oc get co` row (NAME VERSION AVAILABLE PROGRESSING DEGRADED) with Degraded True or Available False
-            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+(?:True|False|Unknown)\s+(?:True|False|Unknown)\s+True\b",
-            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+False\s+(?:True|False|Unknown)\s+(?:True|False|Unknown)\b",
+            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+(?:"
+            r"True|False|Unknown)\s+(?:True|False|Unknown)\s+True\b",
+            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+Fal"
+            r"se\s+(?:True|False|Unknown)\s+(?:True|False|Unknown)\b",
             r"\b[A-Z][A-Za-z]{2,60}ControllerDegraded\b",  # library-go operator condition reasons
             r"Available\s+False",
             r"clusteroperator",
@@ -1203,6 +1556,16 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         platforms=("rosa-hcp",),
         related_rules=("KN-V017",),
         knowledge=("rosa-hcp",),
+        causes=(
+            Cause(
+                0,
+                (r"privatelink|vpc endpoint|route table|security group|cannot reach|unreachable|\bendpoint\b",),
+                (0, 3),
+                (0, 1),
+            ),
+            Cause(1, (r"subnet|ip address(?:es)?|\btags?\b",), (1, 2), (0,)),
+            Cause(2, (r"instance type|quota|capacity|insufficient",), (2, 1), (0,)),
+        ),
     ),
     Playbook(
         "DBG-ARBITRARY-UID",

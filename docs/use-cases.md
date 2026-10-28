@@ -83,9 +83,12 @@ words imply ("leader changed"), each catalogue entry's upstream source and the p
 
 An ImagePullBackOff whose pull secret sits in another namespace is named for what it is: kubelet's
 `FailedToRetrieveImagePullSecret` event (or the question in those words) ranks the pull-secret playbook first, with the
-secret and namespace filled in, read-only checks that list Secret names (never values), and the fixes for each case:
-create or sync the secret in the pod's namespace and link it, the OpenShift global pull secret for a registry every
-project uses, or `system:image-puller` for another project's internal registry. `audit` catches it before deploy
+secret and namespace filled in, read-only checks that list Secret names (never values), and the cause the words point
+at shown first with its own fix and steps: a secret in another namespace gets "create or sync it in the pod's
+namespace and link it" and `kubectl get secrets -A --field-selector metadata.name=<secret>`; only a question that says
+OpenShift and names another project's internal registry gets `system:image-puller`. The 17 playbooks that answer
+most real posts work this way (cause-linked triage): each cause carries the words that point at it, the read-only
+steps that confirm it and its fixes, and text that never says OpenShift gets `kubectl` steps. `audit` catches it before deploy
 (KN-C013) when the bundle defines the Secret only in another namespace, and the in-cluster debug reads the pod's and
 its ServiceAccount's pull secret names.
 
