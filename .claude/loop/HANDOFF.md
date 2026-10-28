@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (after the VUL1 red-team fixes).
+right now; STATE.md says what is done. Updated 2026-10-28 (VUL1 done; ADM1 waiting for CI).
 
 ## Repository and branch
 
@@ -19,6 +19,8 @@ right now; STATE.md says what is done. Updated 2026-10-28 (after the VUL1 red-te
 
 ## Done in this stretch
 
+- VUL1: done after the independent red team (12 findings fixed, G72); CI 40676198576 green.
+
 - BLD2 (CI gate, build/test analytics): done, CI 40661279945 and 40663077885 green.
 - VUL1 (R5.1-R5.4) built and pushed in 74aae4a: `src/kube_noob/vuln/` (reports, rpmver, csaf, vex, kev, rank, threat,
   assess, attack), CLI `vuln report` / `vuln threat`, `gate --scanner-report/--vex/--kev`, MCP `vuln_report` /
@@ -27,48 +29,27 @@ right now; STATE.md says what is done. Updated 2026-10-28 (after the VUL1 red-te
 
 ## In flight (finish these first)
 
-1. CI for VUL1: the red-team fixes are committed on top of a26b95b (see the newest STATE log entry). Dispatch CI on
-   the branch head and mark VUL1 (row 15m) done only when every job is green; gate-ci must show the scanner-report
-   step failing as planned, with the kept CVEs in SARIF and none of the 12 VEX-excluded. CI 40669926452 had failed only
-   on the leaked Jira sync thread in tests/test_seal.py, fixed in a26b95b.
-2. VUL1 red team: done. 12 reproduced findings fixed, one regression test each in `tests/test_vuln_redteam.py`
-   (guidance G72). The repro scripts are not in the repo (they lived in the session scratchpad); the tests replace them.
-   Follow-up, not a red-team finding: `yamlio.load_documents` uses the pure-Python SafeLoader (~14 s for 860 KB of
-   JSON, bounded by MAX_NODE_VISITS); a CSafeLoader path with the same line marks would make large inputs fast.
-3. ADM1 (R3.3, STATE row 15n), partly built in the working tree, not committed yet:
-   - Done: `src/kube_noob/admission.py` (AdmissionReview v1 review, warn by default, enforce per rule, UPDATE denies
-     only new findings, system namespaces and owned Pods/ReplicaSets/Jobs skipped, fails open, exceptions file,
-     background `Lookups` cache with jitter for cross-object rules, Starlette app with /validate, /healthz, /readyz,
-     /metrics, certificate-rotation watcher), `AdmissionSettings` in `config.py` (`admission.enforce`,
-     `excludedNamespaces`, `exceptionsFile`, `lookups`, `maxWarnings`, `version`), CLI `admission serve` and
-     `admission review`, `tests/test_admission.py` (45 tests: 1,500-case fuzz never denies in warn mode, every
-     enforceable rule denies only itself, p99 well under 50 ms; local p99 is about 1.3 ms).
-   - Left: chart templates (`deploy/helm/kube-noob/templates/admission.yaml`: Deployment with 2 replicas and soft
-     anti-affinity, PDB minAvailable 1, Service 443->8443, ValidatingWebhookConfiguration with `failurePolicy: Ignore`,
-     `timeoutSeconds: 3`, `sideEffects: None`, `admissionReviewVersions: [v1]`, `matchPolicy: Equivalent`, a
-     namespaceSelector excluding the system namespaces plus a matchCondition excluding `openshift-*`; certificates by
-     `admission.certificates: openshift-service-ca` (Service annotation `service.beta.openshift.io/serving-cert-secret-name`,
-     webhook annotation `service.beta.openshift.io/inject-cabundle: "true"`), `cert-manager` (Certificate +
-     `cert-manager.io/inject-ca-from: <ns>/<cert>`) or `secret` (operator-provided Secret and caBundle); a read-only
-     ClusterRole for lookups only when `admission.lookups`), values + values.schema.json + chart README + chart tests;
-     a kind CI job `admission-kind` (CI-generated CA with openssl; warn mode shows `Warning: [KN-S001]` and admits;
-     an in-cluster Job sends fuzzed reviews and a 50 rps load for 30 s and asserts never denied and p99 < 50 ms;
-     enforce mode denies KN-S001 only; scaling the webhook to 0 does not block `kubectl apply`); docs (CHANGELOG,
-     use-cases, architecture trust boundary, SECURITY tier A row, PRIVACY note: no new destination, guidance row,
-     README only if words allow under 600).
-   - Facts verified for ADM1 (add to STATE verification sources when committing): AdmissionResponse fields and the
-     warning guidance ("Limit warnings to 120 characters if possible. Warnings over 256 characters ... may be
-     truncated") from kubernetes/api @32a56a94 `admission/v1/types.go`; failurePolicy default Fail, timeoutSeconds
-     1-30 default 10, matchPolicy default Equivalent from `admissionregistration/v1/types.go`; OpenShift service CA
-     annotations from openshift/service-ca-operator @ed872ba1 `pkg/controller/api/api.go` and its
-     `cabundleinjector/admissionwebhook.go`; cert-manager `cert-manager.io/inject-ca-from` from cert-manager @43405a5a
-     `pkg/controller/cainjector/sources.go`.
-4. Claude plugin directory (owner's 0.5.0 submission): held by directory policy for a reviewer, which is expected
-   for any local stdio server; review "In progress" with an Anthropic reviewer. The one new finding against 0.2.3 is
-   most likely the kernel FIPS flag read (`/proc/sys/crypto/fips_enabled`) added to `posture.crypto_posture` in 0.5.0.
-   Fixed in the working tree: the read moved to `src/kube_noob/host_fips.py`, guarded out of the plugin
-   (`scripts/sync_plugin_server.py` GUARDED_IMPORTS), with `tests/test_plugin.py::test_bundle_reads_no_host_system_files`.
-   It reaches the directory only with the next release (owner action).
+1. VUL1: done (CI 40676198576 on f75fcbe, every job green). The red-team fixes and `tests/test_vuln_redteam.py` are
+   in; follow-up only: `yamlio.load_documents` uses the pure-Python SafeLoader (~14 s for 860 KB of JSON, bounded by
+   MAX_NODE_VISITS); a CSafeLoader path with the same line marks would make large inputs fast.
+2. ADM1 (R3.3, STATE row 15n): everything is built and committed; only CI is left. Dispatch CI on the branch head and
+   watch two places:
+   - `helm-and-dogfood`, step "Admission webhook chart (R3.3) ...": renders `templates/admission.yaml` in the three
+     certificate modes (openshift-service-ca, cert-manager, secret), checks the objects in Python, audits them clean
+     and checks six refusals. Helm is not installed in the container (get.helm.sh is blocked), so the template has
+     only been checked by CI; a Go-template mistake shows up here first.
+   - `admission-kind`: openssl CA, chart install in warn mode (`Warning: [KN-S001]`), an in-cluster Job running
+     `scripts/admission_kind_load.py` (600 fuzzed reviews never denied, 50 rps for 30 s, p99 < 50 ms), enforce mode
+     (denies `priv2`, a plain Deployment still warns, a label update of the existing privileged `priv` is admitted),
+     scale to zero admits in under 15 s. Read failures from the job's annotations
+     (`gh api repos/aashishmahajan/kube-noob/check-runs/<job id>/annotations`); the Diagnostics step prints the
+     webhook's logs, pods and the ValidatingWebhookConfiguration.
+   When both are green (and the rest of CI), set row 15n to `done` with the run id, and log it.
+3. Claude plugin directory (owner's 0.5.0 submission): held by directory policy for a reviewer, which is expected for
+   any local stdio server. The one new finding against 0.2.3 is most likely the kernel FIPS flag read; the read moved
+   to `src/kube_noob/host_fips.py`, guarded out of the plugin, with
+   `tests/test_plugin.py::test_bundle_reads_no_host_system_files`. It reaches the directory only with the next release
+   (owner action).
 
 ## Queue after that (from STATE.md)
 

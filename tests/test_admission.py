@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -320,3 +321,112 @@ def test_cli_review(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["admission", "review", "-f", str(f), "--enforce", "KN-C008"]) == 2
     cert = tmp_path / "missing.crt"
     assert main(["admission", "serve", "--tls-cert", str(cert), "--tls-key", str(cert)]) == 2
+
+
+# -- the chart (deploy/helm/kube-noob/templates/admission.yaml); rendered and installed in CI (helm, kind) -------------
+
+CHART = ROOT / "deploy" / "helm" / "kube-noob"
+
+
+def test_chart_values_and_schema() -> None:
+    import jsonschema
+
+    values = yaml.safe_load((CHART / "values.yaml").read_text())
+    schema = jsonschema.Draft7Validator(json.loads((CHART / "values.schema.json").read_text()))
+    assert not list(schema.iter_errors(values))
+    a = values["admission"]
+    assert a["enabled"] is False and a["enforce"] == [] and a["lookups"] is False, "off and warn-only by default"
+    assert a["timeoutSeconds"] == 3 and a["certificates"] == "openshift-service-ca"
+    for bad in (
+        {"enforce": ["KN-X"]},
+        {"enforce": ["KN-S001", "KN-S001"]},
+        {"timeoutSeconds": 31},
+        {"timeoutSeconds": 0},
+        {"certificates": "self-signed"},
+        {"maxWarnings": 51},
+        {"excludedNamespaces": ["Not_A_Namespace"]},
+        {"tls": {"caBundle": "not base64!"}},
+        {"certManager": {"issuerRef": {"kind": "Secret"}}},
+        {"mutate": True},
+    ):
+        assert list(schema.iter_errors({**values, "admission": {**a, **bad}})), bad
+
+
+def test_chart_webhook_matches_the_server() -> None:
+    from kube_noob.audit.rules import RULES
+    from kube_noob.cli import build_parser
+
+    text = (CHART / "templates" / "admission.yaml").read_text()
+    for line in (
+        "failurePolicy: Ignore",
+        "sideEffects: None",
+        "admissionReviewVersions: [v1]",
+        "matchPolicy: Equivalent",
+        "path: /validate, port: 443",
+        'service.beta.openshift.io/inject-cabundle: "true"',
+        "service.beta.openshift.io/serving-cert-secret-name:",
+        "cert-manager.io/inject-ca-from: {{ $ns }}/{{ $name }}",
+        "scheme: HTTPS",
+        "operations: [CREATE, UPDATE]",
+    ):
+        assert line in text, line
+    assert "mutating" not in text.lower() and "patch" not in text.lower(), "a validating webhook only"
+    excluded = text.split("concat (list ", 1)[1].split(" $ns)", 1)[0].replace('"', "").split()
+    assert set(excluded) == adm.SYSTEM_NAMESPACES, "the namespaceSelector skips what the server skips"
+    assert 'startsWith("openshift-")' in text and adm.SYSTEM_PREFIXES == ("openshift-",)
+    owned = text.split("request.kind.kind in [", 1)[1].split("]", 1)[0].replace('"', "").replace(",", "").split()
+    assert set(owned) == adm.OWNED_KINDS
+    lookups = text.split("kind: ClusterRole\n", 1)[1].split("---", 1)[0]
+    for resource in (*adm.CONTEXT_RESOURCES, "storageclasses"):
+        assert f"resources: [{resource}]" in lookups, resource
+    assert "secrets" not in lookups and "verbs: [get, list]" in lookups
+    rules = text.split("    rules:\n", 1)[1]
+    for resource in (
+        "pods",
+        "deployments",
+        "statefulsets",
+        "daemonsets",
+        "replicasets",
+        "jobs",
+        "cronjobs",
+        "deploymentconfigs",
+        "services",
+        "ingresses",
+        "routes",
+        "networkpolicies",
+        "roles",
+        "rolebindings",
+    ):
+        assert re.search(rf"[\[ ,]{resource}[\],]", rules), resource
+    assert "scope: Namespaced" in rules and "secrets" not in rules
+    serve = build_parser().parse_args(["admission", "serve", "--port", "8443", "--tls-cert", "/c", "--tls-key", "/k"])
+    assert (serve.port, serve.tls_cert, serve.tls_key) == (8443, "/c", "/k")
+    assert '"--port", "8443"' in text and "/etc/kube-noob-admission/tls/tls.key" in text
+    values = yaml.safe_load((CHART / "values.yaml").read_text())
+    assert values["admission"]["enforce"] == [] and all(r in RULES for r in ("KN-S001",))
+
+
+def test_chart_config_loads_as_the_server_reads_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kube_noob.config import load_settings
+
+    exceptions = tmp_path / "exceptions.yaml"
+    exceptions.write_text("apiVersion: kube-noob.io/v1\nkind: ExceptionList\nexceptions: []\n")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "offline: true\nwebEnabled: false\ndefaultPlatform: openshift\nllm:\n  provider: none\ncluster:\n"
+        "  enabled: true\n  backend: in-cluster\nadmission:\n  enforce:\n    - KN-S001\n  excludedNamespaces:\n"
+        '    - kube-system\n    - kube-noob\n  lookups: true\n  maxWarnings: 10\n  version: "4.20"\n'
+        f"  exceptionsFile: {exceptions}\n"
+    )
+    monkeypatch.setenv("KUBE_NOOB_CONFIG", str(config))
+    s = load_settings()
+    assert s.offline and s.cluster.enabled and s.admission.enforce == ["KN-S001"] and s.admission.lookups
+    cfg = adm.Config.build(
+        enforce=s.admission.enforce,
+        excluded=s.admission.excluded_namespaces,
+        platform=s.default_platform,
+        version=s.admission.version,
+        exceptions_text=exceptions.read_text(),
+        lookups=s.admission.lookups,
+    )
+    assert cfg.enforce == frozenset({"KN-S001"}) and "kube-noob" in cfg.excluded

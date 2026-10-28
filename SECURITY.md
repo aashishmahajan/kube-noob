@@ -57,8 +57,10 @@ each tier and what it needs.
 | D | `dryRun.enabled` | server-side dry-run (`?dryRun=All`) of a manifest | create and patch on `dryRun.rules` resources, never Secrets: Kubernetes authorizes a dry-run exactly like the real request |
 | W | `itsm.writeEnabled`, `notify.enabled` | attach evidence to a ticket; forward a report | the external system's token; refused under the offline lock |
 | G | `gate.enabled` | forward a tool call a person approved to an upstream MCP server | nothing from kube-noob; the upstream keeps its own access |
+| A | `admission.enforce` (chart `admission.enabled` runs the webhook) | `kube-noob admission serve` denies a create or update for a listed rule, and on an update only a finding the old object did not have; otherwise it only warns; it never mutates, and `failurePolicy: Ignore` means a dead webhook blocks nothing | a serving certificate (OpenShift service CA, cert-manager or your Secret); with `admission.lookups`, a ClusterRole with get and list on PodDisruptionBudgets, NetworkPolicies, PersistentVolumeClaims, HorizontalPodAutoscalers and StorageClasses |
 
-The read-only backends have no method that writes. Code that changes something exists only while its tier is on.
+Tier A is configuration rather than an action: whoever lists a rule in `admission.enforce` approves every denial of
+that rule, so it has no per-action approval. The read-only backends have no method that writes. Code that changes something exists only while its tier is on.
 kube-noob's own audit flags what the P and D Roles allow (KN-S017, medium): pods started by Jobs or added as
 ephemeral containers can act as any ServiceAccount in the namespace, so enable them only in namespaces that enforce
 Pod Security `restricted`.

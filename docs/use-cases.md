@@ -588,6 +588,35 @@ kube-noob policy generate --rule KN-S001 --rule KN-S009 --mode enforce --engine 
 kube-noob policy generate --engine kyverno --exclude-namespace legacy-apps -o kyverno.yaml
 ```
 
+### Every finding as a kubectl warning: the admission webhook
+
+The generated policies cover the rules CEL can decide. `kube-noob-admission` runs the audit itself: every finding of
+a created or updated object comes back to `kubectl` and `oc` as an admission warning (`Warning: [KN-S001] Privileged
+container: ...`, at most `admission.maxWarnings`, each at most 256 characters), so developers see them where they
+work. It denies nothing until you list a rule in `admission.enforce`, and then only that rule, and on an update only
+a finding the old object did not have: turning a rule on never freezes a Deployment that already breaks it. The
+webhook has `failurePolicy: Ignore` and a 3-second timeout, so a dead or slow webhook never blocks the cluster; it
+never mutates, stores nothing but counters, and fetches nothing. The system namespaces, `openshift-*`, its own
+namespace, `admission.excludedNamespaces` and namespaces labelled `kube-noob.io/admission=disabled` are skipped, and
+so are Pods, ReplicaSets and Jobs a controller owns (their owner was checked). Rules about other objects of the
+namespace (a PodDisruptionBudget for a Deployment, a NetworkPolicy, a claim's StorageClass) warn only with
+`admission.lookups`, which lists those kinds read-only in the background, and can never be enforced. Exceptions use
+the same ExceptionList as `kube-noob audit --exceptions`.
+
+```bash
+helm upgrade --install kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob -n kube-noob --create-namespace \
+  --set admission.enabled=true
+helm upgrade kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob -n kube-noob --reuse-values \
+  --set "admission.enforce={KN-S001,KN-S009}"
+kube-noob admission review -f review.json --enforce KN-S001
+```
+
+On OpenShift the service CA operator issues the serving certificate and injects the CA (the default,
+`admission.certificates: openshift-service-ca`); elsewhere use `cert-manager` with an issuer, or `secret` with your
+own certificate and CA bundle. CI installs it on a kind cluster: warnings in warn mode, 600 fuzzed reviews never
+denied, 50 requests per second for 30 seconds under 50 ms at p99, denial of the enforced rule only, an update of an
+existing breaker admitted, and nothing blocked with the webhook scaled to zero.
+
 ## Claude and MCP users
 
 Install the plugin or add the MCP server (see the [README](../README.md)), then ask for the `getting_started` prompt.

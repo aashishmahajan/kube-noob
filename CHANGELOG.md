@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `kube-noob-admission` (chart `admission.enabled`, `kube-noob admission serve`, capability tier A): a validating
+  webhook that runs the audit on every created or updated object and returns each finding as an admission warning,
+  so `kubectl` and `oc` print it. It denies nothing until a rule is listed in `admission.enforce`, then only that
+  rule, and on an update only a finding the old object did not have. `failurePolicy: Ignore` and a 3-second timeout:
+  a dead or slow webhook blocks nothing. It never mutates and fetches nothing; any error admits with a warning. The
+  system namespaces, `openshift-*`, its own namespace, `admission.excludedNamespaces`, namespaces labelled
+  `kube-noob.io/admission=disabled`, and Pods, ReplicaSets and Jobs a controller owns are skipped. Cross-object rules
+  warn only with `admission.lookups` (a read-only, jittered background cache) and are never enforced. Exceptions use
+  the audit's ExceptionList. The chart runs two replicas with a PodDisruptionBudget and soft anti-affinity; the
+  serving certificate comes from the OpenShift service CA (default), cert-manager or your Secret, and the webhook
+  restarts when it rotates. `kube-noob admission review -f review.json` evaluates one AdmissionReview offline. Tests:
+  1,500 fuzzed reviews never denied in warn mode, each enforceable rule denies only itself, p99 well under 50 ms; CI
+  installs it on kind (warnings, fuzz and 50 requests per second from inside the cluster, enforce, scale to zero).
+  `kube-noob doctor` lists tier A.
 - Vulnerability assessment, after an independent red team of `vuln report`, `vuln threat` and `gate
   --scanner-report` (each finding has a regression test in `tests/test_vuln_redteam.py`):
   - A Red Hat VEX statement for one module stream (`nodejs:18`) no longer decides a package from another

@@ -60,3 +60,23 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- $i := .Values.jira.seed.image -}}
 {{- if $i.digest -}}{{ $i.repository }}@{{ $i.digest }}{{- else -}}{{ $i.repository }}:{{ $i.tag }}{{- end -}}
 {{- end -}}
+
+{{- /* kube-noob-admission (admission.enabled): its own name and labels, so the server's Service, PDB and
+NetworkPolicy never select the webhook pods and the webhook's never select the server's. */ -}}
+{{- define "kube-noob.admissionName" -}}
+{{- printf "%s-admission" (include "kube-noob.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "kube-noob.admissionSelectorLabels" -}}
+app.kubernetes.io/name: {{ .Chart.Name }}-admission
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "kube-noob.admissionLabels" -}}
+{{ include "kube-noob.admissionSelectorLabels" . }}
+app.kubernetes.io/component: admission
+app.kubernetes.io/part-of: {{ .Chart.Name }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+{{- end -}}

@@ -23,6 +23,7 @@ ALL_ON = {
     "itsm": {"writeEnabled": True},
     "notify": {"enabled": True},
     "gate": {"enabled": True},
+    "admission": {"enforce": ["KN-S001"]},
 }
 
 
@@ -37,7 +38,7 @@ class GateWriter(tiers.Writer):
 def test_every_tier_is_off_by_default(tmp_path: Path) -> None:
     s = load_settings(overrides={"dataDir": str(tmp_path)})
     rows = tiers.describe(s)
-    assert [r["tier"] for r in rows] == ["R", "P", "D", "W", "G"]
+    assert [r["tier"] for r in rows] == ["R", "P", "D", "W", "G", "A"]
     assert not any(r["enabled"] for r in rows)
     assert all(r["switch"] and r["allows"] and r["rbac"] for r in rows)
     assert tiers.conflicts(s) == []
@@ -48,12 +49,16 @@ def test_enabled_tiers_and_their_contradictions(tmp_path: Path) -> None:
     assert all(r["enabled"] for r in tiers.describe(s))
     lonely = load_settings(overrides={"dataDir": str(tmp_path), "probe": {"enabled": True}})
     assert any("probe.enabled needs cluster.enabled" in c for c in tiers.conflicts(lonely))
+    lookups = load_settings(overrides={"dataDir": str(tmp_path), "admission": {"lookups": True}})
+    assert any("admission.lookups" in c and "cluster.enabled" in c for c in tiers.conflicts(lookups))
+    with pytest.raises(ApprovalError, match="read-only and needs no approval"):
+        tiers.Approval.create("A", "deny", "alice", "configured in admission.enforce", now=NOW)
     writes = {"itsm": {"writeEnabled": True}, "notify": {"enabled": True}}
     locked = load_settings(overrides={"dataDir": str(tmp_path), "offline": True, **writes})
     found = tiers.conflicts(locked)
     assert any("itsm.writeEnabled" in c for c in found) and any("notify.enabled" in c for c in found)
     p = posture(locked)
-    assert p["status"] == "conflict" and [t["tier"] for t in p["tiers"]] == ["R", "P", "D", "W", "G"]
+    assert p["status"] == "conflict" and [t["tier"] for t in p["tiers"]] == ["R", "P", "D", "W", "G", "A"]
     text = render_text(p)
     assert "tier W" in text and "tier P" in text
 

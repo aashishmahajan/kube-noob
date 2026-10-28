@@ -191,6 +191,41 @@ notify:
 gate:
   enabled: false             # tier G: forward approved tool calls to an upstream MCP server
 
+admission:
+  # Tier A: kube-noob-admission, a validating webhook. Every kube-noob finding of a created or updated object becomes
+  # an admission warning (kubectl prints them); a request is denied only for a rule listed in enforce, and on UPDATE
+  # only for a finding the old object did not have. failurePolicy Ignore and timeoutSeconds 3: a dead or slow webhook
+  # never blocks the cluster. The system namespaces, openshift-*, the release namespace, excludedNamespaces and any
+  # namespace labelled kube-noob.io/admission=disabled are skipped, as are Pods, ReplicaSets and Jobs owned by a
+  # controller (their owner was checked). It never mutates and fetches nothing; lookups add read-only lists.
+  enabled: false
+  replicaCount: 2
+  enforce: []                # rule ids to deny, e.g. [KN-S001]; empty = warnings only
+  excludedNamespaces: []
+  exceptions: ""             # an ExceptionList (kube-noob.io/v1, as for kube-noob audit --exceptions) as YAML text
+  # Rules about other objects of the namespace (PodDisruptionBudgets, NetworkPolicies, PVCs, HPAs, StorageClasses)
+  # warn only with lookups: a ClusterRole that lists those (never Secrets), cached and refreshed with jitter. They are
+  # never enforced. Needs networkPolicy.egress.apiServerCIDRs when egress policies are on.
+  lookups: false
+  maxWarnings: 10            # 1-50 per request; each is at most 256 characters
+  platformVersion: ""        # e.g. "4.20" or "1.33": version-specific rules (deprecated APIs)
+  timeoutSeconds: 3          # 1-30
+  # Serving certificate: openshift-service-ca (the service CA operator writes it and injects the CA bundle),
+  # cert-manager (a Certificate from certManager.issuerRef; cainjector injects the CA) or secret (your
+  # kubernetes.io/tls Secret and its CA as base64 PEM). The webhook restarts when the certificate rotates.
+  certificates: openshift-service-ca
+  certManager:
+    issuerRef: {name: "", kind: Issuer}
+  tls:
+    secretName: ""
+    caBundle: ""
+  networkPolicy:
+    from: []                 # NetworkPolicy peers allowed to call port 8443; empty = any (the API server is rarely a pod)
+  priorityClassName: ""
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
 rbac:
   # Read-only, never Secrets. Every holder of the bearer token reads through this ServiceAccount, so the default is
   # the release namespace plus the namespaces listed below; "cluster" grants cluster-wide reads.

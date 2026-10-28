@@ -1,0 +1,350 @@
+{{- /*
+kube-noob-admission (requirements R3.3, capability tier A): a validating webhook that turns every kube-noob finding
+of an object into an admission warning and denies only the rules listed in admission.enforce. failurePolicy Ignore:
+a dead or slow webhook never blocks the cluster; it only stops warning. Off by default.
+*/ -}}
+{{- if .Values.admission.enabled }}
+{{- $a := .Values.admission }}
+{{- $name := include "kube-noob.admissionName" . }}
+{{- $ns := .Release.Namespace }}
+{{- $openshift := .Capabilities.APIVersions.Has "security.openshift.io/v1" }}
+{{- if not (has $a.certificates (list "openshift-service-ca" "cert-manager" "secret")) }}
+{{- fail "admission.certificates must be openshift-service-ca, cert-manager or secret" }}
+{{- end }}
+{{- if and (eq $a.certificates "cert-manager") (not $a.certManager.issuerRef.name) }}
+{{- fail "admission.certificates cert-manager needs admission.certManager.issuerRef.name (an Issuer or ClusterIssuer)" }}
+{{- end }}
+{{- if and (eq $a.certificates "secret") (not (and $a.tls.secretName $a.tls.caBundle)) }}
+{{- fail "admission.certificates secret needs admission.tls.secretName (a kubernetes.io/tls Secret) and admission.tls.caBundle (the base64 PEM of the CA that signed it)" }}
+{{- end }}
+{{- if and $a.lookups .Values.networkPolicy.enabled .Values.networkPolicy.egress.enabled (not .Values.networkPolicy.egress.apiServerCIDRs) }}
+{{- fail "admission.lookups reads the API server: set networkPolicy.egress.apiServerCIDRs (or networkPolicy.egress.enabled=false)" }}
+{{- end }}
+{{- $tlsSecret := ternary $a.tls.secretName (printf "%s-tls" $name) (eq $a.certificates "secret") }}
+{{- $excluded := concat (list "kube-system" "kube-public" "kube-node-lease" "openshift" $ns) ($a.excludedNamespaces | default list) | uniq }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+automountServiceAccountToken: {{ $a.lookups }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+data:
+  config.yaml: |
+    offline: true             # the webhook fetches nothing; lookups read the API server only
+    webEnabled: false
+    defaultPlatform: {{ .Values.config.defaultPlatform }}
+    llm:
+      provider: none
+    cluster:
+      enabled: {{ $a.lookups }}
+      backend: in-cluster
+    admission:
+      enforce: {{- if $a.enforce }}{{ toYaml $a.enforce | nindent 8 }}{{ else }} []{{ end }}
+      excludedNamespaces: {{- toYaml $excluded | nindent 8 }}
+      lookups: {{ $a.lookups }}
+      maxWarnings: {{ $a.maxWarnings }}
+      {{- with $a.platformVersion }}
+      version: {{ . | quote }}
+      {{- end }}
+      {{- if $a.exceptions }}
+      exceptionsFile: /etc/kube-noob-admission/config/exceptions.yaml
+      {{- end }}
+  {{- with $a.exceptions }}
+  exceptions.yaml: |
+    {{- . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+  {{- if eq $a.certificates "openshift-service-ca" }}
+  annotations:
+    # The OpenShift service CA operator writes a serving certificate for <name>.<namespace>.svc into this Secret.
+    service.beta.openshift.io/serving-cert-secret-name: {{ $tlsSecret }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector: {{- include "kube-noob.admissionSelectorLabels" . | nindent 4 }}
+  ports:
+    - {name: https, port: 443, targetPort: https, protocol: TCP}
+---
+{{- if eq $a.certificates "cert-manager" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+spec:
+  secretName: {{ $tlsSecret }}
+  dnsNames:
+    - {{ printf "%s.%s.svc" $name $ns }}
+    - {{ printf "%s.%s.svc.cluster.local" $name $ns }}
+  duration: 2160h
+  renewBefore: 360h
+  privateKey: {algorithm: ECDSA, size: 256, rotationPolicy: Always}
+  issuerRef:
+    name: {{ $a.certManager.issuerRef.name }}
+    kind: {{ $a.certManager.issuerRef.kind }}
+    group: cert-manager.io
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+spec:
+  replicas: {{ $a.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: {{- include "kube-noob.admissionSelectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  template:
+    metadata:
+      labels: {{- include "kube-noob.admissionLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s|%s|%s|%s" (toJson $a.enforce) (toJson $excluded) (toString $a.lookups) ($a.exceptions | default "") | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: {{ $a.lookups }}
+      {{- with $a.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+        {{- if not $openshift }}
+        # Vanilla Kubernetes: let UID 1001 read the serving key (mode 0440); OpenShift assigns fsGroup itself.
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {{- include "kube-noob.admissionSelectorLabels" . | nindent 20 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "kube-noob.admissionSelectorLabels" . | nindent 14 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: admission
+          image: {{ include "kube-noob.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["admission", "serve", "--port", "8443",
+                 "--tls-cert", "/etc/kube-noob-admission/tls/tls.crt", "--tls-key", "/etc/kube-noob-admission/tls/tls.key"]
+          env:
+            - {name: KUBE_NOOB_CONFIG, value: /etc/kube-noob-admission/config/config.yaml}
+            - {name: KUBE_NOOB_DATA_DIR, value: /var/lib/kube-noob}
+            - {name: KUBE_NOOB_OFFLINE, value: "true"}
+            - {name: KUBE_NOOB_WEB_ENABLED, value: "false"}
+            - {name: KUBE_NOOB_CLUSTER_ENABLED, value: {{ $a.lookups | quote }}}
+            - {name: HOME, value: /tmp}
+          ports:
+            - {name: https, containerPort: 8443, protocol: TCP}
+          readinessProbe:
+            httpGet: {path: /readyz, port: https, scheme: HTTPS}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /healthz, port: https, scheme: HTTPS}
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet: {path: /healthz, port: https, scheme: HTTPS}
+            periodSeconds: 2
+            failureThreshold: 60
+          resources: {{- toYaml $a.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/kube-noob-admission/config, readOnly: true}
+            - {name: tls, mountPath: /etc/kube-noob-admission/tls, readOnly: true}
+            - {name: data, mountPath: /var/lib/kube-noob}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ $name }}}
+        - name: tls
+          secret:
+            secretName: {{ $tlsSecret }}
+            defaultMode: 288
+            items: [{key: tls.crt, path: tls.crt}, {key: tls.key, path: tls.key}]
+        - name: data
+          emptyDir: {sizeLimit: 256Mi}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+{{- if gt (int $a.replicaCount) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "kube-noob.admissionSelectorLabels" . | nindent 6 }}
+---
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "kube-noob.admissionSelectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress{{ if .Values.networkPolicy.egress.enabled }}, Egress{{ end }}]
+  ingress:
+    # The API server calls the webhook; it is rarely a pod a selector can name, so by default port 8443 is open to
+    # every source (the webhook only evaluates what it is sent). admission.networkPolicy.from narrows it.
+    - ports:
+        - {protocol: TCP, port: 8443}
+      {{- with $a.networkPolicy.from }}
+      from: {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.networkPolicy.egress.enabled }}
+  egress:
+    {{- if $a.lookups }}
+    - to:
+        {{- range .Values.networkPolicy.egress.apiServerCIDRs }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.networkPolicy.egress.apiServerPort }}}
+        - {protocol: TCP, port: 443}
+    {{- else }} []
+    {{- end }}
+  {{- end }}
+---
+{{- end }}
+{{- if $a.lookups }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-{{ $ns }}-lookups
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+rules:
+  # What the cross-object rules read (kube_noob.admission.CONTEXT_RESOURCES and storage classes). Never Secrets.
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-{{ $ns }}-lookups
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-{{ $ns }}-lookups
+subjects:
+  - {kind: ServiceAccount, name: {{ $name }}, namespace: {{ $ns }}}
+---
+{{- end }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ $name }}.{{ $ns }}.kube-noob.io
+  labels: {{- include "kube-noob.admissionLabels" . | nindent 4 }}
+  {{- if eq $a.certificates "openshift-service-ca" }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+  {{- else if eq $a.certificates "cert-manager" }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ $ns }}/{{ $name }}
+  {{- end }}
+webhooks:
+  - name: rules.admission.kube-noob.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Ignore       # never block the cluster: a dead webhook admits everything, without warnings
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ $a.timeoutSeconds }}
+    clientConfig:
+      service: {name: {{ $name }}, namespace: {{ $ns }}, path: /validate, port: 443}
+      {{- if eq $a.certificates "secret" }}
+      caBundle: {{ $a.tls.caBundle }}
+      {{- end }}
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: {{- toYaml $excluded | nindent 12 }}
+        - key: kube-noob.io/admission
+          operator: NotIn
+          values: [disabled]
+    {{- if semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version }}
+    matchConditions:
+      - name: not-an-openshift-namespace
+        expression: '!request.namespace.startsWith("openshift-")'
+      - name: not-owned-by-a-controller
+        expression: >-
+          !(request.kind.kind in ["Pod", "ReplicaSet", "Job"]) || !has(object.metadata.ownerReferences) ||
+          !object.metadata.ownerReferences.exists(r, has(r.controller) && r.controller)
+    {{- end }}
+    rules:
+      - {apiGroups: [""], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [pods, services, serviceaccounts, persistentvolumeclaims]}
+      - {apiGroups: [apps], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [deployments, statefulsets, daemonsets, replicasets]}
+      - {apiGroups: [batch], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [jobs, cronjobs]}
+      - {apiGroups: [networking.k8s.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [ingresses, networkpolicies]}
+      - {apiGroups: [policy], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [poddisruptionbudgets]}
+      - {apiGroups: [autoscaling], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [horizontalpodautoscalers]}
+      - {apiGroups: [rbac.authorization.k8s.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [roles, rolebindings]}
+      - {apiGroups: [route.openshift.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [routes]}
+      - {apiGroups: [apps.openshift.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [deploymentconfigs]}
+      - {apiGroups: [gateway.networking.k8s.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [gateways, httproutes]}
+      - {apiGroups: [k8s.ovn.org], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [egressfirewalls]}
+{{- end }}

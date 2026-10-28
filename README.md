@@ -13,12 +13,12 @@
 
 **No AI inside. Works with yours.** kube-noob is a Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox expert
 in a box: audit rules, read-only-first playbooks, cited docs and graded exercises. Claude, OpenShift Lightspeed or any
-MCP client calls it as tools; the CLI runs it with no AI at all. It makes no network calls unless you turn them on.
+MCP client calls it as tools; the CLI runs it with no AI at all. No network calls unless you turn them on.
 
 - **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles;
   scanner findings with VEX, KEV and reachability; STRIDE threat models.
-- **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno); CI gate.
+- **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno) and webhook; CI gate.
 - **Debug**: 40 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
   denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
   evidence (never Secrets); failed CI builds explained.

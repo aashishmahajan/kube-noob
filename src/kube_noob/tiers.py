@@ -7,6 +7,10 @@
 | D | ``dryRun.enabled`` | server-side dry-run (``?dryRun=All``) of a manifest | create/patch on the named resources |
 | W | ``itsm.writeEnabled``, ``notify.enabled`` | attach evidence to a ticket; forward a report | the system's token |
 | G | ``gate.enabled`` | forward an approved tool call to an upstream MCP server | the upstream's own access |
+| A | ``admission.enforce`` | ``kube-noob admission serve`` denies requests for the listed rules (else warns) | none |
+
+Tier A is configuration, not an action: the operator who lists a rule in ``admission.enforce`` is the person who
+approved every denial of that rule, so it needs no per-action approval; without it the webhook only warns.
 
 The read-only backends (``kube_noob.debug.backends``) have no method that writes. Anything that changes something is
 a ``Writer`` subclass: it cannot be constructed while its tier is off, and each call is checked against an
@@ -101,6 +105,21 @@ TIERS: tuple[Tier, ...] = (
             "server/tools.mdx",
         ),
     ),
+    Tier(
+        "A",
+        "admission enforcement",
+        ("admission.enforce",),
+        "kube-noob admission serve denies a create or update for a rule listed in admission.enforce (only a finding "
+        "the old object did not have); without it the webhook only warns, and it never mutates",
+        "none for the webhook; admission.lookups adds get and list on PodDisruptionBudgets, NetworkPolicies, "
+        "PersistentVolumeClaims, HorizontalPodAutoscalers and StorageClasses (chart: templates/admission.yaml)",
+        writes=False,
+        external=False,
+        sources=(  # failurePolicy Ignore, timeoutSeconds 1-30, warnings in AdmissionResponse (checked 2026-10-28)
+            "https://github.com/kubernetes/api/blob/master/admissionregistration/v1/types.go",
+            "https://github.com/kubernetes/api/blob/master/admission/v1/types.go",
+        ),
+    ),
 )
 _BY_CODE = {t.code: t for t in TIERS}
 
@@ -138,6 +157,11 @@ def conflicts(settings: Settings) -> list[str]:
     for sw in ("probe.enabled", "dryRun.enabled"):
         if _switch(settings, sw) and not settings.cluster.enabled:
             out.append(f"{sw} needs cluster.enabled (tiers P and D act on the cluster); it stays unusable until then")
+    if settings.admission.lookups and not settings.cluster.enabled:
+        out.append(
+            "admission.lookups reads the namespace's other objects and needs cluster.enabled (read-only); "
+            "kube-noob admission serve refuses to start until then"
+        )
     if settings.offline:
         for sw in ("itsm.writeEnabled", "notify.enabled"):
             if _switch(settings, sw):
