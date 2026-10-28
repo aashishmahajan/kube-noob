@@ -1048,6 +1048,17 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["low", "medium", "high", "critical", "never"],
         help="exit 1 when a finding is at or above this severity",
     )
+    mga.add_argument(
+        "--report",
+        metavar="DIR",
+        help="write report.md and report.json here: findings with the known issues and team memory that match them",
+    )
+    mga.add_argument(
+        "--case-draft",
+        action="store_true",
+        help="with --report, also write case-draft.md: a support case with the facts filled in and placeholders "
+        "for what only you know",
+    )
     ad = sub.add_parser(
         "admission",
         help="The kube-noob-admission webhook: admission warnings for every rule, denials only for enforced rules",
@@ -1856,16 +1867,35 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _code_cmd(a, s, fmt)
     if a.cmd == "must-gather":
         from kube_noob.mustgather import analyse, ingest
+        from kube_noob.mustgather import report as mg_report
 
         try:
             bundle = ingest.open_bundle(Path(a.path))
         except ingest.MustGatherError as exc:
             raise ConfigError(str(exc)) from exc
+        if a.case_draft and not a.report:
+            raise ConfigError("--case-draft needs --report DIR")
         analysis = analyse.analyse(bundle)
+        rep = mg_report.build(
+            bundle, analysis, data_dir=s.data_dir, memory_dirs=[Path(m) for m in s.memory.paths] or None
+        )
+        written = []
+        if a.report:
+            try:
+                written = mg_report.write(rep, Path(a.report), draft=a.case_draft)
+            except (OSError, ValueError) as exc:
+                raise ConfigError(f"--report {a.report}: {exc}") from exc
         if a.format == "text":
-            _tprint(ingest.render_text(bundle) + "\n" + analyse.render_text(analysis))
+            text = ingest.render_text(bundle) + "\n" + analyse.render_text(analysis)
+            for m in rep["knownIssues"]:
+                text += f"\nknown issue {m['id']} ({m.get('status') or ''}): {m.get('summary') or ''}"[:300]
+            for m in rep["memory"]:
+                text += f"\nteam memory [mem:{m['id']}]: {m.get('symptom', '')}"[:300]
+            for path in written:
+                text += f"\nwrote {path}"
+            _tprint(text)
         else:
-            _emit({**bundle.as_dict(), **analysis.as_dict()}, fmt)
+            _emit({**bundle.as_dict(), **rep}, fmt)
         return 1 if analyse.failing(analysis, a.fail_on) else 0
     if a.cmd == "admission":
         return _admission_cmd(a, s, fmt)

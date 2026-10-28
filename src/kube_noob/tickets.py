@@ -149,6 +149,7 @@ GENERIC_WORDS = frozenset(
     rpc grpc desc notfound unpack terminated last state context canceled cancelled eof dial tcp udp http https
     connection connect lookup host port address get post put read write file files directory path permission
     unknown exists already found available unavailable internal server client api default system kube
+    too took long time times very much many few
     """.split()  # noqa: SIM905 - a word list reads better as text
 )
 

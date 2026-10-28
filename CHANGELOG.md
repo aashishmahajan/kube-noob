@@ -10,6 +10,18 @@
   elides their values; kube-noob does not open them at all); nested archives are listed, not opened. Caps bound the
   file count, the bytes processed (a gzip bomb stops at the cap), each file, what is kept in memory and the nesting
   depth; logs keep their last MiB. The layout was read from openshift/oc's `must-gather` and `inspect` source.
+- `must-gather analyze --report DIR [--case-draft]` (backlog G3) writes `report.md` and `report.json`: the summary
+  (version, update state, platform, nodes, operators, the OLM operators installed), every finding ranked with its
+  evidence files, signals and read-only commands, the OpenShift known issues and Jira cache tickets that match each
+  finding with their status and fix version for the detected version, approved team memory entries that match, the
+  read-only next steps in order, what was read and skipped, and the knowledge date. `case-draft.md` is a support case
+  with the facts filled in (environment, update history, evidence, matched bugs, suggested read-only checks) and a
+  `[FILL IN: ...]` placeholder for everything only you know (problem statement, start time, change, frequency,
+  impact, severity, steps taken); nothing is invented. Every string is redacted again on the way out and the
+  must-gather's path is reduced to its file name. `kube-noob demo must-gather` walks through it offline in under a
+  second. Go's monotonic clock suffix (`m=+0.03`) is dropped from must-gather timestamps. "too", "took", "long",
+  "time", "times", "very", "much", "many" and "few" no longer count as rare words in known-issue matching (an etcd
+  "apply request took too long" line matched a PTP issue on them; the recall eval is unchanged).
 - Code findings red team (SAST1): 16 reproduced findings fixed, each with a regression test
   (`tests/test_code_redteam.py`). Fail-open paths closed: an absolute `-c`/`--containerfile` path or context, the
   gate having no build context (`--containerfile PATH[=IMAGE][,context=DIR][,target=STAGE]` now, as in `code

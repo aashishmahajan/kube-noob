@@ -258,6 +258,16 @@ kube-noob must-gather analyze must-gather.tar.gz --fail-on critical
 kube-noob --format json must-gather analyze must-gather.local.5421342344627712289/
 ```
 
+Before you open a case, `--report` writes `report.md` and `report.json` with every finding matched to the known
+OpenShift bugs for the version the cluster runs (and to your team's approved memory entries), and `--case-draft`
+adds `case-draft.md`: environment, update history, evidence files, matched bugs and the read-only checks to paste,
+with a `[FILL IN: ...]` for everything only you know. `kube-noob demo must-gather` shows the whole flow offline.
+
+```bash
+kube-noob must-gather analyze must-gather.tar.gz --report case-01 --case-draft
+kube-noob demo must-gather
+```
+
 ```text
 OpenShift 4.20.3; updating to 4.20.4; platform AWS; 1/2 nodes Ready; 2/3 cluster operators Available, 1 Degraded
 findings: 2 critical, 8 high, 10 medium, 2 low, 2 info

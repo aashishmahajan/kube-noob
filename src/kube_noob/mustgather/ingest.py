@@ -182,7 +182,8 @@ def _meta(bundle: Bundle, path: str, data: bytes) -> None:
         if name == "version" and own:
             root.version = " ".join(lines)[:200]
         elif name == "timestamp" and (own or (above and not root.timestamp)):
-            root.timestamp = (lines[0] if lines else "")[:100]
+            # Go's time.Time String() ends with the monotonic clock reading (" m=+0.03"): not a time, dropped
+            root.timestamp = re.sub(r"\s+m=[+-][0-9.]+$", "", lines[0] if lines else "")[:100]
 
 
 def _keep(bundle: Bundle, path: str, kind: str, size: int, read: Any) -> None:

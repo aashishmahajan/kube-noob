@@ -288,6 +288,39 @@ def _memory(kit: Any, emit: Emit) -> None:
     emit(f"version {out['query']['version']} from the alert's {out['query'].get('versionFrom', '')}")
 
 
+def _mustgather(kit: Any, emit: Emit) -> None:
+    from kube_noob.mustgather import analyse, ingest, sample
+    from kube_noob.mustgather import report as mg_report
+
+    case = Path(kit.settings.data_dir) / "case-01"
+    archive = sample.write(case)
+    _step(
+        emit,
+        "A must-gather arrives: open it safely (nothing extracted or run, Secrets never read)",
+        "kube-noob must-gather analyze must-gather.tar.gz",
+    )
+    bundle = ingest.open_bundle(archive)
+    skipped = ", ".join(f"{s['count']} {s['reason']}" for s in bundle.as_dict()["skipped"])
+    emit(f"{bundle.listed} files read as a stream; skipped: {skipped}")
+    analysis = analyse.analyse(bundle)
+    text = analyse.render_text(analysis).splitlines()
+    emit(text[0])
+    emit(text[1])
+    for f in analysis.findings[:6]:
+        emit(f"  {f.severity.upper():8} {f.title}")
+    emit(f"  ... {len(analysis.findings) - 6} more, each with its file, signals and read-only next steps")
+    _step(
+        emit,
+        "Match every finding to known bugs for the version it runs, and draft the support case",
+        "kube-noob must-gather analyze must-gather.tar.gz --report report --case-draft",
+    )
+    rep = mg_report.build(bundle, analysis, data_dir=kit.settings.data_dir)
+    for m in rep["knownIssues"]:
+        emit(f"{m['id']} (findings {', '.join(str(n) for n in m['findings'])}): {m.get('status') or ''}")
+    written = mg_report.write(rep, case / "report", draft=True)
+    emit(f"wrote {', '.join(p.name for p in written)}: every [FILL IN] in the case draft is yours to answer")
+
+
 def _posture(kit: Any, emit: Emit) -> None:
     from kube_noob.posture import posture, render_text
 
@@ -316,6 +349,12 @@ SCENARIOS: dict[str, Scenario] = {
         Scenario("search", "Cited answers from local knowledge", "everyone", _search),
         Scenario("learning", "Remember a confirmed team fix and find it later", "teams", _learning),
         Scenario("memory", "Fixes as code: a team memory repo, its guard and a match", "teams, SREs", _memory),
+        Scenario(
+            "must-gather",
+            "Must-gather pre-flight: what is wrong, the matching bugs, a case draft",
+            "support engineers, SREs",
+            _mustgather,
+        ),
         Scenario("posture", "Show and lock the security posture", "security, platform admins", _posture),
     )
 }
