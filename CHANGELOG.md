@@ -57,8 +57,9 @@
   verifier: patches are validated, audited and red-teamed, and privileged SCC, cluster-admin, hostPath and wildcard
   RBAC grants fail unless the entry records an unexpired `riskAccepted`); `match` takes text or an Alertmanager
   payload, matches approved entries on signals first and distinctive words second, shows negative entries as "tried,
-  did not work" and entries fixed in your version as retired, with "matched N times, resolved M"; `outcome`, `stats
-  --by cluster|signal|component` and `migrate-learning`. New demo: `kube-noob demo memory`.
+  did not work" and entries fixed in your version as retired, with "matched N times, resolved M; seen on N of your
+  clusters, fixed on M"; `outcome` (with a cluster label), `stats --by cluster|signal|component` and
+  `migrate-learning`. New demo: `kube-noob demo memory`.
 - Faster on long input: search walks each distinct query word's postings instead of every chunk for every word
   (scores unchanged), so a 100 KB repetitive error no longer costs seconds in known-issue matching; JSON input is
   parsed as JSON only, and each playbook pattern scans the text once.
