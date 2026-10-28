@@ -740,7 +740,7 @@ jobs:
     env:
       TEKTON_VERSION: v1.15.5
       # release.yaml of that version; empty until a run of this job has read it (the step prints it), then pinned
-      TEKTON_SHA256: ""
+      TEKTON_SHA256: "c2fe5c2ac98af2984f2d58199e81ef2056802f671051744d986ec998ad19ba84"
       GITLAB_CI_LOCAL: gitlab-ci-local@4.76.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -801,9 +801,7 @@ jobs:
           url="https://github.com/tektoncd/pipeline/releases/download/${TEKTON_VERSION}/release.yaml"
           curl -fsSL --retry 3 -o /tmp/tekton.yaml "$url"
           got=$(sha256sum /tmp/tekton.yaml | cut -d' ' -f1)
-          if [ -z "$TEKTON_SHA256" ]; then
-            echo "::notice title=Tekton release.yaml::${TEKTON_VERSION} sha256 ${got} (not pinned yet)"
-          elif [ "$got" != "$TEKTON_SHA256" ]; then
+          if [ "$got" != "$TEKTON_SHA256" ]; then
             echo "::error title=Tekton release.yaml::sha256 ${got} differs from the pinned ${TEKTON_SHA256}"; exit 1
           fi
           kubectl apply -f /tmp/tekton.yaml > /tmp/tekton.out 2>&1 \
