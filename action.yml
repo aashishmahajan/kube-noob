@@ -1,0 +1,103 @@
+name: kube-noob gate
+description: >-
+  Audit Kubernetes and OpenShift manifests, Helm charts and Containerfiles before deploy, offline. Fails at a
+  severity you choose, writes SARIF for code scanning and a job summary. No network calls, no AI.
+author: kube-noob project
+branding:
+  icon: shield
+  color: blue
+inputs:
+  paths:
+    description: Manifest files or directories, separated by spaces.
+    required: false
+    default: ""
+  chart:
+    description: A Helm chart directory to render with helm template (findings point at its templates).
+    required: false
+    default: ""
+  values:
+    description: Values files for the chart, separated by spaces.
+    required: false
+    default: ""
+  namespace:
+    description: Namespace to render the chart into.
+    required: false
+    default: default
+  containerfiles:
+    description: Containerfiles to audit, separated by spaces.
+    required: false
+    default: ""
+  platform:
+    description: kubernetes, openshift, rosa-classic or rosa-hcp.
+    required: false
+    default: kubernetes
+  version:
+    description: The target OpenShift (4.20) or Kubernetes (1.33) version.
+    required: false
+    default: ""
+  exceptions:
+    description: An exception list (kube-noob.io/v1 ExceptionList).
+    required: false
+    default: ""
+  fail-on:
+    description: info, low, medium, high, critical or never.
+    required: false
+    default: high
+  sarif:
+    description: Where to write the SARIF file (upload it with github/codeql-action/upload-sarif).
+    required: false
+    default: kube-noob.sarif
+outputs:
+  result:
+    description: passed or failed.
+    value: ${{ steps.gate.outputs.result }}
+  sarif:
+    description: The SARIF file written.
+    value: ${{ inputs.sarif }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.12"
+    - name: Install kube-noob from this action's source (dependencies pinned by hash)
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m venv "$RUNNER_TEMP/kube-noob-venv"
+        pip="$RUNNER_TEMP/kube-noob-venv/bin/pip"
+        "$pip" install --disable-pip-version-check --quiet --require-hashes --only-binary=:all: \
+          -r "$GITHUB_ACTION_PATH/requirements.lock" -r "$GITHUB_ACTION_PATH/requirements-build.lock"
+        "$pip" install --disable-pip-version-check --quiet --no-deps --no-build-isolation "$GITHUB_ACTION_PATH"
+        echo "$RUNNER_TEMP/kube-noob-venv/bin" >> "$GITHUB_PATH"
+    - if: inputs.chart != ''
+      uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+    - id: gate
+      name: kube-noob gate
+      shell: bash
+      env:
+        KN_PATHS: ${{ inputs.paths }}
+        KN_CHART: ${{ inputs.chart }}
+        KN_VALUES: ${{ inputs.values }}
+        KN_NAMESPACE: ${{ inputs.namespace }}
+        KN_CONTAINERFILES: ${{ inputs.containerfiles }}
+        KN_PLATFORM: ${{ inputs.platform }}
+        KN_VERSION: ${{ inputs.version }}
+        KN_EXCEPTIONS: ${{ inputs.exceptions }}
+        KN_FAIL_ON: ${{ inputs.fail-on }}
+        KN_SARIF: ${{ inputs.sarif }}
+      run: |
+        set -euo pipefail
+        args=(--platform "$KN_PLATFORM" --fail-on "$KN_FAIL_ON" --namespace "$KN_NAMESPACE")
+        for p in $KN_PATHS; do args+=(-f "$p"); done
+        if [ -n "$KN_CHART" ]; then args+=(--chart "$KN_CHART"); fi
+        for v in $KN_VALUES; do args+=(--values "$v"); done
+        for c in $KN_CONTAINERFILES; do args+=(--containerfile "$c"); done
+        if [ -n "$KN_VERSION" ]; then args+=(--version "$KN_VERSION"); fi
+        if [ -n "$KN_EXCEPTIONS" ]; then args+=(--exceptions "$KN_EXCEPTIONS"); fi
+        rc=0
+        kube-noob gate "${args[@]}" --sarif "$KN_SARIF" --summary "$RUNNER_TEMP/kube-noob-summary.md" \
+          --format json > "$RUNNER_TEMP/kube-noob-gate.json" || rc=$?
+        if [ -f "$RUNNER_TEMP/kube-noob-summary.md" ]; then cat "$RUNNER_TEMP/kube-noob-summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+        if [ "$rc" = 0 ]; then echo "result=passed" >> "$GITHUB_OUTPUT"; elif [ "$rc" = 1 ]; then echo "result=failed" >> "$GITHUB_OUTPUT"; fi
+        exit "$rc"

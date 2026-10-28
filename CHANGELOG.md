@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `kube-noob gate`: the CI gate before deploy. One command over manifests, rendered charts (`--chart`, findings
+  point at the template file) and Containerfiles runs the audit (with `--exceptions`), says for each finding whether
+  the generated admission policy would refuse it in enforce mode, lists open reported issues in the target OpenShift
+  release that name a deployed kind, and fails at `--fail-on` (default high). It writes SARIF 2.1.0 (GitHub code
+  scanning), a Markdown summary and GitLab code quality JSON; directory walks skip dot directories, Helm templates and
+  YAML that is not a manifest, and list them. Shipped as a GitHub Action (`uses: aashishmahajan/kube-noob@<tag>`,
+  dependencies pinned by hash, inputs passed through the environment), a Tekton Task
+  (`deploy/tekton/kube-noob-gate.yaml`, read-only source workspace) and a GitLab CI template
+  (`deploy/gitlab/kube-noob-gate.gitlab-ci.yml`, code quality report). CI runs all three: our chart passes, the bad
+  fixtures fail. Vulnerability checks are listed as not run until the scanner reader (R5.1) lands.
 - `kube-noob build diagnose` (and the MCP tool `build_diagnose`, and `insight` for a pasted build log): a failed
   GitHub Actions, Jenkins (Pipeline and freestyle), Tekton (`tkn ... logs`) or OpenShift build (`oc logs build/...`)
   log gives the failing step and why it is that step, the error line and its template, the cause class (dependency

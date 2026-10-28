@@ -211,6 +211,32 @@ def _exceptions_cmd(a: argparse.Namespace, fmt: str) -> int:
     return 0 if out["gate"] else 1
 
 
+def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob import gate
+    from kube_noob.audit.exceptions import ExceptionsError
+
+    try:
+        sources = gate.collect(a.file, _read) + gate.render(a.chart, a.values, a.namespace)
+        report = gate.run(
+            sources,
+            containerfiles=[(p, _read(p)) for p in a.containerfile],
+            platform=a.platform or s.default_platform,
+            version=a.pversion,
+            exceptions=_read(a.exceptions) if a.exceptions else None,
+            fail_on=a.fail_on,
+            chart_path=a.chart_path,
+            data_dir=s.data_dir,
+        )
+    except (gate.GateError, ExceptionsError) as exc:
+        raise ConfigError(str(exc)) from exc
+    gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
+    if a.format == "text":
+        _tprint(gate.markdown(report, top=50))
+    else:
+        _emit(report, fmt)
+    return 0 if report["passed"] else 1
+
+
 def _build_cmd(a: argparse.Namespace, kit: Any, fmt: str) -> int:
     from kube_noob import toolkit as tk
     from kube_noob.build import containerfile as cf
@@ -429,6 +455,28 @@ def build_parser() -> argparse.ArgumentParser:
     exc_chk = exc_sub.add_parser("check", help="Check every entry and say why one is refused or expired")
     exc_chk.add_argument("file", help="the exception list (YAML)")
     exc_chk.add_argument("--today", default=None, help="check as of this date (YYYY-MM-DD), for planning renewals")
+    gt = sub.add_parser(
+        "gate",
+        help="CI gate before deploy: audit, admission policy, reported issues and Containerfiles; SARIF and a summary",
+        description="Audits manifests and rendered charts (with an exception list when given), says which findings the "
+        "generated admission policies would refuse, lists open reported issues in the target OpenShift release that "
+        "name a deployed kind, audits Containerfiles, and exits 1 at --fail-on. Writes SARIF 2.1.0, a Markdown "
+        "summary and GitLab code quality JSON. Offline. Example: helm template app chart/ > rendered.yaml && "
+        "kube-noob gate -f rendered.yaml --chart-path chart --platform openshift --version 4.20 --sarif out.sarif",
+    )
+    gt.add_argument("-f", "--file", action="append", default=[], help="manifests: a file, a directory, or -; repeat")
+    gt.add_argument("--chart", action="append", default=[], help="a Helm chart directory to render; repeat")
+    gt.add_argument("--values", action="append", default=[], help="values file for --chart; repeat")
+    gt.add_argument("--namespace", default="default", help="namespace to render charts into")
+    gt.add_argument("--containerfile", action="append", default=[], help="a Containerfile to audit; repeat")
+    gt.add_argument("--platform", choices=PLATFORMS)
+    gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
+    gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
+    gt.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
+    gt.add_argument("--chart-path", default=None, help="the chart in the repository: findings point at its templates")
+    gt.add_argument("--sarif", default=None, help="write SARIF 2.1.0 here (GitHub code scanning)")
+    gt.add_argument("--summary", default=None, help="write the Markdown summary here ($GITHUB_STEP_SUMMARY)")
+    gt.add_argument("--codequality", default=None, help="write GitLab code quality JSON here")
     bd = sub.add_parser(
         "build",
         help="Build insight: why a build failed, and a Containerfile and image audit",
@@ -1265,6 +1313,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _rhacs_cmd(a, s, fmt)
     if a.cmd == "build":
         return _build_cmd(a, kit, fmt)
+    if a.cmd == "gate":
+        return _gate_cmd(a, s, fmt)
     if a.cmd == "watch":
         return _watch(a, s, fmt)
 

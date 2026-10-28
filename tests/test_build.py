@@ -208,14 +208,14 @@ def test_build_context_and_ignore_files(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("DB_PASSWORD=hunter2hunter2\n")
     (tmp_path / "keys").mkdir()
     (tmp_path / "keys" / "id_rsa").write_text("key\n")
-    (tmp_path / "keys" / "deploy.pem").write_text("key\n")
-    (tmp_path / ".dockerignore").write_text("keys/\n!keys/deploy.pem\n")
+    (tmp_path / "keys" / "deploy.key").write_text("key\n")
+    (tmp_path / ".dockerignore").write_text("keys/\n!keys/deploy.key\n")
     text = (
         f"FROM {('registry.access.redhat.com/ubi9/python-312@' + DIGEST)}\nCOPY . .\nUSER 1001\nHEALTHCHECK CMD true\n"
     )
     rep = cf.audit(text, context=tmp_path)
     msgs = [f["message"] for f in rep["findings"] if f["ruleId"] == "KN-B004"]
-    assert any(".env" in m for m in msgs) and any("keys/deploy.pem" in m for m in msgs)
+    assert any(".env" in m for m in msgs) and any("keys/deploy.key" in m for m in msgs)
     assert not any("id_rsa" in m for m in msgs), "excluded by .dockerignore"
     (tmp_path / ".containerignore").write_text(".env\nkeys/**\n")
     rep = cf.audit(text, context=tmp_path)
@@ -342,6 +342,30 @@ def test_a_planted_secret_in_a_layer_is_found_even_after_deletion(tmp_path: Path
     assert "KN-B002" in _ids(rep), "an empty User runs as root"
     assert not any("ca-bundle" in f["message"] for f in layer_hits), "certificates are public"
     assert rep["image"]["layers"] == 3 and rep["image"]["files"] >= 4
+
+
+def test_certificates_named_pem_are_not_private_keys(tmp_path: Path) -> None:
+    """Found by CI on ubi-minimal: /etc/pki/product-default/479.pem and a CA .pem were reported as key files."""
+    cert = b"-----BEGIN CERTIFICATE-----\nMIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQGEwJJ\n"
+    root = _layout(
+        tmp_path / "img",
+        [
+            {
+                "etc/pki/product-default/479.pem": cert,
+                "usr/share/gnupg/sks-keyservers.netCA.pem": cert,
+                "opt/app/tls.pem": f"{KEY_HEAD}\nAAAA\n".encode(),
+            }
+        ],
+        user="1001",
+    )
+    hits = [f["message"] for f in image.audit(None, layout=root)["findings"] if f["ruleId"] == "KN-B009"]
+    assert len(hits) == 1 and "/opt/app/tls.pem" in hits[0]
+    (tmp_path / "ctx").mkdir()
+    (tmp_path / "ctx" / "ca.pem").write_bytes(cert)
+    (tmp_path / "ctx" / "server.pem").write_text(f"{KEY_HEAD}\nAAAA\n")
+    text = f"FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6@{DIGEST}\nCOPY . /app\nUSER 1001\n"
+    msgs = [f["message"] for f in cf.audit(text, context=tmp_path / "ctx")["findings"] if f["ruleId"] == "KN-B004"]
+    assert len(msgs) == 1 and "server.pem" in msgs[0]
 
 
 def test_the_image_user_decides_kn_b002_when_the_containerfile_sets_none(tmp_path: Path) -> None:

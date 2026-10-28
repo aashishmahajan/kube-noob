@@ -732,6 +732,148 @@ jobs:
           echo "::warning title=describe::$(kubectl -n kube-noob describe pods 2>&1 | tail -60 | enc)" || true
           echo "::warning title=logs::$(kubectl -n kube-noob logs deploy/kn-kube-noob --tail=80 2>&1 | enc)" || true
 
+  gate-ci:
+    # R4.3: the gate passes this repository's chart and fails on fixtures, as a GitHub Action, a Tekton Task (in
+    # kind) and a GitLab CI template (run by gitlab-ci-local).
+    runs-on: ubuntu-latest
+    needs: [test]
+    env:
+      TEKTON_VERSION: v1.15.5
+      # release.yaml of that version; empty until a run of this job has read it (the step prints it), then pinned
+      TEKTON_SHA256: ""
+      GITLAB_CI_LOCAL: gitlab-ci-local@4.76.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Values for rendering our chart
+        run: |
+          printf 'auth:\n  existingSecret: kn-token\n' > /tmp/kn-values.yaml
+      - id: good
+        name: GitHub Action on our own chart (must pass)
+        uses: ./
+        with:
+          chart: deploy/helm/kube-noob
+          values: /tmp/kn-values.yaml
+          namespace: kube-noob
+          containerfiles: Containerfile
+          platform: openshift
+          version: "4.20"
+          sarif: /tmp/kn-good.sarif
+      - id: bad
+        name: GitHub Action on the bad fixtures (must fail)
+        continue-on-error: true
+        uses: ./
+        with:
+          paths: tests/fixtures/gate/bad
+          containerfiles: tests/fixtures/containerfile/KN-B005.bad.Containerfile
+          platform: openshift
+          version: "4.20"
+          sarif: /tmp/kn-bad.sarif
+      - name: The action's verdicts and SARIF 2.1.0 schema
+        env:
+          GOOD: ${{ steps.good.outputs.result }}
+          BAD: ${{ steps.bad.outputs.result }}
+        run: |
+          set -euo pipefail
+          test "$GOOD" = passed || { echo "::error title=gate action::our chart: $GOOD"; exit 1; }
+          test "$BAD" = failed || { echo "::error title=gate action::bad fixtures: $BAD"; exit 1; }
+          python -m pip install --quiet check-jsonschema==0.38.2
+          check-jsonschema --schemafile https://json.schemastore.org/sarif-2.1.0.json /tmp/kn-good.sarif /tmp/kn-bad.sarif
+          python -c "
+          import json
+          bad = json.load(open('/tmp/kn-bad.sarif'))['runs'][0]['results']
+          print('::notice title=gate action::our chart passed; bad fixtures failed with', len(bad), 'SARIF results')
+          "
+      - name: Build the image the Tekton Task and the GitLab template run
+        run: |
+          docker build -f Containerfile -t kube-noob:ci .
+          docker tag kube-noob:ci "ghcr.io/aashishmahajan/kube-noob:$(python -c 'import re;print(re.search(r"__version__ = \"([^\"]+)\"", open("src/kube_noob/__init__.py").read()).group(1))')"
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: kn
+          version: v0.32.0
+          node_image: "kindest/node:v1.33.12@sha256:3f5c8443c620245e4d355cfe09e96a91ead32ceaa569d3f1ca9edf0cb2fe2ff4"
+          kubectl_version: v1.33.12
+      - name: Install Tekton Pipelines
+        run: |
+          set -euo pipefail
+          url="https://github.com/tektoncd/pipeline/releases/download/${TEKTON_VERSION}/release.yaml"
+          curl -fsSL --retry 3 -o /tmp/tekton.yaml "$url"
+          got=$(sha256sum /tmp/tekton.yaml | cut -d' ' -f1)
+          if [ -z "$TEKTON_SHA256" ]; then
+            echo "::notice title=Tekton release.yaml::${TEKTON_VERSION} sha256 ${got} (not pinned yet)"
+          elif [ "$got" != "$TEKTON_SHA256" ]; then
+            echo "::error title=Tekton release.yaml::sha256 ${got} differs from the pinned ${TEKTON_SHA256}"; exit 1
+          fi
+          kubectl apply -f /tmp/tekton.yaml > /tmp/tekton.out 2>&1 \
+            || { echo "::error title=Tekton install::$(tail -c 1500 /tmp/tekton.out | tr '\n' ' ')"; exit 1; }
+          kubectl -n tekton-pipelines rollout status deploy/tekton-pipelines-controller --timeout=300s
+          kubectl -n tekton-pipelines rollout status deploy/tekton-pipelines-webhook --timeout=300s
+          kind load docker-image kube-noob:ci --name kn
+      - name: Tekton Task on our chart (must pass) and on the bad fixtures (must fail)
+        run: |
+          set -euo pipefail
+          kubectl apply -f deploy/tekton/kube-noob-gate.yaml
+          helm template kn deploy/helm/kube-noob -n kube-noob -f /tmp/kn-values.yaml > /tmp/kn-chart.yaml
+          kubectl create configmap gate-good --from-file=chart.yaml=/tmp/kn-chart.yaml --from-file=Containerfile=Containerfile
+          kubectl create configmap gate-bad --from-file=tests/fixtures/gate/bad/ \
+            --from-file=Containerfile=tests/fixtures/containerfile/KN-B005.bad.Containerfile
+          for case in good bad; do
+            cat <<EOF | kubectl create -f -
+          apiVersion: tekton.dev/v1
+          kind: TaskRun
+          metadata: {name: gate-${case}}
+          spec:
+            taskRef: {name: kube-noob-gate}
+            params:
+              - {name: image, value: kube-noob:ci}
+              - {name: paths, value: "."}
+              - {name: containerfiles, value: Containerfile}
+              - {name: platform, value: openshift}
+              - {name: version, value: "4.20"}
+            workspaces:
+              - {name: source, configMap: {name: gate-${case}}}
+          EOF
+          done
+          for case in good bad; do
+            kubectl wait "taskrun/gate-${case}" --for=condition=Succeeded=Unknown --timeout=5s >/dev/null 2>&1 || true
+            for i in $(seq 1 90); do
+              s=$(kubectl get "taskrun/gate-${case}" -o jsonpath='{.status.conditions[0].status}')
+              [ "$s" = True ] || [ "$s" = False ] && break
+              sleep 5
+            done
+          done
+          good=$(kubectl get taskrun/gate-good -o jsonpath='{.status.results[?(@.name=="result")].value}')
+          bad=$(kubectl get taskrun/gate-bad -o jsonpath='{.status.results[?(@.name=="result")].value}')
+          counts=$(kubectl get taskrun/gate-bad -o jsonpath='{.status.results[?(@.name=="counts")].value}')
+          echo "::notice title=Tekton gate::good=${good} bad=${bad} counts=${counts}"
+          test "$good" = passed && test "$bad" = failed \
+            || { kubectl get taskrun -o yaml | tail -80 | sed 's/^/::warning title=taskrun::/'; exit 1; }
+      - name: GitLab CI template under gitlab-ci-local (must pass on the chart, fail on the fixtures)
+        run: |
+          set -euo pipefail
+          cp /tmp/kn-chart.yaml rendered-chart.yaml
+          cat > .gitlab-ci-gate.yml <<'EOF'
+          include:
+            - local: deploy/gitlab/kube-noob-gate.gitlab-ci.yml
+          gate-good:
+            extends: .kube-noob-gate
+            variables: {KUBE_NOOB_PATHS: rendered-chart.yaml, KUBE_NOOB_CONTAINERFILES: Containerfile, KUBE_NOOB_PLATFORM: openshift, KUBE_NOOB_VERSION: "4.20"}
+          gate-bad:
+            extends: .kube-noob-gate
+            variables: {KUBE_NOOB_PATHS: tests/fixtures/gate/bad, KUBE_NOOB_CONTAINERFILES: tests/fixtures/containerfile/KN-B005.bad.Containerfile, KUBE_NOOB_PLATFORM: openshift, KUBE_NOOB_VERSION: "4.20"}
+          EOF
+          git add -f rendered-chart.yaml .gitlab-ci-gate.yml  # in the index only, in case untracked files are not copied
+          npx --yes "$GITLAB_CI_LOCAL" --file .gitlab-ci-gate.yml gate-good > /tmp/gl-good.out 2>&1 \
+            || { tail -c 2000 /tmp/gl-good.out | tr '\n' ' ' | sed 's/^/::error title=gitlab good::/'; exit 1; }
+          rc=0
+          npx --yes "$GITLAB_CI_LOCAL" --file .gitlab-ci-gate.yml gate-bad > /tmp/gl-bad.out 2>&1 || rc=$?
+          test "$rc" != 0 || { echo "::error title=gitlab bad::the bad fixtures passed"; exit 1; }
+          grep -q "kube-noob gate failed" /tmp/gl-bad.out \
+            || { tail -c 2000 /tmp/gl-bad.out | tr '\n' ' ' | sed 's/^/::error title=gitlab bad output::/'; exit 1; }
+          echo "::notice title=GitLab gate::chart passed, fixtures failed (exit ${rc})"
+
   policy-kind:
     # R3.1 acceptance: each generated admission policy refuses its rule's bad fixture and admits the good one on a real
     # API server (server-side dry-run), for the built-in ValidatingAdmissionPolicy and for Kyverno ValidatingPolicy.

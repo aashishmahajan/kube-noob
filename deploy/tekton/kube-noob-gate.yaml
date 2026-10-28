@@ -1,0 +1,102 @@
+# kube-noob gate as a Tekton Task: audit manifests and Containerfiles in the source workspace before deploy.
+# Offline: no network, no cluster access, no model. Fails at params.fail-on; writes SARIF and a Markdown summary
+# into the optional output workspace. Render Helm charts in an earlier step (helm template ... > rendered.yaml) and pass the file.
+# Install: kubectl apply -f deploy/tekton/kube-noob-gate.yaml (or oc apply -n <pipelines-namespace>)
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: kube-noob-gate
+  labels:
+    app.kubernetes.io/name: kube-noob-gate
+    app.kubernetes.io/version: "0.5.0"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.50.0"
+    tekton.dev/categories: Security
+    tekton.dev/tags: kubernetes, openshift, security, audit, sarif
+    tekton.dev/displayName: kube-noob gate
+    tekton.dev/platforms: linux/amd64,linux/arm64
+spec:
+  description: >-
+    Audits Kubernetes and OpenShift manifests and Containerfiles (audit rules, admission-policy coverage, reported
+    issues in the target OpenShift release), fails at a severity you choose and writes SARIF 2.1.0 and a Markdown
+    summary. Offline.
+  workspaces:
+    - name: source
+      description: The checked-out repository (and any rendered manifests). Only read.
+      readOnly: true
+    - name: output
+      description: Where kube-noob.sarif and kube-noob-summary.md are written (default /tmp in the step).
+      optional: true
+  params:
+    - name: paths
+      type: string
+      description: Manifest files or directories in the workspace, separated by spaces.
+      default: "."
+    - name: containerfiles
+      type: string
+      description: Containerfiles in the workspace to audit, separated by spaces.
+      default: ""
+    - name: platform
+      type: string
+      description: kubernetes, openshift, rosa-classic or rosa-hcp.
+      default: openshift
+    - name: version
+      type: string
+      description: The target OpenShift (4.20) or Kubernetes (1.33) version.
+      default: ""
+    - name: exceptions
+      type: string
+      description: An exception list in the workspace (kube-noob.io/v1 ExceptionList).
+      default: ""
+    - name: fail-on
+      type: string
+      description: info, low, medium, high, critical or never.
+      default: high
+    - name: image
+      type: string
+      description: The kube-noob image (pin it by digest).
+      default: ghcr.io/aashishmahajan/kube-noob:0.5.0
+  results:
+    - name: result
+      description: passed or failed.
+    - name: counts
+      description: Findings per severity, as JSON.
+  steps:
+    - name: gate
+      image: $(params.image)
+      workingDir: $(workspaces.source.path)
+      env:
+        - {name: KN_PATHS, value: $(params.paths)}
+        - {name: KN_CONTAINERFILES, value: $(params.containerfiles)}
+        - {name: KN_PLATFORM, value: $(params.platform)}
+        - {name: KN_VERSION, value: $(params.version)}
+        - {name: KN_EXCEPTIONS, value: $(params.exceptions)}
+        - {name: KN_FAIL_ON, value: $(params.fail-on)}
+        - {name: KUBE_NOOB_OFFLINE, value: "1"}
+        - {name: HOME, value: /tmp}
+      computeResources:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {memory: 1Gi}
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        seccompProfile: {type: RuntimeDefault}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        args=(--platform "$KN_PLATFORM" --fail-on "$KN_FAIL_ON")
+        for p in $KN_PATHS; do args+=(-f "$p"); done
+        for c in $KN_CONTAINERFILES; do args+=(--containerfile "$c"); done
+        if [ -n "$KN_VERSION" ]; then args+=(--version "$KN_VERSION"); fi
+        if [ -n "$KN_EXCEPTIONS" ]; then args+=(--exceptions "$KN_EXCEPTIONS"); fi
+        out=/tmp
+        if [ "$(workspaces.output.bound)" = "true" ]; then out="$(workspaces.output.path)"; fi
+        rc=0
+        kube-noob gate "${args[@]}" --sarif "$out/kube-noob.sarif" --summary "$out/kube-noob-summary.md" \
+          --format json > /tmp/kube-noob-gate.json || rc=$?
+        if [ -f "$out/kube-noob-summary.md" ]; then cat "$out/kube-noob-summary.md"; fi
+        python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["counts"]), end="")' \
+          /tmp/kube-noob-gate.json > "$(results.counts.path)" || printf '{}' > "$(results.counts.path)"
+        if [ "$rc" = 0 ]; then printf passed > "$(results.result.path)"; else printf failed > "$(results.result.path)"; fi
+        exit "$rc"

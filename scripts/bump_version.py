@@ -29,6 +29,11 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "deploy/helm/kube-noob/Chart.yaml": (r"^version: (?P<v>\S+)$", r'^appVersion: "(?P<v>[^"]+)"$'),
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),
     "Containerfile": (r"^ARG VERSION=(?P<v>\S+)$",),
+    "deploy/tekton/kube-noob-gate.yaml": (
+        r'app\.kubernetes\.io/version: "(?P<v>[^"]+)"',
+        r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",
+    ),
+    "deploy/gitlab/kube-noob-gate.gitlab-ci.yml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),
 }
 
 

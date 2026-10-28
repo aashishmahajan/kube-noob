@@ -26,6 +26,8 @@ FILES = [
     "deploy/helm/kube-noob/Chart.yaml",
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml",
     "Containerfile",
+    "deploy/tekton/kube-noob-gate.yaml",
+    "deploy/gitlab/kube-noob-gate.gitlab-ci.yml",
     "CHANGELOG.md",
 ]
 
@@ -68,6 +70,10 @@ def test_bump_updates_every_reference(repo: Path) -> None:
     chart = yaml.safe_load((repo / "deploy/helm/kube-noob/Chart.yaml").read_text())
     assert chart["version"] == new and chart["appVersion"] == new
     assert f"kube-noob:{new}" in (repo / "deploy/sidecar/app-with-kube-noob-sidecar.yaml").read_text()
+    task = yaml.safe_load((repo / "deploy/tekton/kube-noob-gate.yaml").read_text())
+    assert task["metadata"]["labels"]["app.kubernetes.io/version"] == new
+    assert next(x for x in task["spec"]["params"] if x["name"] == "image")["default"].endswith(f":{new}")
+    assert f"kube-noob:{new}" in (repo / "deploy/gitlab/kube-noob-gate.gitlab-ci.yml").read_text()
     changelog = (repo / "CHANGELOG.md").read_text()
     assert changelog.index(f"## {new}") < changelog.index(f"## {old}")
     if "## Unreleased" in (ROOT / "CHANGELOG.md").read_text():

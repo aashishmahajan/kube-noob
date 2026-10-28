@@ -371,6 +371,37 @@ skopeo copy docker://quay.io/acme/web:1.8.0 oci:/tmp/web-oci:1.8.0
 kube-noob build audit -f Containerfile --image-layout /tmp/web-oci --fail-on high
 ```
 
+### Gate a release before it deploys
+
+`gate` is one command for CI: the audit rules over manifests and rendered charts, the exception list, whether each
+finding would be refused by the generated admission policy in enforce mode, open reported issues in the target
+OpenShift release that name a kind you deploy, and the Containerfile checks. It exits 1 at `--fail-on` and writes
+SARIF (GitHub code scanning), a Markdown summary and GitLab code quality JSON. Findings in a rendered chart point at
+the template file.
+
+```bash
+kube-noob gate --chart deploy/helm/shop --values deploy/helm/shop/values-prod.yaml --containerfile Containerfile \
+  --platform openshift --version 4.20 --exceptions kube-noob-exceptions.yaml --sarif kube-noob.sarif \
+  --summary kube-noob-summary.md
+```
+
+GitHub Actions (add `github/codeql-action/upload-sarif` after it to see findings in code scanning):
+
+```yaml
+- uses: aashishmahajan/kube-noob@<tag>
+  with:
+    chart: deploy/helm/shop
+    values: deploy/helm/shop/values-prod.yaml
+    containerfiles: Containerfile
+    platform: openshift
+    version: "4.20"
+```
+
+Tekton: `oc apply -f deploy/tekton/kube-noob-gate.yaml`, then a pipeline task with `taskRef: {name: kube-noob-gate}`,
+the source workspace and `params: [{name: paths, value: k8s}]`. GitLab: include
+`deploy/gitlab/kube-noob-gate.gitlab-ci.yml` and extend `.kube-noob-gate` with `KUBE_NOOB_PATHS`; findings show in
+the merge request through the code quality report.
+
 ## Security: policy-aligned reviews and red-team scenarios
 
 Each audit finding maps to the RHACS (StackRox) policy that would fire. `redteam` shows how an attacker would use a

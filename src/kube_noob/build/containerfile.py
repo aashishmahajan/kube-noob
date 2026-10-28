@@ -442,6 +442,17 @@ def _ignored(rel: str, rules: list[tuple[bool, re.Pattern[str]]]) -> bool:
     return verdict
 
 
+def _private_key(path: Path) -> str | None:
+    """A .pem file in the build context that holds a private key (certificates and CA bundles are public)."""
+    if path.suffix not in {".pem", ".crt", ".cer"} or path.is_symlink() or not path.is_file():
+        return None
+    try:
+        head = path.read_bytes()[:1_048_576].decode("utf-8", "replace")
+    except OSError:
+        return None
+    return "private key" if secrets.CONTENT[0][1].search(head) else None
+
+
 def _context_files(context: Path, source: str, rules: list[tuple[bool, re.Pattern[str]]]) -> tuple[list[str], bool]:
     """Files under ``context`` that ``COPY <source>`` would take (bounded walk, no symlinks followed)."""
     root = context.resolve()
@@ -556,7 +567,7 @@ def audit(
                             )
                     else:
                         files, truncated = _context_files(context, src, _ignore_patterns(context))
-                        bad = [(f, kd) for f in files if (kd := secrets.name_kind(f))]
+                        bad = [(f, kd) for f in files if (kd := secrets.name_kind(f) or _private_key(context / f))]
                         for f, kd in bad[:10]:
                             findings.append(
                                 Finding(

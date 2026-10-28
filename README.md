@@ -17,7 +17,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
 
 - **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles.
-- **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno).
+- **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno); CI gate.
 - **Debug**: 40 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
   denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
   evidence (never Secrets); failed CI builds explained.

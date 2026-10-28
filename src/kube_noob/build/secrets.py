@@ -38,11 +38,8 @@ CONTENT: tuple[tuple[str, re.Pattern[str]], ...] = (
 # File names that hold credentials whatever their contents (compared on the last path segments).
 NAMES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
-        "private key file",
-        re.compile(
-            r"(?:^|/)(?:id_(?:rsa|dsa|ecdsa|ed25519)|[\w.-]{1,100}\.(?:pem|key|p12|pfx|jks|"
-            r"keystore))$"
-        ),
+        "private key file",  # .pem is left to the content check: in images most are certificates (CA, product)
+        re.compile(r"(?:^|/)(?:id_(?:rsa|dsa|ecdsa|ed25519)|[\w.-]{1,100}\.(?:key|p12|pfx|jks|keystore))$"),
     ),
     ("environment file", re.compile(r"(?:^|/)\.env(?:\.[\w-]{1,30})?$")),
     ("package registry credentials", re.compile(r"(?:^|/)\.(?:npmrc|pypirc|netrc|git-credentials)$")),
