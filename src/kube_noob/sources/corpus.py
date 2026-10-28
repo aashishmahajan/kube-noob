@@ -79,7 +79,9 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
     import shutil
     import tarfile
 
-    with tempfile.TemporaryDirectory() as tmp:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    # extract next to the data, not in /tmp: a Jira snapshot is gigabytes and the chart's /tmp holds 256 MiB
+    with tempfile.TemporaryDirectory(dir=data_dir, prefix=".import-") as tmp:
         root = source
         if source.is_file():
             with tarfile.open(source, "r:gz") as tf:

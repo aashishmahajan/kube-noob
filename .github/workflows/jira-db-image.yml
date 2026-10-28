@@ -1,0 +1,164 @@
+name: jira-db-image
+
+# Your organisation's private kube-noob-db-jira image (requirements R1.4): every time corpus-refresh updates the Jira
+# main copy, open it, check it (it imports cleanly and the anonymiser's self-check finds no person in it), seal it with
+# your key and push it to your private registry, so new pods answer ticket questions from the first minute with no
+# Jira egress (chart: jira.seed.source image, jira.seed.keySecret).
+#
+# Configure (Settings > Secrets and variables > Actions):
+#   variable JIRA_DB_IMAGE               a private repository, e.g. quay.io/acme/kube-noob-db-jira (no tag)
+#   secret   JIRA_DB_REGISTRY_USER       a robot account that can push there
+#   secret   JIRA_DB_REGISTRY_PASSWORD
+#   secret   CORPUS_PASSPHRASE           opens the main copy corpus-refresh uploaded
+#   secret   JIRA_SEED_KEY               seals the snapshot (openssl rand -base64 32); strongly recommended
+# Without JIRA_DB_IMAGE the workflow does nothing. It fails before pushing when anyone can list the repository's
+# tags, and after pushing when anyone can pull the new image, so Red Hat ticket text never sits in a public image.
+
+on:
+  workflow_run:
+    workflows: [corpus-refresh]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read              # download corpus-refresh's encrypted main copy
+
+concurrency:
+  group: jira-db-image
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IMAGE: ${{ vars.JIRA_DB_IMAGE }}
+      KUBE_NOOB_DATA_DIR: ${{ github.workspace }}/check-copy
+    steps:
+      - name: Configured?
+        id: cfg
+        env:
+          PASS: ${{ secrets.CORPUS_PASSPHRASE }}
+          REG_USER: ${{ secrets.JIRA_DB_REGISTRY_USER }}
+          REG_PASS: ${{ secrets.JIRA_DB_REGISTRY_PASSWORD }}
+          SEED_KEY: ${{ secrets.JIRA_SEED_KEY }}
+        run: |
+          if [ -z "$IMAGE" ]; then
+            echo "::notice title=jira-db-image::set the JIRA_DB_IMAGE variable to a private repository to build the image"
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! printf '%s' "$IMAGE" | grep -Eq '^[a-z0-9.-]+(:[0-9]{1,5})?(/[a-z0-9][a-z0-9._-]*)+$'; then
+            echo "::error title=JIRA_DB_IMAGE::'$IMAGE' must be registry/path with no tag or digest"; exit 1
+          fi
+          for v in PASS REG_USER REG_PASS; do
+            if [ -z "${!v}" ]; then echo "::error title=jira-db-image::secret for $v is not set"; exit 1; fi
+          done
+          if [ -z "$SEED_KEY" ]; then
+            echo "::warning title=jira-db-image::JIRA_SEED_KEY is not set: the snapshot ships unsealed and relies on the registry alone"
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+        if: steps.cfg.outputs.run == 'true'
+      - name: Refuse a public repository (before anything is pushed)
+        if: steps.cfg.outputs.run == 'true'
+        run: |
+          if skopeo list-tags --no-creds "docker://${IMAGE}" >/dev/null 2>&1; then
+            echo "::error title=public registry::anyone can list ${IMAGE}; make the repository private first"; exit 1
+          fi
+          echo "anonymous listing of ${IMAGE} is refused: continuing"
+      - name: Open the latest main copy
+        if: steps.cfg.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ids="${RUN_ID:-}"
+          [ -n "$ids" ] || ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow corpus-refresh.yml --status success \
+            --limit 20 --json databaseId --jq '.[].databaseId')
+          for id in $ids; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" -n jira-main-copy-encrypted -D copy 2>/dev/null && break
+          done
+          [ -f copy/jira-snapshot.tgz.enc ] || { echo "::error::no jira-main-copy-encrypted artifact found"; exit 1; }
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in copy/jira-snapshot.tgz.enc -out copy/jira-snapshot.tgz \
+            -pass env:CORPUS_PASSPHRASE
+          rm copy/jira-snapshot.tgz.enc
+      - name: Check the copy (imports cleanly, no person left in it)
+        if: steps.cfg.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          kube-noob corpus import copy/jira-snapshot.tgz --format json > import.json
+          kube-noob corpus jira-audit --format json > audit.json
+          python -c "
+          import json, sys
+          a = json.load(open('audit.json'))
+          n = a.get('selfCheck', {}).get('personShapedFindings', 1)
+          print(f'::notice title=Jira copy::{a.get(\"tickets\")} tickets, self-check findings: {n}')
+          sys.exit(1 if n else 0)
+          "
+      - name: Seal with your key
+        if: steps.cfg.outputs.run == 'true'
+        env:
+          SEED_KEY: ${{ secrets.JIRA_SEED_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p dist/seed
+          if [ -n "$SEED_KEY" ]; then
+            printf '%s' "$SEED_KEY" > "$RUNNER_TEMP/seed.key"
+            kube-noob corpus seal copy/jira-snapshot.tgz -o dist/seed/jira-snapshot.tgz.enc --key-file "$RUNNER_TEMP/seed.key"
+            rm -f "$RUNNER_TEMP/seed.key" copy/jira-snapshot.tgz
+            echo "SEED=jira-snapshot.tgz.enc" >> "$GITHUB_ENV"
+          else
+            mv copy/jira-snapshot.tgz dist/seed/jira-snapshot.tgz
+            echo "SEED=jira-snapshot.tgz" >> "$GITHUB_ENV"
+          fi
+      - name: Build and push to your private registry
+        id: push
+        if: steps.cfg.outputs.run == 'true'
+        env:
+          REG_USER: ${{ secrets.JIRA_DB_REGISTRY_USER }}
+          REG_PASS: ${{ secrets.JIRA_DB_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          registry="${IMAGE%%/*}"
+          printf '%s' "$REG_PASS" | docker login "$registry" -u "$REG_USER" --password-stdin
+          day=$(date -u +%Y-%m-%d)
+          docker build -f Containerfile.seed --build-arg "SEED=${SEED}" --build-arg "BUILT_AT=$(date -u +%FT%TZ)" \
+            -t "${IMAGE}:${day}" .
+          docker push "${IMAGE}:${day}"
+          ref=$(docker image inspect "${IMAGE}:${day}" --format '{{index .RepoDigests 0}}')
+          echo "digest=${ref##*@}" >> "$GITHUB_OUTPUT"
+          docker logout "$registry"
+      - name: Refuse a public image (after the push)
+        if: steps.cfg.outputs.run == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          if skopeo inspect --no-creds "docker://${IMAGE}@${DIGEST}" >/dev/null 2>&1; then
+            echo "::error title=public image::anyone can pull ${IMAGE}@${DIGEST}: make the repository private now and delete that image"
+            exit 1
+          fi
+          {
+            echo "### kube-noob-db-jira pushed"
+            echo ""
+            echo "\`${IMAGE}@${DIGEST}\` holds \`/seed/${SEED}\`. Pin it in the chart:"
+            echo ""
+            echo "\`--set jira.seed.source=image --set jira.seed.image.repository=${IMAGE} --set jira.seed.image.digest=${DIGEST} --set jira.seed.path=/seed/${SEED}\`"
+            if [ "$SEED" = "jira-snapshot.tgz.enc" ]; then
+              echo ""
+              echo "and \`--set jira.seed.keySecret.name=<a Secret holding the key under 'key'>\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

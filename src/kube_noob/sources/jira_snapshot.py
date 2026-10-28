@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from kube_noob.sources.seal import is_sealed, read_secret, unseal
+
 FORMAT = "kube-noob-jira-snapshot/1"
 MAX_PART = 200_000_000  # bytes: the sync state or the change log inside a snapshot
 README = """kube-noob Red Hat Jira snapshot
@@ -205,12 +207,15 @@ def restore_extras(checked: dict[str, Any], data_dir: Path) -> dict[str, Any]:
 
 
 def seed_on_start(data_dir: Path) -> dict[str, Any] | None:
-    """Import the newest ``<dataDir>/seed/*.tgz`` when this data folder has no Jira copy yet; None otherwise."""
+    """Import the newest ``<dataDir>/seed/*.tgz`` (or ``*.tgz.enc``, sealed with the organisation's key, opened with
+    the key file named by ``KUBE_NOOB_SEED_KEY_FILE``) when this data folder has no Jira copy yet; None otherwise.
+    A sealed seed with no key or the wrong key raises SealError and nothing is imported."""
     from kube_noob.sources.corpus import import_corpus, read_manifest
 
+    folder = data_dir / "seed"
     seeds = (
-        sorted((data_dir / "seed").glob("*.tgz"), key=lambda p: p.stat().st_mtime)
-        if (data_dir / "seed").is_dir()
+        sorted([*folder.glob("*.tgz"), *folder.glob("*.tgz.enc")], key=lambda p: p.stat().st_mtime)
+        if folder.is_dir()
         else []
     )
     has_copy = any(
@@ -218,4 +223,12 @@ def seed_on_start(data_dir: Path) -> dict[str, Any] | None:
     )
     if not seeds or has_copy:
         return None
-    return {"seed": str(seeds[-1]), **import_corpus(seeds[-1], data_dir)}
+    newest = seeds[-1]
+    if not is_sealed(newest):
+        return {"seed": str(newest), **import_corpus(newest, data_dir)}
+    secret = read_secret()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=data_dir, prefix=".seed-") as tmp:
+        plain = Path(tmp) / "jira-snapshot.tgz"
+        unseal(newest, plain, secret)
+        return {"seed": str(newest), "sealed": True, **import_corpus(plain, data_dir)}

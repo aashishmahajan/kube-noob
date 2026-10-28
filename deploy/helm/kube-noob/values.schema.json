@@ -210,7 +210,7 @@
             },
             "path": {
               "type": "string",
-              "pattern": "^/([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,8}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\\.tgz$"
+              "pattern": "^/([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,8}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\\.tgz(\\.enc)?$"
             },
             "pvc": {
               "type": "object",
@@ -229,6 +229,20 @@
             "sizeLimit": {
               "type": "string",
               "pattern": "^[1-9][0-9]{0,4}(Mi|Gi)$"
+            },
+            "keySecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?)?$"
+                },
+                "key": {
+                  "type": "string",
+                  "pattern": "^[-._a-zA-Z0-9]{1,253}$"
+                }
+              }
             }
           }
         }

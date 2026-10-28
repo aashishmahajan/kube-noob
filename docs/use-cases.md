@@ -166,6 +166,19 @@ current from the service; offline clusters import a copy built elsewhere with `c
 
 ### One main copy for the whole organisation, and what changed since yesterday
 
+Seal the copy with your own key before it goes into an image, and give pods the key from a Secret: a new pod answers
+ticket questions from its first minute with no Jira egress, and a wrong key imports nothing and says so. The
+`jira-db-image` workflow does this after every refresh and refuses a public repository.
+
+```bash
+openssl rand -base64 32 > seed.key
+kube-noob corpus jira-snapshot -o jira-snapshot.tgz
+kube-noob corpus seal jira-snapshot.tgz -o jira-snapshot.tgz.enc --key-file seed.key
+kubectl create secret generic kn-seed-key --from-file=key=seed.key
+helm upgrade --install kube-noob deploy/helm/kube-noob --set jira.seed.source=image --set jira.seed.image.repository=quay.io/acme/kube-noob-db-jira --set jira.seed.image.digest=sha256:<digest> --set jira.seed.path=/seed/jira-snapshot.tgz.enc --set jira.seed.keySecret.name=kn-seed-key --set config.offline=true
+```
+
+
 Nobody should wait hours for a first sync. Keep one main copy, refresh it daily (or every two days), and start every
 other install from it:
 

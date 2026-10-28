@@ -620,6 +620,17 @@ def build_parser() -> argparse.ArgumentParser:
         "import", help="Import a corpus directory or .tgz (the corpus-refresh artifact, a Jira snapshot, kube-noob-db)"
     )
     ci.add_argument("path")
+    ci.add_argument("--key-file", help="the key of a sealed snapshot (default: $KUBE_NOOB_SEED_KEY_FILE)")
+    for name, what in (("seal", "Seal"), ("unseal", "Open")):
+        cs = csub.add_parser(
+            name,
+            help=f"{what} a Jira snapshot with your organisation's key (AES-256-GCM, a key file of 16+ characters)",
+            description="Example: openssl rand -base64 32 > seed.key && kube-noob corpus seal jira-snapshot.tgz -o "
+            "jira-snapshot.tgz.enc --key-file seed.key",
+        )
+        cs.add_argument("path")
+        cs.add_argument("-o", "--output", required=True)
+        cs.add_argument("--key-file", help="default: $KUBE_NOOB_SEED_KEY_FILE")
     cdb = csub.add_parser(
         "db-bundle",
         help="Pack what may be shared (redistributable docs, release history, known issues) into kube-noob-db.tgz",
@@ -1056,7 +1067,13 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
 
             if s.offline:
                 raise ConfigError("jira.syncEnabled downloads tickets; the offline lock forbids it (unset one)")
-            start_jira_sync(s)
+            sync = start_jira_sync(s)
+            print(
+                f"jira sync: first run in {sync.first_delay:.0f} s, then every {s.jira.interval_hours} h +/- 10%",
+                file=sys.stderr,
+            )
+        else:
+            print("jira sync: off (the copy changes only when a newer seed is imported)", file=sys.stderr)
         uvicorn.run(
             app,
             host=s.server.host,
@@ -1719,16 +1736,43 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             _emit({**res, "openTickets": opened}, fmt)
         return 0
     if cc == "import":
-        from kube_noob.sources import db_bundle
+        from kube_noob.sources import db_bundle, seal
         from kube_noob.sources.corpus import import_corpus
 
         where = Path(a.path)
         if not where.exists():
             raise ConfigError(f"no such file or folder: {where}")
-        if db_bundle.is_bundle(where):
+        if where.is_file() and seal.is_sealed(where):
+            import tempfile
+
+            secret = seal.read_secret(a.key_file)
+            s.data_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=s.data_dir, prefix=".unseal-") as tmp:
+                plain = Path(tmp) / "snapshot.tgz"
+                seal.unseal(where, plain, secret)
+                out = (
+                    db_bundle.import_bundle(plain, s.data_dir)
+                    if db_bundle.is_bundle(plain)
+                    else import_corpus(plain, s.data_dir)
+                )
+            _emit({**out, "sealed": True}, fmt)
+        elif db_bundle.is_bundle(where):
             _emit(db_bundle.import_bundle(where, s.data_dir), fmt)
         else:
             _emit(import_corpus(where, s.data_dir), fmt)
+        return 0
+    if cc in {"seal", "unseal"}:
+        from kube_noob.sources import seal
+
+        where = Path(a.path)
+        if not where.is_file():
+            raise ConfigError(f"no such file: {where}")
+        secret = seal.read_secret(a.key_file)
+        done = (seal.seal if cc == "seal" else seal.unseal)(where, Path(a.output), secret)
+        if a.format == "text":
+            _tprint(f"wrote {a.output} ({done['bytes']} bytes, {done['chunks']} chunks)")
+        else:
+            _emit({"output": a.output, **done}, fmt)
         return 0
     if cc == "db-bundle":
         from kube_noob.sources import db_bundle

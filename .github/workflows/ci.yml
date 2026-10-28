@@ -356,25 +356,22 @@ jobs:
               echo "::error title=chart::db values must fail to render: $args"; exit 1
             fi
           done
-          mt --set db.enabled=true $dbd $seed --set jira.seed.image.tag=1 | python -c "
-          import sys, yaml
-          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
-          pod = dep['spec']['template']['spec']
-          assert [c['name'] for c in pod['initContainers']] == ['kube-noob-db', 'jira-seed'], pod['initContainers']
-          init = pod['initContainers'][0]
-          assert init['image'] == 'ghcr.io/aashishmahajan/kube-noob-db@sha256:' + 'a' * 64, init
-          assert init['command'] == ['cp', '--', '/kube-noob-db/kube-noob-db.tgz', '/kube-noob-db-seed/kube-noob-db.tgz']
-          assert init['securityContext']['readOnlyRootFilesystem'] is True and init['volumeMounts'] == [
-              {'name': 'kube-noob-db', 'mountPath': '/kube-noob-db-seed'}], init
-          mounts = pod['containers'][0]['volumeMounts']
-          assert {'name': 'kube-noob-db', 'mountPath': '/var/lib/kube-noob/seed-db', 'readOnly': True} in mounts, mounts
-          assert {'name': 'kube-noob-db', 'emptyDir': {'sizeLimit': '2Gi'}} in pod['volumes'], pod['volumes']
-          "
-          mt --set db.enabled=true $dbd | python -c "
-          import sys, yaml
-          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
-          assert {'name': 'data', 'emptyDir': {'sizeLimit': '4Gi'}} in dep['spec']['template']['spec']['volumes']
-          "
+          render() { mt "$@" > /tmp/render.yaml 2> /tmp/render.err \
+            || { echo "::error title=chart render::$(tr '\n' ' ' < /tmp/render.err | cut -c1-1500)"; return 1; }; }
+          render --set db.enabled=true $dbd $seed --set jira.seed.image.tag=1
+          python scripts/chart_seed_guard.py db < /tmp/render.yaml
+          render --set db.enabled=true $dbd
+          python scripts/chart_seed_guard.py db-data < /tmp/render.yaml
+          sealed="$seed --set jira.seed.image.tag=1 --set jira.seed.path=/seed/jira-snapshot.tgz.enc"
+          render $sealed --set jira.seed.keySecret.name=kn-seed-key
+          python scripts/chart_seed_guard.py sealed < /tmp/render.yaml
+          for args in "--set jira.seed.keySecret.name=kn-seed-key" "$sealed --set jira.seed.keySecret.name=Bad_Name" \
+              "$sealed --set jira.seed.keySecret.name=k --set jira.seed.keySecret.key=../x" \
+              "$sealed --set jira.seed.path=/seed/x.enc"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::jira.seed.keySecret values must fail to render: $args"; exit 1
+            fi
+          done
           mt --set db.enabled=true $dbd --api-versions security.openshift.io/v1 \
             | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
           if mt | grep -q "kube-noob-db"; then
@@ -594,6 +591,9 @@ jobs:
             || { kubectl -n kube-noob get events --sort-by=.lastTimestamp | tail -30 | sed 's/^/::error title=install::/'; exit 1; }
       - name: Helm test (in-cluster readiness through the Service)
         run: helm test kn -n kube-noob --timeout 3m --logs
+      - name: Sealed private Jira seed, wrong key, sync on and off (requirements R1.4, R1.5)
+        if: matrix.ocp == '4.22'
+        run: bash scripts/e2e_jira_seed_kind.sh kube-noob:ci kn
       - name: Sidecar under Pod Security restricted (loopback only, transcript)
         run: scripts/demo_sidecar_kind.sh kube-noob:ci "/tmp/sidecar-transcript-${{ matrix.ocp }}.txt"
       - name: Publish the sidecar transcript as an annotation (source of the sidecar demo video)

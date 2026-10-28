@@ -101,7 +101,13 @@ jira:
   seed:
     source: none
     image: {repository: "", tag: "", digest: ""}   # a private image with cp and the snapshot (docs/use-cases.md)
-    path: /seed/jira-snapshot.tgz                   # the snapshot inside the image
+    path: /seed/jira-snapshot.tgz                   # the snapshot inside the image (.tgz, or .tgz.enc when sealed)
+    # A sealed snapshot (kube-noob corpus seal ... -o jira-snapshot.tgz.enc) opens only with your key: a Secret you
+    # create (kubectl create secret generic kn-seed-key --from-file=key=seed.key), mounted read-only for the server
+    # alone. The key never sits in the image or in these values. A wrong or missing key imports nothing and says so.
+    keySecret:
+      name: ""
+      key: key
     pvc:
       claimName: ""          # a claim holding the snapshot (read-only)
       subPath: ""            # the folder inside the claim that holds *.tgz

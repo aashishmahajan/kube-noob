@@ -111,6 +111,21 @@
   runs every `jira.sync.intervalHours` +/- 10%; clones from GitHub (`corpus build`, `corpus known-issues`) are spaced
   by a random 1 to 4 s; the scheduled `corpus-refresh` starts at a random offset of up to 15 minutes (the Jira client
   already spaced requests by the crawl delay plus random jitter).
+- Private `kube-noob-db-jira` seed (requirements R1.4, R1.5): `kube-noob corpus seal` / `unseal` seal a Jira snapshot
+  with your organisation's key (AES-256-GCM in 1 MiB chunks, a per-file key from PBKDF2-HMAC-SHA256 with 600,000
+  iterations, chunk counters and a last-chunk flag as nonces, so a wrong key, an edited, reordered, dropped or
+  truncated chunk all fail and nothing is written). `corpus import --key-file` and the pod's seed import open a
+  `*.tgz.enc` with the key file named by `KUBE_NOOB_SEED_KEY_FILE`; a missing or wrong key imports nothing and says
+  "the key does not open ..." while the server keeps serving. Chart `jira.seed.keySecret` mounts the key from a
+  Secret read-only for the server alone (never in values or the image; fsGroup set off-OpenShift so UID 1001 can
+  read it); `jira.seed.path` may end in `.tgz.enc`. `Containerfile.seed` and a `jira-db-image` workflow that, after
+  each corpus-refresh, opens the main copy, refuses it if the anonymiser's self-check finds a person, seals it with
+  `JIRA_SEED_KEY` and pushes it to `JIRA_DB_IMAGE`, refusing a repository anyone can list before the push and an
+  image anyone can pull after it. `serve` now states the sync schedule ("jira sync: first run in N s, then every 48 h
+  +/- 10%") or that sync is off. Proven in kind (one leg): a sealed seed answers `OCPBUGS-900` under the offline lock,
+  a wrong key fails closed, sync on with 48 h states its jittered schedule.
+- Fixed: `corpus import` and the seed import extracted the archive into `/tmp`, which the chart caps at 256 MiB, so a
+  Jira snapshot of a few GB could not seed a pod; archives are now extracted next to the data.
 - The public `kube-noob-db` image (requirements R1.3): `kube-noob corpus db-bundle` packs what may be shared (the
   documentation of every redistributable source with its license, release history, the release-note known issues)
   into one reproducible `kube-noob-db.tgz` with `ATTRIBUTION.md`; shards not marked redistributable and every Jira

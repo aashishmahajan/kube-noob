@@ -1246,7 +1246,7 @@ def start_background(settings: Any, rng: random.Random | None = None) -> Any:
                 log.exception("jira sync failed")
             stop.wait(jittered_interval(settings.jira.interval_hours * 3600, r))
 
-    log.info("jira sync: first run in %d s, then every %s h +/- 10%%", first, settings.jira.interval_hours)
+    log.debug("jira sync: first run in %d s, then every %s h +/- 10%%", first, settings.jira.interval_hours)
     threading.Thread(target=loop, name="kube-noob-jira-sync", daemon=True).start()
     stop.first_delay = first  # type: ignore[attr-defined]  # for the operator log and tests
     return stop

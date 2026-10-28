@@ -1,0 +1,24 @@
+# kube-noob-db-jira: your organisation's private seed image (requirements R1.4). It holds one Jira snapshot made by
+# `kube-noob corpus jira-snapshot`, sealed with your key by `kube-noob corpus seal` (recommended) or plain. It holds
+# Red Hat ticket text: push it only to a private registry repository. The jira-db-image workflow refuses a public one.
+# The Helm chart (jira.seed.source: image) copies /seed/<file> with cp in an init container; kube-noob serve imports
+# it on start, opening a sealed file with the key from jira.seed.keySecret.
+# Build:  mkdir -p dist/seed && kube-noob corpus jira-snapshot -o jira-snapshot.tgz
+#         kube-noob corpus seal jira-snapshot.tgz -o dist/seed/jira-snapshot.tgz.enc --key-file seed.key
+#         docker build -f Containerfile.seed --build-arg SEED=jira-snapshot.tgz.enc -t <private-registry>/kube-noob-db-jira:<date> .
+# No org.opencontainers.image.source label on purpose: GHCR links a labelled package to its repository and can make
+# it as visible as the repository.
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+FROM ${BASE_IMAGE}
+ARG SEED=jira-snapshot.tgz.enc
+ARG BUILT_AT=unknown
+LABEL name="kube-noob-db-jira" \
+      summary="Private seed: one organisation's copy of Red Hat's public Jira for kube-noob" \
+      description="Not redistributable. Keep this image in a private registry." \
+      org.opencontainers.image.title="kube-noob-db-jira" \
+      org.opencontainers.image.created="${BUILT_AT}" \
+      io.k8s.display-name="kube-noob-db-jira"
+COPY dist/seed/${SEED} /seed/${SEED}
+USER 1001
+CMD ["ls", "-l", "/seed"]

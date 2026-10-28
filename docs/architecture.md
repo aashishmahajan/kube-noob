@@ -85,6 +85,9 @@ flowchart LR
   sizes, checksums and that it comes from the same Jira before copying anything. `serve` imports a seed from
   `<dataDir>/seed/` only when there is no copy, and the chart mounts the seed read-only (an init container copies it
   from a pinned image, or a read-only claim). The scheduled main copy leaves the runner only encrypted.
+- A sealed Jira seed is opened in the server container only, with the key file from a Secret; the init container
+  that copies it never sees the key. The plaintext is written to a temporary folder next to the data, imported
+  through the same validation as any snapshot, and removed; a wrong key leaves the data folder untouched.
 - The public `kube-noob-db` bundle is the only data kube-noob publishes. It is built from redistributable sources
   only, checked by `corpus db-check` (allow-listed licenses, no Jira data, every file listed and checksummed), and
   shipped in an image the chart pins by digest. The init container copies the archive into a scratch volume that the

@@ -370,7 +370,8 @@ def import_bundle(archive: Path, data_dir: Path) -> dict[str, Any]:
     from kube_noob import known_issues as ki
     from kube_noob.sources.corpus import import_corpus
 
-    with tempfile.TemporaryDirectory() as tmp:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=data_dir, prefix=".import-") as tmp:
         root = archive if archive.is_dir() else _extract(archive, Path(tmp))
         problems = check(root)
         if problems:
@@ -404,7 +405,7 @@ def seed_on_start(data_dir: Path) -> dict[str, Any] | None:
     if not seeds:
         return None
     newest = seeds[-1]
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=data_dir, prefix=".seed-") as tmp:
         root = _extract(newest, Path(tmp))
         try:
             built = str(json.loads((root / "MANIFEST.json").read_text(encoding="utf-8"))["bundle"]["builtAt"])

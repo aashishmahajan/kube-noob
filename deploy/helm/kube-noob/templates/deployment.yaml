@@ -39,6 +39,9 @@
 {{- fail "jira.seed.image needs a tag or a digest: the seed is the copy every new pod starts from, so pin it" }}
 {{- end }}
 {{- end }}
+{{- if and .Values.jira.seed.keySecret.name (eq $seedSource "none") }}
+{{- fail "jira.seed.keySecret opens a sealed seed; set jira.seed.source (image or pvc) too" }}
+{{- end }}
 {{- if and (eq $seedSource "pvc") (not .Values.jira.seed.pvc.claimName) }}
 {{- fail "jira.seed.source pvc needs jira.seed.pvc.claimName" }}
 {{- end }}
@@ -112,8 +115,8 @@ spec:
         {{- if .Values.podSecurityContext.fsGroup }}
         fsGroup: {{ .Values.podSecurityContext.fsGroup }}
         fsGroupChangePolicy: OnRootMismatch
-        {{- else if and (or .Values.persistence.enabled $memSsh) (not $openshift) }}
-        # Vanilla Kubernetes: make the PVC (and the git key) usable by UID 1001; OpenShift assigns fsGroup itself.
+        {{- else if and (or .Values.persistence.enabled $memSsh .Values.jira.seed.keySecret.name) (not $openshift) }}
+        # Vanilla Kubernetes: make the PVC (and the git and seed keys) usable by UID 1001; OpenShift assigns fsGroup.
         fsGroup: 1001
         fsGroupChangePolicy: OnRootMismatch
         {{- end }}
@@ -157,7 +160,7 @@ spec:
         - name: jira-seed
           image: {{ include "kube-noob.seedImage" . | quote }}
           imagePullPolicy: IfNotPresent
-          command: ["cp", "--", {{ .Values.jira.seed.path | quote }}, "/kube-noob-seed/jira-snapshot.tgz"]
+          command: ["cp", "--", {{ .Values.jira.seed.path | quote }}, "/kube-noob-seed/jira-snapshot.tgz{{ if hasSuffix ".enc" .Values.jira.seed.path }}.enc{{ end }}"]
           resources:
             requests: {cpu: 10m, memory: 16Mi}
             limits: {memory: 64Mi}
@@ -222,6 +225,10 @@ spec:
               value: {{ .Values.config.webEnabled | quote }}
             - name: KUBE_NOOB_CLUSTER_ENABLED
               value: {{ .Values.config.clusterEnabled | quote }}
+            {{- if .Values.jira.seed.keySecret.name }}
+            - name: KUBE_NOOB_SEED_KEY_FILE
+              value: /var/run/kube-noob/seed-key/{{ .Values.jira.seed.keySecret.key }}
+            {{- end }}
             {{- with (include "kube-noob.tokenSecret" .) }}
             - name: KUBE_NOOB_HTTP_TOKEN
               valueFrom:
@@ -255,6 +262,9 @@ spec:
             - {name: tmp, mountPath: /tmp}
             {{- if $db }}
             - {name: kube-noob-db, mountPath: /var/lib/kube-noob/seed-db, readOnly: true}
+            {{- end }}
+            {{- if .Values.jira.seed.keySecret.name }}
+            - {name: seed-key, mountPath: /var/run/kube-noob/seed-key, readOnly: true}
             {{- end }}
             {{- if eq $seedSource "image" }}
             - {name: jira-seed, mountPath: /var/lib/kube-noob/seed, readOnly: true}
@@ -313,4 +323,11 @@ spec:
         - name: memory-ssh
           secret: {secretName: {{ .Values.memory.git.sshSecret | quote }}, defaultMode: 288}
         {{- end }}
+        {{- end }}
+        {{- if .Values.jira.seed.keySecret.name }}
+        - name: seed-key
+          secret:
+            secretName: {{ .Values.jira.seed.keySecret.name | quote }}
+            defaultMode: 288
+            items: [{key: {{ .Values.jira.seed.keySecret.key | quote }}, path: {{ .Values.jira.seed.keySecret.key | quote }}}]
         {{- end }}

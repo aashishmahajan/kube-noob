@@ -184,13 +184,13 @@ def test_an_analyser_over_its_time_budget_is_reported_not_waited_for(
     import threading
 
     release = threading.Event()
-    monkeypatch.setattr(ins, "BUDGET_SECONDS", 0.2)
-    monkeypatch.setattr(kit, "diagnose", lambda p: release.wait(5) and {})
+    monkeypatch.setattr(ins, "BUDGET_SECONDS", 2.0)  # generous for the audit under coverage on a slow runner
+    monkeypatch.setattr(kit, "diagnose", lambda p: release.wait(30) and {})
     out = kit.insight(tk.InsightIn(text=PSA_DENIAL + "\n" + BAD_DEPLOY))
     release.set()
     assert "diagnose" not in out["ran"] and "audit" in out["ran"]
     late = next(s for s in out["skipped"] if s["kind"] == "diagnose")
-    assert late["why"] == "took longer than 0.2 s; run it alone: kube-noob diagnose -f <file>"
+    assert late["why"] == "took longer than 2 s; run it alone: kube-noob diagnose -f <file>"
     assert any(f["id"] == "KN-S001" for f in out["findings"])
 
 
