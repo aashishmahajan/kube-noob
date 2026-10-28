@@ -608,6 +608,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="Show what kube-noob can reach (network, cluster, model); exit 1 on conflicts")
     st = sub.add_parser("selftest", help="Answer a battery of real questions offline and score the results")
     st.add_argument("--category", choices=["kubernetes", "helm", "openshift", "rosa-hcp", "rhacs", "everyday"])
+    st.add_argument(
+        "--cases",
+        help="your own problems instead of the built-in battery: YAML, JSONL, CSV, or plain text (one per line, "
+        "or blocks separated by ---)",
+    )
+    st.add_argument("--gate", type=float, help="with --cases: fail (exit 1) when the pass rate is below this, 0-1")
+    st.add_argument("--out", help="with --cases: write report.md and report.json to this folder")
     dm = sub.add_parser("demo", help="Offline walkthroughs of common use cases (no network, no cluster)")
     dm.add_argument("scenario", nargs="?", help="scenario name or 'all' (see --list)")
     dm.add_argument("--list", action="store_true", dest="list_demos")
@@ -979,6 +986,30 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "config":
         _emit(kit.config_status(tk.EmptyIn()), fmt)
         return 0
+    if a.cmd == "selftest" and a.cases:
+        from kube_noob.evals import problems
+
+        if a.gate is not None and not 0 <= a.gate <= 1:
+            raise ConfigError("--gate is a pass rate from 0 to 1, e.g. 0.9")
+        try:
+            loaded = problems.load(Path(a.cases))
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        prep = problems.run_cases(s, loaded, a.gate)
+        md = problems.markdown(prep)
+        if a.out:
+            out_dir = Path(a.out)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "report.md").write_text(md, encoding="utf-8")
+            (out_dir / "report.json").write_text(json.dumps(prep, indent=2, ensure_ascii=False) + "\n", "utf-8")
+        if a.format == "text":
+            _tprint(md.rstrip())
+        else:
+            _emit(prep, fmt)
+        failed = any(r["status"] in {"fail", "error"} for r in prep["results"])
+        if prep["gate"] is not None:
+            return 0 if prep["gate"]["passed"] else 1
+        return 1 if failed else 0
     if a.cmd == "selftest":
         from kube_noob.evals.selftest import run as run_selftest
 

@@ -101,6 +101,11 @@
   daily (repository variable `JIRA_EVERY_DAYS=2` for every two days), continues the previous run's encrypted copy,
   writes the changes and open tickets to the run summary, and uploads the new copy only encrypted
   (`jira-main-copy-encrypted`); Git docs and release history stay weekly.
+- `kube-noob selftest --cases <file>`: your own problems as a test. YAML, JSONL, CSV or plain text (one question per
+  line, or blocks separated by `---`); each case has an `input` and, optionally, `expect` (playbook in the top N,
+  rules that must or must not fire, documents, reported issues, phrases the answer must or must not mention). Cases
+  without expectations are answered and listed to label. Markdown and JSON scorecard (`--out`), `--gate` on the pass
+  rate, offline (web and cluster off), at most 2,000 cases of 2 MB each. Example: `examples/problems.yaml`.
 - The Jira copy keeps each ticket's full text and every comment (up to 2,000 comments and 1 MB per ticket; a longer
   ticket keeps its latest part and is marked `textCut`). A search returns only a ticket's latest comments, so the
   rest come from the issue's paged comment endpoint inside the same request budget, and a ticket is stored only once

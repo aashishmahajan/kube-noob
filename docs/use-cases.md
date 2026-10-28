@@ -85,6 +85,23 @@ oc describe pod web-7d9c6b9f5-x2k8p -n shop | kube-noob diagnose --platform open
 `bundle` writes a redacted, read-only evidence pack (`bundle.md` and `bundle.json`) that you can attach to a ticket.
 Once a fix is confirmed, save it with `kube-noob learning note`. The team finds it next time as `[kn:local-N#0]`.
 
+### Does it answer our problems? Test it on them
+
+`kube-noob selftest --cases` runs your own problems through the same diagnosis, search, known-issue and audit paths
+the CLI and MCP server use, offline. Start with a plain list of questions (one per line, or multi-line pastes
+separated by `---`): each is answered and listed for you to label. Add `expect` (the playbook, documents, issues or
+rules you expect, phrases the answer must or must not mention) and the case becomes a test with a pass or fail.
+YAML, JSONL and CSV (for a spreadsheet export) work too; `examples/problems.yaml` shows every field.
+
+```bash
+kube-noob selftest --cases examples/problems.yaml
+kube-noob selftest --cases our-problems.txt --out problem-report
+kube-noob selftest --cases our-problems.yaml --gate 0.9
+```
+
+kube-noob has no model, so nothing is learned by itself: a failed case is fixed with a playbook, signal, rule or
+team memory entry that is reviewed like any other change, and then guards against regressions.
+
 ### Is this a known bug?
 
 `known-issues` matches an error or symptom against the issues Red Hat lists in the OpenShift 4.20, 4.21 and 4.22 release
