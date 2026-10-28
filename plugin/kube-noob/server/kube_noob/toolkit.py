@@ -360,6 +360,7 @@ class ToolSpec:
     fn: Callable[[Any], Any]
     read_only: bool = True
     open_world: bool = False
+    tier: str | None = None  # a capability tier beyond read-only (kube_noob.tiers); offered only when it is on
 
 
 class Toolkit:
@@ -1095,4 +1096,6 @@ class Toolkit:
             )
         if self.shared:
             s = [t for t in s if t.name not in {"learning_note_add", "learning_profile_set", "incident_confirm"}]
-        return s
+        from kube_noob.tiers import offered
+
+        return [t for t in s if offered(t, self.settings)]

@@ -194,6 +194,44 @@ jobs:
             | grep -q "dnsName: redhat.atlassian.net"
           jt --set replicaCount=1 --api-versions security.openshift.io/v1 \
             | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if helm template kn deploy/helm/kube-noob $base | grep -q -- "-probe\|-dry-run"; then
+            echo "::error title=chart::tier Roles must not render by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set probe.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::probe.enabled without config.clusterEnabled must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set config.offline=true --set itsm.writeEnabled=true \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::itsm.writeEnabled under config.offline must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set dryRun.enabled=true --set config.clusterEnabled=true \
+               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" \
+               --set "dryRun.rules[0].apiGroups={}" --set "dryRun.rules[0].resources={secrets}" >/dev/null 2>&1; then
+            echo "::error title=chart::dry-run rules must never name Secrets"; exit 1
+          fi
+          tt() { helm template kn deploy/helm/kube-noob -n shop $base --set config.clusterEnabled=true \
+            --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" --set probe.enabled=true \
+            --set dryRun.enabled=true --set "rbac.namespaces={payments}" "$@"; }
+          tt --show-only templates/rbac-tiers.yaml | python -c "
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
+          roles = {(d['metadata']['name'], d['metadata']['namespace']) for d in docs if d['kind'] == 'Role'}
+          want = {(n, ns) for n in ('kn-kube-noob-probe', 'kn-kube-noob-dry-run') for ns in ('shop', 'payments')}
+          assert roles == want, roles
+          probe = next(d for d in docs if d['kind'] == 'Role' and d['metadata']['name'].endswith('-probe'))
+          assert probe['rules'][0] == {'apiGroups': [''], 'resources': ['pods/ephemeralcontainers'], 'verbs': ['patch']}
+          assert not any(d['kind'].startswith('Cluster') for d in docs)
+          "
+          tt --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          from kube_noob import tiers
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          on = {t['tier'] for t in tiers.describe(Settings.model_validate(cfg)) if t['enabled']}
+          assert on == {'R', 'P', 'D'}, on
+          "
+          tt --api-versions security.openshift.io/v1 | kube-noob audit -f - --platform openshift --version 4.22 \
+            --fail-on high
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"

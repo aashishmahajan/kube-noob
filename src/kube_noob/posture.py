@@ -96,6 +96,9 @@ def posture(s: Settings) -> dict[str, Any]:
     if s.offline and not judge["local"]:
         warnings.append(f"judge.provider {s.judge.provider!r} is not local and will refuse under the offline lock.")
 
+    from kube_noob import tiers
+
+    conflicts += tiers.conflicts(s)
     learning = s.data_dir / "learning.json"
     return {
         "version": __version__,
@@ -109,6 +112,7 @@ def posture(s: Settings) -> dict[str, Any]:
             else "none",
             "backend": s.cluster.backend if s.cluster.enabled else None,
         },
+        "tiers": tiers.describe(s),
         "model": model,
         "judge": judge,
         "dataDir": {"path": str(s.data_dir), "exists": s.data_dir.is_dir(), "learningFile": str(learning)},
@@ -132,6 +136,11 @@ def render_text(p: dict[str, Any]) -> str:
         f"  agent model    {p['model']['provider']}"
         + (f" -> {p['model']['endpoint']}" if p["model"]["endpoint"] else "")
         + (" (local)" if p["model"]["local"] else " (remote)"),
+        *(
+            f"  tier {t['tier']}         {'ON ' if t['enabled'] else 'off'} {t['name']} ({t['switch']})"
+            + (f"; needs {t['rbac']}" if t["enabled"] else "")
+            for t in p.get("tiers", [])
+        ),
         f"  data dir       {p['dataDir']['path']}",
         f"  telemetry      {p['telemetry']}",
         f"  FIPS mode      {p['crypto']['fipsMode']} ({p['crypto']['openssl']})",

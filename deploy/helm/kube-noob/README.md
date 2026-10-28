@@ -31,6 +31,8 @@ Clients connect to `http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `A
 | `config.webEnabled` | `false` | HTTPS GET to allowlisted documentation domains; opens egress 443 |
 | `config.clusterEnabled` | `false` | Read-only cluster tools (never Secrets); needs `networkPolicy.egress.apiServerCIDRs` |
 | `watch.enabled` | `false` | Always-on incident watch in the release namespace and `rbac.namespaces`; needs `config.clusterEnabled` and `replicaCount: 1` |
+| `probe.enabled`, `dryRun.enabled` | `false` | Capability tiers P and D (SECURITY.md): render a Role in the release namespace and `rbac.namespaces` only when enabled; need `config.clusterEnabled`; every action still needs a person's approval; `dryRun.rules` lists what may be dry-run (never Secrets) |
+| `itsm.writeEnabled`, `notify.enabled`, `gate.enabled` | `false` | Tiers W and G: attach evidence to tickets, forward reports, forward approved tool calls; W is refused under `config.offline` |
 | `jira.sync.enabled` | `false` | Keep a local copy of Red Hat's public Jira (`jira.sync.projects`, default set) for "what became of this bug?" answers; REST API at one request per second, `jira.sync.maxRequests` per run every `jira.sync.intervalHours`; opens egress 443 (EgressFirewall: redhat.atlassian.net only); needs `persistence.enabled` and `replicaCount: 1`; refused under `config.offline` |
 | `rbac.namespaces` | `[]` | Namespaces it may read besides its own (`rbac.scope=cluster` for all) |
 | `egressFirewall.enabled` | `false` | OVN-Kubernetes EgressFirewall: API server and allowlisted domains only, then deny (namespace-wide) |

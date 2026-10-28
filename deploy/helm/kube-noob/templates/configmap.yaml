@@ -25,6 +25,16 @@ data:
         {{- range .Values.rbac.namespaces }}
         - {{ . | quote }}
         {{- end }}
+    probe:
+      enabled: {{ .Values.probe.enabled }}
+    dryRun:
+      enabled: {{ .Values.dryRun.enabled }}
+    itsm:
+      writeEnabled: {{ .Values.itsm.writeEnabled }}
+    notify:
+      enabled: {{ .Values.notify.enabled }}
+    gate:
+      enabled: {{ .Values.gate.enabled }}
     jira:
       syncEnabled: {{ .Values.jira.sync.enabled }}
       projects: {{ .Values.jira.sync.projects | quote }}

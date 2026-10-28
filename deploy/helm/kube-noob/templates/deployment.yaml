@@ -7,6 +7,12 @@
 {{- if and .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") (gt (int .Values.replicaCount) 1) }}
 {{- fail "persistence with a ReadWriteOnce volume attaches to one node: set replicaCount: 1 (or a ReadWriteMany accessMode)" }}
 {{- end }}
+{{- if and (or .Values.probe.enabled .Values.dryRun.enabled) (not .Values.config.clusterEnabled) }}
+{{- fail "probe.enabled and dryRun.enabled act on the cluster: set config.clusterEnabled too" }}
+{{- end }}
+{{- if and (.Values.config.offline | default false) (or .Values.itsm.writeEnabled .Values.notify.enabled) }}
+{{- fail "itsm.writeEnabled and notify.enabled send outside the cluster; config.offline forbids it" }}
+{{- end }}
 {{- if .Values.jira.sync.enabled }}
 {{- if (.Values.config.offline | default false) }}
 {{- fail "jira.sync.enabled downloads Red Hat Jira tickets; config.offline forbids it (import a copy instead)" }}

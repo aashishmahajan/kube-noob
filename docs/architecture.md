@@ -63,5 +63,9 @@ flowchart LR
   downloads and allows only loopback or `*.svc` model endpoints. `kube-noob doctor` reports the result.
 - Cluster access is read-only, allowlisted per resource, never Secrets, and redacts values before they reach a model.
   Diagnoses list read-only steps first; commands that execute or change state are labelled as needing approval.
+- Anything beyond reading is a capability tier (`kube_noob.tiers`: probe, dry-run, external writes, gate forwarding),
+  off by default. Code that changes something is a `Writer` that cannot be built while its tier is off, and each
+  action needs a person's `Approval` for that action, unexpired and used once. The read-only backends have no write
+  method; tier RBAC renders only when the tier is on.
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.

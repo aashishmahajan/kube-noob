@@ -8,6 +8,15 @@
   credits and brand videos are frozen. New `docs/editions.md` records where an enterprise line could fall
   (documentation only).
 
+- Capability tiers: probe (P), server-side dry-run (D), external writes (W) and gate forwarding (G) join read-only
+  (R) as explicit switches, all off by default. `doctor` lists every tier, what it allows and what it needs, and
+  reports contradictions (a probe without cluster access, a ticket write under the offline lock). Anything that
+  changes something is a writer that cannot exist while its tier is off and needs a person's approval for exactly that
+  action, unexpired and used once. The chart renders a probe Role and a dry-run Role only when enabled.
+- KN-S017 also flags workload creation and changes (pods, Deployments, Jobs...), ephemeral containers and
+  PersistentVolume creation: each lets a subject act as any ServiceAccount in the namespace or reach the host
+  (Kubernetes RBAC good practices).
+
 ## 0.5.0 - 2026-10-28
 
 Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and what became of each ticket.

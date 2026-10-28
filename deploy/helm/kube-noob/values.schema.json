@@ -179,6 +179,86 @@
           }
         }
       }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "dryRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rules": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "apiGroups",
+              "resources"
+            ],
+            "properties": {
+              "apiGroups": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9.-]*$"
+                }
+              },
+              "resources": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*$",
+                  "not": {
+                    "enum": [
+                      "secrets",
+                      "*"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "itsm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "writeEnabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "notify": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

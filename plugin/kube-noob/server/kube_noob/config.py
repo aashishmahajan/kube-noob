@@ -190,6 +190,36 @@ class WatchSettings(_Base):
         return v
 
 
+class ProbeSettings(_Base):
+    """Tier P: ephemeral debug containers or probe Jobs. Off by default; every probe needs an approval."""
+
+    enabled: bool = False
+
+
+class DryRunSettings(_Base):
+    """Tier D: server-side dry-run of manifests (``?dryRun=All``). Off by default; every request needs an approval."""
+
+    enabled: bool = False
+
+
+class ItsmSettings(_Base):
+    """Tier W: attach evidence to tickets in an external ITSM system. Off by default."""
+
+    write_enabled: bool = False
+
+
+class NotifySettings(_Base):
+    """Tier W: forward reports to chat or webhooks. Off by default."""
+
+    enabled: bool = False
+
+
+class GateSettings(_Base):
+    """Tier G: forward approved tool calls to an upstream MCP server. Off by default."""
+
+    enabled: bool = False
+
+
 class JiraSettings(_Base):
     """Local copy of Red Hat's public Jira (``kube-noob corpus jira``) for "has Red Hat seen this error?" answers.
 
@@ -248,6 +278,11 @@ class Settings(_Base):
     server: ServerSettings = Field(default_factory=ServerSettings)
     watch: WatchSettings = Field(default_factory=WatchSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
+    probe: ProbeSettings = Field(default_factory=ProbeSettings)
+    dry_run: DryRunSettings = Field(default_factory=DryRunSettings)
+    itsm: ItsmSettings = Field(default_factory=ItsmSettings)
+    notify: NotifySettings = Field(default_factory=NotifySettings)
+    gate: GateSettings = Field(default_factory=GateSettings)
     data_dir: Path = Field(default_factory=_default_data_dir)
     default_platform: Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"] = "kubernetes"
     source_path: Path | None = Field(default=None, exclude=True)

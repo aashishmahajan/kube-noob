@@ -59,3 +59,11 @@ class ClarificationNeeded(KubeNoobError):
 
 class ProviderError(KubeNoobError):
     """The configured LLM provider is unavailable or misconfigured."""
+
+
+class TierDisabledError(KubeNoobError):
+    """A capability tier beyond read-only is off; the message names the switch that turns it on."""
+
+
+class ApprovalError(KubeNoobError):
+    """A change was attempted without a valid approval: missing, for another action or tier, expired or reused."""

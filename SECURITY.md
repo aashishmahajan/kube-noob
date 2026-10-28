@@ -39,6 +39,25 @@ when cluster access is enabled; the maintainer CLI commands `corpus build --onli
 | Egress on OpenShift | Chart NetworkPolicy allows DNS only by default; optional OVN-Kubernetes EgressFirewall allows only the API server and allowlisted HTTPS domains, then denies all. |
 | Homebrew | The formula installs the release wheel and wheels-only dependencies pinned by hash from the release's `requirements.lock`. |
 
+## Capability tiers
+
+kube-noob reads by default and changes nothing. Everything else is a tier, off by default; every action in a tier
+needs a person's approval for exactly that action, valid for 15 minutes and usable once. `kube-noob doctor` prints
+each tier and what it needs.
+
+| Tier | Switch | Allows | Needs |
+|---|---|---|---|
+| R | `cluster.enabled` | get, list and logs on the allowlisted resources; Secrets never | get/list/watch RBAC |
+| P | `probe.enabled` | an ephemeral debug container or a probe Job | patch on `pods/ephemeralcontainers`; create and delete on Jobs (chart Role only when enabled) |
+| D | `dryRun.enabled` | server-side dry-run (`?dryRun=All`) of a manifest | create and patch on `dryRun.rules` resources, never Secrets: Kubernetes authorizes a dry-run exactly like the real request |
+| W | `itsm.writeEnabled`, `notify.enabled` | attach evidence to a ticket; forward a report | the external system's token; refused under the offline lock |
+| G | `gate.enabled` | forward a tool call a person approved to an upstream MCP server | nothing from kube-noob; the upstream keeps its own access |
+
+The read-only backends have no method that writes. Code that changes something exists only while its tier is on.
+kube-noob's own audit flags what the P and D Roles allow (KN-S017, medium): pods started by Jobs or added as
+ephemeral containers can act as any ServiceAccount in the namespace, so enable them only in namespaces that enforce
+Pod Security `restricted`.
+
 ## Compliance
 
 Audit findings name the NIST SP 800-53 Rev. 5 controls they are evidence about, and `kube-noob doctor` reports FIPS

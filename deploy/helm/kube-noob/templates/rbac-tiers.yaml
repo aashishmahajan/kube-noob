@@ -1,0 +1,66 @@
+{{- /*
+Capability tiers beyond read-only (kube_noob.tiers). Each Role renders only when its tier is enabled, in the release
+namespace plus rbac.namespaces, never cluster-wide. kube-noob still asks a person to approve every action.
+*/}}
+{{- $sa := include "kube-noob.fullname" . }}
+{{- $namespaces := concat (list .Release.Namespace) .Values.rbac.namespaces | uniq }}
+{{- if .Values.probe.enabled }}
+{{- $name := printf "%s-probe" (include "kube-noob.fullname" .) }}
+{{- range $ns := $namespaces }}
+---
+# Tier P: kubectl debug patches the pods/ephemeralcontainers subresource; probe Jobs are created and removed.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels: {{- include "kube-noob.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods/ephemeralcontainers]
+    verbs: [patch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels: {{- include "kube-noob.labels" $ | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $name }}}
+subjects:
+  - {kind: ServiceAccount, name: {{ $sa }}, namespace: {{ $.Release.Namespace }}}
+{{- end }}
+{{- end }}
+{{- if .Values.dryRun.enabled }}
+{{- $name := printf "%s-dry-run" (include "kube-noob.fullname" .) }}
+{{- range $ns := $namespaces }}
+---
+# Tier D: dry-run is authorized exactly like the real request, so this Role grants create and patch on the listed
+# resources; kube-noob only ever sends them with ?dryRun=All, after an approval.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels: {{- include "kube-noob.labels" $ | nindent 4 }}
+rules:
+  {{- range $.Values.dryRun.rules }}
+  - apiGroups: {{ toJson .apiGroups }}
+    resources: {{ toJson .resources }}
+    verbs: [create, patch]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels: {{- include "kube-noob.labels" $ | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $name }}}
+subjects:
+  - {kind: ServiceAccount, name: {{ $sa }}, namespace: {{ $.Release.Namespace }}}
+{{- end }}
+{{- end }}

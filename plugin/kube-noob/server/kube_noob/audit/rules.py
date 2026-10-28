@@ -1079,13 +1079,29 @@ def _s016(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 ESCALATION_VERBS = frozenset({"escalate", "bind", "impersonate"})
 
 
+WORKLOAD_RESOURCES = frozenset(
+    {
+        "pods",
+        "deployments",
+        "replicasets",
+        "statefulsets",
+        "daemonsets",
+        "jobs",
+        "cronjobs",
+        "replicationcontrollers",
+        "deploymentconfigs",
+    }
+)
+
+
 @rule(
     "KN-S017",
     "RBAC privilege-escalation paths",
     Stage.AUDIT,
     "rbac",
     Severity.HIGH,
-    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy and pod exec unless essential.",
+    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy, pod exec, ephemeral containers and "
+    "workload creation unless essential; where they are, enforce Pod Security restricted in that namespace.",
     "These permissions let a subject obtain more privileges than it was granted.",
     ("k8s-rbac-good-practices",),
 )
@@ -1103,6 +1119,26 @@ def _s017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 yield r.finding(d, ("rules", i, "resources"), "Grants exec/attach into pods.", severity=Severity.MEDIUM)
             if "nodes/proxy" in resources:
                 yield r.finding(d, ("rules", i, "resources"), "Grants nodes/proxy (kubelet API access).")
+            # Kubernetes RBAC good practices, "Workload creation" and "Persistent volume creation":
+            # https://github.com/kubernetes/website/blob/main/content/en/docs/concepts/security/rbac-good-practices.md
+            if resources & WORKLOAD_RESOURCES and verbs & {"create", "patch", "update", "*"}:
+                sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.MEDIUM
+                yield r.finding(
+                    d,
+                    ("rules", i, "resources"),
+                    f"Can create or change {', '.join(sorted(resources & WORKLOAD_RESOURCES))}: their pods can run as "
+                    "any ServiceAccount in the namespace and mount its Secrets and volumes.",
+                    severity=sev,
+                )
+            if "pods/ephemeralcontainers" in resources and verbs & {"patch", "update", "*"}:
+                yield r.finding(
+                    d,
+                    ("rules", i, "resources"),
+                    "Can add ephemeral containers to running pods: code runs in the pod, like exec.",
+                    severity=Severity.MEDIUM,
+                )
+            if "persistentvolumes" in resources and verbs & {"create", "*"}:
+                yield r.finding(d, ("rules", i, "resources"), "Can create PersistentVolumes, including hostPath.")
 
 
 @rule(

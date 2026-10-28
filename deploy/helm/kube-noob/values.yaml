@@ -94,6 +94,24 @@ jira:
     intervalHours: 24
     maxRequests: 600         # per run, one second or more apart: about 60,000 tickets a run at most
 
+# Capability tiers beyond read-only (tier R is config.clusterEnabled). Each is off by default, every action needs a
+# person's approval, and probe and dryRun get their own Role (templates/rbac-tiers.yaml) only when enabled.
+probe:
+  enabled: false             # tier P: ephemeral debug containers or probe Jobs; needs config.clusterEnabled
+dryRun:
+  enabled: false             # tier D: server-side dry-run; needs config.clusterEnabled
+  rules:                     # what may be dry-run; dry-run needs the same RBAC as a real create or patch
+    - apiGroups: [apps]
+      resources: [deployments, statefulsets, daemonsets]
+    - apiGroups: [""]
+      resources: [services]
+itsm:
+  writeEnabled: false        # tier W: attach evidence to tickets; refused under config.offline
+notify:
+  enabled: false             # tier W: forward reports to chat or webhooks; refused under config.offline
+gate:
+  enabled: false             # tier G: forward approved tool calls to an upstream MCP server
+
 rbac:
   # Read-only, never Secrets. Every holder of the bearer token reads through this ServiceAccount, so the default is
   # the release namespace plus the namespaces listed below; "cluster" grants cluster-wide reads.
