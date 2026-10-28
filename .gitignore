@@ -8,7 +8,7 @@ __pycache__/
 coverage.xml
 htmlcov/
 dist/
-build/
+/build/
 *.egg-info/
 .env
 .env.*

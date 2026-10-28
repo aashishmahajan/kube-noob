@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 from kube_noob import __version__
@@ -172,3 +173,21 @@ def test_homebrew_install_is_documented_tested_and_never_ahead_of_the_package() 
     release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())["jobs"]
     assert release["homebrew"]["needs"] == "publish-pypi"
     assert release["brew"]["uses"] == "./.github/workflows/brew.yml"
+
+
+def test_no_source_file_is_ignored_by_git() -> None:
+    """A .gitignore pattern such as build/ once hid the kube_noob.build package from commits and from the wheel."""
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None or not (ROOT / ".git").exists():
+        pytest.skip("not a git checkout")
+    out = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "src", "plugin", "tests", "scripts"],  # noqa: S607
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    hidden = [p for p in out if "__pycache__" not in p and not p.endswith((".pyc", ".DS_Store"))]
+    assert hidden == [], f"ignored by .gitignore, so never committed or packaged: {hidden[:10]}"
