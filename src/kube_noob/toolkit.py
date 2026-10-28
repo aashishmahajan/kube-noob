@@ -232,6 +232,18 @@ class MemoryProposeIn(_In):
     )
 
 
+class InsightIn(_In):
+    text: str = Field(
+        ...,
+        min_length=3,
+        max_length=MAX_DIAGNOSE_TEXT,
+        description="Anything pasted: events, describe output, logs, an Alertmanager payload, a policy denial, a "
+        "ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.",
+    )
+    platform: PlatformT | None = None
+    version: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")
+
+
 class TicketChangesIn(_In):
     since: str = Field(
         "2d",
@@ -761,6 +773,13 @@ class Toolkit:
         self._observe([f"signal:{c['id']}" for c in catalogue][:20])  # catalogued (public) names only
         return out
 
+    def insight(self, p: InsightIn) -> dict[str, Any]:
+        from kube_noob.insight import insight
+
+        out = insight(self, p.text, p.platform, p.version)
+        self._observe([f"insight:{k['kind']}" for k in out["kinds"]])
+        return out
+
     def ticket_changes(self, p: TicketChangesIn) -> dict[str, Any]:
         from kube_noob import ticket_changes
 
@@ -1132,6 +1151,18 @@ class Toolkit:
                 "and offline.",
                 SignalsIn,
                 self.extract_signals,
+            ),
+            ToolSpec(
+                "insight",
+                "What is this, and what does it say?",
+                "Start here for anything the user pastes. Names what the input is (events, pod status, logs, an "
+                "Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a "
+                "Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at "
+                "once) and runs every analyser that applies: diagnosis with reported issues and team memory, the "
+                "denial explainer, the audit, the documentation. Returns every finding with its source, read-only "
+                "next steps and what was not analysed and why. Read-only, local.",
+                InsightIn,
+                self.insight,
             ),
             ToolSpec(
                 "ticket_changes",

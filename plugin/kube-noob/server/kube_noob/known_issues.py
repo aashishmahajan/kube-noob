@@ -19,6 +19,7 @@ duplicate (see ``kube_noob.tickets``). A release-note issue that is also in the 
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import threading
@@ -38,6 +39,22 @@ GENERAL_SHARE = 0.02  # and in at most 2% of the bundled Kubernetes and OpenShif
 RELATIVE_FLOOR = 0.75  # further matches must score at least 75% of the best one
 STRONG_SCORE = 40.0  # a score this high with two rare shared words, or one and a clear lead, is a match
 DOMINANCE = 2.0  # "a clear lead": at least twice the next applicable issue's score
+
+
+@functools.cache
+def _templates() -> tuple[re.Pattern[str], ...]:
+    from kube_noob.signals.vocab import MESSAGE_TEMPLATES
+
+    return tuple(re.compile(t) for t in MESSAGE_TEMPLATES)
+
+
+def strip_templates(text: str) -> str:
+    """``text`` with the fixed wording of known component messages replaced by their variable parts
+    (``kube_noob.signals.vocab.MESSAGE_TEMPLATES``): "Unable to retrieve some image pull secrets (regcred); ..." keeps
+    "regcred" only."""
+    for rx in _templates():
+        text = rx.sub(lambda m: " ".join(g for g in m.groups() if g), text)
+    return text
 
 
 def stems(text: str, known: Callable[[str], bool] | None = None) -> str:
@@ -209,6 +226,7 @@ class Index:
         running = version if version and re.fullmatch(r"\d+\.\d+(\.\d+)?", version) else None
         signals = [x for x in extract(text) if x.kind in {"alert", "event_reason", "pod_reason"}] + infer(text)
         sig_terms = terms_for(signals)
+        text = strip_templates(text)  # the fixed words of component messages are not evidence for any one issue
         query = f"{text}\n{stems(text, self.known)}"
         q_tokens = set(tokenize(query))
         sig_tokens = set(tokenize(" ".join(sig_terms))) - q_tokens

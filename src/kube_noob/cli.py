@@ -35,7 +35,7 @@ def _read(path: str) -> str:
 _PATHLIKE = re.compile(r"[/\\]|\.[A-Za-z0-9]{1,5}$")
 
 
-def _read_text_or_file(value: str) -> str:
+def _read_text_or_file(value: str, command: str = "diagnose") -> str:
     """For `diagnose`: '-' reads stdin, an existing path is read, anything else is the pasted text itself.
 
     A single token that looks like a missing file (``events.txt``, ``logs/pod.log``) is an error rather than text, so a
@@ -53,7 +53,7 @@ def _read_text_or_file(value: str) -> str:
         return _read(value)
     if not any(c.isspace() for c in value) and _PATHLIKE.search(value):
         raise ConfigError(
-            f"no such file: {value}. To diagnose text instead, pass it in quotes: kube-noob diagnose '<text>'"
+            f"no such file: {value}. To read text instead, pass it in quotes: kube-noob {command} '<text>'"
         )
     return value
 
@@ -66,6 +66,23 @@ def _emit(obj: Any, fmt: str) -> None:
 
 
 _REMARK_LABELS = {"cause": "cause", "expected": "why closed", "fix": "fix note"}
+
+
+def _print_insight(res: dict[str, Any]) -> None:
+    _tprint("input: " + "; ".join(f"{k['kind']} ({k['evidence']})" for k in res["kinds"]))
+    if res.get("ran"):
+        _tprint("ran: " + ", ".join(res["ran"]))
+    for f in res["findings"]:
+        extra = f.get("verdict") or f.get("severity") or f.get("confidence") or f.get("cite") or ""
+        _tprint(f"  {f['source']:15} {f.get('id')!s:28} {str(f.get('title') or '')[:90]}  {extra}")
+        if f.get("cause"):
+            _tprint(f"  {'':15} cause: {f['cause'][:150]}")
+    if res.get("readOnlyNextSteps"):
+        _tprint("read-only next steps:")
+        for st in res["readOnlyNextSteps"]:
+            _tprint(f"  {st.get('command') or st.get('step') or st}")
+    for sk in res.get("skipped", []):
+        _tprint(f"not analysed ({sk['kind']}): {sk['why']}")
 
 
 def _print_ticket_changes(res: dict[str, Any], opened: dict[str, Any]) -> None:
@@ -293,6 +310,18 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument(
         "--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8: leaves out issues already fixed there"
     )
+
+    ins = sub.add_parser(
+        "insight",
+        help="Paste anything (events, logs, an alert, a denial, a ticket, manifests, a question): it names what it is "
+        "and runs every analyser that applies",
+        description="Recognises what the input is and merges the diagnosis, reported issues, team memory, policy "
+        "explanations, audit findings and documentation that apply. Text in quotes, a file with -f, or stdin.",
+    )
+    ins.add_argument("text", nargs="*", help="the input; quote multi-line text (single quotes avoid $ expansion)")
+    ins.add_argument("-f", "--file", default=None, help="a file (a .pcap is recognised by its header), or '-'")
+    ins.add_argument("--platform", choices=PLATFORMS)
+    ins.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
 
     kis = sub.add_parser(
         "known-issues",
@@ -769,6 +798,34 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         top = chart_report.max_severity()
         return 1 if top is not None and top >= 3 else 0
 
+    if a.cmd == "insight":
+        from kube_noob import insight as insight_mod
+
+        if a.text and a.file is not None:
+            raise ConfigError("pass the text or -f, not both")
+        if a.file not in (None, "-") and Path(a.file).is_file():
+            data = Path(a.file).read_bytes()[: insight_mod.MAX_TEXT]
+            kinds = insight_mod.recognise_bytes(data)
+            if [k.kind for k in kinds] == ["packet-capture"]:
+                pcap: dict[str, Any] = {
+                    "kinds": [k.as_dict() for k in kinds],
+                    "ran": [],
+                    "findings": [],
+                    "skipped": [{"kind": "packet-capture", "why": insight_mod.PENDING["packet-capture"]}],
+                }
+                _emit(pcap, fmt) if a.format != "text" else _print_insight(pcap)
+                return 0
+            text = data.decode("utf-8", errors="replace")
+        else:
+            text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-", "insight")
+        if len(text.strip()) < 3:
+            raise ConfigError("nothing to read: pass the text in quotes, a file with -f, or pipe it in")
+        found = kit.insight(tk.InsightIn(text=text[-tk.MAX_DIAGNOSE_TEXT :], platform=a.platform, version=a.pversion))
+        if a.format == "text":
+            _print_insight(found)
+        else:
+            _emit(found, fmt)
+        return 0
     if a.cmd == "diagnose":
         if a.text and a.file is not None:
             raise ConfigError("pass the text or -f, not both")

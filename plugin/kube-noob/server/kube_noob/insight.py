@@ -1,0 +1,488 @@
+"""One entry point for anything pasted: ``kube-noob insight`` and the ``kubenoob_insight`` tool.
+
+``recognise`` names what the input is (several kinds at once are normal: events next to a denial next to a manifest)
+by rules, with the evidence for each kind. ``insight`` then runs every analyser that applies, each on its own size
+budget: diagnosis with reported issues, team memory and policy denials (events, pod status, logs, alerts, build
+logs, tickets, questions), the audit with its schema and removed-API checks (manifests), the documentation index
+(questions) and the denial explainer. Kinds whose analyser is still to come (Containerfile, SBOM and scanner reports,
+packet captures, must-gather paths) are named with what to run today. The answer merges every finding with its
+source, the read-only next steps, and what was skipped and why. Rules only: no model, deterministic.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from typing import Any
+
+MAX_TEXT = 2_000_000
+ANALYSER_TEXT = 200_000  # characters each text analyser reads (the end of the input, where failures usually are)
+
+KINDS = (
+    "alert-payload",
+    "events",
+    "pod-status",
+    "logs",
+    "ticket",
+    "manifests",
+    "helm-chart",
+    "policy-denial",
+    "build-log",
+    "containerfile",
+    "sbom",
+    "scanner-report",
+    "packet-capture",
+    "must-gather",
+    "question",
+)
+PENDING = {
+    "containerfile": "the Containerfile audit (requirements R4.2) is not built yet; until then audit the manifests "
+    "that run the image and pin its base image by digest",
+    "sbom": "SBOM analysis (R5.1) is not built yet; run your scanner and read its findings with RHACS or Trivy",
+    "scanner-report": "scanner report analysis (R5.1) is not built yet",
+    "packet-capture": "packet capture analysis (queue N2) is not built yet; tcpdump text is read as logs",
+    "must-gather": "must-gather analysis (queue G1-G3) is not built yet; paste the pod's events and logs instead",
+}
+
+_EVENT_TABLE = re.compile(r"^\s*(?:Type\s+Reason\s+Age\s+From\s+Message|LAST SEEN\s+TYPE\s+REASON\s+OBJECT)", re.M)
+_EVENT_LINE = re.compile(r"^\s*(?:\S+\s+)?(?:Normal|Warning)\s+[A-Z][A-Za-z]+\s+\S+", re.M)
+_DESCRIBE_POD = re.compile(r"^(?:Name|Namespace|Node|Status|Containers|Conditions|Controlled By):", re.M)
+_CONTAINER_STATE = re.compile(r"(?:Last State|State):\s+(?:Waiting|Terminated|Running)|Reason:\s+[A-Z][A-Za-z]+", re.M)
+_LOG_LINE = re.compile(
+    r"^\s*(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|[IWEF]\d{4} \d{2}:\d{2}:\d{2}\.\d+|time=\"?\d{4}-|"
+    r"level=(?:info|warn|warning|error|fatal|debug)|\{\"(?:level|ts|time|msg)\"|"
+    r"[A-Z][a-z]{2} +\d{1,2} \d{2}:\d{2}:\d{2})",
+    re.M,
+)
+_STACK = re.compile(r"^(?:Traceback \(most recent call last\):|\s+at [\w.$]+\(|panic: |goroutine \d+ \[)", re.M)
+_TICKET = re.compile(
+    r"\b(?:[A-Z][A-Z0-9_]{1,15}-\d{1,7}|INC\d{7}|RITM\d{7}|CHG\d{7})\b.{0,200}?(?:Summary|Description|Status|"
+    r"short_description|Priority|Assignee|Resolution)\b|\"(?:issues|short_description|fields)\"\s*:|"
+    r"^(?:Issue key|Summary|number),",
+    re.S | re.M,
+)
+_DENIAL = re.compile(
+    r"admission webhook \".{1,200}\" denied|violates PodSecurity|unable to validate against any security context "
+    r"constraint|exceeded quota|\[denied by |ValidatingAdmissionPolicy .{1,120} denied|is forbidden: |"
+    r"policy .{1,120} (?:blocked|violation)",
+    re.I,
+)
+_BUILD = re.compile(
+    r"^(?:STEP \d+/\d+: |Step \d+/\d+ : |#\d+ \[[\w-]+ \d+/\d+\]|\[Pipeline\]|##\[(?:error|group)\]|Cloning \"https?://|"
+    r"error building image|Pushing image |error: build error|\[step-[\w-]+\]|Run actions/)",
+    re.M,
+)
+_DOCKER_INSTRUCTION = re.compile(r"^(?:FROM|RUN|COPY|ADD|USER|ENTRYPOINT|CMD|WORKDIR|ENV|ARG|EXPOSE|LABEL)\s", re.M)
+_TCPDUMP = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d+ (?:IP6?|ARP),? \S+ > \S+: ", re.M)  # tcpdump: time IP src > dst:
+_MUST_GATHER = re.compile(
+    r"must-gather\.local\.|cluster-scoped-resources/|namespaces/openshift-[\w-]+/pods/|"
+    r"quay-io-openshift-release-dev-ocp-v4-0-art-dev-sha256-"
+)
+_QUESTION = re.compile(r"^(?:how|why|what|when|where|which|can|could|should|is|are|does|do|will|my|i )\b", re.I)
+_WORD = re.compile(r"[A-Za-z]{3}")
+_HELM = re.compile(
+    r"\{\{-?\s*(?:\.Values|\.Release|include |template |if |range )|^apiVersion: v2\n(?:.*\n){0,6}name: ", re.M
+)
+
+
+@dataclass(frozen=True)
+class Kind:
+    kind: str
+    evidence: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "evidence": self.evidence}
+
+
+def _json(text: str) -> Any:
+    s = text.lstrip()
+    if not s.startswith(("{", "[")):
+        return None
+    try:
+        return json.loads(s)
+    except (ValueError, RecursionError):
+        return None
+
+
+def _yaml_docs(text: str) -> list[Any]:
+    """The documents, through the audit's guarded loader (size, count, depth and alias budgets); [] if not YAML."""
+    if "apiVersion" not in text or "kind" not in text:
+        return []
+    from kube_noob.errors import ManifestError
+    from kube_noob.yamlio import load_documents
+
+    try:
+        docs = [d.data for d in load_documents(text)]
+    except ManifestError:
+        return []
+    return docs if all(isinstance(d, dict) for d in docs) else []
+
+
+_YAMLISH = re.compile(r"^(?:\s|-\s|-$|#|---|\.\.\.|[A-Za-z_][\w./-]*:(?:\s|$))")
+_YAML_START = re.compile(r"^(?:apiVersion|kind):\s*\S")
+MAX_SEGMENTS = 50
+
+
+def manifest_segments(text: str) -> list[str]:
+    """The Kubernetes YAML inside a mixed paste (events, then a manifest, then a denial): each run of lines that
+    starts with ``apiVersion:`` or ``kind:`` at the margin, continues while lines look like YAML, and parses as
+    documents that all carry apiVersion and kind. Shrinks a run to its last blank line or ``---`` when the whole run
+    does not parse."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines) and len(out) < MAX_SEGMENTS:
+        if not _YAML_START.match(lines[i]):
+            i += 1
+            continue
+        start = i - 1 if i and lines[i - 1].strip() == "---" else i
+        j = i + 1
+        while j < len(lines) and (not lines[j].strip() or _YAMLISH.match(lines[j])):
+            j += 1
+        ends = [j] + [k for k in range(j - 1, i, -1) if not lines[k].strip() or lines[k].strip() == "---"][:20]
+        for end in ends:
+            chunk = "\n".join(lines[start:end]).strip("\n")
+            docs = _yaml_docs(chunk)
+            if docs and all("apiVersion" in d and "kind" in d for d in docs):
+                out.append(chunk)
+                break
+        i = j
+    return out
+
+
+def recognise(text: str) -> list[Kind]:
+    """Every kind the input looks like, with the evidence; empty for text that is none of them."""
+    text = text[:MAX_TEXT]
+    found: dict[str, str] = {}
+    doc = _json(text)
+    s = text.lstrip()
+    if isinstance(doc, dict):
+        if "spdxVersion" in doc or doc.get("bomFormat") == "CycloneDX":
+            found["sbom"] = "SPDX or CycloneDX document"
+        if ("Results" in doc and "SchemaVersion" in doc) or ("matches" in doc and "descriptor" in doc):
+            found["scanner-report"] = "Trivy or Grype report"
+        if "runs" in doc and "sarif" in str(doc.get("$schema", "")).lower() + str(doc.get("version", "")):
+            found["scanner-report"] = "SARIF report"
+        if doc.get("kind") in {"EventList", "Event"}:
+            found["events"] = f"{doc.get('kind')} JSON"
+        if doc.get("kind") == "Pod" and "status" in doc:
+            found["pod-status"] = "Pod JSON with status"
+        if "issues" in doc or "fields" in doc or "short_description" in s[:5000]:
+            found["ticket"] = "ticket export JSON"
+    from kube_noob.signals import alertmanager
+
+    if alertmanager.parse(text) is not None:
+        found["alert-payload"] = "Alertmanager webhook or API alerts"
+    docs = _yaml_docs(text) if not found else []
+    whole = bool(docs) and all("apiVersion" in d and "kind" in d for d in docs)
+    if not whole and not found:
+        docs = [d for seg in manifest_segments(text) for d in _yaml_docs(seg)]
+    if docs and all("apiVersion" in d and "kind" in d for d in docs):
+        where = "" if whole else " inside the paste"
+        found["manifests"] = (
+            f"{len(docs)} Kubernetes document(s){where}: {', '.join(sorted({str(d['kind']) for d in docs}))}"
+        )
+        if any(d.get("kind") == "Pod" and isinstance(d.get("status"), dict) for d in docs):
+            found["pod-status"] = "Pod with status"
+        if any(d.get("kind") == "EventList" for d in docs):
+            found["events"] = "EventList"
+    if _HELM.search(text):
+        found["helm-chart"] = "Helm template or Chart.yaml"
+        found.pop("manifests", None)
+    if _EVENT_TABLE.search(text) or _EVENT_LINE.search(text):
+        found.setdefault("events", "event lines (Normal or Warning with a reason)")
+    if len(_DESCRIBE_POD.findall(text)) >= 3 or _CONTAINER_STATE.search(text):
+        found.setdefault("pod-status", "pod status or describe output")
+    if len(_LOG_LINE.findall(text)) >= 2 or _STACK.search(text):
+        found["logs"] = "timestamped log lines or a stack trace"
+    if _TICKET.search(text[:20_000]):
+        found.setdefault("ticket", "ticket key with ticket fields")
+    if _DENIAL.search(text):
+        found["policy-denial"] = "an admission or authorization denial"
+    if _BUILD.search(text):
+        found["build-log"] = "build or pipeline steps"
+    instructions = _DOCKER_INSTRUCTION.findall(text)
+    if len(instructions) >= 2 and re.match(r"(?:\s*#.*\n|\s*ARG\s.*\n)*\s*FROM\s", text):
+        found["containerfile"] = f"{len(instructions)} Containerfile instructions"
+    if len(_TCPDUMP.findall(text)) >= 2:
+        found["packet-capture"] = "tcpdump text"
+    if _MUST_GATHER.search(text):
+        found["must-gather"] = "must-gather paths"
+    stripped = text.strip()
+    one_line = "\n" not in stripped and 3 <= len(stripped) <= 300 and bool(_WORD.search(stripped))
+    asked = stripped.endswith("?") or bool(_QUESTION.match(stripped))
+    if (not found and (asked or one_line)) or (asked and one_line and set(found) <= {"policy-denial", "ticket"}):
+        found["question"] = "a question or symptom in words"
+    return [Kind(k, found[k]) for k in KINDS if k in found]
+
+
+def recognise_bytes(data: bytes) -> list[Kind]:
+    """For a file: packet captures by their magic number, else the text inside."""
+    if data[:4] in {b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4", b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d"}:
+        return [Kind("packet-capture", "pcap file")]
+    if data[:4] == b"\x0a\x0d\x0d\x0a":
+        return [Kind("packet-capture", "pcapng file")]
+    if b"\x00" in data[:8192]:
+        return []  # some other binary file: nothing to read as text
+    return recognise(data.decode("utf-8", errors="replace"))
+
+
+_SEVERITY = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+BUDGET_SECONDS = 20.0  # each analyser's time budget; one that runs longer is reported as skipped
+MAX_TICKETS = 5
+ALONE = {
+    "diagnose": "kube-noob diagnose -f <file>",
+    "search": "kube-noob search '<question>'",
+    "audit": "kube-noob audit -f <file>",
+    "tickets": "kube-noob ticket <KEY>",
+}
+GATHER = (
+    ("{cli} get pods -n {ns} -o wide", "which pods are not Running or not Ready, and on which node"),
+    ("{cli} describe pod <pod> -n {ns}", "the State, Last State and Events sections name the reason"),
+    ("{cli} get events -n {ns} --sort-by=.lastTimestamp", "recent warnings in the namespace"),
+    ("{cli} logs <pod> -n {ns} --previous --tail=200", "the last run's logs when the container restarted"),
+)
+GATHER_NOTE = " Nothing here was evidence enough to diagnose: run the steps and paste what they print."
+NOT_YET = {
+    "build-log": "build failure analysis (requirements R4.1) is not built yet; the log was diagnosed as text",
+}
+
+
+def gather_steps(platform: str | None, namespace: str | None) -> list[dict[str, str]]:
+    """Read-only commands that collect the evidence a diagnosis needs, for input that carries none yet."""
+    from kube_noob.catalog import OPENSHIFT_FAMILY
+
+    cli = "oc" if platform in OPENSHIFT_FAMILY else "kubectl"
+    ns = namespace or "<namespace>"
+    return [{"command": c.format(cli=cli, ns=ns), "why": why} for c, why in GATHER]
+
+
+class _Budget:
+    """Runs each analyser in a worker thread and stops waiting after ``BUDGET_SECONDS``. A late analyser's result
+    is dropped and the answer says so; the size limits already bound how long any of them can take."""
+
+    def __init__(self, skipped: list[dict[str, str]], ran: list[str]) -> None:
+        self.skipped, self.ran = skipped, ran
+
+    def run(self, name: str, fn: Any) -> Any:
+        import concurrent.futures
+
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"insight-{name}")
+        future = pool.submit(fn)
+        try:
+            out = future.result(timeout=BUDGET_SECONDS)
+        except concurrent.futures.TimeoutError:
+            self.skipped.append(
+                {"kind": name, "why": f"took longer than {BUDGET_SECONDS:g} s; run it alone: {ALONE.get(name, name)}"}
+            )
+            return None
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        self.ran.append(name)
+        return out
+
+
+def _ticket_keys(text: str) -> list[str]:
+    from kube_noob.jira_catalog import DEFAULT_PROJECTS
+
+    projects = "|".join(sorted(DEFAULT_PROJECTS, key=len, reverse=True))
+    keys = re.findall(rf"\b(?:{projects})-\d{{1,9}}\b", text[:ANALYSER_TEXT])
+    return list(dict.fromkeys(keys))[:MAX_TICKETS]
+
+
+def _ticket_findings(kit: Any, keys: list[str], version: str | None) -> list[dict[str, Any]]:
+    from kube_noob import known_issues as ki
+    from kube_noob import toolkit as tk
+
+    out: list[dict[str, Any]] = []
+    index = {i.id: i for i in ki.get_index(kit.settings.data_dir).issues}
+    for key in keys:
+        t = kit.ticket(tk.TicketIn(key=key, version=version))
+        if t.get("found"):
+            out.append(
+                {
+                    "source": "ticket",
+                    "id": key,
+                    "title": t.get("title"),
+                    "verdict": t.get("verdict") or t.get("status"),
+                    "url": t.get("url"),
+                    "rank": 3,
+                }
+            )
+        elif key in index:
+            issue = index[key]
+            out.append(
+                {
+                    "source": "reported-issue",
+                    "id": key,
+                    "title": issue.summary,
+                    "verdict": issue.status(version),
+                    "url": issue.url,
+                    "rank": 3,
+                }
+            )
+        else:
+            out.append(
+                {
+                    "source": "ticket",
+                    "id": key,
+                    "title": "not in the local copy or the release notes",
+                    "verdict": t.get("note"),
+                    "rank": 40,
+                }
+            )
+    return out
+
+
+def insight(kit: Any, text: str, platform: str | None = None, version: str | None = None) -> dict[str, Any]:
+    """Recognise the input, run every analyser that applies (each on its own size and time budget) and merge
+    what they found into one answer."""
+    from kube_noob import toolkit as tk
+
+    text = text[:MAX_TEXT]
+    kinds = recognise(text)
+    names = {k.kind for k in kinds}
+    findings: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    ran: list[str] = []
+    budget = _Budget(skipped, ran)
+    tail = text[-ANALYSER_TEXT:]
+    textual = {"alert-payload", "events", "pod-status", "logs", "ticket", "build-log", "question", "policy-denial"}
+    context: dict[str, Any] = {}
+    signals: list[Any] = []
+
+    if names & textual or not names:
+        d = budget.run(
+            "diagnose", lambda: kit.diagnose(tk.DiagnoseIn(text=tail, platform=platform, version=version, limit=5))
+        )
+        d = d or {}
+        signals = list(d.get("signals") or [])
+        for i, x in enumerate(d.get("diagnoses", [])[:3]):
+            findings.append(
+                {
+                    "source": "playbook",
+                    "id": x["id"],
+                    "title": x["title"],
+                    "confidence": x["confidence"],
+                    "cause": (x.get("rootCauses") or [""])[0],
+                    "rank": 10 + i,
+                }
+            )
+            if i == 0:
+                steps += x.get("readOnlyNextSteps", [])[:6]
+        for m in d.get("knownIssues", [])[:3]:
+            findings.append(
+                {
+                    "source": "reported-issue",
+                    "id": m.get("id"),
+                    "title": m.get("title"),
+                    "verdict": m.get("verdict") or m.get("status"),
+                    "url": m.get("url"),
+                    "rank": 20,
+                }
+            )
+        for m in d.get("memory", [])[:3]:
+            findings.append(
+                {
+                    "source": "team-memory",
+                    "id": m.get("id"),
+                    "title": m.get("symptom"),
+                    "cite": m.get("citation"),
+                    "rank": 5,
+                }
+            )
+        for den in d.get("policyDenials", [])[:3]:
+            findings.append(
+                {
+                    "source": "policy",
+                    "id": "/".join(str(x) for x in (den.get("engine"), den.get("policy"), den.get("rule")) if x),
+                    "title": den.get("meaning") or den.get("message"),
+                    "rank": 1,
+                }
+            )
+            steps = [*den.get("readOnlyNextSteps", [])[:3], *steps]
+        context = d.get("context") or {}
+    keys = _ticket_keys(text)
+    if keys:
+        known = {f["id"] for f in findings}
+        fresh = [k for k in keys if k not in known]
+        if fresh:
+            findings += budget.run("tickets", lambda: _ticket_findings(kit, fresh, version)) or []
+    if "question" in names:
+        res = budget.run("search", lambda: kit.search(tk.SearchIn(query=text.strip()[:500], limit=8)))
+        seen: set[str] = set()
+        for h in (res or {}).get("results", []):
+            doc = h["chunkId"].split("#", 1)[0]
+            if doc in seen or len(seen) == 3:
+                continue
+            seen.add(doc)
+            findings.append({"source": "doc", "id": h["chunkId"], "title": h.get("title"), "rank": 30 + len(seen)})
+    if "manifests" in names:
+        from kube_noob.errors import ManifestError
+
+        docs = _yaml_docs(text)
+        manifests = text if docs and all("apiVersion" in x and "kind" in x for x in docs) else None
+        manifests = manifests or "\n---\n".join(manifest_segments(text))
+        where = {k: v for k, v in (("platform", platform), ("version", version)) if v}
+
+        def audit() -> Any:
+            try:
+                return kit.audit(tk.AuditIn(manifests=manifests[: tk.MAX_MANIFEST_CHARS], **where))
+            except ManifestError as exc:
+                return exc
+
+        rep = budget.run("audit", audit)
+        if isinstance(rep, ManifestError):
+            ran.remove("audit")
+            skipped.append({"kind": "manifests", "why": f"not audited: {rep}"})
+            rep = None
+        ordered = sorted((rep or {}).get("findings", []), key=lambda f: -_SEVERITY.get(str(f.get("severity")), 0))
+        for f in ordered[:10]:
+            findings.append(
+                {
+                    "source": "rule",
+                    "id": f["ruleId"],
+                    "title": f["message"],
+                    "severity": f["severity"],
+                    "resource": f.get("resource"),
+                    "rank": 15 - _SEVERITY.get(str(f.get("severity")), 0),
+                }
+            )
+        if re.search(r"^kind:\s*NetworkPolicy\s*$", manifests, re.M):
+            skipped.append(
+                {
+                    "kind": "network-policy",
+                    "why": "reachability needs a source, a destination and a port: kube-noob policy reach --from "
+                    "<ns>/<workload> --to <ns>/<workload> --port <port> -f <file>",
+                }
+            )
+    if "helm-chart" in names:
+        skipped.append(
+            {
+                "kind": "helm-chart",
+                "why": "templates are audited after rendering: helm template <release> <chart> | kube-noob audit -f -",
+            }
+        )
+    for k in sorted(names & (set(PENDING) | set(NOT_YET))):
+        skipped.append({"kind": k, "why": PENDING.get(k) or NOT_YET[k]})
+    evidence = {"playbook", "policy", "rule", "ticket", "reported-issue", "team-memory"}
+    if not steps and not any(f["source"] in evidence for f in findings) and (names & textual or not names):
+        ns = context.get("namespace")
+        steps = gather_steps(platform, ns if isinstance(ns, str) else None)
+        ran.append("gather")
+    findings.sort(key=lambda f: (f["rank"], str(f.get("id"))))
+    for f in findings:
+        f.pop("rank", None)
+    return {
+        "kinds": [k.as_dict() for k in kinds] or [{"kind": "unknown", "evidence": "nothing recognised"}],
+        "ran": ran,
+        "findings": findings,
+        "signals": signals,
+        "readOnlyNextSteps": steps[:8],
+        "context": context,
+        "skipped": skipped,
+        "approach": "Read-only first: every step listed here only reads; changes come from the playbook or rule "
+        "with a person's approval." + (GATHER_NOTE if "gather" in ran else ""),
+    }

@@ -14,6 +14,10 @@ description: >
 Diagnose before change. Never lead with a command that executes in a container or changes the cluster. Commands
 are for the user to run: give them as copy-paste lines (no shell comments) and do not run them yourself.
 
+0. When the user pastes something and it is not obvious what it is (or it is several things at once), call
+   `kubenoob_insight` with the text: it names each kind, runs every analyser that applies and returns the findings
+   with their source, `readOnlyNextSteps` and what it `skipped` and why. Lead with the first finding; say what was
+   skipped. If it only returned evidence-gathering steps, ask the user to run them and paste the output.
 1. Call `kubenoob_incidents` first: if the watch already recorded the problem, its incident has the diagnosis, what
    changed before it started, how often it came back and the fix the team confirmed last time; lead with that.
    Otherwise ask for read-only evidence: the output of `oc describe pod`, `oc get events --sort-by=.lastTimestamp`,

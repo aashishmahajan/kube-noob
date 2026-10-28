@@ -43,7 +43,7 @@ brew trust --formula aashishmahajan/kube-noob/kube-noob
 brew install kube-noob
 kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
-kube-noob diagnose 'paste events or errors'
+kube-noob insight 'paste anything'
 kube-noob doctor
 kube-noob selftest
 ```

@@ -50,7 +50,9 @@ def _icons() -> list[Icon]:
 def _instructions(settings: Settings) -> str:
     return (
         "kube-noob: offline-first Kubernetes / Helm / OpenShift / ROSA HCP / RHACS (StackRox) learning, audit and "
-        "debugging tools. Start design or review requests with kubenoob_run_protocol (7 steps: Clarify, Validate, "
+        "debugging tools. For anything the user pastes (events, logs, alerts, denials, tickets, manifests, a "
+        "question) start with kubenoob_insight: it names what the input is and runs every analyser that applies. "
+        "Start design or review requests with kubenoob_run_protocol (7 steps: Clarify, Validate, "
         "Research, Audit, Calibrate, Generate, Red Team). Ground answers with kubenoob_search_knowledge and cite "
         "chunk ids as [kn:<doc>#<n>]. Debug with kubenoob_diagnose (events, logs or an Alertmanager webhook payload; "
         "kubenoob_extract_signals lists the alert names and reasons a text carries)"

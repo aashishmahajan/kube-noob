@@ -111,3 +111,24 @@ COMPONENTS: dict[str, tuple[str, ...]] = {
     "image-registry": ("image-registry", "cluster-image-registry-operator"),
     "storage": ("csi", "ebs-csi", "efs-csi", "persistentvolume", "persistentvolumeclaim"),
 }
+
+
+# Fixed wording of messages Kubernetes components print (the variable parts are captured and kept). Words like
+# "attempting", "succeed" or "machine" in these templates say nothing about which bug it is, so matching against
+# reported issues reads the captured parts only. Copied from:
+# - kubelet: pkg/kubelet/kubelet.go (pull secrets), pkg/kubelet/images/image_manager.go (image pulls),
+#   pkg/kubelet/kuberuntime/kuberuntime_container.go (stopping)
+# - kube-scheduler: pkg/scheduler/schedule_one.go (Scheduled)
+MESSAGE_TEMPLATES: tuple[str, ...] = (
+    r"Unable to retrieve some image pull secrets \(([^)]{0,500})\); attempting to pull the image may not succeed\.?",
+    r"Container image (\"[^\"]{0,500}\") already present on machine(?: and can be accessed by the pod)?",
+    r"Container image (\"[^\"]{0,500}\") is not present with pull policy of Never",
+    r"Back-off pulling image (\"[^\"]{0,500}\")",
+    r"Pulling image (\"[^\"]{0,500}\")",
+    r"Failed to pull image (\"[^\"]{0,500}\"):",
+    r"Successfully pulled image (\"[^\"]{0,500}\") in \S{1,40} \(\S{1,40} including waiting\)\. "
+    r"Image size: \d{1,20} bytes\.",
+    r"Successfully assigned (\S{1,320}) to (\S{1,253})",
+    r"Back-off restarting failed container (\S{1,253}) in pod (\S{1,253})",
+    r"Stopping container (\S{1,253})",
+)

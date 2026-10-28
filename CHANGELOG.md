@@ -111,6 +111,28 @@
   runs every `jira.sync.intervalHours` +/- 10%; clones from GitHub (`corpus build`, `corpus known-issues`) are spaced
   by a random 1 to 4 s; the scheduled `corpus-refresh` starts at a random offset of up to 15 minutes (the Jira client
   already spaced requests by the crawl delay plus random jitter).
+- `kube-noob insight` (MCP: `kubenoob_insight`, listed first for anything pasted): names what the input is, with the
+  evidence (Alertmanager payload, events, pod status, logs, ticket, manifests, Helm template, policy denial, build log,
+  Containerfile, SBOM, scanner report, packet capture or `.pcap` file, must-gather paths, question; several at once),
+  then runs every analyser that applies, each on its own size and time budget (20 s; a late one is named with the
+  command to run it alone): diagnosis with signals, reported issues, team memory and the denial explainer; Red Hat
+  ticket keys in the text (local Jira copy, then the release notes); the audit with its removed-API and schema checks
+  (most severe first) on the manifests, including YAML found inside a mixed paste of events, a denial and a manifest;
+  and the documentation for questions. One deterministic answer: findings each with their source, the signals,
+  read-only next steps, and what was not analysed and why (Helm templates go through `helm template` first;
+  NetworkPolicy reachability needs `policy reach` with a source, destination and port; build, Containerfile, SBOM,
+  scanner, capture and must-gather analysers are queued and named). Input with no evidence gets the read-only
+  commands that collect it (`oc` on OpenShift and ROSA, `kubectl` elsewhere). Rules only. Recogniser gate on 360
+  generated cases per seed (every kind plus mixed pastes): precision and recall 1.0 on five seeds; the cases are
+  synthetic and written with the rules, so they guard regressions and the red team's held-out set measures it.
+  Hostile input is bounded: deeply nested JSON and YAML, alias bombs and binary files are recognised as nothing.
+- Fixed: a Pod Security denial quoted without the details in brackets ("violates PodSecurity "restricted:latest":
+  allowPrivilegeEscalation != false") was explained as breaking 0 checks with no patch; the checks are now read from
+  the list itself, counted and patched.
+- Fixed: kubelet's image-pull messages ("Unable to retrieve some image pull secrets ...; attempting to pull the image
+  may not succeed", "Failed to pull image", "Pulling image") matched OCPBUGS-64840 on their fixed wording. Known-issue
+  matching now strips the fixed wording of known component messages and keeps their variable parts (secret and image
+  names). The frozen recall eval gains negative N33 for it (the eval grows; the matcher is tuned, never the eval).
 - `kube-noob selftest --cases <file>`: your own problems as a test. YAML, JSONL, CSV or plain text (one question per
   line, or blocks separated by `---`); each case has an `input` and, optionally, `expect` (playbook in the top N,
   rules that must or must not fire, documents, reported issues, phrases the answer must or must not mention). Cases

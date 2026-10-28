@@ -544,8 +544,10 @@ def _pod_security(text: str, platform: str | None, ns: str | None) -> list[Denia
         violations: list[dict[str, str]] = []
         rules: list[str] = []
         fixes: list[str] = []
-        for item in _PSA_ITEM.finditer(m["list"]):
-            check, detail = item["check"].strip(), item["detail"].strip()
+        items = [(i["check"].strip(), i["detail"].strip()) for i in _PSA_ITEM.finditer(m["list"])]
+        if not items:  # quoted without the details: "violates PodSecurity "restricted:latest": privileged, ..."
+            items = [(c.strip()[:200], "") for c in m["list"].split(", ")[:20] if c.strip()]
+        for check, detail in items:
             cm = _CONTAINERS.search(detail)
             names = re.findall(r"\"([^\"]+)\"", cm.group(1)) if cm else []
             violations.append({"check": check, "detail": detail})

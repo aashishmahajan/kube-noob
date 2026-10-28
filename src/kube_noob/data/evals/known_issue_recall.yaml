@@ -89,3 +89,5 @@ negatives:
   - {id: N30b, version: "4.20.13", text: "etcd leader changed frequently, apiserver timeouts after upgrade"}
   - {id: N31, text: "my deployment is slow"}
   - {id: N32, text: "hello, is this thing on?"}
+  # N33 added 2026-10-28 (INS1): kubelet's image-pull wording matched OCPBUGS-64840 before message templates were stripped
+  - {id: N33, text: "Warning FailedToRetrieveImagePullSecret pod/web-1 Unable to retrieve some image pull secrets (regcred); attempting to pull the image may not succeed. Warning Failed pod/web-1 Failed to pull image \"quay.io/acme/web:1.2\": unauthorized: access to the requested resource is not authorized"}

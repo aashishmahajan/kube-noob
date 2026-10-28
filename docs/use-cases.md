@@ -48,6 +48,18 @@ To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It ex
 
 ## SRE or on-call: diagnose before you change anything
 
+Not sure what you have? `insight` names it first (events, logs, a denial, manifests, a ticket, a build log, a
+question; several at once), runs every analyser that applies and merges the answer: findings with their source,
+read-only next steps, and what it did not analyse and why. Input with no evidence gets the read-only commands that
+collect some.
+
+```bash
+kube-noob insight -f whatever-you-copied.txt
+oc describe pod web-1 -n shop | kube-noob insight --platform openshift
+kube-noob insight 'why does my pod stay Pending?'
+kube-noob insight -f trace.pcap --format json
+```
+
 1. Paste events, `describe` output or logs into `diagnose`: as quoted text (multi-line is fine; single quotes stop the
    shell expanding `$`), as a file with `-f`, or piped in. An Alertmanager webhook payload works as it is. You get
    the signals it found (alert names, event and container reasons), the likely cause, then read-only steps (get,
