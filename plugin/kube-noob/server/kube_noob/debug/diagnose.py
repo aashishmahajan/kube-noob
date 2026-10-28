@@ -230,6 +230,16 @@ def _fix_applies(fix: str, platform: str | None) -> bool:
     return True
 
 
+_ROSA_CONTEXT = re.compile(r"(?i)\b(?:rosa|hypershift|hosted control planes?|hcp)\b")
+# Patterns too common to name an OpenShift playbook when the text does not say it is OpenShift: a bare "Permission
+# denied" is a Docker entrypoint without +x as often as an arbitrary UID. The playbook's specific patterns (nginx's
+# "mkdir() ... failed (13: Permission denied)") still name it.
+_WEAK_WITHOUT_CONTEXT: dict[str, frozenset[str]] = {
+    "DBG-ARBITRARY-UID": frozenset({"EACCES", "Permission denied"}),
+    "DBG-CLUSTEROPERATOR": frozenset({r"Degraded\s+True", r"Available\s+False"}),
+}
+
+
 def diagnose(
     text: str, platform: str | None = None, limit: int = 5, signals: list[Signal] | None = None
 ) -> DiagnoseResult:
@@ -246,13 +256,29 @@ def diagnose(
     linked = playbooks_for(signals)
     lines = text.splitlines()
     results: list[Diagnosis] = []
+    openshift = rosa = False
+    if not platform:
+        from kube_noob.known_issues import openshift_context
+
+        openshift = openshift_context(text)
+        rosa = bool(_ROSA_CONTEXT.search(text))
     for p in PLAYBOOKS:
         if platform and platform not in p.platforms:
             continue
+        # No platform given: an OpenShift playbook needs the text to say it is OpenShift (a bare "Permission denied"
+        # is not the arbitrary-UID problem on Docker), and a ROSA playbook needs ROSA or hosted control planes.
+        weak: frozenset[str] = frozenset()
+        if not platform and "kubernetes" not in p.platforms:
+            if set(p.platforms) <= {"rosa-hcp", "rosa-classic"} and not rosa:
+                continue  # a ROSA playbook needs ROSA or hosted control planes in the text
+            if not openshift:
+                if p.pid not in _WEAK_WITHOUT_CONTEXT:
+                    continue  # an OpenShift playbook needs the text to say it is OpenShift
+                weak = _WEAK_WITHOUT_CONTEXT[p.pid]  # without it, only the playbook's specific patterns count
         evidence: list[str] = [f"signal {x.kind} {x.name}" for x in linked.get(p.pid, [])]
         hits = 0
         for pat in _COMPILED[p.pid]:
-            if not pat.search(text):  # one scan of the text; the line is looked up only for patterns that match
+            if pat.pattern in weak or not pat.search(text):  # one scan; the line is looked up only for matches
                 continue
             matched_line = next((ln.strip() for ln in lines if pat.search(ln)), pat.pattern)
             if matched_line is not None:

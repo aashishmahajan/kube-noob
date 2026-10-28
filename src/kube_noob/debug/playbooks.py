@@ -345,6 +345,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"ExternalProvisioning",
             r"access mode .* not supported",
             r"failed to provision volume",
+            r"(?i)\b(?:pvcs?|persistentvolumeclaims?|volume claims?)\b[^\n]{0,40}"
+            r"\b(?:stuck|pending|not bound|unbound)\b",
+            r"(?i)\b(?:stuck|pending)\b[^\n]{0,20}\b(?:pvcs?|persistentvolumeclaims?)\b",
         ),
         (
             "Access mode unsupported by the class: ReadWriteMany on EBS (gp3-csi/gp2-csi) or Ceph RBD filesystem.",
@@ -696,6 +699,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"server misbehaving",
             r"lookup [\w.-]+ on [\d.:]+: (read udp|dial udp).*i/o timeout",
             r"NXDOMAIN",
+            r"(?i)\b(?:dns|name resolution)\b[^\n]{0,30}\b(?:issues?|problems?|not (?:working|resolving)|"
+            r"fail(?:s|ed|ing|ure)?|broken|timeouts?)\b",
         ),
         (
             "Egress NetworkPolicy blocks DNS (OpenShift DNS listens on 5353 in openshift-dns; CoreDNS on 53 in "
@@ -899,6 +904,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             r"ClusterOperator\w* .*Degraded",
             r"Degraded\s+True",
+            # an `oc get co` row (NAME VERSION AVAILABLE PROGRESSING DEGRADED) with Degraded True or Available False
+            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+(?:True|False|Unknown)\s+(?:True|False|Unknown)\s+True\b",
+            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+False\s+(?:True|False|Unknown)\s+(?:True|False|Unknown)\b",
+            r"\b[A-Z][A-Za-z]{2,60}ControllerDegraded\b",  # library-go operator condition reasons
             r"Available\s+False",
             r"clusteroperator",
             r"ClusterVersion.*(Failing|Progressing)",

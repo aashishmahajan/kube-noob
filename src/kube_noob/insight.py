@@ -112,6 +112,10 @@ _ASKED_LINE = re.compile(  # a line of words that asks something, next to a past
     re.M | re.I,
 )
 _CAMEL = re.compile(r"\b[A-Z][a-z]+(?:[A-Z][a-z0-9]*)+\b")
+_ASKED_SENTENCE = re.compile(  # "Is there a way to use kubectl to ...?" inside a paragraph
+    r"(?i)\b(?:how (?:do|can|to|should)|is there (?:a|any) way|can (?:i|you|we)|is it possible|does anyone|"
+    r"what is the (?:best|right|correct) way)\b[^.?!\n]{0,200}\?"
+)
 _TCPDUMP = re.compile(  # tcpdump (any -t format, interface prefix) and tshark summary lines
     r"^(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}\.\d+[ \t]+(?:\S+[ \t]+(?:In|Out|P|M)[ \t]+)?(?:IP6?|ARP),?[ \t]+"
     r"\S+ > \S+: |^[ \t]*\d+[ \t]+\d+\.\d{6,9}[ \t]+\S+[ \t]+(?:→|->)[ \t]+\S+[ \t]+[A-Z][A-Z0-9v.]{1,10}[ \t]+\d+",
@@ -329,7 +333,20 @@ def recognise(text: str) -> list[Kind]:
     one_line = "\n" not in stripped and 3 <= len(stripped) <= 300 and bool(_WORD.search(stripped))
     asked = stripped.endswith("?") or bool(_QUESTION.match(stripped))
     technical = bool(_TECH.search(stripped[:300]) or _CAMEL.search(stripped[:300]))
-    if (not found and (asked or (one_line and technical))) or (
+    # A forum post: a title line that asks, then the body (asked by its title or by a line that asks).
+    title = stripped.split("\n", 1)[0].strip()
+    posted = (
+        not found
+        and "\n" in stripped
+        and technical
+        and (
+            title.endswith("?")
+            or bool(_QUESTION.match(title))
+            or bool(_ASKED_LINE.search(stripped[:3000]))
+            or bool(_ASKED_SENTENCE.search(stripped[:1000]))
+        )
+    )
+    if (not found and (asked or (one_line and technical) or posted)) or (
         asked and one_line and set(found) <= {"policy-denial", "ticket"}
     ):
         found["question"] = "a question or symptom in words"
@@ -488,6 +505,38 @@ def _containerfile(kit: Any, text: str) -> dict[str, Any] | str:
         return f"not audited: {str(exc).splitlines()[0][:300]}"
 
 
+# A document is offered for a pasted post only when it shares at least this many specific words with it (base forms,
+# not everyday English or everyday Kubernetes words, not version numbers): measured on 25,292 community questions
+# (scripts/eval_questions.py), documents sharing one incidental word answered almost none of them. A one-line question
+# typed to kube-noob needs one shared word that is not everyday English ("why does my pod stay Pending?" -> pending).
+MIN_DOC_TERMS = 2
+_STOP = frozenset(
+    """
+    the and for with from that this these those there their they them what when where which while does doing done
+    have having would could should will shall about into onto your yours just only also some such each other more
+    most than then very
+    """.split()  # noqa: SIM905 - a word list reads better as text
+)
+
+
+def _specific_terms(text: str, *, kubernetes_words: bool = False) -> set[str]:
+    """Words of ``text`` in base form that carry meaning: not stop words or everyday English and, unless
+    ``kubernetes_words``, not everyday Kubernetes words either (pod, node, error, pending)."""
+    from kube_noob.knowledge.store import tokenize
+    from kube_noob.known_issues import EVERYDAY_WORDS, _forms
+    from kube_noob.tickets import GENERIC_WORDS
+
+    out: set[str] = set()
+    for t in tokenize(text[:20_000]):
+        if len(t) <= 3 or not any(ch.isalpha() for ch in t):
+            continue
+        forms = _forms(t)
+        if any(f in _STOP or f in EVERYDAY_WORDS or (not kubernetes_words and f in GENERIC_WORDS) for f in forms):
+            continue
+        out.add(min(forms, key=len))
+    return out
+
+
 def insight(kit: Any, text: str, platform: str | None = None, version: str | None = None) -> dict[str, Any]:
     """Recognise the input, run every analyser that applies (each on its own size and time budget) and merge
     what they found into one answer."""
@@ -533,7 +582,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                 {
                     "source": "reported-issue",
                     "id": m.get("id"),
-                    "title": m.get("title"),
+                    "title": m.get("title") or m.get("summary"),
                     "verdict": m.get("verdict") or m.get("status"),
                     "url": m.get("url"),
                     "rank": 20,
@@ -588,7 +637,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                         {
                             "source": "reported-issue",
                             "id": m.get("id"),
-                            "title": m.get("title"),
+                            "title": m.get("title") or m.get("summary"),
                             "verdict": m.get("verdict") or m.get("status"),
                             "url": m.get("url"),
                             "rank": 20,
@@ -675,14 +724,38 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         if fresh:
             findings += budget.run("tickets", lambda: _ticket_findings(kit, fresh, version)) or []
     if "question" in names:
-        res = budget.run("search", lambda: kit.search(tk.SearchIn(query=text.strip()[:500], limit=8)))
+        query = text.strip()[:500]
+        res = budget.run("search", lambda: kit.search(tk.SearchIn(query=query, limit=8)))
         seen: set[str] = set()
+        typed = "\n" not in query  # a question typed to kube-noob, not a pasted post
+        asked = _specific_terms(query, kubernetes_words=typed)
+        need = MIN_DOC_TERMS
+        if typed and len(asked) <= 2:
+            # A short question needs one shared word, unless it names something the knowledge has never seen
+            # ("Talos", "batchMaxDuration"): then it is about that, and a document sharing one other word is not.
+            from kube_noob.knowledge.store import tokenize
+
+            store = kit.store()
+            raw = [t for t in tokenize(query) if len(t) > 3 and t.isalpha()]
+            if not any(store.doc_frequency(t) == 0 for t in raw):
+                need = 1
         for h in (res or {}).get("results", []):
             doc = h["chunkId"].split("#", 1)[0]
             if doc in seen or len(seen) == 3:
                 continue
+            shared = asked & _specific_terms(f"{h.get('title') or ''} {h.get('text') or ''}", kubernetes_words=typed)
+            if len(shared) < need:  # a document that shares one incidental word with a post does not answer it
+                continue
             seen.add(doc)
-            findings.append({"source": "doc", "id": h["chunkId"], "title": h.get("title"), "rank": 30 + len(seen)})
+            findings.append(
+                {
+                    "source": "doc",
+                    "id": h["chunkId"],
+                    "title": h.get("title"),
+                    "sharedTerms": sorted(shared)[:6],
+                    "rank": 30 + len(seen),
+                }
+            )
     if "manifests" in names:
         from kube_noob.errors import ManifestError
 

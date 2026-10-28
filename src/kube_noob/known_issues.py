@@ -76,6 +76,75 @@ def stems(text: str, known: Callable[[str], bool] | None = None) -> str:
     return " ".join(sorted(out))
 
 
+# Words and names only OpenShift (and its Red Hat family) uses. A text without one, and no platform given, is not
+# matched against OpenShift release notes: on 25,292 community questions (Stack Overflow, GitHub, forums) matching
+# them anyway put an OpenShift bug at the top of 6,177 answers about other platforms (scripts/eval_questions.py).
+_OPENSHIFT_CONTEXT = re.compile(
+    r"(?i)\b(?:openshift|okd|ocp|ocpbugs|rosa|aro|hypershift|hosted control planes?|rhcos|red hat|redhat|rhel|"
+    r"oc(?:\s+(?:adm|get|describe|logs|rsh|debug|apply|create|delete|patch|edit|login|project|new-app|"
+    r"rollout|whoami|mirror|image|import-image|start-build)\b)|oc-mirror|must-gather|machineconfig(?:pool)?s?|"
+    r"machine-config(?:-operator|-daemon)?|clusteroperators?|clusterversions?|cluster-version-operator|"
+    r"securitycontextconstraints?|security context constraints?|scc|application is not available|egressips?|"
+    r"ovn-kubernetes|ovnkube|openshift-sdn|olm|operatorhub|catalogsources?|"
+    r"clusterserviceversions?|ingresscontrollers?|imagestreams?|buildconfigs?|deploymentconfigs?|routes?\.route|"
+    r"route\.openshift\.io|odf|ocs|noobaa|rhacs|stackrox|quay\.io/openshift|registry\.redhat\.io|"
+    r"cluster-etcd-operator|kube-apiserver-operator|ibm cloud satellite|microshift|openshift-[a-z0-9-]{1,60}|"
+    r"(?<![a-z0-9.-])[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,3}\.openshift\.io|consolequickstarts?|consoleplugins?|consolelinks?|helmchartrepositor(?:y|ies)|"
+    r"baremetalhosts?|bmh|metal3|machinesets?|machine-api|controlplanemachinesets?|nmstate|sriov|"
+    r"cluster-logging|clusterlogforwarder|lokistack|compliance-operator|file-integrity-operator)\b"
+)
+
+
+# Everyday English in bug reports and questions (base forms and common inflections). In the small release-note corpus
+# these look rare, and three of them ("deployed", "following", "plugin") were enough to match an unrelated issue.
+EVERYDAY_WORDS = frozenset(
+    """
+    too took long time times very much many few linux enterprise red hat rpm package packages os kubernetes
+    kubernete k8s yaml json follow following cause causes caused deploy deployed deploying deployment plugin plugins
+    mirror mirrors replace replaced change changed update updated install installed upgrade upgraded add added
+    remove removed delete deleted run runs ran work works worked try tried need needs want see show shows display
+    return returns report reports expect expected happen happens happened issue issues problem problems question
+    questions example examples case cases way ways step steps thing things something anything nothing everything
+    someone user users team project projects application applications app apps setup setting settings option options
+    feature features support supported allow allows enable enabled disable disabled include includes contain
+    contains provide provides require requires required apply applied configure configured configuration manage
+    managed handle handled send sent receive received access load loaded save saved store stored open opened close
+    closed test tests tested testing check checked find found create created build built release released new old
+    different same multiple several other another correct correctly incorrect incorrectly wrong right properly
+    successful successfully always never sometimes already instead without within between during because however
+    even here what which who why how where whether able unable possible impossible current currently latest previous
+    next first second third last main help thanks thank please hello hi regards anyone idea ideas tips solution
+    solutions fix fixed fixes fixing behavior behaviour result results output input information details detail list
+    lists page pages view views field fields name names label labels tag tags type types mode format line lines
+    number numbers size make local through come custom component components private
+    """.split()  # noqa: SIM905 - a word list reads better as text
+)
+
+
+def openshift_context(text: str) -> bool:
+    """Whether the text says it is about OpenShift or the Red Hat products around it."""
+    return bool(_OPENSHIFT_CONTEXT.search(text[:200_000]))
+
+
+def _forms(token: str) -> tuple[str, ...]:
+    """The base forms an English inflection may come from: "deployed" -> "deploy", "following" -> "follow",
+    "causes" -> "cause", "mirrors" -> "mirror", "libraries" -> "library"."""
+    out = [token]
+    for suffix, add in (
+        ("ies", "y"),
+        ("es", ""),
+        ("s", ""),
+        ("ed", ""),
+        ("ed", "e"),
+        ("ing", ""),
+        ("ing", "e"),
+        ("ly", ""),
+    ):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            out.append(token[: -len(suffix)] + add)
+    return tuple(out)
+
+
 _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(`])")
 _lock = threading.RLock()  # re-entrant: building an index builds the general store too
 _cache: dict[str, Index] = {}
@@ -200,7 +269,7 @@ class Index:
             t
             for t in shared
             if len(t) > 2
-            and t not in GENERIC_WORDS
+            and not any(f in GENERIC_WORDS or f in EVERYDAY_WORDS for f in _forms(t))
             and self.store.doc_frequency(t) <= RARE_SHARE
             and general.doc_frequency(t) <= GENERAL_SHARE
         )
@@ -209,7 +278,12 @@ class Index:
         return self._rare(query_tokens & self._tokens(issue))
 
     def match(
-        self, text: str, platform: str | None = None, version: str | None = None, limit: int = 3
+        self,
+        text: str,
+        platform: str | None = None,
+        version: str | None = None,
+        limit: int = 3,
+        require_context: bool = False,
     ) -> dict[str, Any]:
         """Issues that describe ``text``. Candidates come from text search on the words and on the signals the text
         carries or implies (``kube_noob.signals``: an alert name, or "leader changed" for etcd leader elections);
@@ -218,6 +292,12 @@ class Index:
         out: dict[str, Any] = {"knowledge": self.knowledge(), "matches": []}
         if platform and platform not in OPENSHIFT_FAMILY:
             out["note"] = "The index holds OpenShift release-note issues; it does not apply to plain Kubernetes."
+            return out
+        if require_context and not platform and not openshift_context(text):
+            out["note"] = (
+                "The text does not say it is about OpenShift, so the OpenShift release notes were not searched; give "
+                "the platform (openshift, rosa-hcp) to search them."
+            )
             return out
         from kube_noob.signals import extract
         from kube_noob.signals.catalogue import infer, terms_for
@@ -357,11 +437,19 @@ def get_index(data_dir: Path | None = None) -> Index:
 
 
 def match(
-    text: str, platform: str | None = None, version: str | None = None, limit: int = 3, data_dir: Path | None = None
+    text: str,
+    platform: str | None = None,
+    version: str | None = None,
+    limit: int = 3,
+    data_dir: Path | None = None,
+    require_context: bool = False,
 ) -> dict[str, Any]:
+    """Reported issues for ``text``. ``require_context``: with no platform given, search the OpenShift release notes
+    only when the text says it is about OpenShift (diagnose, insight and the watch pass it: their text can be about
+    any platform; ``known-issues`` asks about OpenShift by definition)."""
     from kube_noob import tickets
 
-    out = get_index(data_dir).match(text, platform, version, limit)
+    out = get_index(data_dir).match(text, platform, version, limit, require_context)
     found = tickets.match(text, platform, version, limit, data_dir)
     if not found.get("available"):
         if found.get("note"):

@@ -10,6 +10,16 @@
   elides their values; kube-noob does not open them at all); nested archives are listed, not opened. Caps bound the
   file count, the bytes processed (a gzip bomb stops at the cap), each file, what is kept in memory and the nesting
   depth; logs keep their last MiB. The layout was read from openshift/oc's `must-gather` and `inspect` source.
+- Answer quality, measured on 25,292 community questions (`scripts/eval_questions.py`,
+  [docs/evals/community-questions.md](docs/evals/community-questions.md)): an OpenShift release-note bug no longer
+  answers questions about other platforms (5,274 such answers before, 29 after): with no platform given, diagnose,
+  insight and the watch search the release notes only when the text says it is about OpenShift, and everyday English
+  words in any inflection ("deployed", "following", "mirrors") no longer count as rare evidence. OpenShift and ROSA
+  playbooks need OpenShift or ROSA words when no platform is given (an OpenShift playbook's specific patterns, such
+  as nginx's `mkdir() ... (13: Permission denied)`, still name it). New trigger phrases: a PVC stuck in words, DNS
+  trouble in words, `oc get co` rows and `*ControllerDegraded` reasons. Documents are offered only when they share
+  enough specific words with the question; forum posts that ask in their title or a sentence are read as questions;
+  reported-issue findings in `insight` carry the issue summary as their title.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

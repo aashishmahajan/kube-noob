@@ -895,7 +895,7 @@ class Toolkit:
             }
         self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
         reported = known_issue_match(
-            payload.symptoms if payload else text, p.platform, version, 3, self.settings.data_dir
+            payload.symptoms if payload else text, p.platform, version, 3, self.settings.data_dir, require_context=True
         )
         out["knownIssues"] = reported["matches"]
         if reported["matches"]:
@@ -1097,7 +1097,9 @@ class Toolkit:
         out = logs.as_dict(d)
         platform = p.platform or ("openshift" if d.system == "openshift-build" else None)
         evidence = "\n".join(e.full or e.text for e in d.evidence) or "\n".join(p.log.splitlines()[-40:])
-        reported = known_issue_match(evidence[:100_000], platform, p.version, 3, self.settings.data_dir)
+        reported = known_issue_match(
+            evidence[:100_000], platform, p.version, 3, self.settings.data_dir, require_context=True
+        )
         out["knownIssues"] = reported["matches"]
         self._attach_memory(out, evidence[:MAX_SIGNAL_TEXT], p.version, platform)
         self._observe([f"build:{d.system}:{d.cause or 'unknown'}"])
