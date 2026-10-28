@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 16:00 (SAST1, G1-G3, G5, I6, QA1 done; QA2 in CI; QA3 in progress; owner sent 3,732 answered questions: QA4).
+right now; STATE.md says what is done. Updated 2026-10-28 17:00 (QA5 committed, waiting for CI; QA6 next: close golden gaps).
 
 ## Repository and branch
 
@@ -29,6 +29,20 @@ right now; STATE.md says what is done. Updated 2026-10-28 16:00 (SAST1, G1-G3, G
 
 ## In flight (finish these first)
 
+0. QA5 (STATE row 20u): per-technology measurement and the golden set. Committed; dispatch CI and mark done when green.
+   Golden set: `tests/fixtures/golden/*.yaml` (119 items; status pass/abstain/miss, `gap` says what each miss needs).
+   Baseline: in-scope top-1 answers 7/96, out of scope 15/23 unanswered. To regrade after a change:
+   `python scripts/eval_golden.py` prints NOW PASSING items; raise their status to pass with `expect` = the top id,
+   after checking the answer against the item's `answer`. The writers' generators are in the session scratchpad only
+   (goldgen/, gen_golden_ocp/); edit the YAML directly in a new session.
+1. QA6 (row 20v): close the golden gaps that generalise. Facts already verified (session scratchpad, re-verify in a
+   new session): kubectl troubleshooting page (API server unreachable), Deployment page (progress deadline, rollout
+   history/undo, revisionHistoryLimit), PersistentVolume page (pvc-protection finalizer), debug-running-pod
+   (kubectl debug --target), pod-lifecycle (back-off 10s doubling to 300s, reset after 10 min), kubeadm
+   troubleshooting (CoreDNS Pending until a CNI, x509 after reset, malformed pair); Helm 3 pages (using_helm --set
+   format, registries, troubleshooting repo add/rollback, kubernetes_apis mapkubeapis, helm.md XDG, changes_since_helm2
+   three-way merge, CRD best practices, hooks, library charts, template comments, --take-ownership in helm_install).
+   Drafts: scratchpad qa6/k8s-kubeadm-troubleshooting.md, k8s-deployment-rollouts.md, helm-cli-operations.md.
 1. CI: run 40719517318 on 2353551 (QA3 part + QA4). QA2 is done (CI 40715183769 green). QA3 (row 20s) and QA4
    (row 20t) stay in-progress: QA3 needs error-string playbooks; QA4 needs the owner's decision on document answers.
 2. NEW (owner, 2026-10-28 15:29): answer files from Grok, third-party text, never commit them. Copies in the session

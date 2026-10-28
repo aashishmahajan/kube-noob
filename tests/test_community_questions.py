@@ -225,6 +225,40 @@ def test_the_committed_grades_file_is_well_formed() -> None:
         assert header == ",".join(mod.GRADE_COLUMNS)  # ids and verdicts only: no question text in the repo
 
 
+def test_test_rows_that_informed_a_change_are_retired_from_the_test_half(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spec = importlib.util.spec_from_file_location("eval_questions_r", ROOT / "scripts" / "eval_questions.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["eval_questions_r"] = mod
+    spec.loader.exec_module(mod)
+    test_ids = [str(i) for i in range(1, 60) if mod.split_of(str(i)) == "test"][:3]
+    train_id = next(str(i) for i in range(1, 60) if mod.split_of(str(i)) == "train")
+    q = tmp_path / "q.csv"
+    lines = "".join(f"{i},why is my pod Pending?,\n" for i in [*test_ids, train_id])
+    q.write_text("id,question,body_excerpt\n" + lines)
+    retired = tmp_path / "retired.csv"
+    retired.write_text(f"id,change,date\n{test_ids[0]},helm document,2026-10-28\n{train_id},n/a,2026-10-28\n")
+    out = tmp_path / "o"
+    assert mod.main([str(q), "--out", str(out), "--split", "test", "--retired", str(retired)]) == 0
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["rows"] == 2 and summary["retiredExcluded"] == 1
+    assert {r["id"] for r in csv.DictReader((out / "results.csv").open())} == set(test_ids[1:])
+    assert mod.main([str(q), "--out", str(out), "--split", "train", "--retired", str(retired)]) == 0
+    assert json.loads((out / "summary.json").read_text())["rows"] == 1  # retired rows stay in the train half
+    for body, message in (
+        ("id,date\n1,2026-10-28\n", "missing column(s) change"),
+        ("id,change,date\n1,x,2026-10-28\n1,y,2026-10-28\n", "retired twice"),
+        ("id,change,date\n1," + "x" * 201 + ",2026-10-28\n", "change longer"),
+    ):
+        retired.write_text(body)
+        assert mod.main([str(q), "--out", str(tmp_path / "bad"), "--split", "test", "--retired", str(retired)]) == 2
+        assert message in capsys.readouterr().err
+    committed = mod.load_retired(ROOT / "docs" / "evals" / "community-questions-retired.csv")
+    assert committed and all(mod.split_of(i) == "test" for i in committed)
+
+
 # QA2: the second tuning round, from the graded sample (docs/evals/community-questions-grades.csv). Each test uses
 # text written for this file.
 
@@ -379,3 +413,62 @@ def test_a_question_about_another_product_is_not_answered_by_a_doc_that_never_na
         "It says getting credentials: exec: executable aws not found after I copied the kubeconfig. What now?"
     )
     assert _docs(kit, lens)[0].startswith("kn:k8s-kubeconfig-exec#")  # "lens" is not on the product list
+
+
+# QA5: per-technology test half (docs/evals/supported-technologies.md): Helm usage, local images, SCC wording.
+
+
+def test_helm_usage_questions_get_the_helm_values_document(kit: tk.Toolkit) -> None:
+    cases = (
+        (
+            "helm upgrade dropped my overrides\n"
+            "I installed the chart with --set replicaCount=3, then ran helm upgrade with a new chart version and the "
+            "replica count went back to 1. How do I keep the values I passed last time?",
+            "kn:helm-templates-values#",
+        ),
+        (
+            "Error: unknown flag: --name when running helm install myapp ./chart --name web. Did the flag change?",
+            "kn:helm-templates-values#",
+        ),
+        (
+            "nil pointer evaluating interface {}.Release in my chart template inside a range loop over "
+            ".Values.services; .Release.Name works outside the loop",
+            "kn:helm-templates-values#",
+        ),
+        (
+            "How do I read a values key with a dash, like gitlab-runner, in a helm template? Dot notation fails.",
+            "kn:helm-templates-values#",
+        ),
+    )
+    for text, prefix in cases:
+        got = _docs(kit, text)
+        assert got and got[0].startswith(prefix), (text[:40], got)
+
+
+def test_the_helm_values_document_keeps_to_helm(kit: tk.Toolkit) -> None:
+    for text in (
+        "how do I set a default value for an environment variable in my Deployment?",
+        "my ConfigMap values are not picked up by the running pod",
+    ):
+        assert not [d for d in _docs(kit, text) if d.startswith("kn:helm-templates-values#")], text
+
+
+def test_a_local_image_on_minikube_is_explained_by_the_image_pull_playbook() -> None:
+    text = (
+        "Built myapp:latest with docker build on my laptop, kubectl apply on minikube and the pod shows "
+        "ErrImagePull: pull access denied for myapp, repository does not exist"
+    )
+    out = diagnose(text).as_dict()
+    top = out["diagnoses"][0]
+    assert top["id"] == "DBG-IMAGEPULL"
+    assert any("in no registry" in c for c in top["rootCauses"])
+    assert any("minikube image load" in c["change"] for c in top["proposedChanges"])
+
+
+def test_the_scc_playbook_reads_a_mangled_denial_line() -> None:
+    for text in (
+        'pods "web-1" is forbidden: unable to validate against any security context constraint: '
+        "[spec.containers[0].securityContext.runAsUser: Invalid value: 0]",
+        "Error creating: pods is forbidden: unable to validate against any security-context constraint",
+    ):
+        assert "DBG-SCC" in _ids(text, platform="openshift")[:2], text

@@ -1,0 +1,302 @@
+# Golden questions: rosa-hcp. Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository); graded against kube-noob by an
+# independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
+- id: rosa-001
+  technology: rosa-hcp
+  kind: error
+  question: My ROSA HCP cluster failed during provisioning with OCM5011, unavailable capacity in the selected region. Do I
+    need to change anything in IAM or the VPC?
+  answer: No. OCM5011 means capacity was not available in the chosen region, which is not caused by your IAM or VPC settings.
+    Retry the installation, or create the cluster in a different region.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-troubleshoot-hcp-install.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshoot-hcp-install.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'playbook: ROSA HCP OCM5011 unavailable capacity in region -> not an IAM/VPC problem, retry or use another region'
+- id: rosa-002
+  technology: rosa-hcp
+  kind: error
+  question: rosa create cluster on our own VPC fails with OCM5010, Failed to tag subnets for the cluster. What should I verify
+    before retrying?
+  answer: Check that the AWS permissions in use and the subnet configuration are correct. At least one private subnet must
+    be tagged and, if you use public subnets, one public subnet too. Then retry the installation.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-troubleshoot-hcp-install.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshoot-hcp-install.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'playbook: ROSA OCM5010 failed to tag subnets -> check AWS permissions and that private (and public if used) subnets
+    are tagged'
+- id: rosa-003
+  technology: rosa-hcp
+  kind: error
+  question: 'First ROSA cluster in this AWS account and the install dies with: Error creating network Load Balancer: AccessDenied
+    ... not authorized to perform: iam:CreateServiceLinkedRole. How do I fix it?'
+  answer: The account has no Elastic Load Balancing service-linked role yet. Check it with `aws iam get-role --role-name AWSServiceRoleForElasticLoadBalancing`
+    and, if absent, run `aws iam create-service-linked-role --aws-service-name elasticloadbalancing.amazonaws.com`. Needed
+    once per account.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-troubleshooting-elb-service-role.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-elb-service-role.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'playbook: iam:CreateServiceLinkedRole AccessDenied on first ROSA install -> create AWSServiceRoleForElasticLoadBalancing'
+- id: rosa-004
+  technology: rosa-hcp
+  kind: error
+  question: Deleting our ROSA HCP cluster in the console fails with CLUSTERS-MGMT-400 ... sts_user_role is not linked to your
+    account. Someone tidied up IAM roles last week. How do I get unstuck?
+  answer: The user-role was unlinked or deleted. Run `rosa create user-role` to recreate and link it (look for the successfully
+    linked role ARN message), then retry the cluster deletion.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-troubleshooting-cluster-deletion.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-cluster-deletion.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'playbook: CLUSTERS-MGMT-400 sts_user_role not linked -> rosa create user-role and retry deletion'
+- id: rosa-005
+  technology: rosa-hcp
+  kind: error
+  question: Every rosa command now prints Can't get tokens .... and Can't get access tokens .... It worked last month. What
+    happened?
+  answer: Your api.openshift.com offline access token expired or was invalidated by sso.redhat.com. Get a new offline token
+    from the Hybrid Cloud Console and log in again with `rosa login --token=<token>`, or use `rosa login --use-device-code`.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-troubleshooting-expired-token.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-expired-token.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'playbook: rosa ''Can''t get tokens'' / ''Can''t get access tokens'' -> expired offline token, rosa login --token or
+    --use-device-code'
+- id: rosa-006
+  technology: rosa-hcp
+  kind: error
+  question: We enabled auto node on a ROSA HCP cluster. The default ec2nodeclass shows Ready=False (UnhealthyDependents) and
+    SubnetsReady=False with SubnetSelector did not match any Subnets. Nodes will not provision.
+  answer: Private subnets lack the karpenter.sh/discovery tag the EC2NodeClass expects. Read the value from `.spec.subnetSelectorTerms`,
+    add it with `aws ec2 create-tags` to every private subnet (and the security group), wait 30 to 60 seconds, and recheck.
+    Values are case-sensitive.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/resolve-ec2nodeclass-not-ready.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/resolve-ec2nodeclass-not-ready.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'playbook: auto node EC2NodeClass SubnetsReady=False -> add karpenter.sh/discovery tag from subnetSelectorTerms to
+    private subnets and security group'
+- id: rosa-007
+  technology: rosa-hcp
+  kind: error
+  question: On ROSA HCP with auto node, CloudTrail shows CreateTags failing with Client.UnauthorizedOperation for the control-plane-operator
+    role, and the security group never gets its Karpenter discovery tag. How do I fix this?
+  answer: 'That IAM role lacks ec2:CreateTags. Find the `<prefix>-kube-system-control-plane-operator` role, attach an inline
+    policy allowing `ec2:CreateTags` with `aws iam put-role-policy`, confirm with `aws iam get-role-policy`, then add the
+    discovery tag to the security group.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/resolve-iam-permissions-tagging.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/resolve-iam-permissions-tagging.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'playbook: control-plane-operator role lacks ec2:CreateTags (auto node) -> aws iam put-role-policy, then tag the security
+    group'
+- id: rosa-008
+  technology: rosa-hcp
+  kind: error
+  question: 'A worker on our ROSA HCP cluster crashed and the replacement pod hangs with: Multi-Attach error for volume ...
+    Volume is already used by pod(s). It is an RWO volume. What are my options?'
+  answer: If your storage supports it, use ReadWriteMany volumes. With RWO, force-delete the old pod on the dead node using
+    `oc delete pod <old_pod> --force=true --grace-period=0`; the stuck volume is released after about six minutes.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/storage-multi-attach-error.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/storage-multi-attach-error.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-MULTIATTACH
+- id: rosa-009
+  technology: rosa-hcp
+  kind: howto
+  question: My ROSA HCP cluster has been stuck in installing for a long time. How can I watch the install logs from the CLI,
+    and what AWS check should I run?
+  answer: Run `rosa logs install --cluster=<name> --watch` (use `rosa logs uninstall` for deletions). Also run `rosa verify
+    quota` to confirm you have quota in the cluster's AWS region, since quotas differ per region.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-troubleshooting-installing.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-installing.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'doc: stuck ROSA install: rosa logs install --watch plus rosa verify quota for the cluster''s region'
+- id: rosa-010
+  technology: rosa-hcp
+  kind: howto
+  question: 'How do I schedule a ROSA HCP control plane upgrade for 02:00 UTC next Saturday, using the CLI?'
+  answer: 'List targets with `rosa list upgrade -c <cluster>`, then run `rosa upgrade cluster -c <cluster> --schedule-date=<yyyy-mm-dd>
+    --schedule-time=02:00 --version <v>`; times are UTC. Optionally set the channel first with `rosa edit cluster --channel`.
+    No machine pool update may be in progress.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-hcp-upgrading-cli-control-plane.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-upgrading-cli-control-plane.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'doc: schedule ROSA HCP control plane upgrade with rosa upgrade cluster --schedule-date/--schedule-time (UTC), rosa
+    list upgrade'
+- id: rosa-011
+  technology: rosa-hcp
+  kind: howto
+  question: I built my own VPC for a ROSA HCP cluster. Which tags do the subnets need before cluster creation, and what is
+    the command?
+  answer: Public subnets get kubernetes.io/role/elb and private subnets kubernetes.io/role/internal-elb, each with value 1,
+    set via `aws ec2 create-tags --resources <subnet-id> --region <region> --tags Key=<key>,Value=1`. Tag at least one private
+    subnet; preflight checks verify this.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-hcp-vpc-subnet-tagging.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-vpc-subnet-tagging.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'doc: ROSA HCP custom VPC subnet tags kubernetes.io/role/elb and internal-elb (value 1) with aws ec2 create-tags'
+- id: rosa-012
+  technology: rosa-hcp
+  kind: howto
+  question: Our ROSA HCP cluster uses an external OIDC identity provider and it is down. How do I get temporary admin access
+    with a break glass credential, and how long can it last?
+  answer: Run `rosa create break-glass-credential -c <cluster> --username <user> --expiration 1h`. Validity ranges from 10
+    minutes to 24 hours (default 24). Then fetch the kubeconfig with `rosa describe break-glass-credential <id> -c <cluster>
+    --kubeconfig`; its status should be issued.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-hcp-sts-creating-a-break-glass-cred-cli.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-sts-creating-a-break-glass-cred-cli.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'doc: rosa create break-glass-credential for external OIDC, 10 minutes to 24 hours, describe --kubeconfig'
+- id: rosa-013
+  technology: rosa-hcp
+  kind: howto
+  question: After I delete a ROSA HCP cluster, what do I have to clean up in AWS, and in what order?
+  answer: Delete the cluster first (`rosa delete cluster -c <name> --watch`, after turning off delete protection if enabled)
+    and wait for it to finish. Only then run `rosa delete operator-roles --prefix <prefix>` and `rosa delete oidc-provider
+    --oidc-config-id <id>`.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-hcp-deleting-cluster.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-deleting-cluster.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'doc: ROSA HCP post-deletion cleanup: rosa delete operator-roles then rosa delete oidc-provider, after cluster deletion
+    completes'
+- id: rosa-014
+  technology: rosa-hcp
+  kind: concept
+  question: 'What are the main architectural differences between ROSA with hosted control planes and ROSA Classic: where the
+    control plane lives, infra nodes, and upgrades?'
+  answer: With HCP the control plane (API server, etcd) runs in a Red Hat-owned AWS account, reached over PrivateLink; Classic
+    keeps it in yours. HCP has no dedicated infra nodes, needs only 2 EC2 instances, and lets you upgrade the control plane
+    and each machine pool separately.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-hcp-classic-comparison.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-classic-comparison.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'rank: kn:rosa-hcp#1 (HCP control plane in Red Hat account, PrivateLink, separate upgrades) exists but is not in the
+    top 3'
+- id: rosa-015
+  technology: rosa-hcp
+  kind: concept
+  question: My ROSA HCP cluster says ready but the web console will not load. Does ready not really mean ready?
+  answer: Ready only reflects that the control plane in the Red Hat-managed account is up. Console workloads run on your worker
+    nodes, so the console is unreachable until nodes join and those workloads start. Watch progress with `rosa describe machinepool`
+    or `oc`.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-hcp-ready-no-console-access.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-ready-no-console-access.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'doc: ROSA HCP ''ready'' reflects only the hosted control plane; console pods need worker nodes (rosa describe machinepool)'
+- id: rosa-016
+  technology: rosa-hcp
+  kind: concept
+  question: On ROSA HCP, pods on the same node as the router pods intermittently cannot reach our apps route through the private
+    NLB, while pods on other nodes can. Why does this happen?
+  answer: Because the private NLB keeps the original client IP, a connection can get dropped if the caller and the target
+    share one host, which is the case for pods co-located with the router. Reschedule those workloads onto other nodes, or
+    call services over the internal pod and service networks.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/rosa-troubleshooting-networking-nlb.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-networking-nlb.adoc'
+  outOfScope: false
+  status: miss
+  gap: 'doc: ROSA HCP private NLB preserves client IP so pods co-located with router pods get dropped; reschedule or use internal
+    service networks'
+- id: rosa-017
+  technology: rosa-hcp
+  kind: out-of-scope
+  question: In the AWS console our EKS cluster's Resources tab says Your current IAM principal doesn't have access to Kubernetes
+    objects on this cluster. We also run ROSA HCP in the same account, but this one is EKS. How do I grant access?
+  answer: 'Outside this assistant''s scope: this is Amazon EKS access management (IAM principals and EKS access entries),
+    not ROSA with hosted control planes.'
+  source: {}
+  outOfScope: true
+  status: miss
+  gap: 'abstain: doc: kn:rosa-efs#0 should not fire for an Amazon EKS access-entry question'
+- id: rosa-018
+  technology: rosa-hcp
+  kind: out-of-scope
+  question: az aro create fails on our subscription with MissingSubscriptionRegistration for Microsoft.RedHatOpenShift. I
+    know ROSA is the AWS version of this; what do I run to register it?
+  answer: 'Outside this assistant''s scope: this is Azure Red Hat OpenShift (ARO), a Microsoft Azure managed service with
+    its own Azure CLI and provider registration, not ROSA.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: rosa-019
+  technology: rosa-hcp
+  kind: out-of-scope
+  question: 'Our Node.js app on the ROSA cluster logs Error: connect ECONNREFUSED 127.0.0.1:5432 on startup. It uses the pg
+    module and works on my laptop. What is wrong with my code?'
+  answer: 'Outside this assistant''s scope: this is application code and database connection configuration (the app targets
+    localhost for PostgreSQL), not a ROSA platform issue.'
+  source: {}
+  outOfScope: true
+  status: miss
+  gap: 'abstain: doc: kn:k8s-debug-pods#0 should not fire for application code connecting to localhost PostgreSQL'
+- id: rosa-020
+  technology: rosa-hcp
+  kind: out-of-scope
+  question: Our AWS Lambda function in the same account as the ROSA HCP cluster keeps failing with Task timed out after 3.00
+    seconds. How do I raise the limit?
+  answer: 'Outside this assistant''s scope: this is an AWS Lambda configuration question (function timeout setting), a separate
+    AWS service rather than ROSA with hosted control planes.'
+  source: {}
+  outOfScope: true
+  status: miss
+  gap: 'abstain: doc: kn:ocp-egressip#2 should not fire for an AWS Lambda timeout question'

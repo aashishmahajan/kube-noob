@@ -17,6 +17,7 @@ documents, and the top answer. It then scores what can be scored without referen
 Usage:
   python scripts/eval_questions.py questions.csv --out <dir> [--limit N] [--sample-review 76] [--seed 7]
       [--grades docs/evals/community-questions-grades.csv --grades docs/evals/community-questions-heldout.csv]
+      [--split all|train|test] [--retired docs/evals/community-questions-retired.csv] [--data-dir <dir>]
 
 A CSV that also carries ``answer_text`` (an accepted answer or a Jira resolution) is scored against it: per row,
 the share of the answer's specific words that kube-noob's top finding carries (``answerShare``) and whether that
@@ -32,12 +33,17 @@ A verdict carries over only while kube-noob still gives the same answer kind and
 a row whose answer changed is listed under ``graded.changed`` and its review row shows the old verdict in
 ``previousVerdict`` with ``verdict`` left empty, so a tuning change is re-graded where it moved an answer and
 nowhere else.
+
+``--split`` evaluates one fixed half (by a hash of the row id): tune on ``train``, report on ``test``, and per
+technology (``byTechnology``). A test row whose grading informed a change is listed in the retired file (id, change,
+date) and left out of ``--split test``.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import random
 import re
@@ -92,6 +98,35 @@ PLAYBOOK_TOPICS: dict[str, set[str]] = {
     "DBG-EGRESSIP": {"networking-ip", "openshift-specific"},
 }
 _KEY = re.compile(r"/browse/((?:OCPBUGS|ROX)-\d{1,7})\b")
+
+# The technologies kube-noob supports, in the order a row is assigned to one (the most specific first), from the
+# dataset's platform tags and source. "other" holds what kube-noob does not claim (Docker alone, EKS/AKS/GKE consoles,
+# Argo CD, Istio...). See docs/evals/supported-technologies.md.
+TECHNOLOGIES: tuple[tuple[str, frozenset[str], tuple[str, ...]], ...] = (
+    ("rhacs", frozenset({"acs-stackrox"}), ("redhat-jira:ROX",)),
+    ("rosa-hcp", frozenset({"rosa-hcp"}), ()),
+    ("policy", frozenset({"kyverno", "opa-gatekeeper"}), ()),
+    ("odf-storage", frozenset({"ceph-rook-odf"}), ("redhat-jira:DFBUGS",)),
+    ("openshift", frozenset({"openshift"}), ("redhat-jira:",)),
+    ("helm", frozenset({"helm"}), ()),
+    ("kubernetes", frozenset({"kubernetes", "kubeadm"}), ()),
+)
+
+
+def technology(row: dict[str, str]) -> str:
+    tags = set((row.get("platform_tags") or "").split(";"))
+    source = row.get("source") or ""
+    for name, wanted, sources in TECHNOLOGIES:
+        if tags & wanted or any(source.startswith(s) for s in sources):
+            return name
+    return "other"
+
+
+def split_of(row_id: str) -> str:
+    """A fixed half of the rows to tune on and the other half to report on: the same row is always in the same half,
+    whatever file it comes from."""
+    return "test" if hashlib.sha256(row_id.encode()).digest()[0] % 2 else "train"
+
 
 # What a person can say about one answer. "not-indexed": a Red Hat bug report whose key the bundled release-note
 # index does not hold (a synced local Jira copy would); "out-of-scope": nothing an offline Kubernetes and OpenShift
@@ -164,6 +199,34 @@ def load_grades(path: Path) -> dict[str, dict[str, str]]:
                 raise GradesError(f"{path}:{n}: note longer than {MAX_NOTE} characters")
             grades[rid] = {k: (row.get(k) or "").strip() for k in GRADE_COLUMNS}
     return grades
+
+
+RETIRED_COLUMNS = ("id", "change", "date")
+MAX_CHANGE = 200
+RETIRED_DEFAULT = Path(__file__).resolve().parents[1] / "docs" / "evals" / "community-questions-retired.csv"
+
+
+def load_retired(path: Path) -> dict[str, str]:
+    """Test-half rows whose grading informed a change (id -> the change). They no longer measure that change, so
+    ``--split test`` leaves them out; they stay in the train half."""
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        missing = [c for c in RETIRED_COLUMNS if c not in (reader.fieldnames or [])]
+        if missing:
+            raise GradesError(f"{path}: missing column(s) {', '.join(missing)}")
+        retired: dict[str, str] = {}
+        for n, row in enumerate(reader, start=2):
+            if len(retired) >= MAX_GRADES:
+                raise GradesError(f"{path}: more than {MAX_GRADES} retired rows")
+            rid, change = (row.get("id") or "").strip(), (row.get("change") or "").strip()
+            if not rid:
+                raise GradesError(f"{path}:{n}: empty id")
+            if rid in retired:
+                raise GradesError(f"{path}:{n}: id {rid} is retired twice")
+            if len(change) > MAX_CHANGE:
+                raise GradesError(f"{path}:{n}: change longer than {MAX_CHANGE} characters")
+            retired[rid] = change
+    return retired
 
 
 def apply_grades(res: list[dict[str, Any]], grades: dict[str, dict[str, str]]) -> dict[str, Any]:
@@ -252,6 +315,8 @@ def evaluate(rows: list[dict[str, str]], data_dir: Path) -> tuple[list[dict[str,
                 "topic": r.get("topic_category", ""),
                 "platforms": r.get("platform_tags", ""),
                 "source": r.get("source", ""),
+                "technology": technology(r),
+                "split": split_of(r["id"]),
                 "itemType": r.get("item_type", ""),
                 "url": r.get("url", ""),
                 "kinds": ";".join(k["kind"] for k in res.get("kinds", [])),
@@ -330,10 +395,15 @@ def _answer_summary(res: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {}
     by: dict[str, Counter[str]] = defaultdict(Counter)
+    tech: dict[str, Counter[str]] = defaultdict(Counter)
     for r in rows:
         c = by[r["answer"]]
         c["rows"] += 1
         c["agrees"] += r["answerAgrees"]
+        t = tech[r.get("technology", "other")]
+        t["rows"] += 1
+        t["answered"] += r["answer"] != "none"
+        t["agrees"] += r["answerAgrees"]
     answered = [r for r in rows if r["answer"] != "none"]
     return {
         "referenceAnswers": {
@@ -344,6 +414,10 @@ def _answer_summary(res: list[dict[str, Any]]) -> dict[str, Any]:
             else 0.0,
             "agreesOfAll": round(100.0 * sum(r["answerAgrees"] for r in rows) / len(rows), 1),
             "byAnswer": {k: {"rows": v["rows"], "agrees": v["agrees"]} for k, v in sorted(by.items())},
+            "byTechnology": {
+                k: {"rows": v["rows"], "answered": v["answered"], "agrees": v["agrees"]}
+                for k, v in sorted(tech.items())
+            },
             "threshold": {"share": AGREE_SHARE, "minShared": AGREE_MIN_SHARED},
         }
     }
@@ -392,6 +466,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--sample-review", type=int, default=0)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument(
+        "--split",
+        choices=("all", "train", "test"),
+        default="all",
+        help="evaluate one fixed half: tune on train, report on test (split by a hash of the row id)",
+    )
+    ap.add_argument(
         "--data-dir",
         type=Path,
         help="a kube-noob data dir to read (for example one with the optional docs corpus built); default: a fresh one",
@@ -403,10 +483,20 @@ def main(argv: list[str]) -> int:
         default=[],
         help="earlier verdicts to carry over (id, answer, top, verdict); repeat for several files",
     )
+    ap.add_argument(
+        "--retired",
+        type=Path,
+        help="test-half rows that informed a change, left out of --split test (default: "
+        "docs/evals/community-questions-retired.csv when it exists)",
+    )
     a = ap.parse_args(argv)
     csv.field_size_limit(10**8)
     grades: dict[str, dict[str, str]] = {}
+    retired: dict[str, str] = {}
     try:
+        retired_path = a.retired or (RETIRED_DEFAULT if RETIRED_DEFAULT.is_file() else None)
+        if retired_path is not None:
+            retired = load_retired(retired_path)
         for path in a.grades:
             more = load_grades(path)
             twice = sorted(set(grades) & set(more))
@@ -418,6 +508,12 @@ def main(argv: list[str]) -> int:
         return 2
     with a.csv.open(newline="", encoding="utf-8", errors="replace") as f:
         rows = list(csv.DictReader(f))
+    retired_excluded = 0
+    if a.split != "all":
+        rows = [r for r in rows if split_of(r["id"]) == a.split]
+    if a.split == "test" and retired:
+        kept = [r for r in rows if r["id"] not in retired]
+        retired_excluded, rows = len(rows) - len(kept), kept
     if a.limit:
         rows = random.Random(a.seed).sample(rows, min(a.limit, len(rows)))  # noqa: S311 - reproducible sample
     a.out.mkdir(parents=True, exist_ok=True)
@@ -432,6 +528,8 @@ def main(argv: list[str]) -> int:
         w.writeheader()
         w.writerows(res)
     summary = summarise(res, meta)
+    if a.split == "test":
+        summary["retiredExcluded"] = retired_excluded
     if graded is not None:
         summary["graded"] = graded
     (a.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")

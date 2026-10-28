@@ -56,6 +56,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         weight=0.9,  # a symptom, not a cause: a specific cause (OOM, probe, UID) with equal evidence ranks first
     ),
     Playbook(
+        # Local images: kubernetes/website concepts/containers/images.md (no tag or :latest -> Always) and
+        # kubernetes/minikube site/content/en/docs/handbook/pushing.md (image load, docker-env, IfNotPresent/Never).
         "DBG-IMAGEPULL",
         "Image cannot be pulled (ImagePullBackOff / ErrImagePull)",
         (
@@ -76,6 +78,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Registry TLS not trusted by the nodes (x509) or the registry is unreachable from the node network "
             "(egress/proxy restrictions; on ROSA private clusters check NAT/VPC endpoints).",
             "Architecture mismatch is a different error ('exec format error' after pull).",
+            "An image built only on your workstation (minikube, a local Docker) is in no registry, and a ':latest' "
+            "tag or no tag makes imagePullPolicy default to Always, so the kubelet tries to pull it.",
         ),
         (
             "oc describe pod {pod} -n {ns}   # exact pull error in Events",
@@ -89,6 +93,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "--docker-password=... -n {ns} && oc secrets link {sa} <name> --for=pull -n {ns}",
             "Mirror public images to a private registry (Quay, ECR) to avoid rate limits.",
             "[OCP] add the registry CA via image.config.openshift.io/cluster additionalTrustedCA.",
+            "Local image on minikube: minikube image load <image> (or build with eval $(minikube docker-env)) and set "
+            "imagePullPolicy: IfNotPresent or Never.",
         ),
         related_rules=("KN-S012", "KN-C013"),
         knowledge=("k8s-images",),
@@ -229,8 +235,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         "DBG-SCC",
         "Pod rejected by SecurityContextConstraints",
         (
-            r"unable to validate against any security context constraint",
-            r"forbidden: unable to validate against any security context",
+            r"unable to validate against any security\W{1,4}context constraint",  # also when a forum mangled the line
+            r"forbidden: unable to validate against any security\W{1,4}context",
             r"provider restricted(-v2)?: .*not allowed",
             r"Invalid value: \d+: must be in the ranges",
             r"Forbidden: not usable by user or serviceaccount",

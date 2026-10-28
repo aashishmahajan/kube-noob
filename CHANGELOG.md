@@ -46,6 +46,29 @@
   not answer it. `scripts/eval_questions.py` scores rows whose CSV carries accepted answers (`answer_text`): the share
   of the answer's specific words in kube-noob's top finding, totalled per answer kind, without writing the answer
   text out; `--data-dir` evaluates with a prepared data dir (for example with the official docs corpus built).
+- Per-technology measurement: [docs/evals/supported-technologies.md](docs/evals/supported-technologies.md) lists
+  what kube-noob answers from for each supported technology (Kubernetes, OpenShift, ROSA HCP, Helm, RHACS, admission
+  policy engines, ODF) and how well it answers, graded on a fixed test half of the owner's answered questions.
+  `scripts/eval_questions.py --split train|test` evaluates one fixed half (by a hash of the row id) and reports
+  results per technology. `scripts/eval_golden.py` runs the golden question set (`tests/fixtures/golden/`, original
+  questions written from each technology's official documentation, with out-of-scope questions that must stay
+  unanswered) and fails when an item that passed regresses; `tests/test_golden.py` runs it in CI. Test rows whose
+  grading informed a change are listed in `docs/evals/community-questions-retired.csv` (ids and the change only)
+  and `--split test` leaves them out (`--retired` names another file). The golden set holds 119 questions
+  (Kubernetes, Helm 3, OpenShift, ROSA HCP, RHACS, admission policy engines) written by independent agents from the
+  official docs at pinned commits and graded by other independent agents; the baseline is 7 of 96 in-scope
+  questions answered by the top finding (Kubernetes 4 of 16) and 15 of 23 out-of-scope questions left unanswered,
+  each miss with its gap recorded. The SCC playbook also matches "unable to validate against any security context constraint" when a forum mangled the line.
+- Helm usage knowledge (Helm had the lowest graded score, 2 of 20 helpful): a new cited document,
+  `helm-templates-values`, from the Helm documentation: values precedence (`-f` and `--set`, right-most wins) and
+  removing a default with `null`; why `helm upgrade` forgets earlier `--set` values and what `--reuse-values`,
+  `--reset-then-reuse-values` and `--reset-values` do; quoting strings but not integers; `.` and `$` inside
+  `range` and `with` ("nil pointer evaluating interface {}"); `index` for keys with dashes; `include | nindent`;
+  `required`; the checksum annotation that rolls pods on a ConfigMap change; rendering one template; and the Helm 3
+  changes (a release name or `--generate-name`, no `--name`, `uninstall --keep-history`, namespaced releases). It
+  answers only questions that name Helm, a chart or `values.yaml`. The image-pull playbook now names an image built
+  only on a workstation (minikube, a local Docker) with `:latest` or no tag, so `imagePullPolicy` defaults to
+  `Always`, and proposes `minikube image load` or `minikube docker-env` with `IfNotPresent` or `Never`.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

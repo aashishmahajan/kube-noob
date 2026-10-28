@@ -130,3 +130,10 @@ flowchart LR
   objects, and exempts platform namespaces and operators so a cluster upgrade is never blocked by a generated policy.
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.
+- Evaluation (maintainer tools, not shipped in the package or plugin): `scripts/eval_questions.py` reads a question
+  CSV that is third-party text (forum posts, accepted answers, Jira resolutions) from outside the repository, runs
+  each row through `insight` offline and writes ids, answer kinds, finding ids and scores only: no question or answer
+  text. Only ids, verdicts, retired ids and aggregates are committed (`docs/evals/`). `scripts/eval_golden.py`
+  reads `tests/fixtures/golden/`, original questions written from the official docs with their source pinned to a
+  commit, and fails CI when a passing item regresses. Trust boundary: the CSV is untrusted input, read with a bounded
+  field size; nothing from it is executed.

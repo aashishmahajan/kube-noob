@@ -13,7 +13,7 @@
 
 **No AI inside. Works with yours.** kube-noob is a Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox expert
 in a box: audit rules, read-only-first playbooks, cited docs and graded exercises. Claude, OpenShift Lightspeed or any
-MCP client calls it as tools; the CLI runs it with no AI at all. No network calls unless you turn them on.
+MCP client calls it as tools; the CLI runs it with no AI at all. No network calls unless enabled.
 
 - **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles;
@@ -91,7 +91,7 @@ NetworkPolicies and runs under `restricted-v2`.
 - [Use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
 - [Enterprise roadmap](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md)
 - [Architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
-- [Training](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
+- [Training](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md) and [measured accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md)
 - [Operations](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
 - [Guidance traceability](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md) and [release readiness](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
 - [Privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security policy](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md) and [contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md)
