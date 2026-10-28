@@ -7,7 +7,7 @@ Statuses: `todo`, `in-progress`, `done`, `blocked` (reason and the exact questio
 
 | # | ID | Item | Depends on | Status | Evidence / notes |
 |---|---|---|---|---|---|
-| 1 | F1 | Baseline and loop scaffolding | - | todo | |
+| 1 | F1 | Baseline and loop scaffolding | - | done | check.sh green: 428 passed, 1 skipped, selftest 61/61, 23 s (2026-10-28); toolchain below |
 | 2 | F2 | Strategy into the docs (roadmap, editions) | F1 | todo | |
 | 3 | F3 | Capability tiers framework | F1 | todo | |
 | 4 | S1 | Signal extraction module | F1 | todo | |
@@ -35,7 +35,8 @@ Statuses: `todo`, `in-progress`, `done`, `blocked` (reason and the exact questio
 | 26 | E2 | Installed operator inventory | F3 | todo | |
 | 27 | E1 | Operator release notes | E2 | todo | |
 | 28 | E3 | Kubernetes and RHACS known issues | S3 | todo | |
-| 29 | E4 | Customer-side Jira cache | S3 | todo | |
+| 29 | E4 | Customer-side Jira cache | S3 | done | Shipped on main in 0.5.0 before this loop: `corpus jira` full sync of 28 projects, FTS5 ticket index, verdicts in known-issues/diagnose/watch, `ticket` tool, chart `jira.sync`; live CI on 7,700 OCPBUGS tickets |
+| 29b | E4b | Jira matches filtered and ranked by the cluster's components and installed operators (from E2 inventory or a must-gather) | E4, E2, G2 | todo | remainder of E4 |
 | 30 | E5 | Customer Portal research doc | - | todo | |
 | 31 | I2 | SARIF, GitHub Action, pre-commit, Tekton | F1 | todo | |
 | 32 | I9 | runbooks.yaml, report and /metrics, lightspeed-config, diagnose --brief | MEM2 | todo | |
@@ -69,6 +70,13 @@ When an item is too large for one iteration, split it here into lettered rows (f
 which ships tested and documented on its own.
 
 ## Decisions (do not re-litigate)
+
+- 2026-10-28: this branch was cut at 4959025, before 0.4.0 (incident watch) and 0.5.0 (Red Hat Jira copy) shipped on
+  main; main was merged in (9e4c3f8). Items build on both: the Alertmanager receiver (I1) records into the incident
+  ledger (`incidents.json`) instead of a second store, and MEM imports fixes confirmed in incidents as proposed
+  entries (`memory migrate-learning` also reads `incidents.json`).
+- E4 is done by 0.5.0's Jira copy (REST API only, robots.txt pace, request budget, never redistributed); its
+  remaining slice (filter by the cluster's components and operators) is E4b.
 
 - kube-noob has no model inside. The AI is the client or the optional `kube-noob ask`.
 - The trained-model track is cut. The grader stays as an evaluation product (`kube-noob bench`).
@@ -111,6 +119,16 @@ which ships tested and documented on its own.
 
 ## Baseline
 
-Not run yet (F1).
+- 2026-10-28 on 9e4c3f8 (branch with main merged): `scripts/check.sh` passes: plugin copy in sync, ruff, ruff
+  format, mypy (76 files), pytest 428 passed and 1 skipped (root ignores file permissions), selftest 61/61. 23 s.
+- Toolchain in the cloud container: Python 3.13.17 (project venv), uv 0.13.6, node 22.23 and npm 10.9 (npm registry
+  reachable), docker CLI 29.9 without a running daemon, no kind, helm, kubectl, oc or podman (helm downloads are
+  refused by the egress proxy). GitHub and raw.githubusercontent.com are reachable from the shell; docs.redhat.com
+  is not (read it with web fetch). No model provider keys in the environment.
+- CI (GitHub Actions) has helm, kind and docker: chart, image and cluster behaviour is proven there.
 
 ## Iteration log (newest first; at most 10 lines per entry)
+
+- 2026-10-28 F1: baseline recorded (above); main merged into the branch; E4 marked done by 0.5.0 with remainder
+  E4b; decisions on reusing the incident ledger. M1 gap reproduced: `known-issues 'etcd leader changed frequently,
+  apiserver timeouts after upgrade' --version 4.21.0` returns no match (expected OCPBUGS-73881). Next: F2.
