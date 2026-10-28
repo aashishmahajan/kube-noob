@@ -694,6 +694,15 @@ class EmptyIn(_In):
     pass
 
 
+def _has_module(name: str) -> bool:
+    """Whether a module ships in this install. find_spec raises, not returns None, when a parent package is missing
+    (the Claude plugin has no kube_noob.mustgather at all)."""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -1994,7 +2003,7 @@ class Toolkit:
                     self.containerfile_audit,
                 )
             )
-        if importlib.util.find_spec("kube_noob.mustgather.analyse") is not None and (  # not in the Claude plugin
+        if _has_module("kube_noob.mustgather.analyse") and (  # not in the Claude plugin
             not self.shared or self.settings.must_gather.allowed_dir is not None
         ):
             s.append(

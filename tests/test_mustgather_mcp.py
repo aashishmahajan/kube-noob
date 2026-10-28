@@ -93,3 +93,22 @@ def test_mcp_server_and_plugin(tmp_path: Path) -> None:
     sys.modules["sync_plugin"] = mod
     spec.loader.exec_module(mod)
     assert not any(m.startswith("kube_noob.mustgather") for m in mod.plugin_modules())
+
+
+def test_a_toolkit_without_the_must_gather_package_still_lists_its_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plugin ships without kube_noob.mustgather; find_spec raises for a missing parent package (CI caught the
+    plugin server failing to start)."""
+    import importlib.util
+
+    real = importlib.util.find_spec
+
+    def missing(name: str, package: str | None = None) -> object:
+        if name.startswith("kube_noob.mustgather"):
+            raise ModuleNotFoundError(f"No module named {name!r}")
+        return real(name, package)
+
+    monkeypatch.setattr(importlib.util, "find_spec", missing)
+    names = _names(_kit(tmp_path, shared=False))
+    assert "analyze_must_gather" not in names and "diagnose" in names
