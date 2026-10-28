@@ -69,6 +69,19 @@ words differ, and a payload's `openshift_version` (or `version`) label, when it 
 the reported issues for that version. `signals` (MCP: `kubenoob_extract_signals`) lists what was found, the alerts the
 words imply ("leader changed"), each catalogue entry's upstream source and the playbooks they point at.
 
+An ImagePullBackOff whose pull secret sits in another namespace is named for what it is: kubelet's
+`FailedToRetrieveImagePullSecret` event (or the question in those words) ranks the pull-secret playbook first, with the
+secret and namespace filled in, read-only checks that list Secret names (never values), and the fixes for each case:
+create or sync the secret in the pod's namespace and link it, the OpenShift global pull secret for a registry every
+project uses, or `system:image-puller` for another project's internal registry. `audit` catches it before deploy
+(KN-C013) when the bundle defines the Secret only in another namespace, and the in-cluster debug reads the pod's and
+its ServiceAccount's pull secret names.
+
+```bash
+kube-noob diagnose 'ImagePullBackOff when the pull secret sits in a different namespace from the pod'
+oc describe pod web-7d9c6b9f5-x2k8p -n shop | kube-noob diagnose --platform openshift
+```
+
 `bundle` writes a redacted, read-only evidence pack (`bundle.md` and `bundle.json`) that you can attach to a ticket.
 Once a fix is confirmed, save it with `kube-noob learning note`. The team finds it next time as `[kn:local-N#0]`.
 

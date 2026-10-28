@@ -94,6 +94,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-C010": ("SC-36",),
     "KN-C011": ("CP-10",),
     "KN-C012": ("SC-6",),
+    "KN-C013": ("CM-6",),
     # Validation: changes are tested before they reach the cluster
     "KN-V001": _VALIDATION,
     "KN-V002": _VALIDATION,

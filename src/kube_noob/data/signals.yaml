@@ -25,6 +25,7 @@ sources:
   ovn: https://github.com/openshift/cluster-network-operator/blob/master/bindata/network/ovn-kubernetes/common/alert-rules.yaml
   ovn-cp: https://github.com/openshift/cluster-network-operator/blob/master/bindata/network/ovn-kubernetes/self-hosted/alert-rules-control-plane.yaml
   kubelet-events: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/events/event.go
+  kubelet-main: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kubelet.go
   scheduler: https://github.com/kubernetes/kubernetes/blob/master/pkg/scheduler/schedule_one.go
   controllers: https://github.com/kubernetes/kubernetes/blob/master/pkg/controller/controller_utils.go
   eviction: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/eviction/helpers.go
@@ -383,6 +384,12 @@ signals:
     components: [kube-controller-manager]
     playbooks: [DBG-SCC, DBG-PSA, DBG-QUOTA, DBG-WEBHOOK]
     sources: [controllers]
+  - id: event_reason:FailedToRetrieveImagePullSecret
+    aliases: [unable to retrieve some image pull secrets, pull secret in another namespace, pull secret in a different namespace]
+    terms: [pullsecret, imagepullsecrets, secret, namespace, registry, serviceaccount]
+    components: [kubelet]
+    playbooks: [DBG-PULLSECRET, DBG-IMAGEPULL]
+    sources: [kubelet-main]
   - id: event_reason:BackOff
     aliases: [back-off restarting failed container, back-off pulling image]
     terms: [backoff, restart, crash, image, pull]

@@ -1879,6 +1879,50 @@ def _c012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 yield r.finding(h, ("spec", "metrics"), f"Target {d.ref()} has containers without CPU requests.")
 
 
+def _pull_secret_names(spec: object) -> list[str]:
+    refs = get_path(spec, ("imagePullSecrets",)) if isinstance(spec, dict) else None
+    return [str(x["name"]) for x in refs or [] if isinstance(x, dict) and x.get("name")]
+
+
+@rule(
+    "KN-C013",
+    "Pull secret exists only in another namespace",
+    Stage.VALIDATE,
+    "reliability",
+    Severity.HIGH,
+    "Create (or sync) the pull secret in the workload's namespace and link it to its ServiceAccount; on OpenShift put "
+    "a registry every project uses in the global pull secret, and grant system:image-puller for another project's "
+    "internal registry.",
+    "imagePullSecrets name Secrets in the pod's own namespace (LocalObjectReference): kubelet never looks in another "
+    "namespace, reports FailedToRetrieveImagePullSecret and the pull fails with ImagePullBackOff.",
+    ("k8s-images",),
+)
+def _c013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    secrets: dict[str, set[str]] = {}
+    for s in ctx.by_kind("Secret"):
+        if s.name:
+            secrets.setdefault(s.name, set()).add(ctx.ns(s))
+    if not secrets:
+        return  # the bundle carries no Secrets: nothing to compare with
+
+    def check(doc: Document, path: PathT, names: list[str]) -> Iterator[Finding]:
+        ns = ctx.ns(doc)
+        for i, name in enumerate(names):
+            elsewhere = secrets.get(name, set()) - {ns}
+            if elsewhere and ns not in secrets.get(name, set()):
+                yield r.finding(
+                    doc,
+                    (*path, "imagePullSecrets", i),
+                    f"Pull secret '{name}' is defined in namespace {', '.join(sorted(elsewhere))}, not in {ns}, "
+                    f"where kubelet looks for it.",
+                )
+
+    for d, pt in ctx.workloads():
+        yield from check(d, pt.path, _pull_secret_names(pt.spec))
+    for sa in ctx.by_kind("ServiceAccount"):
+        yield from check(sa, (), _pull_secret_names(sa.data))
+
+
 def run_rules(ctx: AuditContext, stages: set[Stage] | None = None) -> list[Finding]:
     findings: list[Finding] = []
     for r in RULES.values():

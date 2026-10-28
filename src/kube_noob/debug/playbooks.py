@@ -90,8 +90,63 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Mirror public images to a private registry (Quay, ECR) to avoid rate limits.",
             "[OCP] add the registry CA via image.config.openshift.io/cluster additionalTrustedCA.",
         ),
-        related_rules=("KN-S012",),
+        related_rules=("KN-S012", "KN-C013"),
         knowledge=("k8s-images",),
+        weight=0.9,  # a symptom with several causes: a playbook that names the cause ranks first on equal evidence
+    ),
+    Playbook(
+        # kubelet emits FailedToRetrieveImagePullSecret when a name in imagePullSecrets is not found in the pod's own
+        # namespace and the pull then fails (pkg/kubelet/kubelet.go, getPullSecretsForPod in kubelet_pods.go);
+        # imagePullSecrets are LocalObjectReferences (staging/src/k8s.io/api/core/v1/types.go). OpenShift options:
+        # openshift-docs modules/images-allow-pods-to-reference-images-across-projects.adoc and
+        # modules/images-update-global-pull-secret.adoc (enterprise-4.21).
+        "DBG-PULLSECRET",
+        "Pull secret not found in the pod's namespace (FailedToRetrieveImagePullSecret)",
+        (
+            r"FailedToRetrieveImagePullSecret",
+            r"Unable to retrieve some image pull secrets",
+            r"pull[- ]?secrets?\b[^.\n]{0,40}\b(?:in|from)\s+(?:a\s+|an\s+)?(?:different|another|other)\s+"
+            r"(?:namespace|project)",
+            r"(?:different|another|other)\s+(?:namespace|project)[^.\n]{0,60}\bpull[- ]?secret",
+            r"(?:copy|share|use|reuse)\s+(?:a\s+|the\s+)?pull[- ]?secrets?\s+(?:across|between)\s+"
+            r"(?:namespaces|projects)",
+        ),
+        (
+            "imagePullSecrets name Secrets in the pod's own namespace only (they are LocalObjectReferences): kubelet "
+            "looks up {secret} in {ns}, and a Secret of that name in any other namespace is never used.",
+            "The Secret exists in the namespace under another name, or the pod's ServiceAccount links a name that is "
+            "missing (the ServiceAccount's imagePullSecrets are also looked up in its own namespace).",
+            "[OCP] The image is in the internal registry of another project: no pull secret is needed, the pod's "
+            "ServiceAccount needs the system:image-puller role in that project.",
+        ),
+        (
+            "oc describe pod {pod} -n {ns}   # FailedToRetrieveImagePullSecret names the secret kubelet could not find",
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.spec.imagePullSecrets}} {{.spec.serviceAccountName}}'",
+            "oc get sa {sa} -n {ns} -o jsonpath='{{.imagePullSecrets}}'",
+            "oc get secrets -n {ns} --field-selector type=kubernetes.io/dockerconfigjson -o name   # names only",
+            "oc get secrets -A --field-selector metadata.name={secret} "
+            "-o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name   # where it really is",
+        ),
+        (
+            "[OCP] Create the pull secret in {ns} and link it to the ServiceAccount: oc create secret "
+            "docker-registry {secret} --docker-server=<registry> --docker-username=<user> --docker-password=<token> "
+            "-n {ns} && oc secrets link {sa} {secret} --for=pull -n {ns}",
+            "[K8S] Create the pull secret in {ns} and add it to the ServiceAccount: kubectl create secret "
+            "docker-registry {secret} --docker-server=<registry> --docker-username=<user> --docker-password=<token> "
+            "-n {ns} && kubectl patch serviceaccount {sa} -n {ns} -p "
+            '\'{{"imagePullSecrets": [{{"name": "{secret}"}}]}}\'',
+            "Keep one source of truth instead of hand-made copies: sync the Secret into each namespace that needs it "
+            "with the External Secrets Operator or your secret manager.",
+            "[OCP] A registry the whole cluster uses: add it to the global pull secret (cluster-admin; rolls out to "
+            "every node): oc set data secret/pull-secret -n openshift-config --from-file=.dockerconfigjson=<file>. "
+            "On hosted control planes (ROSA with HCP 4.20.6 or later) use secret/additional-pull-secret in "
+            "kube-system.",
+            "[OCP] An image in another project's internal registry: oc policy add-role-to-user system:image-puller "
+            "system:serviceaccount:{ns}:{sa} --namespace=<image-project>",
+        ),
+        related_rules=("KN-C013",),
+        knowledge=("k8s-images",),
+        weight=2.0,  # one named cause: ranks above the image-pull symptom that matches the same events
     ),
     Playbook(
         "DBG-OOM",

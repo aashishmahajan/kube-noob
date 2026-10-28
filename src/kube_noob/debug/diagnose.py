@@ -38,6 +38,7 @@ _POD_PATTERNS = (
 )
 _PVC_PATTERN = re.compile(r"(?:persistentvolumeclaim|pvc)[/ ]\"?([a-z0-9][-a-z0-9.]{0,252})\"?", re.IGNORECASE)
 _SA_PATTERN = re.compile(r"system:serviceaccount:[a-z0-9-]+:([a-z0-9][-a-z0-9]{0,62})")
+_SA_SPEC = re.compile(r"\bserviceAccountName[=:]\s*\"?([a-z0-9][-a-z0-9.]{0,252})")
 _FORBIDDEN = re.compile(
     r"User \"(?P<subject>[^\"]{1,253})\" cannot (?P<verb>[a-z]+) resource \"(?P<resource>[a-z0-9./-]{1,253})\""
     r"(?: in API group \"(?P<group>[a-z0-9.-]*)\")?"
@@ -51,6 +52,8 @@ class Diagnosis:
     score: float
     evidence: list[str]
     checks: list[str]
+    fixes: list[str] | None = None  # the playbook's fixes with the names from the input filled in
+    causes: list[str] | None = None  # the same for its root causes
 
     def as_dict(self) -> dict[str, Any]:
         p = self.playbook
@@ -59,13 +62,15 @@ class Diagnosis:
             "title": p.title,
             "confidence": round(min(1.0, self.score / 3.0), 2),
             "evidence": self.evidence,
-            "rootCauses": list(p.root_causes),
+            "rootCauses": list(p.root_causes if self.causes is None else self.causes),
             # Diagnose before change: read-only evidence first; anything that executes or mutates needs approval.
             "readOnlyNextSteps": [_step(c) for c in self.checks if classify_step(c) == "read"],
             "diagnosticCommands": [
                 {**_step(c), "requiresApproval": True} for c in self.checks if classify_step(c) == "exec"
             ],
-            "proposedChanges": [{"change": f, "requiresApproval": True} for f in p.fixes],
+            "proposedChanges": [
+                {"change": f, "requiresApproval": True} for f in (p.fixes if self.fixes is None else self.fixes)
+            ],
             "relatedRules": list(p.related_rules),
             "knowledge": list(p.knowledge),
         }
@@ -115,19 +120,46 @@ def _first(patterns: tuple[re.Pattern[str], ...], text: str) -> str | None:
     return None
 
 
+# English words that follow "namespace" in a sentence ("a different namespace from the pod") and are not its name.
+_NOT_A_NAMESPACE = frozenset(
+    {
+        "a", "an", "and", "another", "are", "as", "at", "but", "by", "different", "does", "for", "from", "has", "in",
+        "into", "is", "it", "its", "level", "of", "on", "or", "other", "same", "scoped", "than", "that", "the", "then",
+        "this", "to", "was", "which", "while", "with", "without",
+    }
+)  # fmt: skip
+# kube-scheduler's Scheduled event: "Successfully assigned <namespace>/<pod> to <node>" (pkg/scheduler/schedule_one.go)
+_ASSIGNED = re.compile(r"Successfully assigned ([a-z0-9][-a-z0-9]{0,62})/([a-z0-9][-a-z0-9.]{0,252}) to ")
+_PULL_SECRETS = re.compile(r"Unable to retrieve some image pull secrets \(([a-z0-9][-a-z0-9.]{0,252})")
+
+
+def _namespace(text: str) -> str | None:
+    for p in _NS_PATTERNS:
+        for m in p.finditer(text):
+            if m.group(1) not in _NOT_A_NAMESPACE:
+                return m.group(1)
+    return None
+
+
 def extract_context(text: str) -> dict[str, str]:
     ctx: dict[str, str] = {}
-    ns = _first(_NS_PATTERNS, text)
+    ns = _namespace(text)
+    assigned = _ASSIGNED.search(text)
     if ns:
         ctx["ns"] = ns
-    pod = _first(_POD_PATTERNS, text)
+    elif assigned:
+        ctx["ns"] = assigned.group(1)
+    m = _PULL_SECRETS.search(text)
+    if m:
+        ctx["secret"] = m.group(1)
+    pod = _first(_POD_PATTERNS, text) or (assigned.group(2) if assigned else None)
     if pod:
         ctx["pod"] = pod
         ctx.setdefault("name", pod)
     m = _PVC_PATTERN.search(text)
     if m:
         ctx["pvc"] = m.group(1)
-    m = _SA_PATTERN.search(text)
+    m = _SA_PATTERN.search(text) or _SA_SPEC.search(text)
     if m:
         ctx["sa"] = m.group(1)
     m = _FORBIDDEN.search(text)
@@ -146,6 +178,7 @@ def _fill(cmd: str, ctx: dict[str, str]) -> str:
         "pod": "<pod>",
         "name": "<name>",
         "pvc": "<pvc>",
+        "secret": "<secret>",
         "sa": "default",
         "subject": sa_subject if "sa" in ctx else "<user-or-serviceaccount>",
         "verb": "<verb>",
@@ -176,6 +209,15 @@ def _for_platform(cmd: str, platform: str | None) -> str | None:
     if rsh:
         return f"kubectl exec {rsh.group(1) or ''}{rsh.group(2)} -- {rsh.group(3)}"
     return re.sub(r"^oc ", "kubectl ", cmd)
+
+
+def _fix_applies(fix: str, platform: str | None) -> bool:
+    """Fixes marked [OCP] or [ROSA] are for OpenShift; [K8S] for plain Kubernetes. With no platform, all apply."""
+    if platform == "kubernetes":
+        return not fix.startswith(("[OCP]", "[ROSA]"))
+    if platform:
+        return not fix.startswith("[K8S]")
+    return True
 
 
 def diagnose(
@@ -212,7 +254,9 @@ def diagnose(
         if hits or boost:
             score = (hits + boost) * p.weight
             checks = [_for_platform(_fill(c, ctx), platform) for c in p.checks]
-            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c]))
+            fixes = [_fill(f, ctx) for f in p.fixes if _fix_applies(f, platform)]
+            causes = [_fill(c, ctx) for c in p.root_causes if _fix_applies(c, platform)]
+            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c], fixes, causes))
     results.sort(key=lambda d: (-d.score, d.playbook.pid))
     codes = {int(c) for c in _EXIT_PATTERN.findall(text)}
     exit_info = {c: EXIT_CODES[c] for c in sorted(codes) if c in EXIT_CODES}
@@ -249,7 +293,11 @@ def _pod_summary(pod: dict[str, Any]) -> list[str]:
     out: list[str] = []
     name = pod.get("metadata", {}).get("name")
     status = pod.get("status", {})
-    out.append(f"pod/{name} phase={status.get('phase')} node={pod.get('spec', {}).get('nodeName')}")
+    spec = pod.get("spec") or {}
+    out.append(f"pod/{name} phase={status.get('phase')} node={spec.get('nodeName')}")
+    pull = [str(s.get("name")) for s in spec.get("imagePullSecrets") or [] if isinstance(s, dict) and s.get("name")]
+    if pull or spec.get("serviceAccountName"):  # names only: kube-noob never reads a Secret
+        out.append(f"  spec serviceAccountName={spec.get('serviceAccountName') or 'default'} imagePullSecrets={pull}")
     for cond in status.get("conditions") or []:
         if cond.get("status") != "True":
             out.append(
@@ -270,6 +318,29 @@ def _pod_summary(pod: dict[str, Any]) -> list[str]:
                 f"  container {cs.get('name')} lastState terminated: {t.get('reason')} exitCode: {t.get('exitCode')}"
             )
         out.append(f"  container {cs.get('name')} ready={cs.get('ready')} restartCount: {cs.get('restartCount')}")
+    return out
+
+
+_PULL_REASONS = frozenset({"ErrImagePull", "ImagePullBackOff"})
+
+
+def _service_account_pull_secrets(backend: Backend, namespace: str, pods: list[dict[str, Any]]) -> list[str]:
+    """For pods stuck pulling: the pull secret names their ServiceAccounts link (names only, never a Secret)."""
+    accounts: list[str] = []
+    for pod in pods:
+        statuses = (pod.get("status") or {}).get("containerStatuses") or []
+        if any(((cs.get("state") or {}).get("waiting") or {}).get("reason") in _PULL_REASONS for cs in statuses):
+            sa = (pod.get("spec") or {}).get("serviceAccountName") or "default"
+            if sa not in accounts:
+                accounts.append(sa)
+    out: list[str] = []
+    for sa in accounts[:3]:
+        try:
+            obj = backend.get("serviceaccounts", name=sa, namespace=namespace)
+        except ClusterAccessError:
+            continue  # the ServiceAccount is a bonus; the events already name the missing secret
+        names = [str(s.get("name")) for s in obj.get("imagePullSecrets") or [] if isinstance(s, dict)]
+        out.append(f"serviceaccount/{sa} imagePullSecrets={names}")
     return out
 
 
@@ -312,6 +383,7 @@ def collect_evidence(backend: Backend, namespace: str, kind: str, name: str, log
         pods = backend.get("pods", namespace=namespace, selector=sel_str or None).get("items", []) if sel_str else []
     for pod in pods[:10]:
         lines.extend(_pod_summary(pod))
+    lines.extend(_service_account_pull_secrets(backend, namespace, pods[:10]))
     events = backend.get("events", namespace=namespace).get("items", [])
     names = {name} | {p.get("metadata", {}).get("name") for p in pods}
     rel = [

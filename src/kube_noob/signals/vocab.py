@@ -1,7 +1,8 @@
 """Kubernetes and OpenShift reason vocabularies, each name copied from the upstream source that emits it.
 
 Checked on 2026-10-28 against these files (the URL is the citation):
-- kubelet event reasons: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/events/event.go
+- kubelet event reasons: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/events/event.go, and
+  "FailedToRetrieveImagePullSecret" from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kubelet.go
 - image pull errors: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/images/types.go
 - container sync errors: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/container/sync_result.go
 - container creation errors:
@@ -21,6 +22,7 @@ EVENT_REASONS = frozenset(
     {
         "BackOff",
         "Failed",
+        "FailedToRetrieveImagePullSecret",
         "FailedKillPod",
         "FailedCreatePodContainer",
         "NetworkNotReady",
