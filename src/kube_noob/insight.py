@@ -603,6 +603,39 @@ class _DocFit:
         return all(any(w in words for w in group) for group in extra.get("requires") or [])
 
 
+# A policy engine and the playbook for its denials (debug/policy.py ENGINES; Kyverno and Gatekeeper have none).
+_ENGINE_PLAYBOOK = {
+    "validating-admission-policy": "DBG-VAP",
+    "openshift-scc": "DBG-SCC",
+    "pod-security": "DBG-PSA",
+    "rhacs": "DBG-STACKROX-ADMISSION",
+}
+
+
+# The asker wants to change or get around the policy itself, not their object: "Should I just edit restricted-v2?",
+# "how do I make it friendlier?", "What are my options?".
+_POLICY_SIDE = re.compile(
+    r"(?i)\b(?:edit|modify|disable|bypass|exempt\w*|exceptions?|turn (?:it )?off|loosen|relax|override|options|"
+    r"friendlier|clearer|message(?:Expression)?|break[- ]?glass)\b"
+)
+
+
+def _engine_playbook_first(findings: list[dict[str, Any]], text: str) -> None:
+    """The policy explainer (which policy, what it means, the change to the object) comes first, except when the
+    denying engine's own playbook matched and either the explainer has no change to offer or the question asks about
+    the policy itself (editing, bypassing or exempting it, its message, the options): then the playbook, which covers
+    the policy side, comes first and the explainer right after it. The owner delegated this call (2026-10-28)."""
+    asked = " ".join(s for s in _SENTENCE_END.split(text[-2000:]) if s.rstrip().endswith("?"))
+    policy_side = bool(_POLICY_SIDE.search(asked))
+    ranks = {f["id"]: f["rank"] for f in findings if f["source"] == "playbook"}
+    for f in findings:
+        if f["source"] != "policy":
+            continue
+        pid = _ENGINE_PLAYBOOK.get(str(f.get("id") or "").split("/", 1)[0])
+        if pid in ranks and (policy_side or not f.get("fix")):
+            f["rank"] = ranks[pid] + 0.5
+
+
 def _explain_first(findings: list[dict[str, Any]], query: str, asked: set[str]) -> None:
     """A typed conceptual question ("What is the difference between Degraded and Available...") whose only playbook
     is a weak word match gets the document section that explains it first, when the section's heading shares two
@@ -993,6 +1026,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         ns = context.get("namespace")
         steps = gather_steps(platform, ns if isinstance(ns, str) else None)
         ran.append("gather")
+    _engine_playbook_first(findings, text)
     findings.sort(key=lambda f: (f["rank"], str(f.get("id"))))
     for f in findings:
         f.pop("rank", None)

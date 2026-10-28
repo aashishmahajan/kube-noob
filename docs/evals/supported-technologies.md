@@ -98,9 +98,9 @@ Golden results now, graded again by independent agents:
 | Helm 3 | 16 of 16 (was 1) | 4 of 4 (was 2) |
 | OpenShift | 13 of 16 (was 1) | 3 of 3 |
 | ROSA HCP | 16 of 16 (was 1) | 2 of 4 (was 1) |
-| RHACS | 14 of 16 (was 0) | 4 of 4 (was 2) |
-| Admission policy engines | 11 of 16 (was 0) | 4 of 4 (was 3) |
-| **All** | **85 of 96 (was 7)** | **21 of 23 (was 15)** |
+| RHACS | 15 of 16 (was 0) | 4 of 4 (was 2) |
+| Admission policy engines | 13 of 16 (was 0) | 4 of 4 (was 3) |
+| **All** | **88 of 96 (was 7)** | **21 of 23 (was 15)** |
 
 OpenShift and ROSA HCP items are now asked with their platform (`platform: openshift` or `rosa-hcp`), as kube-noob
 is configured on those clusters; without it, OpenShift-only content stays silent unless the question says OpenShift
@@ -129,6 +129,7 @@ answer:
 | Most common cause when nothing points at one (CrashLoopBackOff, image pull, OOM; chosen on the train half) | 105 | 24; 25 | 1; 2 | 80; 78 |
 | Steps and guesses fit the infrastructure (ROSA steps, OpenShift DNS steps, no AWS guess elsewhere, init containers) | 44 | 28; 36 | 1; 1 | 15; 7 |
 | Mount playbook needs volume words next to "timed out waiting for the condition" (both halves, one grader) | 15 | 15 | 0 | 0 |
+| The engine's playbook before the policy explainer when the question is about the policy itself (pol-002, pol-015, rhacs-001) | 0 | 0 | 0 | 0 |
 
 Cause choice has its own held-out set (`tests/fixtures/triage/`, 114 questions, one typed and one pasted per cause,
 written by an agent that saw only the causes): the answer names the labelled cause for 80 (50 before cause-linked

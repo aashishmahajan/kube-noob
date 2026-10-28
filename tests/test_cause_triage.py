@@ -469,3 +469,44 @@ def test_without_evidence_an_aws_cause_is_no_guess_for_another_cloud() -> None:
         assert c is not None
         cause = p.root_causes[c.cause]
         assert not re.search(r"\b(?:EFS|EBS|AWS|security groups?)\b|\bcloud\b", cause, re.I), (pid, cause)
+
+
+@pytest.mark.parametrize(
+    ("text", "platform", "first"),
+    [
+        (
+            "deployments.apps \"web\" is forbidden: ValidatingAdmissionPolicy 'cap.example' with binding 'cap-prod' "
+            "denied request: failed expression: object.spec.replicas <= 5. How do I make the message friendlier?",
+            None,
+            "DBG-VAP",
+        ),
+        (
+            "unable to validate against any security context constraint: [provider restricted-v2: "
+            ".spec.containers[0].securityContext.privileged: Invalid value: true: Privileged containers are not "
+            "allowed]. Should I just edit restricted-v2?",
+            "openshift",
+            "DBG-SCC",
+        ),
+        (
+            "Error from server (Failed currently enforced policies from RHACS): admission webhook "
+            '"policyeval.stackrox.io" denied the request',
+            None,
+            "DBG-STACKROX-ADMISSION",
+        ),
+        (
+            'pods "api-6f7d" is forbidden: violates PodSecurity "restricted:latest": allowPrivilegeEscalation != false '
+            '(container "api" must set securityContext.allowPrivilegeEscalation=false). What do I fix in the pod spec?',
+            None,
+            "pod-security/restricted:latest",
+        ),
+    ],
+)
+def test_the_engines_playbook_comes_first_when_the_question_is_about_the_policy(
+    kit: tk.Toolkit, text: str, platform: str | None, first: str
+) -> None:
+    # Owner's call delegated (2026-10-28, row 20w): the explainer's change to the object first, unless the question
+    # is about the policy itself or the explainer has no change to offer; then the engine's playbook first.
+    out = kit.insight(tk.InsightIn(text=text, platform=platform))
+    ids = [f["id"] for f in out["findings"]]
+    assert ids[0] == first, ids
+    assert "policy" in {f["source"] for f in out["findings"][:2]}, ids

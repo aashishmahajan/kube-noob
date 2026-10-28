@@ -34,10 +34,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#message-expression'
   outOfScope: false
-  status: miss
+  status: pass
   expect:
   - DBG-VAP
-  gap: 'rank: DBG-VAP playbook should outrank the generic policy-source finding'
 - id: pol-003
   technology: policy
   kind: howto
@@ -251,10 +250,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-about.adoc'
   outOfScope: false
-  status: miss
+  status: pass
   expect:
   - DBG-SCC
-  gap: 'rank: DBG-SCC playbook should outrank the restricted-v2 policy-source finding'
 - id: pol-016
   technology: policy
   kind: out-of-scope

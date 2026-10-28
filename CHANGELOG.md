@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A policy denial whose question is about the policy itself ("Should I just edit restricted-v2?", "how do I make the
+  message friendlier?", "what are my options?"), or whose explainer has no change to offer, gets the engine's own
+  playbook first (ValidatingAdmissionPolicy, SecurityContextConstraints, Pod Security Admission, RHACS), with the
+  policy explainer right after it; a question about what to change in the object keeps the explainer's specific
+  change first. The owner delegated this call. Golden pol-002, pol-015 and rhacs-001 now answer: in scope 88 of 96;
+  no community row changed (9 posts carry a policy denial, none of this kind).
 - Answers fit the post's infrastructure (from the community graders' notes). `rosa` steps need a ROSA platform or text
   that says ROSA (they had shown on EKS, GKE and minikube posts); OpenShift text gets the openshift-dns steps,
   including `oc logs -n openshift-dns -c dns -l dns.operator.openshift.io/daemonset-dns=default`, and plain

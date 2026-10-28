@@ -16,10 +16,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/bypass-admission-controller-enforcement.adoc'
   outOfScope: false
-  status: miss
+  status: pass
   expect:
   - DBG-STACKROX-ADMISSION
-  gap: 'rank: DBG-STACKROX-ADMISSION playbook should outrank the generic rhacs policy-source finding'
 - id: rhacs-002
   technology: rhacs
   kind: howto
