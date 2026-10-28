@@ -15,13 +15,25 @@ kube-noob bundles derived data and links to public sources. Licenses were verifi
 | RHACS default policy names (references only) | stackrox/stackrox `pkg/defaults/policies/files` | Apache-2.0 | `audit/rules.py` |
 | OpenShift 4.20, 4.21 and 4.22 release notes: known and fixed issues (text, issue ids, versions) | openshift/openshift-docs, branches enterprise-4.20 to enterprise-4.22 (commits in each file) | Apache-2.0 | `src/kube_noob/data/known_issues/*.json` |
 
+| MITRE ATT&CK for Containers technique ids, names and tactics (18 techniques) | mitre-attack/attack-stix-data `enterprise-attack/enterprise-attack.json` @c2494b29dd268c46a5d0ea0990553e4327cd2253 (Enterprise ATT&CK 20.0) | ATT&CK Terms of Use (below) | `src/kube_noob/vuln/attack.py` |
+
 Exact source URLs and upstream SHA-256 digests: `src/kube_noob/schemas/data/PROVENANCE.json`.
+
+MITRE ATT&CK: "© 2026 The MITRE Corporation. This work is reproduced and distributed with the permission of The
+MITRE Corporation." Licence (https://github.com/mitre-attack/attack-stix-data/blob/master/LICENSE.txt): "The MITRE
+Corporation (MITRE) hereby grants you a non-exclusive, royalty-free license to use ATT&CK® for research,
+development, and commercial purposes. Any copy you make for such purposes is authorized provided that you reproduce
+MITRE's copyright designation and this license in any such copy." The same licence file carries MITRE's disclaimers
+(ATT&CK does not enumerate all possibilities, and is provided as is); every threat model kube-noob writes carries the
+copyright designation.
 
 ## Test fixtures (in the repository, not in the package)
 
 | Material | Upstream | License | Where |
 |---|---|---|---|
 | RHACS default policies (89 policies as an export, `exclusions` removed) | stackrox/stackrox `pkg/defaults/policies/files` @dce8fb594ee287a5386fece8be1df3ee1adedc72 | Apache-2.0 | `tests/fixtures/rhacs/default-policies-export.json` |
+| RPM version comparison vectors (91 cases) | rpm-software-management/rpm `tests/rpmvercmp.at` @4f7be32ef288a231893dd4c45d4ef36584e3d4b6 | facts used as test data (rpm is GPL-2.0-or-later / LGPL-2.0-or-later; no code copied) | `tests/test_vuln.py` |
+| Scanner report, SBOM, VEX and KEV shapes (synthetic CVE-2099-* data) | written to the field names in aquasecurity/trivy, anchore/grype, anchore/syft, stackrox/stackrox protos, Red Hat CSAF VEX and cisagov/kev-data | original fixtures, Apache-2.0 | `tests/fixtures/vuln/generate.py` |
 
 ## Knowledge base
 

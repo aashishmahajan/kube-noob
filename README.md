@@ -16,7 +16,8 @@ in a box: audit rules, read-only-first playbooks, cited docs and graded exercise
 MCP client calls it as tools; the CLI runs it with no AI at all. It makes no network calls unless you turn them on.
 
 - **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
-  removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles.
+  removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles;
+  scanner findings with VEX, KEV and reachability; STRIDE threat models.
 - **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno); CI gate.
 - **Debug**: 40 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
   denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
@@ -48,7 +49,7 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 
 ## Use with Claude or any MCP client
 
@@ -66,8 +67,6 @@ Any MCP client:
 ```json
 {"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.5.0", "kube-noob", "mcp"]}}}
 ```
-
-Cluster and web tools appear when enabled.
 
 ## Run on OpenShift
 

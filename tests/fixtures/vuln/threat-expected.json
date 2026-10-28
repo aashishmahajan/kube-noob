@@ -1,0 +1,294 @@
+{
+ "_review": "Reviewed by hand 2026-10-28 against tests/fixtures/vuln/shop.yaml: each status follows from a planted weakness (Route without TLS, privileged web, mutable api tag, api reads Secrets, db password in env, db single replica, no NetworkPolicy, web without PDB) or its absence.",
+ "application": "shop/shop",
+ "counts": {
+  "open": 12,
+  "mitigated": 8,
+  "not assessed": 0
+ },
+ "threats": [
+  {
+   "id": "TM-S01 Route/shop/web",
+   "status": "open",
+   "evidence": [
+    "KN-N002"
+   ],
+   "attack": [],
+   "policies": [
+    "kube-noob-kn-n002",
+    "kube-noob-kn-n003",
+    "kube-noob-kn-v016"
+   ]
+  },
+  {
+   "id": "TM-S02 ServiceAccount/shop/api",
+   "status": "open",
+   "evidence": [
+    "KN-S014"
+   ],
+   "attack": [
+    "T1528",
+    "T1550.001"
+   ],
+   "policies": [
+    "kube-noob-kn-s014"
+   ]
+  },
+  {
+   "id": "TM-T01 Deployment/shop/api",
+   "status": "open",
+   "evidence": [
+    "KN-S012"
+   ],
+   "attack": [
+    "T1525",
+    "T1204.003"
+   ],
+   "policies": [
+    "kube-noob-kn-s012"
+   ]
+  },
+  {
+   "id": "TM-T01 Deployment/shop/web",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1525",
+    "T1204.003"
+   ],
+   "policies": [
+    "kube-noob-kn-s012"
+   ]
+  },
+  {
+   "id": "TM-T01 StatefulSet/shop/db",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1525",
+    "T1204.003"
+   ],
+   "policies": [
+    "kube-noob-kn-s012"
+   ]
+  },
+  {
+   "id": "TM-T02 Deployment/shop/api",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1036.005"
+   ],
+   "policies": [
+    "kube-noob-kn-s007",
+    "kube-noob-kn-s003"
+   ]
+  },
+  {
+   "id": "TM-T02 Deployment/shop/web",
+   "status": "open",
+   "evidence": [
+    "KN-S003",
+    "KN-S007"
+   ],
+   "attack": [
+    "T1036.005"
+   ],
+   "policies": [
+    "kube-noob-kn-s007",
+    "kube-noob-kn-s003"
+   ]
+  },
+  {
+   "id": "TM-T02 StatefulSet/shop/db",
+   "status": "open",
+   "evidence": [
+    "KN-S007"
+   ],
+   "attack": [
+    "T1036.005"
+   ],
+   "policies": [
+    "kube-noob-kn-s007",
+    "kube-noob-kn-s003"
+   ]
+  },
+  {
+   "id": "TM-I01 StatefulSet/shop/db",
+   "status": "open",
+   "evidence": [
+    "KN-N001"
+   ],
+   "attack": [
+    "T1046",
+    "T1613"
+   ],
+   "policies": [
+    "kube-noob-kn-n007"
+   ]
+  },
+  {
+   "id": "TM-I02 shop/shop",
+   "status": "open",
+   "evidence": [
+    "KN-S013"
+   ],
+   "attack": [
+    "T1552.001"
+   ],
+   "policies": [
+    "kube-noob-kn-s013"
+   ]
+  },
+  {
+   "id": "TM-I03 ServiceAccount/shop/api",
+   "status": "open",
+   "evidence": [
+    "KN-S017"
+   ],
+   "attack": [
+    "T1552.007"
+   ],
+   "policies": [
+    "kube-noob-kn-s015",
+    "kube-noob-kn-s016",
+    "kube-noob-kn-s017"
+   ]
+  },
+  {
+   "id": "TM-D01 Deployment/shop/api",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1499",
+    "T1496.001"
+   ],
+   "policies": [
+    "kube-noob-kn-c004",
+    "kube-noob-kn-c005"
+   ]
+  },
+  {
+   "id": "TM-D01 Deployment/shop/web",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1499",
+    "T1496.001"
+   ],
+   "policies": [
+    "kube-noob-kn-c004",
+    "kube-noob-kn-c005"
+   ]
+  },
+  {
+   "id": "TM-D01 StatefulSet/shop/db",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1499",
+    "T1496.001"
+   ],
+   "policies": [
+    "kube-noob-kn-c004",
+    "kube-noob-kn-c005"
+   ]
+  },
+  {
+   "id": "TM-D02 Deployment/shop/web",
+   "status": "open",
+   "evidence": [
+    "KN-C008"
+   ],
+   "attack": [
+    "T1499"
+   ],
+   "policies": [
+    "kube-noob-kn-c007",
+    "kube-noob-kn-c009"
+   ]
+  },
+  {
+   "id": "TM-D02 StatefulSet/shop/db",
+   "status": "open",
+   "evidence": [
+    "KN-C007"
+   ],
+   "attack": [
+    "T1499"
+   ],
+   "policies": [
+    "kube-noob-kn-c007",
+    "kube-noob-kn-c009"
+   ]
+  },
+  {
+   "id": "TM-E01 Deployment/shop/web",
+   "status": "open",
+   "evidence": [],
+   "attack": [
+    "T1190"
+   ],
+   "policies": [
+    "kube-noob-kn-s012"
+   ]
+  },
+  {
+   "id": "TM-E02 Deployment/shop/api",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1611",
+    "T1068"
+   ],
+   "policies": [
+    "kube-noob-kn-s001",
+    "kube-noob-kn-s002",
+    "kube-noob-kn-s005",
+    "kube-noob-kn-s009",
+    "kube-noob-kn-s010",
+    "kube-noob-kn-s019",
+    "kube-noob-kn-s020"
+   ]
+  },
+  {
+   "id": "TM-E02 Deployment/shop/web",
+   "status": "open",
+   "evidence": [
+    "KN-S001",
+    "KN-S002"
+   ],
+   "attack": [
+    "T1611",
+    "T1068"
+   ],
+   "policies": [
+    "kube-noob-kn-s001",
+    "kube-noob-kn-s002",
+    "kube-noob-kn-s005",
+    "kube-noob-kn-s009",
+    "kube-noob-kn-s010",
+    "kube-noob-kn-s019",
+    "kube-noob-kn-s020"
+   ]
+  },
+  {
+   "id": "TM-E02 StatefulSet/shop/db",
+   "status": "mitigated",
+   "evidence": [],
+   "attack": [
+    "T1611",
+    "T1068"
+   ],
+   "policies": [
+    "kube-noob-kn-s001",
+    "kube-noob-kn-s002",
+    "kube-noob-kn-s005",
+    "kube-noob-kn-s009",
+    "kube-noob-kn-s010",
+    "kube-noob-kn-s019",
+    "kube-noob-kn-s020"
+   ]
+  }
+ ]
+}

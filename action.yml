@@ -1,7 +1,7 @@
 name: kube-noob gate
 description: >-
-  Audit Kubernetes and OpenShift manifests, Helm charts and Containerfiles before deploy, offline. Fails at a
-  severity you choose, writes SARIF for code scanning and a job summary. No network calls, no AI.
+  Audit Kubernetes and OpenShift manifests, Helm charts, Containerfiles and image scanner reports before deploy,
+  offline. Fails at a severity you choose, writes SARIF for code scanning and a job summary. No network calls, no AI.
 author: kube-noob project
 branding:
   icon: shield
@@ -25,6 +25,20 @@ inputs:
     default: default
   containerfiles:
     description: Containerfiles to audit, separated by spaces.
+    required: false
+    default: ""
+  scanner-reports:
+    description: >-
+      Scanner output of the images (Trivy or Grype JSON, CycloneDX or SPDX SBOM, RHACS image JSON), separated by
+      spaces. Fixable or known-exploited findings at fail-on fail the gate.
+    required: false
+    default: ""
+  vex:
+    description: Red Hat CSAF VEX files or folders for the scanner reports, separated by spaces.
+    required: false
+    default: ""
+  kev:
+    description: The CISA KEV catalog JSON (known_exploited_vulnerabilities.json) for the scanner reports.
     required: false
     default: ""
   platform:
@@ -81,6 +95,9 @@ runs:
         KN_VALUES: ${{ inputs.values }}
         KN_NAMESPACE: ${{ inputs.namespace }}
         KN_CONTAINERFILES: ${{ inputs.containerfiles }}
+        KN_SCANNER_REPORTS: ${{ inputs.scanner-reports }}
+        KN_VEX: ${{ inputs.vex }}
+        KN_KEV: ${{ inputs.kev }}
         KN_PLATFORM: ${{ inputs.platform }}
         KN_VERSION: ${{ inputs.version }}
         KN_EXCEPTIONS: ${{ inputs.exceptions }}
@@ -93,6 +110,9 @@ runs:
         if [ -n "$KN_CHART" ]; then args+=(--chart "$KN_CHART"); fi
         for v in $KN_VALUES; do args+=(--values "$v"); done
         for c in $KN_CONTAINERFILES; do args+=(--containerfile "$c"); done
+        for r in $KN_SCANNER_REPORTS; do args+=(--scanner-report "$r"); done
+        for x in $KN_VEX; do args+=(--vex "$x"); done
+        if [ -n "$KN_KEV" ]; then args+=(--kev "$KN_KEV"); fi
         if [ -n "$KN_VERSION" ]; then args+=(--version "$KN_VERSION"); fi
         if [ -n "$KN_EXCEPTIONS" ]; then args+=(--exceptions "$KN_EXCEPTIONS"); fi
         rc=0

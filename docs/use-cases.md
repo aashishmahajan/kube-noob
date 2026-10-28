@@ -397,6 +397,16 @@ GitHub Actions (add `github/codeql-action/upload-sarif` after it to see findings
     version: "4.20"
 ```
 
+With the images' scanner output (`--scanner-report`, plus `--vex` and `--kev`), the gate also lists their
+vulnerabilities after Red Hat VEX, ranked against the manifests; a fixable or known-exploited one at `--fail-on`
+fails it, an unfixable one is reported without blocking.
+
+```bash
+trivy image -f json --list-all-pkgs -o trivy.json quay.io/acme/shop:1.4
+kube-noob gate -f k8s/ --platform openshift --version 4.20 --scanner-report trivy.json \
+  --kev known_exploited_vulnerabilities.json --sarif kube-noob.sarif
+```
+
 Tekton: `oc apply -f deploy/tekton/kube-noob-gate.yaml`, then a pipeline task with `taskRef: {name: kube-noob-gate}`,
 the source workspace and `params: [{name: paths, value: k8s}]`. GitLab: include
 `deploy/gitlab/kube-noob-gate.gitlab-ci.yml` and extend `.kube-noob-gate` with `KUBE_NOOB_PATHS`; findings show in
@@ -469,6 +479,43 @@ entry edge are not applied: check a path with `policy reach`.
 kube-noob posture scan -f k8s/
 kube-noob posture scan -f k8s/ --fail-above 17
 kube-noob --cluster-enabled posture scan --live -n shop -n payments
+```
+
+### Which vulnerabilities matter here? Scanner output, VEX and reachability
+
+`vuln report` reads what your scanner already wrote: Trivy or Grype JSON, a CycloneDX or SPDX SBOM, or an RHACS
+image scan. Every format gives the same finding per package, installed version, CVE and fix version. Red Hat VEX
+then removes what Red Hat says does not affect the image's product (or is already fixed in the installed version),
+and each removed finding cites the statement, its justification and the VEX document. SBOMs carry packages, not
+findings: their RPMs are matched against the same VEX statements. With the CISA KEV catalog (CC0) and the manifests
+that run the images, findings are ranked by base score x exposure (internet 3, node network 2, internal 1) x
+privileges (1 + the workload's blast radius / 10) x known exploitation (2 when listed), each with its attack path.
+
+```bash
+kube-noob corpus advisories --online --since 2026-10-01
+trivy image -f json --list-all-pkgs -o trivy.json quay.io/acme/shop:1.4
+kube-noob vuln report -r trivy.json -m k8s/ --kev known_exploited_vulnerabilities.json
+kube-noob vuln report -r sbom.spdx.json --vex csaf_vex/ --format json
+ROX_API_TOKEN=<token> kube-noob --config rhacs.yaml vuln report --rhacs-image sha256:<digest> -m k8s/
+```
+
+VEX for RHEL speaks about Red Hat RPMs only; Python, Java and JavaScript packages keep the scanner's verdict, and the
+output says how many were outside VEX. RHACS and Trivy without `--list-all-pkgs` name binary packages only; give the
+image's SBOM too so not-affected statements, which name source RPMs, can match.
+
+### What could go wrong with this application? A threat model
+
+`vuln threat` builds a STRIDE threat model per application (workloads sharing `app.kubernetes.io/part-of`, else a
+namespace): entry points (Routes, Ingresses, exposed Services), trust boundaries (internet to cluster, pod to node,
+pod to the API through its token, the namespace network), data stores (StatefulSets, PVCs, database and cache
+images) and identities (the mounted ServiceAccounts and their RBAC). Each threat has a status (open with the failing
+rules as evidence, mitigated, or not assessed), the kube-noob rules, generated admission policies and RHACS policies
+that mitigate it, and MITRE ATT&CK for Containers technique ids. With `-r`, public-facing exploits are assessed from
+the images' scanner reports.
+
+```bash
+kube-noob vuln threat -f k8s/ --platform openshift --version 4.20
+kube-noob vuln threat -f k8s/ -r trivy.json --format json
 ```
 
 ### What changed since yesterday? The daily drift and policy report

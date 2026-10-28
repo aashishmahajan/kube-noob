@@ -48,6 +48,7 @@ PlatformT = Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
 MAX_MANIFEST_CHARS = 1_000_000
 RHACS_CACHE_SECONDS = 300
 MAX_BUILD_LOG = 2_000_000
+MAX_SCAN_REPORT = 20_000_000  # one scanner report or SBOM given inline
 StageName = Literal["validate", "audit", "calibrate", "red-team"]
 ALL_STAGE_NAMES: tuple[StageName, ...] = ("validate", "audit", "calibrate", "red-team")
 # web_fetch reads documentation text only: archives, binaries, scripts and images are refused before decoding.
@@ -451,6 +452,57 @@ class RhacsCompareIn(_In):
     )
     outcomes: list[Literal["overlap", "related", "gap", "outside", "unexplained"]] = Field(
         default_factory=list, max_length=5, description="Only return policies with these outcomes (default: all)."
+    )
+
+
+_CPE = r"^cpe:/[aho]:[a-z0-9_.-]+:[a-z0-9_.-]+(?::[A-Za-z0-9_.:-]*)?$"
+
+
+class VulnReportIn(_In):
+    reports: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        ...,
+        min_length=1,
+        max_length=10,
+        description="Scanner output as JSON text: Trivy (trivy image -f json [--list-all-pkgs]), Grype (grype -o "
+        "json), a CycloneDX or SPDX 2 JSON SBOM, or an RHACS image (GET /v1/images/{id}). Reports of the same image "
+        "are assessed together.",
+    )
+    vex: list[Annotated[str, Field(min_length=2, max_length=25_000_000)]] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Optional Red Hat CSAF VEX documents (JSON) to apply on top of the local redhat-vex corpus.",
+    )
+    kev: str | None = Field(
+        None,
+        max_length=20_000_000,
+        description="Optional: the CISA KEV catalog JSON (known_exploited_vulnerabilities.json, CC0).",
+    )
+    manifests: str | None = Field(
+        None,
+        max_length=MAX_MANIFEST_CHARS,
+        description="Optional: the YAML that runs the images; findings are then ranked by exposure and privileges "
+        "and shown with their attack path.",
+    )
+    products: list[Annotated[str, Field(pattern=_CPE, max_length=200)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Red Hat product CPE prefixes the images belong to (default: from the RHEL release in the "
+        "report, e.g. cpe:/o:redhat:enterprise_linux:9).",
+    )
+    image: str | None = Field(
+        None, max_length=500, description="Treat every report as this image (registry/repo:tag or @sha256:...)."
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked findings to return.")
+
+
+class ThreatModelIn(_In):
+    manifests: str = Field(..., min_length=10, max_length=MAX_MANIFEST_CHARS, description="The application's YAML.")
+    platform: PlatformT | None = None
+    version: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")
+    reports: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Optional scanner reports of its images, to assess public-facing exploits (threat TM-E01).",
     )
 
 
@@ -1013,6 +1065,54 @@ class Toolkit:
         self._observe(["rhacs-compare"])
         return self._rhacs_out(policies, list(p.outcomes), {"input": "export"})
 
+    def _vuln(
+        self, reports: list[str], vex_texts: list[str], kev_text: str | None, manifests: str | None, **kw: Any
+    ) -> dict[str, Any]:
+        from kube_noob.attack_paths import Inventory as PathInventory
+        from kube_noob.attack_paths import workload_reach
+        from kube_noob.vuln import assess
+        from kube_noob.vuln import kev as kevmod
+        from kube_noob.vuln import reports as rep
+        from kube_noob.vuln import vex as vexmod
+        from kube_noob.yamlio import load_documents
+
+        try:
+            parsed = [rep.parse(r, f"report {i + 1}") for i, r in enumerate(reports)]
+            index = vexmod.load(self.settings.data_dir, texts=vex_texts, products=kw.get("products", ()))
+            kev = kevmod.parse(kev_text, "KEV catalog") if kev_text else None
+            reach = (
+                workload_reach(PathInventory.from_documents(d.data for d in load_documents(manifests)))
+                if manifests
+                else None
+            )
+            return assess.assess(parsed, vex=index, kev=kev, reach=reach, **kw)
+        except (rep.ReportError, vexmod.VexError, kevmod.KevError, assess.AssessError) as exc:
+            raise ValueError(str(exc)) from exc
+
+    def vuln_report(self, p: VulnReportIn) -> dict[str, Any]:
+        """Normalised findings from scanner output, Red Hat VEX applied (each dropped finding cites its statement),
+        ranked by exposure, privileges and known exploitation with the attack path."""
+        out = self._vuln(
+            list(p.reports), list(p.vex), p.kev, p.manifests, products=tuple(p.products), image=p.image, top=p.top
+        )
+        self._observe(sorted({f"vuln:{fmt}" for img in out["images"] for fmt in img["formats"]}))
+        return {**out, "findings": out["findings"][: max(p.top, 50)], "findingsTotal": len(out["findings"])}
+
+    def threat_model(self, p: ThreatModelIn) -> dict[str, Any]:
+        """A STRIDE threat model per application: entry points, trust boundaries, data stores and identities from
+        the manifests, each threat with the rules and policies that mitigate it and MITRE ATT&CK technique ids."""
+        from kube_noob.vuln import assess, threat
+
+        vulnerable = None
+        if p.reports:
+            out = self._vuln(list(p.reports), [], None, p.manifests)
+            vulnerable = assess.summary_for_workloads(out)
+        platform = p.platform or self.settings.default_platform
+        try:
+            return threat.model(p.manifests, platform=platform, version=p.version, vulnerable_images=vulnerable)
+        except threat.ThreatError as exc:
+            raise ValueError(str(exc)) from exc
+
     def rhacs_compare_live(self, p: RhacsLiveIn) -> dict[str, Any]:
         try:
             from kube_noob import rhacs_central
@@ -1493,6 +1593,27 @@ class Toolkit:
                 "Lists disagreements and the rules no policy covers. Local only.",
                 RhacsCompareIn,
                 self.rhacs_compare,
+            ),
+            ToolSpec(
+                "vuln_report",
+                "Assess scanner output: VEX, exploitation, reachability",
+                "Read Trivy or Grype JSON, CycloneDX or SPDX SBOMs, or an RHACS image scan into one finding per "
+                "package, version and CVE (with the fix version); apply Red Hat VEX (a not-affected or already-fixed "
+                "finding drops out, citing the statement); mark CISA KEV entries; and, with the manifests, rank by "
+                "exposure, privileges and RBAC reach with each finding's attack path. SBOM packages are matched "
+                "against Red Hat VEX. Local only.",
+                VulnReportIn,
+                self.vuln_report,
+            ),
+            ToolSpec(
+                "threat_model",
+                "STRIDE threat model of an application",
+                "From manifests: entry points, trust boundaries, data stores and identities, and per element the "
+                "STRIDE threats with status (open, mitigated, not assessed), the evidence, the kube-noob rules, "
+                "generated admission policies and RHACS policies that mitigate each, and MITRE ATT&CK for Containers "
+                "technique ids. Deterministic; Secrets are dropped unread.",
+                ThreatModelIn,
+                self.threat_model,
             ),
             ToolSpec(
                 "posture_report",

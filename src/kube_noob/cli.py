@@ -226,6 +226,9 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             fail_on=a.fail_on,
             chart_path=a.chart_path,
             data_dir=s.data_dir,
+            scanner_reports=[(p, _read(p)) for p in a.scanner_report],
+            vex_paths=[Path(v) for v in a.vex],
+            kev_path=Path(a.kev) if a.kev else None,
         )
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
@@ -395,6 +398,83 @@ def _rhacs_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     return 1 if out["unexplained"] else 0
 
 
+def _vuln_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob.attack_paths import Inventory as PathInventory
+    from kube_noob.attack_paths import workload_reach
+    from kube_noob.vuln import assess, threat
+    from kube_noob.vuln import kev as kevmod
+    from kube_noob.vuln import reports as rep
+    from kube_noob.vuln import vex as vexmod
+    from kube_noob.yamlio import load_documents
+
+    def parse_reports(paths: list[str]) -> list[rep.ScanReport]:
+        out = []
+        for path in paths:
+            if path != "-" and Path(path).is_file() and Path(path).stat().st_size > rep.MAX_BYTES:
+                raise ConfigError(f"{path}: larger than {rep.MAX_BYTES} bytes")
+            out.append(rep.parse(_read(path), path))
+        return out
+
+    try:
+        if a.vuln_cmd == "threat":
+            text = "\n---\n".join(_read(f) for f in a.file)
+            vulnerable = None
+            if a.report:
+                index = vexmod.load(s.data_dir)
+                reach = workload_reach(PathInventory.from_documents(d.data for d in load_documents(text)))
+                vulnerable = assess.summary_for_workloads(
+                    assess.assess(parse_reports(a.report), vex=index, reach=reach)
+                )
+            out = threat.model(
+                text, platform=a.platform or s.default_platform, version=a.pversion, vulnerable_images=vulnerable
+            )
+            if a.format == "text":
+                _tprint(threat.render_markdown(out))
+            else:
+                _emit(out, fmt)
+            return 0
+        if not 1 <= a.top <= 200:
+            raise ConfigError("--top must be 1-200")
+        reports = parse_reports(a.report)
+        if a.rhacs_image:
+            from kube_noob import rhacs, rhacs_central
+
+            try:
+                docs, _source = rhacs_central.read_images(s, list(a.rhacs_image))
+            except rhacs.RhacsError as exc:
+                raise ConfigError(f"rhacs: {exc}") from exc
+            reports += [rep.parse(json.dumps(d), f"RHACS {d.get('id', '')}") for d in docs]
+        if not reports:
+            raise ConfigError(
+                "pass scanner output with -r (Trivy, Grype, CycloneDX, SPDX, RHACS JSON) or --rhacs-image"
+            )
+        index = vexmod.load(
+            s.data_dir, [Path(v) for v in a.vex], products=list(a.product), use_corpus=not a.no_corpus_vex
+        )
+        kev = kevmod.load(Path(a.kev)) if a.kev else None
+        placed: dict[str, Any] | None = None
+        if a.manifests:
+            text = "\n---\n".join(_read(m) for m in a.manifests)
+            placed = dict(workload_reach(PathInventory.from_documents(d.data for d in load_documents(text))))
+        out = assess.assess(
+            reports, vex=index, kev=kev, reach=placed, products=tuple(a.product), image=a.image, top=a.top
+        )
+    except (rep.ReportError, vexmod.VexError, kevmod.KevError, assess.AssessError, threat.ThreatError) as exc:
+        raise ConfigError(str(exc)) from exc
+    if a.format == "text":
+        _tprint(assess.render_text(out, top=a.top))
+    else:
+        _emit(out, fmt)
+    if a.fail_on == "never":
+        return 0
+    order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    floor = order[a.fail_on]
+    bad = [
+        f for f in out["findings"] if order.get(f["severity"], 0) >= floor and (f["fixVersion"] or f["knownExploited"])
+    ]
+    return 1 if bad else 0
+
+
 def _blueprint_from_args(a: argparse.Namespace) -> dict[str, Any]:
     if a.blueprint:
         data = yaml.safe_load(_read(a.blueprint)) or {}
@@ -522,6 +602,16 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--sarif", default=None, help="write SARIF 2.1.0 here (GitHub code scanning)")
     gt.add_argument("--summary", default=None, help="write the Markdown summary here ($GITHUB_STEP_SUMMARY)")
     gt.add_argument("--codequality", default=None, help="write GitLab code quality JSON here")
+    gt.add_argument(
+        "--scanner-report",
+        action="append",
+        default=[],
+        help="Trivy or Grype JSON, CycloneDX or SPDX SBOM, or RHACS image JSON of a deployed image; repeat. Fixable "
+        "or known-exploited findings at --fail-on fail the gate",
+    )
+    gt.add_argument("--vex", action="append", default=[], help="Red Hat CSAF VEX for --scanner-report; repeat")
+    gt.add_argument("--kev", default=None, help="the CISA KEV catalog JSON for --scanner-report")
+
     bd = sub.add_parser(
         "build",
         help="Build insight: why a build failed, and a Containerfile and image audit",
@@ -594,6 +684,78 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["overlap", "related", "gap", "outside", "unexplained"],
         help="with --format text: only these outcomes; repeat",
     )
+    vu = sub.add_parser(
+        "vuln",
+        help="Vulnerabilities from scanner output: normalise, apply Red Hat VEX, rank by reachability; threat model",
+        description="report reads Trivy or Grype JSON, CycloneDX or SPDX JSON SBOMs and RHACS image scans into one "
+        "finding per package, version and CVE, drops what Red Hat VEX says is not affected or already fixed (citing "
+        "the statement), marks CISA KEV entries, and with the manifests ranks findings by exposure, privileges and "
+        "RBAC reach with their attack path. threat writes a STRIDE threat model with the rules, policies and MITRE "
+        "ATT&CK techniques for each threat. Offline unless --rhacs-image. Examples: trivy image -f json "
+        "--list-all-pkgs -o trivy.json <image> && kube-noob vuln report -r trivy.json -m deploy/ --kev "
+        "known_exploited_vulnerabilities.json; kube-noob vuln threat -f deploy/ --platform openshift",
+    )
+    vu_sub = vu.add_subparsers(dest="vuln_cmd", required=True)
+    _patch(vu_sub, common)
+    vr = vu_sub.add_parser(
+        "report",
+        help="Normalise scanner output, apply VEX and KEV, rank by reachability",
+        description="Exit 1 when a fixable or known-exploited finding is at or above --fail-on (default never).",
+    )
+    vr.add_argument(
+        "-r",
+        "--report",
+        action="append",
+        default=[],
+        help="Trivy or Grype JSON, a CycloneDX or SPDX 2 JSON SBOM, or an RHACS image (GET /v1/images/{id}); repeat",
+    )
+    vr.add_argument(
+        "--rhacs-image",
+        action="append",
+        default=[],
+        help="read this image's scan from RHACS Central (sha256:<digest>; GET only, needs rhacs.enabled); repeat",
+    )
+    vr.add_argument(
+        "--vex",
+        action="append",
+        default=[],
+        help="Red Hat CSAF VEX: a file, a folder of <year>/cve-*.json or the csaf_vex archive; repeat. The "
+        "redhat-vex corpus shard (kube-noob corpus advisories) is read too",
+    )
+    vr.add_argument("--no-corpus-vex", action="store_true", help="do not read the redhat-vex corpus shard")
+    vr.add_argument(
+        "--product",
+        action="append",
+        default=[],
+        help="Red Hat product CPE prefix (default: from the report's RHEL release, cpe:/o:redhat:enterprise_linux:9)",
+    )
+    vr.add_argument("--kev", default=None, help="the CISA KEV catalog (known_exploited_vulnerabilities.json, CC0)")
+    vr.add_argument(
+        "-m",
+        "--manifests",
+        action="append",
+        default=[],
+        help="YAML that runs the images (a file or a directory); ranks findings by exposure and privileges; repeat",
+    )
+    vr.add_argument("--image", default=None, help="treat every report as this image (registry/repo:tag or digest)")
+    vr.add_argument("--top", type=int, default=20, help="ranked findings to show (1-200)")
+    vr.add_argument(
+        "--fail-on",
+        default="never",
+        choices=["low", "medium", "high", "critical", "never"],
+        help="exit 1 when a fixable or known-exploited finding is at or above this severity",
+    )
+    vt = vu_sub.add_parser(
+        "threat",
+        help="STRIDE threat model of the applications in manifests",
+        description="Entry points, trust boundaries, data stores and identities from the manifests; each threat with "
+        "its status, evidence, mitigating rules and policies, and ATT&CK technique ids. With -r, public-facing "
+        "exploits (TM-E01) are assessed from the images' reports.",
+    )
+    vt.add_argument("-f", "--file", action="append", required=True, help="manifests: a file or a directory; repeat")
+    vt.add_argument("--platform", choices=PLATFORMS)
+    vt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
+    vt.add_argument("-r", "--report", action="append", default=[], help="a scanner report of an image; repeat")
     manifests_cmd("validate", "Schema/API/platform validation only")
     manifests_cmd("redteam", "Red-team scenarios only")
     fx = manifests_cmd("fix", "Apply safe mechanical fixes")
@@ -1376,6 +1538,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _exceptions_cmd(a, fmt)
     if a.cmd == "rhacs":
         return _rhacs_cmd(a, s, fmt)
+    if a.cmd == "vuln":
+        return _vuln_cmd(a, s, fmt)
     if a.cmd == "build":
         return _build_cmd(a, kit, fmt)
     if a.cmd == "gate":
@@ -2217,6 +2381,7 @@ def _learning(a: argparse.Namespace, kit: Any, fmt: str) -> int:
 
 def _advisories(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob.sources import advisories
+    from kube_noob.vuln import csaf
 
     if a.from_archive:
         if a.cves or a.since:
@@ -2245,7 +2410,7 @@ def _advisories(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             for cve in cves:
                 try:
                     doc = client.document(cve)
-                except advisories.AdvisoryError as exc:
+                except csaf.AdvisoryError as exc:
                     if "budget" in str(exc):
                         failed.append(f"{cve}: {exc}")
                         break
@@ -2253,7 +2418,7 @@ def _advisories(a: argparse.Namespace, s: Settings, fmt: str) -> int:
                     continue
                 (docs.append(doc) if doc is not None else missing.append(cve))
             if failed and not docs:
-                raise advisories.AdvisoryError("no VEX document read: " + "; ".join(failed[:5]))
+                raise csaf.AdvisoryError("no VEX document read: " + "; ".join(failed[:5]))
             out = {**advisories.run(s.data_dir, docs, replace=a.replace), "requests": client.requests}
             if missing:
                 out["notPublished"] = missing

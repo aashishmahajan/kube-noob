@@ -739,7 +739,7 @@ jobs:
     needs: [test]
     env:
       TEKTON_VERSION: v1.15.5
-      # release.yaml of that version; empty until a run of this job has read it (the step prints it), then pinned
+      # release.yaml of that version, as CI 40661279945 read it on first use; a different file fails the job
       TEKTON_SHA256: "c2fe5c2ac98af2984f2d58199e81ef2056802f671051744d986ec998ad19ba84"
       GITLAB_CI_LOCAL: gitlab-ci-local@4.76.1
     steps:
@@ -770,20 +770,45 @@ jobs:
           platform: openshift
           version: "4.20"
           sarif: /tmp/kn-bad.sarif
+      - name: Scanner report fixtures for the vulnerability gate (R5.1-R5.3)
+        run: python tests/fixtures/vuln/generate.py /tmp/kn-vuln
+      - id: vuln
+        name: GitHub Action with a scanner report, VEX and KEV (must fail on fixable criticals)
+        continue-on-error: true
+        uses: ./
+        with:
+          paths: tests/fixtures/vuln/shop.yaml
+          scanner-reports: /tmp/kn-vuln/trivy.json
+          vex: /tmp/kn-vuln/vex
+          kev: /tmp/kn-vuln/kev.json
+          platform: openshift
+          version: "4.20"
+          fail-on: critical
+          sarif: /tmp/kn-vuln.sarif
       - name: The action's verdicts and SARIF 2.1.0 schema
         env:
           GOOD: ${{ steps.good.outputs.result }}
           BAD: ${{ steps.bad.outputs.result }}
+          VULN: ${{ steps.vuln.outputs.result }}
         run: |
           set -euo pipefail
           test "$GOOD" = passed || { echo "::error title=gate action::our chart: $GOOD"; exit 1; }
           test "$BAD" = failed || { echo "::error title=gate action::bad fixtures: $BAD"; exit 1; }
+          test "$VULN" = failed || { echo "::error title=gate action::scanner report: $VULN"; exit 1; }
           python -m pip install --quiet check-jsonschema==0.38.2
-          check-jsonschema --schemafile https://json.schemastore.org/sarif-2.1.0.json /tmp/kn-good.sarif /tmp/kn-bad.sarif
+          check-jsonschema --schemafile https://json.schemastore.org/sarif-2.1.0.json /tmp/kn-good.sarif /tmp/kn-bad.sarif \
+            /tmp/kn-vuln.sarif
           python -c "
           import json
           bad = json.load(open('/tmp/kn-bad.sarif'))['runs'][0]['results']
           print('::notice title=gate action::our chart passed; bad fixtures failed with', len(bad), 'SARIF results')
+          cves = {r['ruleId'] for r in json.load(open('/tmp/kn-vuln.sarif'))['runs'][0]['results'] if r['ruleId'].startswith('CVE-')}
+          exp = json.load(open('/tmp/kn-vuln/expected.json'))
+          want = {n['cve'] for n in exp['kept']}
+          dropped = {c for _, c in exp['excluded']}
+          assert cves == want, (sorted(cves ^ want))
+          assert not cves & dropped, sorted(cves & dropped)
+          print('::notice title=gate action::scanner report: failed as planned;', len(cves), 'CVEs in SARIF after VEX dropped', len(dropped))
           "
       - name: Build the image the Tekton Task and the GitLab template run
         run: |

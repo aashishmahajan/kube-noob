@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- `kube-noob vuln report` (and the MCP tool `vuln_report`, and `insight` for a pasted report): vulnerability findings
+  from what scanners already produce. Trivy and Grype JSON, CycloneDX (as Trivy and as Grype write it) and RHACS
+  image scans give one finding per package, installed version, CVE and fix version, the same in every format; SPDX 2
+  and CycloneDX SBOMs give packages that are matched against Red Hat VEX. Red Hat CSAF VEX (the `redhat-vex` corpus
+  shard and `--vex` files) drops a finding Red Hat says does not affect the image's RHEL release, or that is fixed at
+  or below the installed version (rpm's own version comparison, tested with rpm's vectors), and cites the statement,
+  its justification and the document. A fixture image with 40 findings and 12 not-affected statements reports 28 in
+  all six formats. With the CISA KEV catalog (`--kev`, CC0) and the manifests (`-m`), findings rank by base score x
+  exposure x privileges x known exploitation with their attack path; the planted exposed, privileged, KEV-listed
+  finding ranks first. `--rhacs-image sha256:<digest>` reads Central's scan (`rhacs.enabled`, GET
+  `/v1/images/<digest>`, jittered). Parsers are bounded and hostile-tested.
+- `kube-noob vuln threat` (and the MCP tool `threat_model`): a STRIDE threat model per application from its manifests
+  and the attack-path model: entry points, trust boundaries, data stores and identities, each threat with its status
+  and evidence, the rules, generated admission policies and RHACS policies that mitigate it, and MITRE ATT&CK for
+  Containers technique ids (Enterprise ATT&CK 20.0, with MITRE's attribution). A three-tier fixture gives a fixed,
+  reviewed list of 20 threats; the output is deterministic and Secret objects are never read.
+- `kube-noob gate --scanner-report <file>` (with `--vex` and `--kev`): the images' vulnerabilities join the gate after
+  VEX, ranked against the manifests, in SARIF and the summary; a fixable or known-exploited one at `--fail-on` fails
+  the gate, an unfixable one is reported. The "vulnerability checks not run" note is gone when reports are given.
 - `kube-noob build analytics --history <dir>`: build and test analytics from a CI history on disk (one folder per run:
   the GitHub Actions run with its jobs and steps, JUnit XML reports, optional build logs). Flaky tests (passed and
   failed on the same commit, or failed then passed on a rerun within a run, as Surefire reports), tests that fail
@@ -20,7 +39,7 @@
   dependencies pinned by hash, inputs passed through the environment), a Tekton Task
   (`deploy/tekton/kube-noob-gate.yaml`, read-only source workspace) and a GitLab CI template
   (`deploy/gitlab/kube-noob-gate.gitlab-ci.yml`, code quality report). CI runs all three: our chart passes, the bad
-  fixtures fail. Vulnerability checks are listed as not run until the scanner reader (R5.1) lands.
+  fixtures fail. Vulnerability checks run with `--scanner-report` (above).
 - `kube-noob build diagnose` (and the MCP tool `build_diagnose`, and `insight` for a pasted build log): a failed
   GitHub Actions, Jenkins (Pipeline and freestyle), Tekton (`tkn ... logs`) or OpenShift build (`oc logs build/...`)
   log gives the failing step and why it is that step, the error line and its template, the cause class (dependency

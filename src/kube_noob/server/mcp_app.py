@@ -67,7 +67,9 @@ def _instructions(settings: Settings) -> str:
         "ValidatingAdmissionPolicy and Kyverno policy YAML (suggest audit mode first; it applies nothing); for "
         "'what could an attacker reach from what we expose?' use kubenoob_posture_scan; for 'what does RHACS check "
         "that kube-noob does not?' pass the policy export to kubenoob_rhacs_compare; for a failed CI build pass the "
-        "log to kubenoob_build_diagnose and a Containerfile to kubenoob_containerfile_audit; "
+        "log to kubenoob_build_diagnose and a Containerfile to kubenoob_containerfile_audit; for scanner output "
+        "(Trivy, Grype, CycloneDX, SPDX, RHACS) use kubenoob_vuln_report with the manifests, and lead with rank 1 "
+        "and its attack path; for 'what could go wrong with this app?' use kubenoob_threat_model; "
         "for 'can pod A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
         + (

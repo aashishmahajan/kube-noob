@@ -171,6 +171,9 @@ def _ref(obj: dict[str, Any]) -> str:
     return f"{obj.get('kind')}/{ns}/{meta.get('name')}" if ns else f"{obj.get('kind')}/{meta.get('name')}"
 
 
+object_ref = _ref  # Kind/namespace/name (Kind/name without a namespace), as audit findings name resources
+
+
 def _ns(obj: dict[str, Any]) -> str:
     return str((obj.get("metadata") or {}).get("namespace") or "default")
 
@@ -601,49 +604,129 @@ def _token(inv: Inventory, w: dict[str, Any], spec: dict[str, Any]) -> tuple[str
 # --- the scan ----------------------------------------------------------------------------------------------------
 
 
-def scan(inv: Inventory, *, top: int = DEFAULT_TOP) -> dict[str, Any]:
-    if not 1 <= top <= MAX_PATHS:
-        raise ScanError(f"top must be 1-{MAX_PATHS}")
-    workloads = [w for w in inv.of(*_WORKLOAD_KINDS) if not _owned(w)]
-    paths: list[AttackPath] = []
-    sa_caps: dict[tuple[str, str], list[Capability]] = {}
-    entries = _entries(inv)
-    for entry in entries:
+@dataclass
+class Reach:
+    """What an attacker running code in one workload's pods gets, and how they would arrive (VUL1 ranks findings in
+    the workload's images with it)."""
+
+    ref: str
+    namespace: str
+    images: list[str]
+    entries: list[tuple[int, Entry, list[Step]]]  # (index in the entry list, entry, steps up to the workload)
+    node: list[Capability]
+    api: list[tuple[Capability, list[Step]]]  # capability and the steps from the workload to it
+    token: tuple[str, str] | None = None  # (ServiceAccount ref, evidence) when the pods mount its token
+
+    def paths_from(self, index: int) -> list[AttackPath]:
+        out: list[AttackPath] = []
+        for i, entry, base in self.entries:
+            if i != index:
+                continue
+            for cap in self.node:
+                out.append(AttackPath(entry, [*base, Step(self.ref, "node", "runs on", cap.evidence)], cap))
+            for cap, tail in self.api:
+                out.append(AttackPath(entry, [*base, *tail], cap))
+        return out
+
+    def paths(self) -> list[AttackPath]:
+        out = [p for i in dict.fromkeys(i for i, _, _ in self.entries) for p in self.paths_from(i)]
+        out.sort(key=lambda p: (-p.score, len(p.steps), p.as_dict(0)["summary"]))
+        return out
+
+    @property
+    def exposure(self) -> Entry | None:
+        """The widest exposure that reaches the workload (internet before node network before internal)."""
+        best = sorted(self.entries, key=lambda e: (-e[1].weight, e[0]))
+        return best[0][1] if best else None
+
+    @property
+    def capabilities(self) -> list[Capability]:
+        caps = [*self.node, *(c for c, _ in self.api)]
+        return sorted(caps, key=lambda c: (-c.weight, c.name))
+
+    def entry_steps(self) -> list[Step]:
+        best = sorted(self.entries, key=lambda e: (-e[1].weight, e[0]))
+        return list(best[0][2]) if best else []
+
+
+def _reach(
+    inv: Inventory,
+    w: dict[str, Any],
+    spec: dict[str, Any],
+    entries: list[Entry],
+    sa_caps: dict[tuple[str, str], list[Capability]],
+) -> Reach:
+    ref = _ref(w)
+    reach_entries: list[tuple[int, Entry, list[Step]]] = []
+    for i, entry in enumerate(entries):
+        if _ns(w) != entry.namespace:
+            continue
         svc = next((s for s in inv.of("Service") if _ns(s) == entry.namespace and _name(s) == entry.service), None)
         selector = _get(svc, "spec", "selector") if svc else None
         if not isinstance(selector, dict) or not selector:
             continue
-        for w in workloads:
-            if _ns(w) != entry.namespace or not selector_matches({"matchLabels": selector}, _template_labels(w)):
-                continue
-            spec = _pod_spec(w)
-            if spec is None:
-                continue
-            to_w = Step(
-                f"Service/{entry.namespace}/{entry.service}",
-                _ref(w),
-                "selects",
-                f"selector {selector} matches the pod template labels",
+        if not selector_matches({"matchLabels": selector}, _template_labels(w)):
+            continue
+        to_w = Step(
+            f"Service/{entry.namespace}/{entry.service}",
+            ref,
+            "selects",
+            f"selector {selector} matches the pod template labels",
+        )
+        reach_entries.append((i, entry, [*entry.steps, to_w]))
+    api: list[tuple[Capability, list[Step]]] = []
+    tok = _token(inv, w, spec)
+    if tok is not None:
+        sa, evidence = tok
+        key = (_ns(w), sa)
+        if key not in sa_caps:
+            sa_caps[key] = _api_capabilities(inv, _grants(inv, *key))
+        sa_ref = f"ServiceAccount/{key[0]}/{sa}"
+        for cap in sa_caps[key]:
+            target = "node" if cap.scope == "node" else ("cluster" if cap.scope == "cluster" else key[0])
+            api.append(
+                (
+                    cap,
+                    [
+                        Step(ref, sa_ref, "uses token of", evidence),
+                        Step(sa_ref, f"{cap.name} ({target})", "is allowed to", cap.evidence),
+                    ],
+                )
             )
-            base = [*entry.steps, to_w]
-            for cap in _node_capabilities(w, spec):
-                paths.append(AttackPath(entry, [*base, Step(_ref(w), "node", "runs on", cap.evidence)], cap))
-            tok = _token(inv, w, spec)
-            if tok is None:
-                continue
-            sa, evidence = tok
-            key = (_ns(w), sa)
-            if key not in sa_caps:
-                sa_caps[key] = _api_capabilities(inv, _grants(inv, *key))
-            sa_ref = f"ServiceAccount/{key[0]}/{sa}"
-            for cap in sa_caps[key]:
-                target = "node" if cap.scope == "node" else ("cluster" if cap.scope == "cluster" else key[0])
-                steps = [
-                    *base,
-                    Step(_ref(w), sa_ref, "uses token of", evidence),
-                    Step(sa_ref, f"{cap.name} ({target})", "is allowed to", cap.evidence),
-                ]
-                paths.append(AttackPath(entry, steps, cap))
+    images = [str(c.get("image")) for c in _containers(spec) if isinstance(c.get("image"), str) and c.get("image")]
+    token = (f"ServiceAccount/{_ns(w)}/{tok[0]}", tok[1]) if tok else None
+    return Reach(ref, _ns(w), images, reach_entries, _node_capabilities(w, spec), api, token)
+
+
+def workload_reach(inv: Inventory) -> dict[str, Reach]:
+    """Every workload (not owned by another) with its exposures, node and API capabilities, keyed by Kind/ns/name."""
+    entries = _entries(inv)
+    sa_caps: dict[tuple[str, str], list[Capability]] = {}
+    out: dict[str, Reach] = {}
+    for w in inv.of(*_WORKLOAD_KINDS):
+        if _owned(w):
+            continue
+        spec = _pod_spec(w)
+        if spec is not None:
+            out[_ref(w)] = _reach(inv, w, spec, entries, sa_caps)
+    return out
+
+
+def scan(inv: Inventory, *, top: int = DEFAULT_TOP) -> dict[str, Any]:
+    if not 1 <= top <= MAX_PATHS:
+        raise ScanError(f"top must be 1-{MAX_PATHS}")
+    workloads = [w for w in inv.of(*_WORKLOAD_KINDS) if not _owned(w)]
+    entries = _entries(inv)
+    sa_caps: dict[tuple[str, str], list[Capability]] = {}
+    reach: list[Reach] = []
+    for w in workloads:
+        spec = _pod_spec(w)
+        if spec is not None:
+            reach.append(_reach(inv, w, spec, entries, sa_caps))
+    paths: list[AttackPath] = []
+    for i in range(len(entries)):
+        for r in reach:
+            paths.extend(r.paths_from(i))
     paths.sort(key=lambda p: (-p.score, len(p.steps), p.as_dict(0)["summary"]))
     out_paths = [p.as_dict(i + 1) for i, p in enumerate(paths[:top])]
     head = out_paths[0]["summary"] if out_paths else "no path from an exposure to a node or to API rights"

@@ -43,9 +43,16 @@ ENTRY = "kube_noob.server.stdio"
 # Reached only through kube_noob.debug.cluster.get_backend after it checks that cluster access is enabled; the RHACS
 # Central reader (the only code that reads its API token), imported only by the rhacs_compare_live tool; and the
 # Containerfile and image audit, whose detectors spell out download-and-execute and credential patterns that a plugin
-# reviewer should not have to read past (the CLI and the service keep them).
+# reviewer should not have to read past (the CLI and the service keep them); and the Red Hat VEX fetcher and archive
+# reader (network and a zstd subprocess; the plugin keeps the pure CSAF parser, kube_noob.vuln.csaf).
 GUARDED_IMPORTS = frozenset(
-    {"kube_noob.debug.backends", "kube_noob.rhacs_central", "kube_noob.build.containerfile", "kube_noob.build.image"}
+    {
+        "kube_noob.debug.backends",
+        "kube_noob.rhacs_central",
+        "kube_noob.build.containerfile",
+        "kube_noob.build.image",
+        "kube_noob.sources.advisories",
+    }
 )
 # LLM SDKs never ship in the plugin, even if one returns to the core dependencies; the plugin runs the MCP server only.
 EXCLUDED_DEPENDENCIES = frozenset({"anthropic", "openai"})

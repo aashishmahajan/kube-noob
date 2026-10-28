@@ -209,15 +209,21 @@ def run(
     fail_on: str = "high",
     chart_path: str | None = None,
     data_dir: Path | None = None,
+    scanner_reports: list[tuple[str, str]] | None = None,
+    vex_paths: list[Path] | None = None,
+    kev_path: Path | None = None,
 ) -> dict[str, Any]:
     from kube_noob.audit import exceptions as exc
     from kube_noob.audit.engine import analyze
 
     containerfiles = containerfiles or []
+    scanner_reports = scanner_reports or []
     skipped = [{"file": s.uri, "why": s.skip} for s in sources if s.skip]
     sources = [s for s in sources if not s.skip]
-    if not sources and not containerfiles:
-        raise GateError("nothing to check: pass manifests with -f, or Containerfiles with --containerfile")
+    if not sources and not containerfiles and not scanner_reports:
+        raise GateError(
+            "nothing to check: pass manifests with -f, Containerfiles with --containerfile, or --scanner-report"
+        )
     findings: list[dict[str, Any]] = []
     failures: list[str] = []
     combined = _combine(sources) if sources else ""
@@ -275,12 +281,18 @@ def run(
                     "helpUri": (f.get("sources") or [{"url": INFO_URI}])[0]["url"],
                 }
             )
+    vulns = _vulnerabilities(scanner_reports, combined, vex_paths or [], kev_path, data_dir, fail_on)
+    findings.extend(vulns["findings"])
+    if vulns["failing"]:
+        failures.append(
+            f"{vulns['failing']} vulnerability finding(s) at {fail_on} or above that are fixable or known exploited"
+        )
     order = {s: i for i, s in enumerate(SEVERITIES)}
     findings.sort(key=lambda r: (-order[r["severity"]], r["uri"], r.get("line") or 0, r["ruleId"]))
     counts = {s: sum(1 for r in findings if r["severity"] == s) for s in reversed(SEVERITIES)}
     if fail_on != "never":
         floor = Severity.parse(fail_on)
-        over = [r for r in findings if Severity.parse(r["severity"]) >= floor]
+        over = [r for r in findings if Severity.parse(r["severity"]) >= floor and not r.get("vulnerability")]
         if over:
             failures.append(f"{len(over)} finding(s) at {fail_on} or above")
     known = _known(kinds, platform, version, data_dir)
@@ -304,11 +316,93 @@ def run(
             + " --mode enforce",
         },
         "knownIssues": known,
-        "notRun": [
-            "vulnerability checks: they need scanner input (Trivy, Grype, an SBOM or RHACS), which the scanner "
-            "reader (requirements R5.1) will add; scan images in a step of their own until then"
+        "vulnerabilities": vulns["summary"],
+        "notRun": []
+        if scanner_reports
+        else [
+            "vulnerability checks: pass the images' scanner output with --scanner-report (Trivy or Grype JSON, a "
+            "CycloneDX or SPDX SBOM, or an RHACS image scan)"
         ],
     }
+
+
+_VULN_SEVERITY = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "negligible": "info"}
+
+
+def _vulnerabilities(
+    reports: list[tuple[str, str]],
+    manifests: str,
+    vex_paths: list[Path],
+    kev_path: Path | None,
+    data_dir: Path | None,
+    fail_on: str,
+) -> dict[str, Any]:
+    """Scanner findings as gate findings: VEX applied, KEV marked, ranked against the manifests. A finding fails the
+    gate at ``fail_on`` only when it is fixable or known exploited (an unfixable finding is reported, not blocked)."""
+    if not reports:
+        return {"findings": [], "failing": 0, "summary": None}
+    from kube_noob.attack_paths import Inventory as PathInventory
+    from kube_noob.attack_paths import workload_reach
+    from kube_noob.vuln import assess
+    from kube_noob.vuln import kev as kevmod
+    from kube_noob.vuln import reports as rep
+    from kube_noob.vuln import vex as vexmod
+    from kube_noob.yamlio import load_documents
+
+    try:
+        parsed = [rep.parse(text, uri) for uri, text in reports]
+        index = vexmod.load(data_dir, vex_paths)
+        kev = kevmod.load(kev_path) if kev_path else None
+        reach = (
+            workload_reach(PathInventory.from_documents(d.data for d in load_documents(manifests)))
+            if manifests
+            else None
+        )
+        out = assess.assess(parsed, vex=index, kev=kev, reach=reach, top=200)
+    except (rep.ReportError, vexmod.VexError, kevmod.KevError, assess.AssessError) as exc:
+        raise GateError(str(exc)) from exc
+    uri_of: dict[str, str] = {}
+    for (uri, _), one in zip(reports, parsed, strict=True):
+        uri_of.setdefault(one.image.label, uri)
+    ranked = {(x["image"], x["finding"]["id"]): x for x in out["ranking"]["ranked"]}
+    findings: list[dict[str, Any]] = []
+    failing = 0
+    floor = Severity.parse(fail_on) if fail_on != "never" else None
+    for f in out["findings"]:
+        sev = _VULN_SEVERITY.get(f["severity"], "medium")
+        r = ranked.get((f["image"], f["id"]))
+        where = f"; ranked {r['rank']} (score {r['score']}): {r['attackPath']['summary']}" if r else ""
+        fix = f["fixVersion"] or "no fix yet"
+        findings.append(
+            {
+                "ruleId": f["cve"],
+                "title": f"{f['cve']} in {f['package']['name']}",
+                "severity": sev,
+                "message": f"{f['cve']} in {f['package']['name']} {f['package']['version']} (fix: {fix}) in image "
+                f"{f['image']}" + (" - known exploited (CISA KEV)" if f["knownExploited"] else "") + where,
+                "resource": ", ".join(r["workloads"][:3]) if r and r["workloads"] else f["image"],
+                "path": "",
+                "uri": uri_of.get(f["image"], reports[0][0]),
+                "line": None,
+                "remediation": f"update {f['package']['name']} to {f['fixVersion']} and rebuild the image"
+                if f["fixVersion"]
+                else "no fixed version yet: reduce exposure and privileges of the workloads that run it",
+                "admission": "a vulnerability in the image, not an admission policy",
+                "vulnerability": True,
+                "helpUri": f"https://access.redhat.com/security/cve/{f['cve']}"
+                if f["package"]["ecosystem"] == "rpm"
+                else f"https://www.cve.org/CVERecord?id={f['cve']}",
+            }
+        )
+        if floor is not None and Severity.parse(sev) >= floor and (f["fixVersion"] or f["knownExploited"]):
+            failing += 1
+    summary = {
+        **out["counts"],
+        "images": [i["image"]["name"] for i in out["images"]],
+        "vex": out["vex"]["sources"],
+        "kev": out["kev"]["catalog"],
+    }
+    return {"findings": findings, "failing": failing, "summary": summary}
 
 
 # -- output formats ----------------------------------------------------------------------------------------------
@@ -426,6 +520,13 @@ def markdown(report: dict[str, Any], top: int = 25) -> str:
     ]
     if report["excepted"]:
         lines += [f"{report['excepted']} finding(s) accepted by the exception list.", ""]
+    v = report.get("vulnerabilities")
+    if v:
+        lines += [
+            f"Vulnerabilities in {', '.join(v['images'])}: {v['reported']} reported, {v['excludedByVex']} excluded by "
+            f"VEX, {v['findings']} findings, {v['fixable']} fixable, {v['knownExploited']} known exploited.",
+            "",
+        ]
     if report["knownIssues"]:
         lines += ["### Reported issues in this release (informational)", ""]
         for k in report["knownIssues"]:

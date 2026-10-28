@@ -37,10 +37,14 @@ KINDS = (
     "question",
 )
 PENDING = {
-    "sbom": "SBOM analysis (R5.1) is not built yet; run your scanner and read its findings with RHACS or Trivy",
-    "scanner-report": "scanner report analysis (R5.1) is not built yet",
     "packet-capture": "packet capture analysis (queue N2) is not built yet; tcpdump text is read as logs",
     "must-gather": "must-gather analysis (queue G1-G3) is not built yet; paste the pod's events and logs instead",
+}
+UNREAD = {  # recognised, but in a form the vulnerability reader does not take
+    "sbom": "only JSON SBOMs are read: export SPDX 2.3 or CycloneDX JSON (syft -o spdx-json, trivy image -f "
+    "cyclonedx) and run kube-noob vuln report -r <file>",
+    "scanner-report": "scanner tables and SARIF are not read here: give the JSON (trivy image -f json "
+    "--list-all-pkgs, grype -o json) to kube-noob vuln report -r <file>",
 }
 
 # Every line pattern starts with [ \t]* (never \s*, which crosses newlines and backtracks quadratically on blank lines)
@@ -228,6 +232,8 @@ def recognise(text: str) -> list[Kind]:
             found["scanner-report"] = "Trivy or Grype report"
         if "runs" in doc and "sarif" in str(doc.get("$schema", "")).lower() + str(doc.get("version", "")):
             found["scanner-report"] = "SARIF report"
+        if isinstance(doc.get("scan"), dict) and isinstance(doc["scan"].get("components"), list):
+            found["scanner-report"] = "RHACS image scan"
         if doc.get("kind") in {"EventList", "Event"}:
             found["events"] = f"{doc.get('kind')} JSON"
         if doc.get("kind") == "Pod" and "status" in doc:
@@ -439,6 +445,17 @@ def _ticket_findings(kit: Any, keys: list[str], version: str | None) -> list[dic
     return out
 
 
+def _vulnerabilities(kit: Any, text: str) -> dict[str, Any] | str:
+    from pydantic import ValidationError
+
+    from kube_noob import toolkit as tk
+
+    try:
+        return dict(kit.vuln_report(tk.VulnReportIn(reports=[text[: tk.MAX_SCAN_REPORT]], top=10)))
+    except (ValueError, ValidationError) as exc:
+        return f"not read: {str(exc).splitlines()[0][:300]}"
+
+
 def _containerfile(kit: Any, text: str) -> dict[str, Any] | str:
     from kube_noob import toolkit as tk
 
@@ -575,6 +592,35 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                         "rank": 15 - _SEVERITY.get(str(f.get("severity")), 0),
                     }
                 )
+    vuln_kinds = names & {"sbom", "scanner-report"}
+    unread = set(vuln_kinds)
+    if vuln_kinds and isinstance(doc, dict):
+        rep = budget.run("vulnerabilities", lambda: _vulnerabilities(kit, text))
+        if isinstance(rep, str):
+            ran.remove("vulnerabilities")
+            for k in sorted(vuln_kinds):
+                skipped.append({"kind": k, "why": rep})
+            unread = set()
+        elif rep:
+            unread = set()
+            for r in rep["ranking"]["ranked"][:10]:
+                f = r["finding"]
+                findings.append(
+                    {
+                        "source": "vulnerability",
+                        "id": f["cve"],
+                        "title": f"{f['package']['name']} {f['package']['version']}: "
+                        + (f"fixed in {f['fixVersion']}" if f["fixVersion"] else "no fix yet")
+                        + (" (known exploited)" if f["knownExploited"] else ""),
+                        "severity": {"negligible": "info", "unknown": "medium"}.get(f["severity"], f["severity"]),
+                        "resource": r["image"],
+                        "rank": 12 - _SEVERITY.get(str(f["severity"]), 0) - (2 if f["knownExploited"] else 0),
+                    }
+                )
+            c = rep["counts"]
+            context["vulnerabilities"] = {k: c[k] for k in ("reported", "excludedByVex", "findings", "fixable")}
+    for k in sorted(unread):
+        skipped.append({"kind": k, "why": UNREAD[k]})
     keys = _ticket_keys(text)
     if keys:
         known = {f["id"] for f in findings}
@@ -639,7 +685,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         )
     for k in sorted(names & (set(PENDING) | set(NOT_YET))):
         skipped.append({"kind": k, "why": PENDING.get(k) or NOT_YET[k]})
-    evidence = {"playbook", "policy", "rule", "ticket", "reported-issue", "team-memory", "build"}
+    evidence = {"playbook", "policy", "rule", "ticket", "reported-issue", "team-memory", "build", "vulnerability"}
     if not steps and not any(f["source"] in evidence for f in findings) and (names & textual or not names):
         ns = context.get("namespace")
         steps = gather_steps(platform, ns if isinstance(ns, str) else None)

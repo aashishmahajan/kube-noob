@@ -1,4 +1,4 @@
-# kube-noob gate for GitLab CI: audit manifests and Containerfiles before deploy, offline.
+# kube-noob gate for GitLab CI: audit manifests, Containerfiles and image scanner reports before deploy, offline.
 # Include it and extend the hidden job:
 #   include:
 #     - remote: https://raw.githubusercontent.com/aashishmahajan/kube-noob/<tag>/deploy/gitlab/kube-noob-gate.gitlab-ci.yml
@@ -14,6 +14,9 @@
   variables:
     KUBE_NOOB_PATHS: "."
     KUBE_NOOB_CONTAINERFILES: ""
+    KUBE_NOOB_SCANNER_REPORTS: ""
+    KUBE_NOOB_VEX: ""
+    KUBE_NOOB_KEV: ""
     KUBE_NOOB_PLATFORM: kubernetes
     KUBE_NOOB_VERSION: ""
     KUBE_NOOB_EXCEPTIONS: ""
@@ -24,6 +27,9 @@
       set -- --platform "$KUBE_NOOB_PLATFORM" --fail-on "$KUBE_NOOB_FAIL_ON"
       for p in $KUBE_NOOB_PATHS; do set -- "$@" -f "$p"; done
       for c in $KUBE_NOOB_CONTAINERFILES; do set -- "$@" --containerfile "$c"; done
+      for r in $KUBE_NOOB_SCANNER_REPORTS; do set -- "$@" --scanner-report "$r"; done
+      for x in $KUBE_NOOB_VEX; do set -- "$@" --vex "$x"; done
+      if [ -n "$KUBE_NOOB_KEV" ]; then set -- "$@" --kev "$KUBE_NOOB_KEV"; fi
       if [ -n "$KUBE_NOOB_VERSION" ]; then set -- "$@" --version "$KUBE_NOOB_VERSION"; fi
       if [ -n "$KUBE_NOOB_EXCEPTIONS" ]; then set -- "$@" --exceptions "$KUBE_NOOB_EXCEPTIONS"; fi
       kube-noob gate "$@" --sarif kube-noob.sarif --summary kube-noob-summary.md \
