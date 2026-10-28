@@ -21,7 +21,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
 - **Debug**: 39 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
   denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
   evidence (never Secrets).
-- **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed fixes locally.
+- **Learn**: 5 tracks, 16 lessons, graded exercises; your team's fixes as code.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
 Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.

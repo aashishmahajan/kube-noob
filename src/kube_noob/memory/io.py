@@ -46,7 +46,8 @@ def load_entry(path: Path) -> MemoryEntry:
 
 
 class _Dumper(yaml.SafeDumper):
-    pass
+    def ignore_aliases(self, data: Any) -> bool:
+        return True  # the same date twice is written twice, never as an &anchor / *alias pair
 
 
 def _str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:

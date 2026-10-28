@@ -415,6 +415,55 @@ def build_parser() -> argparse.ArgumentParser:
         lgp.add_argument(f"--{key}", metavar="X.Y", help=f"{key} version")
     lgp.add_argument("--convention", action="append", dest="conventions", help="repeat for several")
 
+    mem = sub.add_parser(
+        "memory",
+        help="Your team's fixes as code: reviewed entries in your own repository, validated and matched",
+        description="A memory repository holds entries/MEM-<n>.yaml, one per lesson. kube-noob reads it locally and "
+        "never uploads, bundles or exports it. Example: kube-noob memory match 'etcd leader changed' --dir ./memory",
+    )
+    msub = mem.add_subparsers(dest="memory_cmd", required=True)
+    _patch(msub, common)
+    mi = msub.add_parser("init", help="Scaffold a repository: README, schema, entries/, CI templates (keeps files)")
+    mi.add_argument("dir")
+    madd = msub.add_parser("add", help="Write a proposed entry (never commits; review it in a pull request)")
+    madd.add_argument("dir")
+    madd.add_argument("--symptom", required=True)
+    madd.add_argument("--cause", required=True)
+    madd.add_argument("--fix", required=True)
+    madd.add_argument("--kind", choices=["fix", "negative", "runbook"], default="fix")
+    madd.add_argument("--signal", action="append", default=[], help="kind:name, e.g. alert:etcdNoLeader (repeat)")
+    madd.add_argument("--command", action="append", default=[], dest="commands", help="one command (repeat)")
+    madd.add_argument("--platform", choices=PLATFORMS)
+    madd.add_argument("--introduced", metavar="X.Y[.Z]")
+    madd.add_argument("--fixed-in", dest="fixed_in", metavar="X.Y[.Z]")
+    madd.add_argument("--owner", action="append", default=[], dest="owners", help="team or person (repeat)")
+    madd.add_argument("--source", action="append", default=[], dest="sources", help="https URL (repeat)")
+    mval = msub.add_parser("validate", help="Schema, duplicates, review dates, credentials and the fix verifier")
+    mval.add_argument("dir")
+    mval.add_argument("--strict", action="store_true", help="passed review dates are errors")
+    mm = msub.add_parser("match", help="Entries for an error, an alert payload or a symptom (approved only)")
+    mm.add_argument("text", nargs="*", help="the error or symptom, in quotes")
+    mm.add_argument("-f", "--file", default=None, help="a file (e.g. an Alertmanager payload), or '-' for stdin")
+    mm.add_argument("--dir", action="append", default=[], dest="dirs", help="memory repository (repeat)")
+    mm.add_argument("--version", dest="pversion", help="your OpenShift version: entries fixed there show as retired")
+    mm.add_argument("--platform", choices=PLATFORMS)
+    mm.add_argument("--operator", action="append", default=[], help="name=version of an installed operator (repeat)")
+    mm.add_argument("--include-proposed", action="store_true")
+    mm.add_argument("--limit", type=int, default=5)
+    mo = msub.add_parser("outcome", help="Record that an entry was applied, and how it went")
+    mo.add_argument("dir")
+    mo.add_argument("entry_id", metavar="MEM-N")
+    mo.add_argument("--result", required=True, choices=["resolved", "partial", "not-resolved"])
+    mo.add_argument("--ticket", help="an opaque ticket reference, e.g. INC-4211")
+    mo.add_argument("--cluster", help="a cluster label, e.g. prod-east")
+    mo.add_argument("--date", dest="when", metavar="YYYY-MM-DD")
+    mst = msub.add_parser("stats", help="Entries and outcomes, optionally per cluster, signal or component")
+    mst.add_argument("dir")
+    mst.add_argument("--by", choices=["cluster", "signal", "component"])
+    mmig = msub.add_parser("migrate-learning", help="Turn confirmed learning notes into proposed entries (once)")
+    mmig.add_argument("dir")
+    mmig.add_argument("--owner", default="unassigned")
+
     ask = sub.add_parser("ask", help="Optional: ask a model you configure, which calls these tools")
     ask.add_argument("question")
 
@@ -785,6 +834,9 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "learning":
         return _learning(a, kit, fmt)
 
+    if a.cmd == "memory":
+        return _memory(a, s, kit, fmt)
+
     if a.cmd == "ask":
         from kube_noob.agent.loop import Agent
 
@@ -1064,6 +1116,170 @@ def _incidents(a: argparse.Namespace, kit: Any, fmt: str) -> int:
     else:
         _emit(out, fmt)
     return 0
+
+
+def _memory(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
+    from datetime import date
+
+    from pydantic import ValidationError
+
+    from kube_noob.memory import match as mmatch
+    from kube_noob.memory import repo, verify
+
+    cmd = a.memory_cmd
+    if cmd == "init":
+        out: dict[str, Any] = {"repository": a.dir, **repo.init_repo(Path(a.dir))}
+        if a.format == "text":
+            for rel in out["created"]:
+                _tprint(f"created {rel}")
+            for rel in out["kept"]:
+                _tprint(f"kept    {rel} (already there)")
+            _tprint(f"next: kube-noob memory add {a.dir} --symptom ... --cause ... --fix ...")
+        else:
+            _emit(out, fmt)
+        return 0
+    if cmd == "add":
+        from kube_noob.debug.steps import classify_step
+
+        signals = []
+        for raw in a.signal:
+            kind, sep, name = raw.partition(":")
+            if not sep:
+                raise ConfigError(f"--signal {raw!r}: use kind:name, e.g. alert:etcdNoLeader")
+            signals.append({"kind": kind, "name": name})
+        fields: dict[str, Any] = {
+            "kind": a.kind,
+            "signals": signals,
+            "symptom": a.symptom,
+            "platform": a.platform or s.default_platform or "kubernetes",
+            "versions": {k: v for k, v in (("introduced", a.introduced), ("fixedIn", a.fixed_in)) if v},
+            "cause": a.cause,
+            "fix": {
+                "text": a.fix,
+                "commands": [
+                    {"command": c, "label": "read-only" if classify_step(c) == "read" else "needs-approval"}
+                    for c in a.commands
+                ],
+            },
+            "owners": a.owners or ["unassigned"],
+            "sources": a.sources,
+        }
+        try:
+            path, entry = repo.add_entry(Path(a.dir), fields)
+        except ValidationError as exc:
+            raise ValueError(f"entry not written: {repo._reason(exc)}") from None
+        out = {"written": str(path), "id": entry.id, "status": entry.status}
+        if a.format == "text":
+            _tprint(f"wrote {path} ({entry.id}, proposed): review it, then set status: approved")
+        else:
+            _emit(out, fmt)
+        return 0
+    if cmd == "validate":
+        rep = verify.validate_repo(Path(a.dir), strict=a.strict)
+        if a.format == "text":
+            for p in rep["errors"] + rep["warnings"]:
+                who = p["entry"] or p["file"]
+                _tprint(f"{p['level'].upper():7} {who}  {p['check']}: {p['detail']}")
+            _tprint(
+                f"{rep['entries']} entries ({rep['approved']} approved, {rep['proposed']} proposed, "
+                f"{rep['retired']} retired): {len(rep['errors'])} errors, {len(rep['warnings'])} warnings"
+            )
+        else:
+            _emit(rep, fmt)
+        return 0 if rep["ok"] else 1
+    if cmd == "match":
+        if a.text and a.file is not None:
+            raise ConfigError("pass the text or -f, not both")
+        text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
+        if len(text.strip()) < 3:
+            raise ConfigError("nothing to match: pass the error text in quotes, a file with -f, or pipe it in")
+        if not a.dirs:
+            raise ConfigError("pass the memory repository with --dir (repeat for several)")
+        operators: dict[str, str] = {}
+        for raw in a.operator:
+            name, sep, ver = raw.partition("=")
+            if not sep or not name or not ver:
+                raise ConfigError(f"--operator {raw!r}: use name=version")
+            operators[name] = ver
+        out = mmatch.match(
+            [Path(d) for d in a.dirs],
+            text,
+            version=a.pversion,
+            platform=a.platform,
+            operators=operators,
+            include_proposed=a.include_proposed,
+            limit=max(1, min(a.limit, 50)),
+        )
+        if a.format == "text":
+            _print_memory_matches(out)
+        else:
+            _emit(out, fmt)
+        return 0
+    if cmd == "outcome":
+        when = date.fromisoformat(a.when) if a.when else None
+        try:
+            entry = repo.add_outcome(Path(a.dir), a.entry_id, a.result, a.ticket, a.cluster, when)
+        except ValidationError as exc:
+            raise ValueError(f"outcome not recorded: {repo._reason(exc)}") from None
+        o = entry.outcomes[-1]
+        out = {"id": entry.id, "outcome": o.model_dump(mode="json", exclude_none=True), "outcomes": len(entry.outcomes)}
+        if a.format == "text":
+            _tprint(f"{entry.id}: recorded {o.result} on {o.date} ({len(entry.outcomes)} outcomes)")
+        else:
+            _emit(out, fmt)
+        return 0
+    if cmd == "stats":
+        out = mmatch.stats(Path(a.dir), a.by)
+        if a.format == "text":
+            _tprint(
+                f"{out['entries']} entries: "
+                + ", ".join(f"{v} {k}" for k, v in out["byStatus"].items())
+                + " | outcomes: "
+                + ", ".join(f"{v} {k}" for k, v in out["outcomes"].items())
+            )
+            for g in out.get("groups", []):
+                _tprint(
+                    f"  {g['key']:40} {len(g['entries'])} entries, applied {g['applied']}, resolved {g['resolved']}"
+                )
+        else:
+            _emit(out, fmt)
+        return 0
+    notes = kit.learning.notes()
+    out = repo.migrate_learning(Path(a.dir), notes, a.owner, s.default_platform or "kubernetes")
+    if a.format == "text":
+        for c in out["created"]:
+            _tprint(f"{c['note']} -> {c['entry']} (proposed)")
+        for sk in out["skipped"]:
+            _tprint(f"{sk['note']} skipped: {sk['reason']}")
+        if not out["created"] and not out["skipped"]:
+            _tprint("no confirmed learning notes to migrate")
+    else:
+        _emit(out, fmt)
+    return 0
+
+
+def _print_memory_matches(out: dict[str, Any]) -> None:
+    for m in out["matches"]:
+        head = {"fix": "fix", "runbook": "runbook", "tried, did not work": "tried, did not work", "retired": "retired"}
+        _tprint(f"{m['citation']} {head[m['state']]} ({m['status']}): {m['symptom']}")
+        if m.get("note"):
+            _tprint(f"  {m['note']}")
+        by = m["matchedBy"]
+        _tprint("  matched by: " + ", ".join(by["signals"] + [f"word {w}" for w in by["words"][:5]]))
+        _tprint(f"  cause: {m['cause']}")
+        _tprint(f"  fix: {m['fix']['text']}")
+        for c in m["fix"]["commands"]:
+            _tprint(f"    {'check' if c['label'] == 'read-only' else 'needs approval'}: {c['command']}")
+        _tprint(f"  {m['outcomes']['summary']}")
+        _tprint(f"  {m['repository']}/{m['file']}")
+    if out.get("note"):
+        _tprint(out["note"])
+    q = out["query"]
+    _tprint(
+        f"memory: {sum(r['entries'] for r in out['repositories'])} entries in {len(out['repositories'])} "
+        f"repositor{'y' if len(out['repositories']) == 1 else 'ies'}"
+        + (f"; version {q['version']} ({q.get('versionFrom')})" if q.get("version") else "")
+    )
 
 
 def _learning(a: argparse.Namespace, kit: Any, fmt: str) -> int:

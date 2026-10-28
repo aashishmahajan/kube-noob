@@ -148,6 +148,29 @@ kube-noob policy reach --from shop/orders-api --to shop/payments --port 9090 -f 
 kube-noob policy reach --from shop/orders-api --to shop/payments --port grpc --live --cluster-enabled
 ```
 
+### What did we learn last time?
+
+`memory` keeps your team's fixes as code: one reviewed YAML file per lesson in a repository you own
+(`entries/MEM-<n>.yaml`), with the signals it shows, the cause, the fix and what happened each time someone applied it.
+`memory match` puts the entries next to the playbooks: signals first (an alert name in a payload), then distinctive
+words. Fixes come first, then runbooks, then what was tried and did not work; an entry whose fix is already in your
+version shows as retired. Each match says how often it was applied and how often it resolved the problem.
+
+```bash
+kube-noob memory init team-memory
+kube-noob memory add team-memory --symptom "etcd leader changes after the update" --cause "catalog sync I/O" --fix "update to 4.21.1" --signal alert:etcdHighNumberOfLeaderChanges --platform openshift
+kube-noob memory validate team-memory
+kube-noob memory match -f alert.json --dir team-memory --version 4.21.0
+kube-noob memory outcome team-memory MEM-1 --result resolved --ticket INC-4211 --cluster prod-east
+kube-noob demo memory
+```
+
+`validate` is the guard against a poisoned entry, and `init` writes a CI workflow that runs it on every pull request:
+every patch is validated, audited and red-teamed, commands must carry the classifier's labels, and grants of the
+privileged SCC, cluster-admin, hostPath or wildcard RBAC fail unless the entry records who accepted the risk and why.
+`add` writes a proposed entry and never commits; `migrate-learning` turns confirmed learning notes into proposed
+entries. kube-noob reads the repository where it runs and never uploads, bundles or exports it.
+
 ### Always on: the incident watch
 
 `watch` polls your namespaces read-only (pods, events, deployments, replicasets; never Secrets) and turns what it sees

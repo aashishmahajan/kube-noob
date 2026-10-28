@@ -69,5 +69,10 @@ flowchart LR
   off by default. Code that changes something is a `Writer` that cannot be built while its tier is off, and each
   action needs a person's `Approval` for that action, unexpired and used once. The read-only backends have no write
   method; tier RBAC renders only when the tier is on.
+- A memory repository (`kube_noob.memory`) is the team's own Git content: kube-noob reads it locally, writes only on
+  `memory init`, `add`, `outcome` and `migrate-learning` (new files created exclusively, rewrites atomic), never runs
+  git, and never bundles, publishes or exports it. Entries are untrusted input until `memory validate` passes:
+  bounded YAML, content rules, and the verifier on every fix (validate, audit and red team on patches; privileged
+  SCC, cluster-admin, hostPath and wildcard RBAC grants fail without a recorded risk acceptance).
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.

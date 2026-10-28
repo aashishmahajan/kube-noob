@@ -51,6 +51,14 @@
   (credentials, raw logs, event rows, stack traces, pipelines and manifests are rejected), a command carries the
   label the playbook classifier gives it and never prints a Secret, a patch holds manifests but never a Secret,
   evidence is a URL, ticket key, citation or bundle path, and versions must be quoted.
+- `kube-noob memory`: `init` scaffolds a team memory repository (README, schema, `entries/`, a GitHub Actions
+  workflow and a shell script that run `validate`); `add` writes a proposed entry with the next id and never commits;
+  `validate` is the poisoning guard (schema, duplicates, review dates, credentials anywhere in a file, and the
+  verifier: patches are validated, audited and red-teamed, and privileged SCC, cluster-admin, hostPath and wildcard
+  RBAC grants fail unless the entry records an unexpired `riskAccepted`); `match` takes text or an Alertmanager
+  payload, matches approved entries on signals first and distinctive words second, shows negative entries as "tried,
+  did not work" and entries fixed in your version as retired, with "matched N times, resolved M"; `outcome`, `stats
+  --by cluster|signal|component` and `migrate-learning`. New demo: `kube-noob demo memory`.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.
