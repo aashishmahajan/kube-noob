@@ -39,11 +39,19 @@ def audit(
     if containerfile is not None:
         report = cf.audit(containerfile, context=context, probes=probes, image_user=image.user if image else None)
     else:
-        report = {"stages": [], "findings": [], "counts": {}, "checks": sorted(cf.CHECKS), "notChecked": [], "notes": []}
+        report = {
+            "stages": [],
+            "findings": [],
+            "counts": {},
+            "checks": sorted(cf.CHECKS),
+            "notChecked": [],
+            "notes": [],
+        }
         if image is not None and (not image.user.strip() or image.user.strip() in cf.ROOT_USERS):
             report["findings"].append(
-                cf.Finding("KN-B002", None, f"the image's config runs as {image.user.strip() or 'root (empty User)'}")
-                .as_dict()
+                cf.Finding(
+                    "KN-B002", None, f"the image's config runs as {image.user.strip() or 'root (empty User)'}"
+                ).as_dict()
             )
     if image is not None:
         extra: list[dict[str, Any]] = []

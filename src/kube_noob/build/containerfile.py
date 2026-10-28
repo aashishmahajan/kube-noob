@@ -491,8 +491,10 @@ def audit(
             if "$" in base:
                 why = f"FROM {st.base}: a build argument with no default; pass a digest with --build-arg"
             elif "$" in st.base:
-                why = (f"FROM {st.base} defaults to {base}, a tag that can be moved: make the default a digest, or "
-                       "pass one with --build-arg every time")
+                why = (
+                    f"FROM {st.base} defaults to {base}, a tag that can be moved: make the default a digest, or "
+                    "pass one with --build-arg every time"
+                )
             else:
                 why = f"FROM {base}: a tag can be moved; pin it to a digest"
             findings.append(Finding("KN-B001", st.line, why, _label(st), sev))
