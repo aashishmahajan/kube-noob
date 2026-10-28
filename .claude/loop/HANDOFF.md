@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 17:00 (QA5 committed, waiting for CI; QA6 next: close golden gaps).
+right now; STATE.md says what is done. Updated 2026-10-28 18:00 (QA5 in CI; QA6 Kubernetes and Helm part committed; next: OpenShift, ROSA HCP, RHACS, policy gaps).
 
 ## Repository and branch
 
@@ -35,7 +35,11 @@ right now; STATE.md says what is done. Updated 2026-10-28 17:00 (QA5 committed, 
    `python scripts/eval_golden.py` prints NOW PASSING items; raise their status to pass with `expect` = the top id,
    after checking the answer against the item's `answer`. The writers' generators are in the session scratchpad only
    (goldgen/, gen_golden_ocp/); edit the YAML directly in a new session.
-1. QA6 (row 20v): close the golden gaps that generalise. Facts already verified (session scratchpad, re-verify in a
+1. QA6 (row 20v): Kubernetes and Helm part done (golden 13/16 each, a fit; community test half 4 better, 2 worse,
+   30 neither). Next: OpenShift, ROSA HCP, RHACS and policy gaps (see each golden item's `gap`); rank the PSA/SCC
+   playbooks above one-line policy titles; measure every change on the community test half before and after
+   (git worktree of the previous commit + PYTHONPATH=<worktree>/src, then grade only moved rows independently).
+   Facts verified for the Kubernetes and Helm part (session scratchpad, re-verify in a
    new session): kubectl troubleshooting page (API server unreachable), Deployment page (progress deadline, rollout
    history/undo, revisionHistoryLimit), PersistentVolume page (pvc-protection finalizer), debug-running-pod
    (kubectl debug --target), pod-lifecycle (back-off 10s doubling to 300s, reset after 10 min), kubeadm

@@ -36,6 +36,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "OOMKilled at startup (see lastState.terminated.reason).",
             "On OpenShift: the image expects root or a fixed UID and cannot write its directories under the "
             "random restricted-v2 UID.",
+            "CrashLoopBackOff is the waiting state between restarts, not a cause: the kubelet restarts the container "
+            "with an exponential back-off (10s, 20s, 40s...) capped at 300 seconds, and resets it once the container "
+            "has run for 10 minutes without a problem.",
         ),
         (
             "oc logs {pod} -n {ns} --previous            # output of the crashed attempt",
@@ -642,6 +645,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Adopt it deliberately: label app.kubernetes.io/managed-by=Helm and annotate "
             "meta.helm.sh/release-name=<release>, meta.helm.sh/release-namespace={ns}; or rename/delete the stray "
             "object.",
+            "Or let Helm adopt it: helm install/upgrade --take-ownership skips the ownership check and takes over the "
+            "existing objects (on Helm 3 releases whose --help lists the flag).",
         ),
         knowledge=("helm-troubleshooting",),
         weight=1.3,
@@ -705,6 +710,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"server misbehaving",
             r"lookup [\w.-]+ on [\d.:]+: (read udp|dial udp).*i/o timeout",
             r"NXDOMAIN",
+            r"nslookup: can't resolve",  # busybox nslookup (kubernetes/website dns-debugging-resolution.md)
             r"(?i)\b(?:dns|name resolution)\b[^\n]{0,30}\b(?:issues?|problems?|not (?:working|resolving)|"
             r"fail(?:s|ed|ing|ure)?|broken|timeouts?)\b",
         ),
@@ -714,9 +720,15 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Wrong service name/namespace (use <svc>.<ns>.svc.cluster.local).",
             "Upstream resolver/VPC DNS issue for external names (ROSA private clusters: VPC DNS hostnames/resolution "
             "must be enabled).",
+            "CoreDNS itself: its pods are not Running, the kube-dns Service has no endpoints, or the ClusterRole "
+            "system:coredns lacks list/watch on Services and EndpointSlices (SERVFAIL in its logs).",
         ),
         (
+            "kubectl exec -ti {pod} -n {ns} -- cat /etc/resolv.conf   # nameserver = the cluster DNS Service IP",
             "oc rsh -n {ns} {pod} getent hosts kubernetes.default.svc",
+            "kubectl get pods -n kube-system -l k8s-app=kube-dns   # CoreDNS (OpenShift: oc get pods -n openshift-dns)",
+            "kubectl logs -n kube-system -l k8s-app=kube-dns",
+            "kubectl get endpointslice -l kubernetes.io/service-name=kube-dns -n kube-system",
             "oc get networkpolicy -n {ns} -o yaml | grep -B3 -A10 egress",
             "oc get pods -n openshift-dns   # [OCP]",
         ),
@@ -768,6 +780,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "The kubeconfig does not trust the CA that signed the API server certificate (new cluster, rotated "
             "certificate, or a corporate proxy that re-signs TLS).",
             "The kubeconfig points at the wrong server, or the machine clock is skewed.",
+            "After kubeadm reset and kubeadm init the cluster has a new CA, but ~/.kube/config still holds the old "
+            'cluster\'s certificates (crypto/rsa verification error naming the CA "kubernetes").',
         ),
         (
             "oc config view --minify -o jsonpath='{{.clusters[0].cluster.server}}'   # which API server you call",
@@ -780,6 +794,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "OpenShift Dedicated serve a publicly trusted certificate unless you changed it). Behind a TLS-inspecting "
             "proxy, add the proxy's CA to the system trust store. Avoid --insecure-skip-tls-verify outside "
             "throwaway clusters.",
+            "kubeadm cluster: use the new admin kubeconfig: export KUBECONFIG=/etc/kubernetes/admin.conf, or copy it "
+            "(sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && sudo chown $(id -u):$(id -g) "
+            "$HOME/.kube/config).",
         ),
         knowledge=("k8s-tls-x509",),
         weight=1.4,
@@ -842,6 +859,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "not in the image or not on its PATH: runc looks it up when it creates the container.",
             "A multi-stage build left the program in an earlier stage (only what COPY --from copies reaches the "
             "final image).",
+            'kubectl exec into an image without a shell (distroless and other minimal images): `exec: "sh"` or '
+            '`"bash"`: executable file not found. The container is fine; it has no shell to start.',
         ),
         (
             "kubectl get pod {pod} -n {ns} -o jsonpath='{{.spec.containers[*].command}} {{.spec.containers[*].args}}'",
@@ -851,6 +870,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Point command at the program's full path inside the image, or install or copy it into the final image; "
             "a path that exists but is not executable fails with permission denied instead (chmod +x in the build).",
+            "No shell in the image: attach an ephemeral debug container that shares the process namespace, "
+            "kubectl debug -it {pod} -n {ns} --image=busybox:1.28 --target=<container>.",
         ),
         knowledge=("k8s-debug-pods",),
         weight=1.2,
@@ -1198,6 +1219,170 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
         knowledge=("ocp-egressip",),
         weight=1.3,
+    ),
+    Playbook(
+        # kubernetes/website troubleshoot-kubectl.md; kubectl's message text from kubernetes/kubernetes
+        # staging/src/k8s.io/kubectl/pkg/cmd/util/helpers.go and the localhost:8080 default from client-go
+        # tools/clientcmd/client_config.go (getDefaultServer).
+        "DBG-APISERVER-UNREACHABLE",
+        "kubectl / oc cannot reach the API server",
+        (
+            r"Unable to connect to the server: dial tcp [^\n]{1,200}: (?:i/o timeout|connect: no route to host|"
+            r"connect: network is unreachable|connect: connection timed out)",
+            r"The connection to the server \S{1,300} was refused - did you specify the right host or port\?",
+            r"Unable to connect to the server: dial tcp: lookup [^\n]{1,200}: no such host",
+        ),
+        (
+            "The VPN or network path to the cluster is down (a dropped VPN is the most common cause of i/o timeout).",
+            "The kubeconfig in use points at the wrong server or context ($KUBECONFIG, --kubeconfig, the current "
+            "context).",
+            "The API server, or the load balancer in front of it, is down or a firewall blocks its port (6443 on "
+            "kubeadm and OpenShift).",
+            "`localhost:8080 was refused` means kubectl found no kubeconfig at all and fell back to "
+            "http://localhost:8080.",
+        ),
+        (
+            "kubectl config current-context",
+            "kubectl config get-contexts",
+            "kubectl config view --minify -o jsonpath='{{.clusters[0].cluster.server}}'   # the server you call",
+            "echo $KUBECONFIG",
+            "ping <api-host>   # then check the port: nc -vz <api-host> 6443",
+        ),
+        (
+            "Reconnect the VPN, then retry.",
+            "Select the right cluster: kubectl config use-context <context>, or set KUBECONFIG to the right file.",
+            "No kubeconfig: get one from the cluster admin (kubeadm: copy /etc/kubernetes/admin.conf to "
+            "$HOME/.kube/config; cloud clusters: the provider's CLI writes it).",
+            "API server or load balancer down: check the control plane nodes and the cloud provider's health "
+            "checks for the API endpoint.",
+        ),
+        knowledge=("k8s-kubeconfig-exec", "k8s-kubeadm-troubleshooting"),
+        weight=1.5,  # more specific than DBG-NETPOL's bare "i/o timeout"
+    ),
+    Playbook(
+        # kubernetes/website concepts/workloads/controllers/deployment.md (Failed Deployment, Progress Deadline
+        # Seconds, Rolling Back a Deployment).
+        "DBG-PROGRESS-DEADLINE",
+        "Deployment rollout stalled (exceeded its progress deadline)",
+        (
+            r"exceeded its progress deadline",
+            r"ProgressDeadlineExceeded",
+        ),
+        (
+            "The new pods did not become available within .spec.progressDeadlineSeconds (600 by default): "
+            "insufficient quota, failing readiness probes, image pull errors, missing permissions, limit ranges or "
+            "bad application configuration.",
+            "Kubernetes only reports it (Progressing=False, reason ProgressDeadlineExceeded); it does not roll back, "
+            "and kubectl rollout status exits 1.",
+        ),
+        (
+            "kubectl rollout status deployment/<name> -n {ns}",
+            "kubectl describe deployment <name> -n {ns}   # Conditions and the new ReplicaSet",
+            "oc get rs -n {ns} -l <selector>",
+            "oc get events -n {ns} --sort-by=.lastTimestamp",
+        ),
+        (
+            "Fix the cause on the new pods (their events name it), then the rollout continues.",
+            "Or go back: kubectl rollout undo deployment/<name> -n {ns} (or --to-revision=<n>).",
+            "A slow but healthy app: raise spec.progressDeadlineSeconds (it must be greater than minReadySeconds).",
+        ),
+        knowledge=("k8s-deployment-rollouts",),
+        weight=1.3,
+    ),
+    Playbook(
+        # kubernetes/website concepts/storage/persistent-volumes.md (Storage Object in Use Protection).
+        "DBG-PVC-TERMINATING",
+        "PersistentVolumeClaim stuck in Terminating",
+        (
+            r"kubernetes\.io/pvc-protection",
+            r"kubernetes\.io/pv-protection",
+            r"(?i)\b(?:pvc|persistentvolumeclaim)s?\b[^\n]{0,80}\b(?:stuck|stays?|hangs?)\b[^\n]{0,40}\bTerminating\b",
+            r"(?i)\b(?:pvc|persistentvolumeclaim)s?\b[^\n]{0,80}\bTerminating\b",
+        ),
+        (
+            "A Pod object still uses the claim (the pvc-protection finalizer holds deletion until no Pod object "
+            "references it, including Completed or Failed pods of a Job).",
+            "For a PersistentVolume: it is still bound to a claim (pv-protection).",
+        ),
+        (
+            "kubectl describe pvc <claim> -n {ns}   # Status: Terminating, Finalizers: [kubernetes.io/pvc-protection]",
+            'kubectl get pods -n {ns} -o jsonpath=\'{{range .items[*]}}{{.metadata.name}}{{" "}}'
+            '{{.spec.volumes[*].persistentVolumeClaim.claimName}}{{"\\n"}}{{end}}\'',
+        ),
+        (
+            "Delete or scale down the workloads whose pods use the claim (and finished Job pods); the claim is then "
+            "removed.",
+            "Do not remove the finalizer while a pod uses the claim: the protection exists to prevent data loss.",
+        ),
+        knowledge=("k8s-common-errors",),
+        weight=1.4,
+    ),
+    Playbook(
+        # helm/helm-www versioned_docs/version-3/faq/troubleshooting.md.
+        "DBG-HELM-REPO-EXISTS",
+        "Helm: repository name already exists",
+        (r"repository name \([^)\n]{1,200}\) already exists",),
+        (
+            "Since Helm 3.3.2, helm repo add errors when the name is already configured (a breaking change made for a "
+            "security fix); --no-update is ignored.",
+        ),
+        ("helm repo list",),
+        (
+            "Make the step repeatable: helm repo add <name> <url> --force-update (overwrites the entry), or use a "
+            "different name.",
+        ),
+        knowledge=("helm-cli-operations",),
+        weight=1.4,
+    ),
+    Playbook(
+        # helm/helm-www versioned_docs/version-3/topics/kubernetes_apis.md.
+        "DBG-HELM-REMOVED-API",
+        "Helm: the deployed release uses an API the cluster removed",
+        (r"current release manifest contains removed kubernetes api",),
+        (
+            "Helm diffs the last deployed manifest against the new one; that stored manifest uses an API version "
+            "this Kubernetes version removed, so Helm cannot parse it, even when the new chart is fixed.",
+        ),
+        (
+            "helm get manifest <release> -n {ns}   # the apiVersions stored in the release",
+            "helm history <release> -n {ns}",
+        ),
+        (
+            "Rewrite the stored release to supported APIs with the helm-mapkubeapis plugin "
+            "(github.com/helm/helm-mapkubeapis), or edit the release Secret by hand as the Helm page describes, then "
+            "upgrade.",
+            "Next time, move charts to supported APIs before upgrading Kubernetes.",
+        ),
+        knowledge=("helm-cli-operations", "k8s-deprecations"),
+        weight=1.5,
+    ),
+    Playbook(
+        # helm/helm-www versioned_docs/version-3/chart_template_guide/control_structures.md (Controlling Whitespace)
+        # and yaml_techniques.md.
+        "DBG-HELM-YAML",
+        "Helm: a template renders invalid YAML",
+        (
+            r"YAML parse error on [^\n]{1,200}: error converting YAML to JSON",
+            r"error converting YAML to JSON: yaml: line \d+: (?:did not find expected|mapping values are not "
+            r"allowed|could not find expected)",
+        ),
+        (
+            "Whitespace from a template action: `{{{{- ` chomps the newline before it and ` -}}}}` the one after, so "
+            "a chomp on the wrong side joins two lines or leaves a line mis-indented.",
+            "An include or toYaml output without nindent/indent lands at the wrong indentation.",
+            "A tab, or a value with a colon that needs quoting.",
+        ),
+        (
+            "helm template <release> <chart> --debug   # prints the rendered YAML even when it fails to parse",
+            "helm template <release> <chart> -s templates/<file>.yaml",
+        ),
+        (
+            "Look at the reported line in the --debug output and fix the chomping ({{{{- if }}}} ... {{{{- end }}}} on "
+            'lines of their own) or pipe includes through nindent: {{{{- include "x" . | nindent 4 }}}}.',
+            "Quote string values: {{{{ .Values.name | quote }}}}.",
+        ),
+        knowledge=("helm-templates-values", "helm-chart-authoring"),
+        weight=1.4,
     ),
 )
 

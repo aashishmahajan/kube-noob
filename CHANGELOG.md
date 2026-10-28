@@ -69,6 +69,26 @@
   answers only questions that name Helm, a chart or `values.yaml`. The image-pull playbook now names an image built
   only on a workstation (minikube, a local Docker) with `:latest` or no tag, so `imagePullPolicy` defaults to
   `Always`, and proposes `minikube image load` or `minikube docker-env` with `IfNotPresent` or `Never`.
+- Golden gaps closed for Kubernetes and Helm, each checked against the official page the grader named
+  (kubernetes/website, the kubectl and client-go source, the Helm 3 docs): new playbooks for an API server kubectl
+  cannot reach (`Unable to connect to the server: dial tcp ...: i/o timeout`, `The connection to the server ... was
+  refused`, and `localhost:8080` meaning no kubeconfig; it no longer reads as a NetworkPolicy problem), a stalled
+  rollout (`exceeded its progress deadline`), a PVC stuck in Terminating (the `kubernetes.io/pvc-protection`
+  finalizer and the pods still using it), `helm repo add` on an existing name (`--force-update`), an upgrade blocked
+  by removed APIs in the stored release (helm-mapkubeapis) and a template that renders invalid YAML (whitespace
+  chomping, `nindent`). Existing playbooks gained the documented CrashLoopBackOff back-off (10 s doubling to 300 s,
+  reset after 10 minutes), `kubectl debug --target` for images without a shell, the CoreDNS checks (resolv.conf,
+  `k8s-app=kube-dns` pods, logs, EndpointSlices, the `system:coredns` ClusterRole), the kubeconfig left over from
+  `kubeadm reset`, and `--take-ownership` for Helm adoption. New documents: kubeadm first-day problems (CoreDNS
+  Pending until a CNI, `malformed pair` extra-args), Deployment rollouts (history, undo, revision limit), Helm CLI
+  operations (`--set` escaping, OCI push, rollback, three-way merge, Helm's paths) and Helm chart authoring (`crds/`,
+  hooks, library charts, template comments). Flux HelmRelease, Chart.js and AWS Lambda questions no longer get Helm
+  or ROSA documents. Golden: Kubernetes 13 of 16 and Helm 13 of 16 (a fit: those items named the gaps); on the
+  community test half, which the changes were not built from, 36 answers moved: 4 better, 2 worse, 30 neither.
+  The reported-issue matcher and the ticket correlation now call a word rare when it is in at most 2 sections of
+  the bundled docs (`GENERAL_MAX_CHUNKS`, a count), not 2% of them: as a share, the new documents had made more words
+  rare and four rows that pointed at the right bug named an unrelated one.
+  `helm repo list` is classified as a read-only step (`helm repo add`, `update` and `remove` stay changes).
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

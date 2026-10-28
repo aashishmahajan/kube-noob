@@ -16,8 +16,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/faq/troubleshooting/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: helm repo add ''repository name already exists'' since Helm 3.3.2, fix with --force-update'
+  status: pass
+  expect:
+  - DBG-HELM-REPO-EXISTS
 - id: helm-002
   technology: helm
   kind: error
@@ -32,8 +33,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/faq/troubleshooting/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: helm rollback ''no ConfigMap with the name found'' after failed upgrade; upgrade the Helm client'
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#4'
 - id: helm-003
   technology: helm
   kind: error
@@ -48,8 +50,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/chart_template_guide/control_structures/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm template whitespace and YAML indentation errors, chomping with {{- if }} and {{- end }}'
+  status: pass
+  expect:
+  - DBG-HELM-YAML
 - id: helm-004
   technology: helm
   kind: error
@@ -65,8 +68,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/topics/kubernetes_apis/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: Helm ''current release manifest contains removed kubernetes api(s)'', repair stored release with mapkubeapis'
+  status: pass
+  expect:
+  - DBG-HELM-REMOVED-API
 - id: helm-005
   technology: helm
   kind: error
@@ -80,8 +84,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/topics/library_charts/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm library charts (type: library) are not installable; use as dependency and call named templates'
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#2'
 - id: helm-006
   technology: helm
   kind: error
@@ -112,7 +117,7 @@
     url: 'https://helm.sh/docs/v3/topics/advanced/'
   outOfScope: false
   status: miss
-  gap: 'playbook: Helm ''exists and is not owned by this release'' fix with --take-ownership flag'
+  gap: 'doc: helm install/upgrade --take-ownership to adopt existing objects'
 - id: helm-008
   technology: helm
   kind: error
@@ -126,8 +131,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/chart_best_practices/templates/'
   outOfScope: false
-  status: miss
-  gap: 'doc: YAML # comments still evaluate template actions; use {{- /* */ -}} template comments'
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#4'
 - id: helm-009
   technology: helm
   kind: howto
@@ -141,8 +147,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/faq/installing/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm XDG environment variables for cache/config/data'
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#6'
 - id: helm-010
   technology: helm
   kind: howto
@@ -172,8 +179,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/intro/using_helm/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm --set escaping dots in keys with backslash, e.g. nodeSelector."kubernetes\.io/role"'
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#0'
 - id: helm-012
   technology: helm
   kind: howto
@@ -205,8 +213,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/topics/registries/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm OCI push workflow (helm package, helm registry login, helm push tgz oci://host/path)'
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#1'
 - id: helm-014
   technology: helm
   kind: concept
@@ -221,8 +230,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/faq/changes_since_helm2/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm 3 three-way strategic merge patch for upgrades and rollbacks vs Helm 2'
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#5'
 - id: helm-015
   technology: helm
   kind: concept
@@ -237,8 +247,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/topics/charts/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm 3 crds/ directory rules (plain YAML, install only, never upgraded or deleted)'
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#0'
 - id: helm-016
   technology: helm
   kind: concept
@@ -253,8 +264,9 @@
     commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
     url: 'https://helm.sh/docs/v3/topics/charts_hooks/'
   outOfScope: false
-  status: miss
-  gap: 'doc: Helm hooks lifecycle, failed hook fails release, hook resources untracked, helm.sh/hook-delete-policy'
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#1'
 - id: helm-017
   technology: helm
   kind: out-of-scope
@@ -264,8 +276,7 @@
     Helm CLI troubleshooting.'
   source: {}
   outOfScope: true
-  status: miss
-  gap: 'abstain: kn:k8s-ingress#1 (Ingress 404) should not fire for a Flux HelmRelease question'
+  status: abstain
 - id: helm-018
   technology: helm
   kind: out-of-scope
@@ -293,5 +304,4 @@
   answer: 'Outside this assistant''s scope: this is the Chart.js JavaScript library in application code, not Helm charts.'
   source: {}
   outOfScope: true
-  status: miss
-  gap: 'abstain: kn:helm-templates-values#3 and kn:helm#2 should not fire for a Chart.js JavaScript question'
+  status: abstain

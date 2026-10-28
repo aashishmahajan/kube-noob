@@ -16,8 +16,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: kubeadm reset/init x509 unknown authority, replace ~/.kube/config with /etc/kubernetes/admin.conf'
+  status: pass
+  expect:
+  - DBG-X509-CLIENT
 - id: k8s-002
   technology: kubernetes
   kind: error
@@ -32,8 +33,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/tasks/debug/debug-cluster/troubleshoot-kubectl/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: kubectl dial tcp i/o timeout, API server unreachable (VPN, kubeconfig server and context, firewall)'
+  status: pass
+  expect:
+  - DBG-APISERVER-UNREACHABLE
 - id: k8s-003
   technology: kubernetes
   kind: error
@@ -48,8 +50,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: kubeadm ''flag: malformed pair, expect string=string'', use kubeadm init --config file'
+  status: pass
+  expect:
+  - 'kn:k8s-kubeadm-troubleshooting#3'
 - id: k8s-004
   technology: kubernetes
   kind: error
@@ -98,8 +101,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/concepts/workloads/controllers/deployment/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: ProgressDeadlineExceeded / rollout status exceeded progress deadline, causes and kubectl rollout undo'
+  status: pass
+  expect:
+  - DBG-PROGRESS-DEADLINE
 - id: k8s-007
   technology: kubernetes
   kind: error
@@ -115,9 +119,9 @@
     url: 'https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/'
   outOfScope: false
   status: miss
-  gap: 'rank: kn:k8s-dns#1 debug-in-order section should outrank the DBG-DNS playbook'
   expect:
   - 'kn:k8s-dns#1'
+  gap: 'rank: kn:k8s-dns#1 debug-order walk (resolv.conf, DNS pods, logs) should outrank the DBG-DNS playbook'
 - id: k8s-008
   technology: kubernetes
   kind: error
@@ -132,8 +136,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/'
   outOfScope: false
-  status: miss
-  gap: 'playbook: no shell in distroless image, use kubectl debug ephemeral container with --target'
+  status: pass
+  expect:
+  - DBG-ENTRYPOINT-NOT-FOUND
 - id: k8s-009
   technology: kubernetes
   kind: howto
@@ -148,8 +153,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/concepts/workloads/controllers/deployment/'
   outOfScope: false
-  status: miss
-  gap: 'doc: kubectl rollout history and rollout undo --to-revision for Deployments'
+  status: pass
+  expect:
+  - 'kn:k8s-deployment-rollouts#2'
 - id: k8s-010
   technology: kubernetes
   kind: howto
@@ -180,8 +186,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/'
   outOfScope: false
-  status: miss
-  gap: 'doc: kubeadm CoreDNS Pending until a Pod network (CNI) add-on is installed'
+  status: pass
+  expect:
+  - 'kn:k8s-kubeadm-troubleshooting#1'
 - id: k8s-012
   technology: kubernetes
   kind: howto
@@ -229,8 +236,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/'
   outOfScope: false
-  status: miss
-  gap: 'doc: CrashLoopBackOff is a status not a phase; exponential back-off capped at 5 minutes, reset after 10 minutes'
+  status: pass
+  expect:
+  - DBG-CRASHLOOP
 - id: k8s-015
   technology: kubernetes
   kind: concept
@@ -261,8 +269,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/concepts/storage/persistent-volumes/'
   outOfScope: false
-  status: miss
-  gap: 'doc: PVC stuck Terminating, kubernetes.io/pvc-protection finalizer (Storage Object in Use Protection)'
+  status: pass
+  expect:
+  - DBG-PVC-TERMINATING
 - id: k8s-017
   technology: kubernetes
   kind: out-of-scope

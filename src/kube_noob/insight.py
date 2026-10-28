@@ -524,7 +524,8 @@ _ROSA_ONLY = frozenset({"rosa-classic", "rosa-hcp"})
 # document that never mentions that product does not answer it, however many Kubernetes words they share (measured on
 # the community-questions eval: Istio, Argo CD and Trivy questions drew Ingress, scheduling and RHACS documents).
 _OTHER_TOOLS = re.compile(
-    r"(?i)\b(istio|argo ?cd|argo-cd|argocd|argo workflows|trivy|karpenter|flux ?cd|fluxcd|flux2|terraform|talos|"
+    r"(?i)\b(istio|argo ?cd|argo-cd|argocd|argo workflows|trivy|karpenter|flux ?cd|fluxcd|flux2|flux|helmrelease|"
+    r"helm-controller|chart\.js|chartjs|aws lambda|lambda function|terraform|talos|"
     r"rancher|rke2|k3s|microk8s|minikube|kind cluster|docker desktop|docker compose|docker-compose|podman|"
     r"traefik|cilium|calico|envoy|keda|vault|jenkins|gitlab|github actions|tekton|skaffold|helmfile|metallb|"
     r"cert-manager|external-secrets|crossplane|longhorn|openebs|velero|knative|linkerd|kong|haproxy|"

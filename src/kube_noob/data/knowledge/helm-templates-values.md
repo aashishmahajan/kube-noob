@@ -6,7 +6,7 @@ platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28
 license: Apache-2.0
 requires:
-  - [helm, chart, charts, values.yaml, chart.yaml, helmfile, tpl, helmrelease, sprig]
+  - [helm, chart, charts, values.yaml, chart.yaml, tpl, sprig]
 sources:
   - {title: "Helm: Values Files", url: "https://helm.sh/docs/v3/chart_template_guide/values_files/", license: MIT}
   - {title: "Helm: Flow Control (scope with range and with)", url: "https://helm.sh/docs/v3/chart_template_guide/control_structures/", license: MIT}

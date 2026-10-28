@@ -49,7 +49,7 @@
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/olm-operatorgroups-troubleshooting.adoc'
   outOfScope: false
   status: miss
-  gap: 'playbook: OLM InstallPlan ''more than one operator group(s) are managing this namespace'' -> delete the extra OperatorGroup'
+  gap: 'playbook: OLM InstallPlan ''more than one operator group(s) are managing this namespace'' -> keep exactly one OperatorGroup'
 - id: ocp-004
   technology: openshift
   kind: error

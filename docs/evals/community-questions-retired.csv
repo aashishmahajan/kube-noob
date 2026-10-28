@@ -1,4 +1,5 @@
 id,change,date
+3286,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 3294,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 3475,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 3514,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
@@ -23,10 +24,14 @@ id,change,date
 8490,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 8558,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 10524,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
+18223,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 18610,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+18919,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 18994,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 19008,DBG-SCC matches a mangled security context constraint line (QA5),2026-10-28
+19397,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 22068,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+22724,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 23083,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 23099,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 23129,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28

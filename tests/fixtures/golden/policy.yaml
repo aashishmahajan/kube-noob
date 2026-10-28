@@ -36,7 +36,8 @@
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#message-expression'
   outOfScope: false
   status: miss
-  gap: 'playbook: VAP denial shows the failed CEL expression when no message is set; fix replicas or set message/messageExpression'
+  gap: 'playbook: ValidatingAdmissionPolicy denial - CEL validation false, set message or messageExpression, adjust replicas
+    or binding'
 - id: pol-003
   technology: policy
   kind: howto
@@ -213,7 +214,7 @@
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#type-checking'
   outOfScope: false
   status: miss
-  gap: 'playbook: VAP status.typeChecking expressionWarnings and correcting to object.spec.replicas'
+  gap: 'doc: ValidatingAdmissionPolicy status.typeChecking warnings are advisory; fix the field path (object.spec.replicas)'
 - id: pol-014
   technology: policy
   kind: howto

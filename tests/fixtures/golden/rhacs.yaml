@@ -139,7 +139,8 @@
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/unable-to-connect-to-the-sensor.adoc'
   outOfScope: false
   status: miss
-  gap: 'playbook: RHACS Collector cannot connect to Sensor; compare GRPC_SERVER env with the Sensor Service and restart collectors'
+  gap: 'playbook: RHACS Collector cannot connect to Sensor - compare GRPC_SERVER env with the sensor Service and restart collector
+    pods'
 - id: rhacs-010
   technology: rhacs
   kind: howto
@@ -299,4 +300,4 @@
   source: {}
   outOfScope: true
   status: miss
-  gap: 'abstain: kn:k8s-images#0 and kn:k8s-tls-x509#2 should not fire for a NeuVector question'
+  gap: 'abstain: kn:k8s-images#0 (generic image tag/pull doc) should not have fired for a NeuVector question'

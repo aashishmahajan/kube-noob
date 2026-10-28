@@ -35,7 +35,8 @@ from kube_noob.knowledge.store import Chunk, KnowledgeStore, builtin_chunks, tok
 MIN_RARE_TERMS = 3  # rare words shared with the issue text before it counts as a match
 RARE_SHARE = 0.03  # a word in at most 3% of issues is rare
 MIN_SCORE = 20.0  # BM25 score floor, set from tests/test_known_issues.py
-GENERAL_SHARE = 0.02  # and in at most 2% of the bundled Kubernetes and OpenShift docs
+GENERAL_MAX_CHUNKS = 2  # and in at most 2 sections of the bundled docs (a count: new documents never make more
+# words rare, which a share of sections would)
 RELATIVE_FLOOR = 0.75  # further matches must score at least 75% of the best one
 STRONG_SCORE = 40.0  # a score this high with two rare shared words, or one and a clear lead, is a match
 DOMINANCE = 2.0  # "a clear lead": at least twice the next applicable issue's score
@@ -273,7 +274,7 @@ class Index:
             if len(t) > 2
             and not any(f in GENERIC_WORDS or f in EVERYDAY_WORDS for f in _forms(t))
             and self.store.doc_frequency(t) <= RARE_SHARE
-            and general.doc_frequency(t) <= GENERAL_SHARE
+            and general.doc_count(t) <= GENERAL_MAX_CHUNKS
         )
 
     def _rare_shared(self, query_tokens: set[str], issue: Issue) -> list[str]:

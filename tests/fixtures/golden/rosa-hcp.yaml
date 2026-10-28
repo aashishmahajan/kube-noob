@@ -298,5 +298,4 @@
     AWS service rather than ROSA with hosted control planes.'
   source: {}
   outOfScope: true
-  status: miss
-  gap: 'abstain: doc: kn:ocp-egressip#2 should not fire for an AWS Lambda timeout question'
+  status: abstain

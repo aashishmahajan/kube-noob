@@ -356,6 +356,10 @@ class KnowledgeStore:
         """Share of chunks containing ``token`` (0..1); rare tokens carry the meaning of a claim."""
         return self._df.get(token, 0) / len(self.chunks) if self.chunks else 0.0
 
+    def doc_count(self, token: str) -> int:
+        """Number of chunks containing ``token``: unlike the share, adding chunks never lowers it."""
+        return self._df.get(token, 0)
+
     def get(self, chunk_id: str) -> Chunk | None:
         return self.by_id.get(chunk_id)
 

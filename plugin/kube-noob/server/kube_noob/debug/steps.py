@@ -153,6 +153,8 @@ def _classify_segment(seg: str) -> StepKind:
             return "change"
         return "change"
     if tool == "helm":
+        if sub == "repo":
+            return "read" if nxt == "list" else "change"  # add, update and remove change the local repositories file
         return "read" if sub in _HELM_READ else "change"
     if tool == "rosa":
         return "read" if sub in _ROSA_READ else "change"
