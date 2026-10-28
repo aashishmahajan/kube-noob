@@ -5,6 +5,10 @@ tags: [kubernetes, rbac, security]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [rbac, role, roles, rolebinding, rolebindings, clusterrole, clusterroles, clusterrolebinding, serviceaccount, serviceaccounts, forbidden]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm, rbac, clusterrole, rolebinding, clusterrolebinding, serviceaccount]
 sources:
   - {title: "Role Based Access Control Good Practices", url: "https://kubernetes.io/docs/concepts/security/rbac-good-practices/", license: CC-BY-4.0}
 ---

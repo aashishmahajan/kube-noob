@@ -5,6 +5,10 @@ tags: [kubernetes, availability, scheduling]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [topologyspreadconstraints, topology, spread, zone, zones, antiaffinity, podantiaffinity, affinity]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm]
 sources:
   - {title: "Pod Topology Spread Constraints", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/", license: CC-BY-4.0}
 ---

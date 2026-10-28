@@ -5,6 +5,10 @@ tags: [kubernetes, images, supply-chain]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [image, images, imagepullbackoff, errimagepull, registry, registries, imagepullsecrets, imagepullsecret, digest, digests, pull]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm, imagepullbackoff, errimagepull, imagepullsecrets, imagepullsecret]
 sources:
   - {title: "Images", url: "https://kubernetes.io/docs/concepts/containers/images/", license: CC-BY-4.0}
   - {title: "Using image pull secrets (OpenShift)", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/images/using-image-pull-secrets", license: CC-BY-SA-3.0}

@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (QA6 engines and matcher-evidence parts committed; CI to confirm; next: QA6 rank gaps, preamble sections, remaining out-of-scope misfires).
+right now; STATE.md says what is done. Updated 2026-10-28 late (QA6: golden in scope 84/96, out of scope 21/23; 19 frequent documents gated on their subject words; CI green through de85cba, later commits pending CI).
 
 ## Repository and branch
 
@@ -35,23 +35,19 @@ right now; STATE.md says what is done. Updated 2026-10-28 (QA6 engines and match
    `python scripts/eval_golden.py` prints NOW PASSING items; raise their status to pass with `expect` = the top id,
    after checking the answer against the item's `answer`. The writers' generators are in the session scratchpad only
    (goldgen/, gen_golden_ocp/); edit the YAML directly in a new session.
-1. QA6 (row 20v): Kubernetes, Helm, OpenShift, ROSA HCP, RHACS and policy content committed; golden in scope 72/96
-   (a fit), out of scope 18/23. Matcher evidence: prefixed names also match bare; a count of documents for rarity
-   was measured worse on the test half (4 better, 24 worse) and not kept: GENERAL_MAX_CHUNKS (sections) stays.
-   Mark row 20v done only after CI is green on the commit. Next QA6 follow-ups (each golden `gap` says what is
-   missing): rank misses pol-002, pol-004, pol-007, pol-015, rhacs-001, ocp-016, rosa-014, k8s-007; preamble
-   sections winning over the specific section; ocp-013; out-of-scope misfires rhacs-019 (Falco), rhacs-020
-   (NeuVector), rosa-017 (EKS), rosa-019 (application code), pol-009 (AWS IAM). Measure every change on the
-   community test half before and after (copy of src or a git worktree + PYTHONPATH, grade only moved rows
-   independently; retire test rows that informed a change in docs/evals/community-questions-retired.csv).
-   Facts verified for the Kubernetes and Helm part (session scratchpad, re-verify in a
-   new session): kubectl troubleshooting page (API server unreachable), Deployment page (progress deadline, rollout
-   history/undo, revisionHistoryLimit), PersistentVolume page (pvc-protection finalizer), debug-running-pod
-   (kubectl debug --target), pod-lifecycle (back-off 10s doubling to 300s, reset after 10 min), kubeadm
-   troubleshooting (CoreDNS Pending until a CNI, x509 after reset, malformed pair); Helm 3 pages (using_helm --set
-   format, registries, troubleshooting repo add/rollback, kubernetes_apis mapkubeapis, helm.md XDG, changes_since_helm2
-   three-way merge, CRD best practices, hooks, library charts, template comments, --take-ownership in helm_install).
-   Drafts: scratchpad qa6/k8s-kubeadm-troubleshooting.md, k8s-deployment-rollouts.md, helm-cli-operations.md.
+1. QA6 (row 20v): golden in scope 84/96 (Helm 16, Kubernetes 15, OpenShift 12, policy 11, RHACS 14, ROSA HCP 16),
+   out of scope 21/23, every miss regraded by an independent agent (gaps in tests/fixtures/golden). Shipped today:
+   engines content, prefixed names match bare, Falco/NeuVector gate, Helm namespaced releases, code-fence splitter
+   fix, six documented gaps, `requires` subject gates on 22 documents (measured: answered test rows 60 better,
+   4 worse). A count of documents for bug-matcher rarity was measured worse and not kept (GENERAL_MAX_CHUNKS).
+   Mark row 20v done only after CI is green on the last commit. Remaining misses are mostly ranking: k8s-007,
+   ocp-014, ocp-016 (a doc should outrank a playbook for a conceptual question), pol-002, pol-015, rhacs-001
+   (playbook vs policy explainer), pol-004, rhacs-006; ocp-009 and ocp-013 pick the neighbouring section;
+   rosa-017 (EKS) and rosa-019 (application code) are out-of-scope misfires. Measure every change on golden and on
+   the community halves before and after (git archive HEAD src into the scratchpad + PYTHONPATH; grade only moved
+   rows independently; retire test rows that informed a change). Golden tooling (run.py, GRADER-BRIEF.md, fold.py)
+   lives in the session scratchpad golden-run/; in a new session recreate it from tests/fixtures/golden and the
+   brief in docs/evals/supported-technologies.md.
 1. CI: run 40719517318 on 2353551 (QA3 part + QA4). QA2 is done (CI 40715183769 green). QA3 (row 20s) and QA4
    (row 20t) stay in-progress: QA3 needs error-string playbooks; QA4 needs the owner's decision on document answers.
 2. NEW (owner, 2026-10-28 15:29): answer files from Grok, third-party text, never commit them. Copies in the session

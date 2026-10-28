@@ -99,8 +99,8 @@ Golden results now, graded again by independent agents:
 | OpenShift | 12 of 16 (was 1) | 3 of 3 |
 | ROSA HCP | 16 of 16 (was 1) | 2 of 4 (was 1) |
 | RHACS | 14 of 16 (was 0) | 4 of 4 (was 2) |
-| Admission policy engines | 11 of 16 (was 0) | 3 of 4 |
-| **All** | **84 of 96 (was 7)** | **20 of 23 (was 15)** |
+| Admission policy engines | 11 of 16 (was 0) | 4 of 4 (was 3) |
+| **All** | **84 of 96 (was 7)** | **21 of 23 (was 15)** |
 
 OpenShift and ROSA HCP items are now asked with their platform (`platform: openshift` or `rosa-hcp`), as kube-noob
 is configured on those clusters; without it, OpenShift-only content stays silent unless the question says OpenShift
@@ -121,6 +121,7 @@ answer:
 | Helm namespaced releases and template scope; last-sentence questions | 10 | 5 | 0 | 5 |
 | Comments in code blocks no longer split sections | 7 | 1 | 2 | 4 |
 | Six documented gap answers; pod, storage and limits documents need their subject's words | 66 | 32 | 12 | 22 |
+| 19 frequent documents need their subject's words (answered rows; a random 100 of the rest) | 80; 100 | 60; 84 | 4; 3 | 16; 13 |
 
 Most moved answers were wrong both before and after: real questions are dominated by Red Hat bug reports (the
 bundled release notes hold the key for few of them) and by products outside the box, which documentation content

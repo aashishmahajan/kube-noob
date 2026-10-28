@@ -5,6 +5,10 @@ tags: [kubernetes, openshift, scheduling, pending, resources, taints, troublesho
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [pending, failedscheduling, unschedulable, taint, taints, toleration, tolerations, affinity, nodeselector, insufficient, schedule, scheduler, scheduling]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm]
 sources:
   - {title: "Kubernetes: Resource Management for Pods and Containers", url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/", license: CC-BY-4.0}
   - {title: "Kubernetes: Assigning Pods to Nodes", url: "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/", license: CC-BY-4.0}

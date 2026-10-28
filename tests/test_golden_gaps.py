@@ -414,3 +414,21 @@ def test_generic_words_do_not_bring_the_pod_storage_or_limits_documents(kit: tk.
         ),
     ):
         assert not [g for g in _top(kit, text) if g.startswith(doc)], text
+
+
+def test_frequent_documents_need_a_word_of_their_subject(kit: tk.Toolkit) -> None:
+    # Measured on the train half: the 19 documents that answered most community rows (Kubernetes overview, RHACS,
+    # everyday errors, images, Ingress, kubelet, NetworkPolicy, TLS, Helm, selectors, DNS, RBAC, scheduling,
+    # deprecations, Services, Pod Security, learning paths, topology spread) were mostly wrong when the post never
+    # named their subject. Each now needs a word of it, and of Kubernetes where its own words are generic.
+    for text in (
+        "How do I make a Docker image smaller? The registry push takes ages because the image is 2 GB.",
+        "Our Redis cluster loses its leader during network partitions. Which policy settings avoid split brain?",
+        "Which certificate does my nginx web server send when the TLS handshake fails on an old Android client?",
+        "Service discovery with etcd on Docker Swarm stopped working after we rotated the TLS keys.",
+    ):
+        assert _top(kit, text) == [], (text, _top(kit, text))
+    from kube_noob.knowledge.store import builtin_chunks
+
+    gated = {c.doc_id for c in builtin_chunks() if c.extra.get("requires")}
+    assert {"kubernetes", "stackrox", "k8s-common-errors", "k8s-images", "helm", "k8s-pss", "learning-paths"} <= gated

@@ -5,6 +5,9 @@ tags: [helm, packaging]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [helm, chart, charts, values.yaml, chart.yaml]
 sources:
   - {title: "Helm documentation", url: "https://helm.sh/docs/", license: MIT}
   - {title: "helm/helm releases", url: "https://github.com/helm/helm/tags", license: Apache-2.0}

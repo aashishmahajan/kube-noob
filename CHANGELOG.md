@@ -160,6 +160,15 @@
   them to ECS, EBS and C questions. Golden in scope 84 of 96 (Helm 16, Kubernetes 15, policy 11, ROSA HCP 16).
   Community: train half 66 answers moved (38 better, 8 worse, 20 neither); test half 66 moved (32 better, 12 worse,
   22 neither), independent grader; most of the better rows are unrelated documents no longer given.
+- The 19 documents that answered most community questions (the Kubernetes overview, RHACS, everyday errors, images,
+  Ingress, kubelet, NetworkPolicy, TLS, Helm, label selectors, DNS, RBAC, scheduling, removed APIs, Services, Pod
+  Security, learning paths, topology spread) now need a word of their subject in the question, and of Kubernetes
+  where their own words are generic (image, certificate, label, service). Measured on the community halves, where
+  these documents mostly answered posts about something else: on the test half, document answers fell from 1,032 to
+  633 rows. An independent grader compared every moved answer among the answered test rows (80: 60 better, 4 worse,
+  16 neither) and a random 100 of the other moved test rows (84 better, 3 worse, 13 neither); on the answered train
+  rows 85 moved: 63 better, 3 worse, 19 neither. Golden unchanged in scope (84 of 96); an AWS IAM question no longer
+  gets the image document, so out of scope 21 of 23 are left unanswered.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

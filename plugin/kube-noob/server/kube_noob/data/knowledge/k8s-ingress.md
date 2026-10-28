@@ -5,6 +5,9 @@ tags: [kubernetes, openshift, networking, ingress, nodeport, loadbalancer]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [ingress, ingresses, ingressclass, ingress-nginx, nodeport, loadbalancer]
 sources:
   - {title: "Kubernetes: Ingress", url: "https://kubernetes.io/docs/concepts/services-networking/ingress/", license: CC-BY-4.0}
   - {title: "Kubernetes: Ingress Controllers", url: "https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/", license: CC-BY-4.0}

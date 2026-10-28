@@ -5,6 +5,9 @@ tags: [kubernetes, security, pss, psa, pod-security-admission]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [psa, pss, pod-security, podsecurity, restricted, baseline, privileged, securitycontext, pod-security.kubernetes.io]
 sources:
   - {title: "Pod Security Standards", url: "https://kubernetes.io/docs/concepts/security/pod-security-standards/", license: CC-BY-4.0}
   - {title: "Pod Security Admission", url: "https://kubernetes.io/docs/concepts/security/pod-security-admission/", license: CC-BY-4.0}

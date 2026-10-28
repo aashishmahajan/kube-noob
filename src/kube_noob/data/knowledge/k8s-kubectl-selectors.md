@@ -5,6 +5,10 @@ tags: [kubernetes, openshift, kubectl, labels, selectors, deployments, beginner]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [label, labels, selector, selectors, matchlabels, belong, belongs, owner, owned, ownerreferences]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm]
 sources:
   - {title: "Kubernetes: Labels and Selectors", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/", license: CC-BY-4.0}
   - {title: "Kubernetes: kubectl Quick Reference", url: "https://kubernetes.io/docs/reference/kubectl/quick-reference/", license: CC-BY-4.0}

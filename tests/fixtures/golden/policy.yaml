@@ -151,8 +151,7 @@
     engines or SecurityContextConstraints.'
   source: {}
   outOfScope: true
-  status: miss
-  gap: 'abstain: doc: kn:k8s-images#0 should not have fired; AWS IAM for ECR is out of scope'
+  status: abstain
 - id: pol-010
   technology: policy
   kind: error

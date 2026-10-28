@@ -6,6 +6,9 @@ tags: [learning, resources]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [learn, learning, course, courses, tutorial, tutorials, beginner, beginners, certification, cka, ckad, cks, practice, study, roadmap, lab, labs]
 sources:
   - {title: "kube-noob link verification (2026-10-27)", url: "https://github.com/aashishmahajan/kube-noob", license: Apache-2.0}
 ---

@@ -5,6 +5,10 @@ tags: [kubernetes, openshift, networking, dns, troubleshooting]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [dns, coredns, nslookup, resolv.conf, dig, cluster.local, svc.cluster.local]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm, coredns, cluster.local, svc.cluster.local]
 sources:
   - {title: "Kubernetes: Debugging DNS Resolution", url: "https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/", license: CC-BY-4.0}
   - {title: "Kubernetes: DNS for Services and Pods", url: "https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/", license: CC-BY-4.0}

@@ -5,6 +5,10 @@ tags: [kubernetes, deprecation, upgrades]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [apiversion, deprecated, deprecation, deprecations, removed, v1beta1, v1beta2, v2beta1, v2beta2, api, apis, upgrade, upgrading]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm]
 sources:
   - {title: "Deprecated API Migration Guide", url: "https://kubernetes.io/docs/reference/using-api/deprecation-guide/", license: CC-BY-4.0}
 ---

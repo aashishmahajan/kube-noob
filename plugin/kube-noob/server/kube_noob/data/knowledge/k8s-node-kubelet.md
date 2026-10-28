@@ -5,6 +5,9 @@ tags: [kubernetes, openshift, kubelet, nodes, kubeadm, swap, cgroups, certificat
 platforms: [kubernetes, openshift]
 updated: 2026-10-28
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm, notready, node, nodes]
 sources:
   - {title: "Kubernetes: Installing kubeadm (swap configuration)", url: "https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/", license: CC-BY-4.0}
   - {title: "Kubernetes: Swap memory management", url: "https://kubernetes.io/docs/concepts/cluster-administration/swap-memory-management/", license: CC-BY-4.0}
