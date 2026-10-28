@@ -29,8 +29,8 @@ right now; STATE.md says what is done. Updated 2026-10-28 16:00 (SAST1, G1-G3, G
 
 ## In flight (finish these first)
 
-1. CI: QA2 commit 001b088 (run 40715183769) and the QA3 commit after it. Green -> mark QA2 (row 20r) done; QA3
-   (row 20s) stays in-progress until its items below are done and CI is green.
+1. CI: run 40719517318 on 2353551 (QA3 part + QA4). QA2 is done (CI 40715183769 green). QA3 (row 20s) and QA4
+   (row 20t) stay in-progress: QA3 needs error-string playbooks; QA4 needs the owner's decision on document answers.
 2. NEW (owner, 2026-10-28 15:29): answer files from Grok, third-party text, never commit them. Copies in the session
    scratchpad `qa2in/hc.csv` (3,732 rows, high-confidence accepted answers) and `qa2in/all.xlsx`; originals at
    /mnt/user-data/attachments/<session>/eb3fa585-questions_with_answers_high_confidence.csv and
@@ -58,8 +58,7 @@ right now; STATE.md says what is done. Updated 2026-10-28 16:00 (SAST1, G1-G3, G
    (doc id = row id) holds the owner's `{verdict, expected, updatedAt}`. To fold in: `ArtifactData list` on
    `verdicts`; the owner's verdict wins in docs/evals/community-questions-grades.csv or -heldout.csv; paraphrase
    `expected` into `note` (max 300 chars, no question text); rerun the eval with both `--grades`; commit. When an
-   answer changes, update that `rows` doc (pin `if_version`). Rows 7789, 3245, 23319 moved to no answer in QA3/QA4;
-   their `rows` docs still show the earlier answer.
+   answer changes, update that `rows` doc (pin `if_version`). All 116 `rows` docs match the answers at commit 2353551.
 5. Stack Overflow pages cannot be read here (search excludes it, api.stackexchange.com blocked); the owner's answer
    files replace that. Independent agents' reference answers (official docs) are in the scratchpad only.
 6. QA3 so far (committed with this handoff): DBG-ENTRYPOINT-NOT-FOUND playbook (runc libcontainer
