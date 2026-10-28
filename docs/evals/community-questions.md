@@ -1,4 +1,4 @@
-# Community questions eval (QA1, QA2)
+# Community questions eval (QA1 to QA4)
 
 How well kube-noob answers what people actually ask, measured on 25,292 public questions, issues and bug reports
 the owner collected (Stack Overflow, Server Fault, GitHub issues and discussions, Red Hat Jira OCPBUGS and ROX,
@@ -92,6 +92,46 @@ answers helped.
   the next knowledge to add, each checked against the documentation.
 - An accuracy grade needs reference answers. The independent agent's reference answers stand in for them here;
   accepted answers from the sources (Stack Exchange cannot be read from this environment) would replace them.
+
+## Against accepted answers (QA4, 2026-10-28)
+
+The owner then supplied 3,732 of the questions with a high-confidence answer each: 2,598 accepted answers (Stack
+Overflow, Server Fault, Unix, AWS re:Post, forums) and 1,125 Jira resolutions or release notes. The answers are
+third-party text and stay out of the repository; `scripts/eval_questions.py` reads `answer_text` when the CSV has
+it. Two measures:
+
+- Independent grading: an agent compared kube-noob's top finding with the accepted answer for a random sample (70
+  rows kube-noob answered, 20 it did not), without seeing any score, and separately for 40 random rows answered from
+  the official docs corpus (`kube-noob corpus build --sources k8s-docs,ocp-docs`, then `--data-dir`).
+- A lexical score for trends (`answerShare`: the share of the answer's specific words in the top finding;
+  `answerAgrees` at 0.15 and at least 3 shared words). Against the independent grading it is right about 6 times in
+  10 when it says "agrees" and finds about half of the helpful answers, and it overrates long documents, so it is
+  quoted only as a trend; the graded sample is the measure.
+
+| kube-noob's answer (bundled knowledge) | Graded | Agrees | Partly right | Wrong |
+|---|---|---|---|---|
+| Playbook | 20 | 3 | 11 | 6 |
+| Reported issue | 20 | 6 | 0 | 14 |
+| Documents | 30 | 0 | 2 | 28 |
+| Documents from the official docs corpus | 40 | 1 | 5 | 34 |
+
+Of 20 rows without an answer, 10 were right not to answer and 10 had an answer kube-noob should hold (core
+Kubernetes how-tos, and OpenShift bugs fixed in a release).
+
+What this says:
+
+- Playbooks are the reliable answer: 14 of 20 helped, though 11 of those named the symptom without the specific cause
+  (CrashLoop, x509, image pull, degraded operator). More playbooks keyed on exact error strings, with the specific
+  causes inside them, are the most direct gain.
+- Reported issues are right when the bug itself or its clone is in the index (6 of 20) and otherwise name a sibling
+  bug in the same component. A synced Jira copy makes the right bug findable; the matcher also needs to prefer the
+  same symptom over the same component.
+- Documents matched by shared words do not answer real questions: 2 of 30 helped, and loading the full official docs
+  does not change that (6 of 40). Half the misses were questions about other products or plain Docker; the other half
+  were in-domain questions answered with a different feature that shares a keyword. More text to search does not fix
+  word matching; meaning-based matching, or not offering documents for pasted posts, does. That is an owner decision
+  (it touches "No AI inside"), recorded in `.claude/loop/STATE.md`.
+- After QA4, a question that names another product is answered by a document only if the document mentions it.
 
 ## Re-grading after a tuning change
 

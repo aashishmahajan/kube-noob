@@ -326,3 +326,56 @@ def test_a_kubeconfig_exec_plugin_that_is_missing_is_explained(kit: tk.Toolkit) 
         "found. What should I do?"
     )
     assert _docs(kit, post)[0].startswith("kn:k8s-kubeconfig-exec#")
+
+
+def test_answers_are_scored_without_being_written_out(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("eval_questions_a", ROOT / "scripts" / "eval_questions.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["eval_questions_a"] = mod
+    spec.loader.exec_module(mod)
+    hit = mod.answer_overlap(
+        "Set securityContext fsGroup so the volume is group-writable; runAsUser picks the uid.",
+        "fsGroup makes the volume files group-owned; set runAsUser and fsGroup in the pod securityContext",
+    )
+    assert hit["answerAgrees"] and hit["answerShared"] >= 3
+    assert not mod.answer_overlap("Use securityContext fsGroup for volumes.", "")["answerAgrees"]
+    path = tmp_path / "q.csv"
+    secret_answer = "ZZTOP-unique-answer-marker fsGroup securityContext runAsUser"
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["id", "question", "body_excerpt", "answer_text", "answer_source_type"])
+        w.writeheader()
+        w.writerow(
+            {
+                "id": "1",
+                "question": "Why can my non-root container not write to its volume?",
+                "body_excerpt": "",
+                "answer_text": secret_answer,
+                "answer_source_type": "accepted_answer",
+            }
+        )
+    out = tmp_path / "out"
+    assert mod.main([str(path), "--out", str(out)]) == 0
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["referenceAnswers"]["rows"] == 1
+    for name in ("results.csv", "summary.json"):
+        assert "ZZTOP" not in (out / name).read_text()
+    row = next(csv.DictReader((out / "results.csv").open()))
+    assert row["answerSource"] == "accepted_answer" and float(row["answerShare"]) >= 0
+
+
+def test_a_question_about_another_product_is_not_answered_by_a_doc_that_never_names_it(kit: tk.Toolkit) -> None:
+    istio = (
+        "Istio sidecar ingress gateway returns 503 for one service\n"
+        "With Istio 1.24 the ingress gateway answers 503 for my service while other routes work. How do I debug it?"
+    )
+    assert _docs(kit, istio) == []
+    plain = istio.replace("Istio sidecar ingress gateway", "Ingress").replace(
+        "With Istio 1.24 the ingress gateway", "It"
+    )
+    assert _docs(kit, plain)  # the same question about plain Kubernetes still gets documents
+    lens = (
+        "Lens cannot connect to my cluster\n"
+        "It says getting credentials: exec: executable aws not found after I copied the kubeconfig. What now?"
+    )
+    assert _docs(kit, lens)[0].startswith("kn:k8s-kubeconfig-exec#")  # "lens" is not on the product list

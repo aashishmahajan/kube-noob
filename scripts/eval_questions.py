@@ -18,6 +18,11 @@ Usage:
   python scripts/eval_questions.py questions.csv --out <dir> [--limit N] [--sample-review 76] [--seed 7]
       [--grades docs/evals/community-questions-grades.csv --grades docs/evals/community-questions-heldout.csv]
 
+A CSV that also carries ``answer_text`` (an accepted answer or a Jira resolution) is scored against it: per row,
+the share of the answer's specific words that kube-noob's top finding carries (``answerShare``) and whether that
+reaches the agreement threshold (``answerAgrees``); ``summary.json`` -> ``referenceAnswers`` totals it per answer kind.
+The answer text is never written out.
+
 Writes ``<dir>/results.csv`` (one row per question, no question text), ``<dir>/summary.json`` and, with
 ``--sample-review``, ``<dir>/review.csv``: a stratified sample with the question, kube-noob's top answer and
 ``verdict`` / ``expected`` columns for a person to fill in.
@@ -95,6 +100,43 @@ VERDICTS = ("correct", "partial", "wrong", "missed", "not-indexed", "out-of-scop
 GRADE_COLUMNS = ("id", "topic", "source", "answer", "top", "verdict", "note")
 MAX_GRADES = 5000
 MAX_NOTE = 300
+
+
+MAX_ANSWER = 20_000
+# A top finding "agrees" with a reference answer when it carries at least this share of the answer's specific words
+# and at least AGREE_MIN_SHARED of them (calibrated against graded rows; see docs/evals/community-questions.md).
+AGREE_SHARE = 0.15
+AGREE_MIN_SHARED = 3
+
+
+def _shown_text(top: dict[str, Any], store: Any, playbook_text: dict[str, str]) -> str:
+    """The text a person reads for kube-noob's top finding: the whole document section, the playbook's causes,
+    checks and fixes, or the reported issue's summary."""
+    if not top:
+        return ""
+    if top.get("source") == "doc":
+        chunk = store.get(top.get("id", ""))
+        return f"{top.get('title') or ''} {chunk.text if chunk else ''}"
+    if top.get("source") == "playbook":
+        return playbook_text.get(str(top.get("id")), str(top.get("title") or ""))
+    return f"{top.get('id') or ''} {top.get('title') or ''}"
+
+
+def answer_overlap(answer: str, shown: str) -> dict[str, Any]:
+    """How much of a reference answer's specific vocabulary kube-noob's top finding carries. Lexical, so a signal to
+    sort rows by and to calibrate against graded rows, not a verdict; the answer text itself is never written out."""
+    from kube_noob.insight import _specific_terms
+
+    want = _specific_terms(answer, kubernetes_words=True)
+    have = _specific_terms(shown, kubernetes_words=True) if shown else set()
+    shared = want & have
+    share = round(len(shared) / len(want), 3) if want else 0.0
+    return {
+        "answerTerms": len(want),
+        "answerShared": len(shared),
+        "answerShare": share,
+        "answerAgrees": bool(shown) and share >= AGREE_SHARE and len(shared) >= AGREE_MIN_SHARED,
+    }
 
 
 class GradesError(ValueError):
@@ -185,6 +227,12 @@ def evaluate(rows: list[dict[str, str]], data_dir: Path) -> tuple[list[dict[str,
     indexed = {i.id for i in known_issues.get_index().issues}
     out: list[dict[str, Any]] = []
     started = time.monotonic()
+    from kube_noob.debug.playbooks import PLAYBOOKS
+
+    playbook_text = {
+        p.pid: " ".join((p.title, *p.root_causes, *p.checks, *p.fixes)) for p in PLAYBOOKS
+    }  # what a person reads for that diagnosis
+    store = kit.store()
     for r in rows:
         text = f"{r['question'].strip()}\n{r['body_excerpt'].strip()}".strip()
         platform = _platform(r.get("platform_tags", ""))
@@ -223,6 +271,11 @@ def evaluate(rows: list[dict[str, str]], data_dir: Path) -> tuple[list[dict[str,
                 and r.get("topic_category", "") in PLAYBOOK_TOPICS.get(playbooks[0], set()),
             }
         )
+        answer = (r.get("answer_text") or "")[:MAX_ANSWER]
+        if answer.strip():
+            shown = _shown_text(top, store, playbook_text)
+            out[-1].update(answer_overlap(answer, shown))
+            out[-1]["answerSource"] = r.get("answer_source_type", "")
     return out, {"seconds": round(time.monotonic() - started, 1), "indexedIssues": len(indexed)}
 
 
@@ -267,6 +320,32 @@ def summarise(res: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any]
             for t, c in sorted(by_topic.items(), key=lambda kv: -kv[1]["rows"])
         },
         "playbooksOutsideTheirTopic": dict(misplaced.most_common(15)),
+        **_answer_summary(res),
+    }
+
+
+def _answer_summary(res: list[dict[str, Any]]) -> dict[str, Any]:
+    """Against reference answers (rows whose CSV carries answer_text): how often the top finding agrees, per kind."""
+    rows = [r for r in res if "answerShare" in r]
+    if not rows:
+        return {}
+    by: dict[str, Counter[str]] = defaultdict(Counter)
+    for r in rows:
+        c = by[r["answer"]]
+        c["rows"] += 1
+        c["agrees"] += r["answerAgrees"]
+    answered = [r for r in rows if r["answer"] != "none"]
+    return {
+        "referenceAnswers": {
+            "rows": len(rows),
+            "answered": len(answered),
+            "agreesWhenAnswered": round(100.0 * sum(r["answerAgrees"] for r in answered) / len(answered), 1)
+            if answered
+            else 0.0,
+            "agreesOfAll": round(100.0 * sum(r["answerAgrees"] for r in rows) / len(rows), 1),
+            "byAnswer": {k: {"rows": v["rows"], "agrees": v["agrees"]} for k, v in sorted(by.items())},
+            "threshold": {"share": AGREE_SHARE, "minShared": AGREE_MIN_SHARED},
+        }
     }
 
 
@@ -313,6 +392,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--sample-review", type=int, default=0)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument(
+        "--data-dir",
+        type=Path,
+        help="a kube-noob data dir to read (for example one with the optional docs corpus built); default: a fresh one",
+    )
+    ap.add_argument(
         "--grades",
         type=Path,
         action="append",
@@ -337,10 +421,13 @@ def main(argv: list[str]) -> int:
     if a.limit:
         rows = random.Random(a.seed).sample(rows, min(a.limit, len(rows)))  # noqa: S311 - reproducible sample
     a.out.mkdir(parents=True, exist_ok=True)
-    res, meta = evaluate(rows, a.out / "data")
+    res, meta = evaluate(rows, a.data_dir or a.out / "data")
     graded = apply_grades(res, grades) if grades else None
     with (a.out / "results.csv").open("w", newline="", encoding="utf-8") as f:
-        base = [k for k in res[0] if k not in ("verdict", "previousVerdict")]
+        extra = ("answerTerms", "answerShared", "answerShare", "answerAgrees", "answerSource")
+        base = [k for k in res[0] if k not in ("verdict", "previousVerdict", *extra)]
+        if any("answerShare" in r for r in res):
+            base += list(extra)
         w = csv.DictWriter(f, fieldnames=[*base, "verdict", "previousVerdict"], restval="")
         w.writeheader()
         w.writerows(res)
@@ -354,7 +441,7 @@ def main(argv: list[str]) -> int:
             w = csv.DictWriter(f, fieldnames=list(sample[0]))
             w.writeheader()
             w.writerows(sample)
-    keys = ("rows", "seconds", "answerCoverage", "groundTruth", "graded")
+    keys = ("rows", "seconds", "answerCoverage", "groundTruth", "graded", "referenceAnswers")
     print(json.dumps({k: summary[k] for k in keys if k in summary}, indent=1))
     return 0
 

@@ -6,7 +6,7 @@ id,topic,source,answer,top,verdict,note
 5004,dns,discourse:discuss.kubernetes.io,docs,kn:k8s-networkpolicy#2,partial,second document (Ingress) is relevant; the top one (NetworkPolicy for the router) is not
 6009,etcd-control-plane,github-discussions:k3s-io/k3s,none,,out-of-scope,k3s design question
 7499,helm,stackexchange:stackoverflow,none,,missed,Helm templating question with no answer
-7789,image-pull,discourse:forums.docker.com,docs,kn:k8s-images#0,wrong,Docker-only sharing question; the image pull doc is about Kubernetes pull secrets
+7789,image-pull,discourse:forums.docker.com,none,,out-of-scope,Docker-only sharing question; no answer is right
 8857,ingress-routing,stackexchange:serverfault,none,,out-of-scope,application behind a third-party ingress
 10437,kubernetes-general,stackexchange:stackoverflow,none,,out-of-scope,Azure Container Apps
 10691,manifests-yaml,discourse:discuss.hashicorp.com,none,,out-of-scope,Vault policy templates

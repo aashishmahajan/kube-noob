@@ -41,6 +41,11 @@
   file or directory` when a container is created means its command is not in the image (runc looks it up with Go's
   `exec.LookPath` at create time). New knowledge on kubeconfig credential plugins (`exec`, `installHint`, relative
   paths) for "getting credentials: exec: executable ... not found".
+- A question that names another product (Istio, Argo CD, Trivy, Terraform, Docker Compose...) is answered by a
+  document only if that document mentions the product: a doc sharing Kubernetes words with an Istio question does
+  not answer it. `scripts/eval_questions.py` scores rows whose CSV carries accepted answers (`answer_text`): the share
+  of the answer's specific words in kube-noob's top finding, totalled per answer kind, without writing the answer
+  text out; `--data-dir` evaluates with a prepared data dir (for example with the official docs corpus built).
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

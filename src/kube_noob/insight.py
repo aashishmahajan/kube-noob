@@ -520,17 +520,29 @@ _STOP = frozenset(
 
 
 _ROSA_ONLY = frozenset({"rosa-classic", "rosa-hcp"})
+# Products with their own documentation that kube-noob does not carry. A question that names one is about it: a
+# document that never mentions that product does not answer it, however many Kubernetes words they share (measured on
+# the community-questions eval: Istio, Argo CD and Trivy questions drew Ingress, scheduling and RHACS documents).
+_OTHER_TOOLS = re.compile(
+    r"(?i)\b(istio|argo ?cd|argo-cd|argocd|argo workflows|trivy|karpenter|flux ?cd|fluxcd|flux2|terraform|talos|"
+    r"rancher|rke2|k3s|microk8s|minikube|kind cluster|docker desktop|docker compose|docker-compose|podman|"
+    r"traefik|cilium|calico|envoy|keda|vault|jenkins|gitlab|github actions|tekton|skaffold|helmfile|metallb|"
+    r"cert-manager|external-secrets|crossplane|longhorn|openebs|velero|knative|linkerd|kong|haproxy|"
+    r"spring boot|django|laravel|wordpress|grafana|loki)\b"
+)
 
 
 class _DocFit:
     """Whether a knowledge doc may answer this text, beyond shared words. With no platform given, a doc written only
     for OpenShift or ROSA needs the text to say it is OpenShift or ROSA (the playbooks' rule, G83); with a platform
-    given, the doc must cover it. A doc's ``requires`` groups each need one of their words in the text."""
+    given, the doc must cover it. A doc's ``requires`` groups each need one of their words in the text, and a text
+    that names another product (Istio, Argo CD, Trivy...) is answered only by a doc that mentions it."""
 
     def __init__(self, text: str, platform: str | None) -> None:
         self.platform = platform
         self._text = text
         self._ctx: tuple[bool, bool] | None = None
+        self.tools = {re.sub(r"[\s-]", "", m.lower()) for m in _OTHER_TOOLS.findall(text[:2_000])}
 
     def _context(self) -> tuple[bool, bool]:
         if self._ctx is None:
@@ -551,6 +563,10 @@ class _DocFit:
             openshift, rosa = self._context()
             if not (rosa if plats <= _ROSA_ONLY else openshift or rosa):
                 return False
+        if self.tools:
+            body = re.sub(r"[\s-]", "", f"{getattr(chunk, 'title', '')} {getattr(chunk, 'text', '')}".lower())
+            if not any(t in body for t in self.tools):
+                return False  # the question is about a product this document never mentions
         return all(any(w in words for w in group) for group in extra.get("requires") or [])
 
 

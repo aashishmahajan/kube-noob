@@ -41,7 +41,16 @@ right now; STATE.md says what is done. Updated 2026-10-28 16:00 (SAST1, G1-G3, G
    `--answers <csv>` that scores kube-noob's top finding against answer_text (overlap of commands, flags, resource
    kinds and error strings; report per answer kind, never store answer text in results), grade a stratified sample
    with an independent agent against the accepted answers, then tune on a split (tune half, hold out half).
-3. Corpus experiment (QA3, not started): build the optional docs corpus
+2b. QA4 results (committed): eval answer scoring + --data-dir; independent grading against accepted answers:
+   playbooks 3 agree + 11 partial of 20; reported issues 6 of 20 (else a sibling bug in the same component);
+   bundled docs 0 + 2 of 30; official-docs corpus docs 1 + 5 of 40. Word-matched documents do not answer real
+   pasted questions; owner decision pending (STATE "Owner actions": keep as related reading / docs only for typed
+   questions / offline embeddings). Next levers in order: error-string playbooks with specific causes (mine the
+   answered CSV: answer_text names the cause), reported-issue matcher preferring same symptom over same component,
+   synced Jira copy, then the owner's doc decision. Agent outputs: scratchpad grade-agents/answers-graded.jsonl,
+   corpus-graded.jsonl.
+3. Corpus experiment (QA3): built (scratchpad corpusdata: k8s-docs 397 files, ocp-docs 2,338 modules) with
+   `KUBE_NOOB_DATA_DIR=<dir> kube-noob corpus build --sources k8s-docs,ocp-docs --online`. Earlier plan: build the optional docs corpus
    (`kube-noob corpus build --sources k8s-docs,ocp-docs --online` into a scratch data dir) and add an eval option to
    reuse that data dir, to measure answers with official docs loaded vs the bundled ~140 chunks.
 4. Owner grading page (private artifact): https://claude.ai/artifact/5wagdbnLepUydgbVVHJfxZ . Store `rows` holds
@@ -49,8 +58,8 @@ right now; STATE.md says what is done. Updated 2026-10-28 16:00 (SAST1, G1-G3, G
    (doc id = row id) holds the owner's `{verdict, expected, updatedAt}`. To fold in: `ArtifactData list` on
    `verdicts`; the owner's verdict wins in docs/evals/community-questions-grades.csv or -heldout.csv; paraphrase
    `expected` into `note` (max 300 chars, no question text); rerun the eval with both `--grades`; commit. When an
-   answer changes, update that `rows` doc (pin `if_version`). Row 3494 changed in QA3 (now kn:k8s-kubeconfig-exec#1,
-   correct): its `rows` doc still shows the QA2 answer.
+   answer changes, update that `rows` doc (pin `if_version`). Rows 7789, 3245, 23319 moved to no answer in QA3/QA4;
+   their `rows` docs still show the earlier answer.
 5. Stack Overflow pages cannot be read here (search excludes it, api.stackexchange.com blocked); the owner's answer
    files replace that. Independent agents' reference answers (official docs) are in the scratchpad only.
 6. QA3 so far (committed with this handoff): DBG-ENTRYPOINT-NOT-FOUND playbook (runc libcontainer

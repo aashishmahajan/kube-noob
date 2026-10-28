@@ -1,6 +1,6 @@
 id,topic,source,answer,top,verdict,note
 23442,workloads-debugging,github-discussions:argoproj/argo-cd,none,,out-of-scope,graded by an independent agent against official documentation
-3245,aws-eks-ecr,github:kubernetes-sigs/aws-load-balancer-controller,docs,kn:k8s-ingress#2,wrong,graded by an independent agent against official documentation
+3245,aws-eks-ecr,github:kubernetes-sigs/aws-load-balancer-controller,none,,out-of-scope,Terraform provider and an OCI chart; no answer is right
 12032,networking-ip,github-discussions:istio/istio,none,,out-of-scope,graded by an independent agent against official documentation
 10584,kubernetes-general,stackexchange:stackoverflow,docs,kn:k8s-tls-x509#1,wrong,graded by an independent agent against official documentation
 3507,aws-eks-ecr,stackexchange:stackoverflow,none,,out-of-scope,graded by an independent agent against official documentation
@@ -28,7 +28,7 @@ id,topic,source,answer,top,verdict,note
 23604,workloads-debugging,github-discussions:kedacore/keda,none,,out-of-scope,graded by an independent agent against official documentation
 22012,storage-odf,stackexchange:stackoverflow,docs,kn:k8s-common-errors#6,correct,fsGroup and runAsUser in the pod securityContext
 8305,image-pull,stackexchange:stackoverflow,docs,kn:k8s-images#0,wrong,graded by an independent agent against official documentation
-23319,workloads-debugging,discourse:discuss.kubernetes.io,docs,kn:k8s-ingress#3,wrong,graded by an independent agent against official documentation
+23319,workloads-debugging,discourse:discuss.kubernetes.io,none,,missed,"probe flaps under load: a light readiness probe, requests sized for PHP-FPM, heavy work in a queue"
 16885,policy-kyverno-opa,stackexchange:stackoverflow,none,,missed,graded by an independent agent against official documentation
 10817,manifests-yaml,github-discussions:rancher/rke2,docs,kn:k8s-ingress#2,partial,graded by an independent agent against official documentation
 10316,kubernetes-general,stackexchange:stackoverflow,none,,out-of-scope,graded by an independent agent against official documentation
