@@ -128,7 +128,14 @@ def parse(text: str, name: str = "") -> list[Case]:
     suffix = Path(name).suffix.lower()
     raw: list[Any]
     if suffix == ".jsonl":
-        raw = [json.loads(line) for line in text.splitlines() if line.strip()]
+        raw = []
+        for n, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                raw.append(json.loads(line))
+            except (ValueError, RecursionError) as exc:
+                raise ValueError(f"{name} line {n}: not JSON (or nested too deeply)") from exc
     elif suffix == ".csv":
         raw = _rows_to_cases(list(csv.DictReader(io.StringIO(text))))
     elif suffix in {".txt", ".md", ""} and not text.lstrip().startswith(("cases:", "- ", "{", "[")):

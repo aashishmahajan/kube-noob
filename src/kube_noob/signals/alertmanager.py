@@ -78,12 +78,17 @@ def _state(alert: dict[str, Any]) -> str:
     if isinstance(status, dict):  # API v2: {"state": "active" | "suppressed" | "unprocessed"}
         state = status.get("state")
         return "firing" if state == "active" else (state if state in {"suppressed", "unprocessed"} else "unknown")
-    return status if status in {"firing", "resolved"} else "unknown"
+    if status in {"firing", "resolved"}:
+        return str(status)
+    state = alert.get("state")  # Prometheus /api/v1/alerts: "firing" | "pending" | "inactive"
+    return "firing" if state == "firing" else (str(state) if state in {"pending", "inactive"} else "unknown")
 
 
 def _alerts(doc: Any) -> list[dict[str, Any]] | None:
     if isinstance(doc, dict) and isinstance(doc.get("alerts"), list):
         items = doc["alerts"]
+    elif isinstance(doc, dict) and isinstance(doc.get("data"), dict) and isinstance(doc["data"].get("alerts"), list):
+        items = doc["data"]["alerts"]  # Prometheus /api/v1/alerts
     elif isinstance(doc, list):
         items = doc
     else:

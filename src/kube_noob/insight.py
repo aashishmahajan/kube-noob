@@ -45,17 +45,29 @@ PENDING = {
     "must-gather": "must-gather analysis (queue G1-G3) is not built yet; paste the pod's events and logs instead",
 }
 
-_EVENT_TABLE = re.compile(r"^\s*(?:Type\s+Reason\s+Age\s+From\s+Message|LAST SEEN\s+TYPE\s+REASON\s+OBJECT)", re.M)
-_EVENT_LINE = re.compile(r"^\s*(?:\S+\s+)?(?:Normal|Warning)\s+[A-Z][A-Za-z]+\s+\S+", re.M)
+# Every line pattern starts with [ \t]* (never \s*, which crosses newlines and backtracks quadratically on blank lines)
+_EVENT_TABLE = re.compile(
+    r"^[ \t]*(?:Type[ \t]+Reason[ \t]+Age[ \t]+From[ \t]+Message|LAST SEEN[ \t]+TYPE[ \t]+REASON[ \t]+OBJECT|"
+    r"NAMESPACE[ \t]+LAST SEEN[ \t]+TYPE[ \t]+REASON)",
+    re.M,
+)
+_EVENT_LINE = re.compile(r"^[ \t]*(?:\S+[ \t]+){0,2}(?:Normal|Warning)[ \t]+[A-Z][A-Za-z]+[ \t]+\S+", re.M)
+_POD_TABLE = re.compile(r"^(?:NAMESPACE[ \t]+)?NAME[ \t]+READY[ \t]+STATUS[ \t]+RESTARTS[ \t]+AGE\b", re.M)
+_POD_ROW = re.compile(
+    r"^[ \t]*(?:[a-z0-9][-a-z0-9]*[ \t]+)?[a-z0-9][-a-z0-9.]*[ \t]+\d+/\d+[ \t]+(?:Running|Pending|Completed|"
+    r"CrashLoopBackOff|ImagePullBackOff|ErrImagePull|Error|OOMKilled|ContainerCreating|Terminating|Init:[\w/:]+|"
+    r"CreateContainerConfigError|Evicted|Unknown)\b",
+    re.M,
+)
 _DESCRIBE_POD = re.compile(r"^(?:Name|Namespace|Node|Status|Containers|Conditions|Controlled By):", re.M)
 _CONTAINER_STATE = re.compile(r"(?:Last State|State):\s+(?:Waiting|Terminated|Running)|Reason:\s+[A-Z][A-Za-z]+", re.M)
 _LOG_LINE = re.compile(
-    r"^\s*(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|[IWEF]\d{4} \d{2}:\d{2}:\d{2}\.\d+|time=\"?\d{4}-|"
+    r"^[ \t]*(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|[IWEF]\d{4} \d{2}:\d{2}:\d{2}\.\d+|time=\"?\d{4}-|"
     r"level=(?:info|warn|warning|error|fatal|debug)|\{\"(?:level|ts|time|msg)\"|"
     r"[A-Z][a-z]{2} +\d{1,2} \d{2}:\d{2}:\d{2})",
     re.M,
 )
-_STACK = re.compile(r"^(?:Traceback \(most recent call last\):|\s+at [\w.$]+\(|panic: |goroutine \d+ \[)", re.M)
+_STACK = re.compile(r"^(?:Traceback \(most recent call last\):|[ \t]+at [\w.$]+\(|panic: |goroutine \d+ \[)", re.M)
 _TICKET = re.compile(
     r"\b(?:[A-Z][A-Z0-9_]{1,15}-\d{1,7}|INC\d{7}|RITM\d{7}|CHG\d{7})\b.{0,200}?(?:Summary|Description|Status|"
     r"short_description|Priority|Assignee|Resolution)\b|\"(?:issues|short_description|fields)\"\s*:|"
@@ -63,21 +75,63 @@ _TICKET = re.compile(
     re.S | re.M,
 )
 _DENIAL = re.compile(
-    r"admission webhook \".{1,200}\" denied|violates PodSecurity|unable to validate against any security context "
-    r"constraint|exceeded quota|\[denied by |ValidatingAdmissionPolicy .{1,120} denied|is forbidden: |"
+    r"admission webhook \".{1,200}\" denied|(?:would )?violate[s]? PodSecurity|"
+    r"unable to validate against any security context constraint|exceeded quota|\[denied by |"
+    r"ValidatingAdmissionPolicy .{1,120} denied|is forbidden: |"
     r"policy .{1,120} (?:blocked|violation)",
     re.I,
 )
 _BUILD = re.compile(
-    r"^(?:STEP \d+/\d+: |Step \d+/\d+ : |#\d+ \[[\w-]+ \d+/\d+\]|\[Pipeline\]|##\[(?:error|group)\]|Cloning \"https?://|"
-    r"error building image|Pushing image |error: build error|\[step-[\w-]+\]|Run actions/)",
+    r"^(?:\d{4}-\d{2}-\d{2}T[\d:.]+Z[ \t])?(?:STEP \d+/\d+: |Step \d+/\d+ : |#\d+ \[[\w.-]+(?: \d+/\d+)?\]|"
+    r"\[Pipeline\]|##\[(?:error|group|warning)\]|Cloning \"https?://|error building image|Pushing image |"
+    r"error: build error|\[step-[\w-]+\]|\[[\w-]+ : [\w-]+\] |Run actions/|Error: Process completed with exit code|"
+    r"\[INFO\] BUILD FAILURE|BUILD FAILED|npm ERR! |\[\+\] Building \d)",
     re.M,
 )
-_DOCKER_INSTRUCTION = re.compile(r"^(?:FROM|RUN|COPY|ADD|USER|ENTRYPOINT|CMD|WORKDIR|ENV|ARG|EXPOSE|LABEL)\s", re.M)
-_TCPDUMP = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d+ (?:IP6?|ARP),? \S+ > \S+: ", re.M)  # tcpdump: time IP src > dst:
+_DOCKER_INSTRUCTION = re.compile(  # instructions are case-insensitive in Dockerfiles and Containerfiles
+    r"^(?:FROM|RUN|COPY|ADD|USER|ENTRYPOINT|CMD|WORKDIR|ENV|ARG|EXPOSE|LABEL|HEALTHCHECK|VOLUME)[ \t]", re.M | re.I
+)
+_SBOM_TEXT = re.compile(r"^SPDXVersion: SPDX-\d|<bom [^>]{0,200}xmlns=\"http://cyclonedx\.org", re.M)
+_ACCESS_LOG = re.compile(r"^\S+ \S+ \S+ \[\d{2}/[A-Z][a-z]{2}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\] \"", re.M)
+_YAML_HEAD = re.compile(r"^(?:---\n)?(?:#.*\n)*apiVersion: [\w./-]+\nkind: [A-Z]\w+\n", re.M)
+_TECH = re.compile(
+    r"\b(?:pods?|nodes?|deploy\w*|crash\w*|errors?|fail\w*|oom\w*|images?|pull\w*|routes?|ingress\w*|services?|"
+    r"namespaces?|pvcs?|volumes?|helm|operators?|clusters?|etcd|upgrad\w*|rbac|forbidden|denied|timeouts?|timed out|"
+    r"certificat\w*|x509|dns|network\w*|containers?|kube\w*|kubectl|oc|openshift|rosa|rhacs|stackrox|secrets?|"
+    r"configmaps?|probes?|restart\w*|pending|evict\w*|quota|scc|webhooks?|api|tls|memory|cpu|disk|storage|latency|"
+    r"[45]\d\d)\b",
+    re.I,
+)
+_ASKED_LINE = re.compile(  # a line of words that asks something, next to a paste
+    r"^(?![ \t]*[$#>|{\[])[^\n]{0,240}?\b(?:how|why|what|when|where|which|can|could|should|would|is|are|does|do|did|"
+    r"will|has|have|anyone|any idea)\b[^\n]{0,240}\?[ \t]*$",
+    re.M | re.I,
+)
+_CAMEL = re.compile(r"\b[A-Z][a-z]+(?:[A-Z][a-z0-9]*)+\b")
+_TCPDUMP = re.compile(  # tcpdump (any -t format, interface prefix) and tshark summary lines
+    r"^(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}\.\d+[ \t]+(?:\S+[ \t]+(?:In|Out|P|M)[ \t]+)?(?:IP6?|ARP),?[ \t]+"
+    r"\S+ > \S+: |^[ \t]*\d+[ \t]+\d+\.\d{6,9}[ \t]+\S+[ \t]+(?:→|->)[ \t]+\S+[ \t]+[A-Z][A-Z0-9v.]{1,10}[ \t]+\d+",
+    re.M,
+)
+_SCANNER_TABLE = re.compile(
+    r"Total: \d+ \((?:UNKNOWN|LOW|MEDIUM|HIGH|CRITICAL)|"
+    r"^NAME[ \t]+INSTALLED[ \t]+FIXED[- ]IN[ \t]+TYPE[ \t]+VULNERABILITY|"
+    r"(?:Library|COMPONENT|PACKAGE)[ \t│|]+(?:Vulnerability|VERSION|INSTALLED)",
+    re.M | re.I,
+)
+_CVE_ROW = re.compile(r"CVE-\d{4}-\d{4,7}.{0,120}?\b(?:CRITICAL|HIGH|MEDIUM|LOW|Important|Moderate|Critical)\b", re.M)
+_ALERT_TEXT = re.compile(r"\[FIRING:\d+\]|\[RESOLVED\]|\balertname=\w+|^ALERTS\{alertname=", re.M)
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+SAMPLE = 200_000  # characters from each end of a long paste the line patterns read
 _MUST_GATHER = re.compile(
     r"must-gather\.local\.|cluster-scoped-resources/|namespaces/openshift-[\w-]+/pods/|"
-    r"quay-io-openshift-release-dev-ocp-v4-0-art-dev-sha256-"
+    r"^\[must-gather[\w -]*\] (?:OUT|POD) |"
+    r"quay-io-openshift-release-dev-ocp-v4-0-art-dev-sha256-",
+    re.M,
+)
+_EVENT_FIELDS = re.compile(
+    r"\"type\":\s{0,4}\"(?:Warning|Normal)\"[^{}]{0,400}?\"reason\":\s{0,4}\"[A-Z][A-Za-z]+\"|"
+    r"\"reason\":\s{0,4}\"[A-Z][A-Za-z]+\"[^{}]{0,400}?\"type\":\s{0,4}\"(?:Warning|Normal)\""
 )
 _QUESTION = re.compile(r"^(?:how|why|what|when|where|which|can|could|should|is|are|does|do|will|my|i )\b", re.I)
 _WORD = re.compile(r"[A-Za-z]{3}")
@@ -96,11 +150,16 @@ class Kind:
 
 
 def _json(text: str) -> Any:
+    """The JSON document the paste is, or starts with after a line or two of words ("got paged for this:"), read
+    up to its end even when log lines follow it."""
     s = text.lstrip()
     if not s.startswith(("{", "[")):
-        return None
+        start = s.find("{", 0, 2000)
+        if start < 0 or "\n" not in s[:start]:
+            return None
+        s = s[start:]
     try:
-        return json.loads(s)
+        return json.JSONDecoder().raw_decode(s)[0]
     except (ValueError, RecursionError):
         return None
 
@@ -151,9 +210,16 @@ def manifest_segments(text: str) -> list[str]:
     return out
 
 
+def normalise(text: str) -> str:
+    """Terminal colour codes and CRLF line ends removed: pastes from kubecolor, Windows terminals and CI logs."""
+    return _ANSI.sub("", text.replace("\r\n", "\n").replace("\r", "\n")) if ("\x1b" in text or "\r" in text) else text
+
+
 def recognise(text: str) -> list[Kind]:
-    """Every kind the input looks like, with the evidence; empty for text that is none of them."""
-    text = text[:MAX_TEXT]
+    """Every kind the input looks like, with the evidence; empty for text that is none of them. Structured parses
+    read the whole input (each with its own caps); line patterns read the first and last ``SAMPLE`` characters, so
+    the time stays linear in the input whatever it holds."""
+    text = normalise(text[:MAX_TEXT])
     found: dict[str, str] = {}
     doc = _json(text)
     s = text.lstrip()
@@ -168,16 +234,35 @@ def recognise(text: str) -> list[Kind]:
             found["events"] = f"{doc.get('kind')} JSON"
         if doc.get("kind") == "Pod" and "status" in doc:
             found["pod-status"] = "Pod JSON with status"
+        if doc.get("kind") == "Status" and isinstance(doc.get("message"), str):  # what the API server answered
+            found["policy-denial" if _DENIAL.search(doc["message"]) else "logs"] = "an API server Status response"
         if "issues" in doc or "fields" in doc or "short_description" in s[:5000]:
             found["ticket"] = "ticket export JSON"
+        items = doc.get("items")
+        if (
+            doc.get("kind") in {"List", "EventList"}
+            and isinstance(items, list)
+            and items
+            and all(isinstance(i, dict) and (i.get("kind") == "Event" or "involvedObject" in i) for i in items[:50])
+        ):
+            found["events"] = f"{len(items)} events (JSON list)"
     from kube_noob.signals import alertmanager
 
-    if alertmanager.parse(text) is not None:
+    if alertmanager.parse(text) is not None or (
+        isinstance(doc, (dict, list)) and alertmanager._alerts(doc) is not None
+    ):
         found["alert-payload"] = "Alertmanager webhook or API alerts"
     docs = _yaml_docs(text) if not found else []
     whole = bool(docs) and all("apiVersion" in d and "kind" in d for d in docs)
     if not whole and not found:
         docs = [d for seg in manifest_segments(text) for d in _yaml_docs(seg)]
+    if docs and all(d.get("kind") == "Status" for d in docs):
+        docs = []  # an API response, not a manifest
+    if docs and all(d.get("kind") == "Event" for d in docs):
+        found.setdefault("events", f"{len(docs)} Event objects")
+        docs = []
+    if not docs and not found and _YAML_HEAD.search(text[:5000]):
+        found["manifests"] = "Kubernetes YAML that does not parse (cut short or mis-indented)"
     if docs and all("apiVersion" in d and "kind" in d for d in docs):
         where = "" if whole else " inside the paste"
         found["manifests"] = (
@@ -187,14 +272,25 @@ def recognise(text: str) -> list[Kind]:
             found["pod-status"] = "Pod with status"
         if any(d.get("kind") == "EventList" for d in docs):
             found["events"] = "EventList"
+    whole_text = text
+    if len(text) > 2 * SAMPLE:
+        text = text[:SAMPLE] + "\n" + text[-SAMPLE:]
     if _HELM.search(text):
         found["helm-chart"] = "Helm template or Chart.yaml"
         found.pop("manifests", None)
     if _EVENT_TABLE.search(text) or _EVENT_LINE.search(text):
         found.setdefault("events", "event lines (Normal or Warning with a reason)")
+    elif _EVENT_FIELDS.search(text):
+        found.setdefault("events", "event fields in JSON (type and reason)")
     if len(_DESCRIBE_POD.findall(text)) >= 3 or _CONTAINER_STATE.search(text):
         found.setdefault("pod-status", "pod status or describe output")
-    if len(_LOG_LINE.findall(text)) >= 2 or _STACK.search(text):
+    if _POD_TABLE.search(text) or len(_POD_ROW.findall(text)) >= 2:
+        found.setdefault("pod-status", "a get pods table")
+    if _ALERT_TEXT.search(text):
+        found.setdefault("alert-payload", "alert notification text")
+    if _SCANNER_TABLE.search(text) or len(_CVE_ROW.findall(text)) >= 2:
+        found.setdefault("scanner-report", "scanner table (Trivy, Grype or roxctl)")
+    if len(_LOG_LINE.findall(text)) >= 2 or _STACK.search(text) or len(_ACCESS_LOG.findall(text)) >= 2:
         found["logs"] = "timestamped log lines or a stack trace"
     if _TICKET.search(text[:20_000]):
         found.setdefault("ticket", "ticket key with ticket fields")
@@ -202,18 +298,30 @@ def recognise(text: str) -> list[Kind]:
         found["policy-denial"] = "an admission or authorization denial"
     if _BUILD.search(text):
         found["build-log"] = "build or pipeline steps"
+        if not _STACK.search(text):
+            found.pop("logs", None)  # CI timestamps make a build log look like logs; it is read as one either way
+    if _SBOM_TEXT.search(text):
+        found["sbom"] = "SPDX tag-value or CycloneDX XML"
     instructions = _DOCKER_INSTRUCTION.findall(text)
-    if len(instructions) >= 2 and re.match(r"(?:\s*#.*\n|\s*ARG\s.*\n)*\s*FROM\s", text):
+    if len(instructions) >= 2 and re.match(r"(?:[ \t\n]*#.*\n|[ \t\n]*ARG\s.*\n)*[ \t\n]*FROM\s", text, re.I):
         found["containerfile"] = f"{len(instructions)} Containerfile instructions"
     if len(_TCPDUMP.findall(text)) >= 2:
         found["packet-capture"] = "tcpdump text"
     if _MUST_GATHER.search(text):
         found["must-gather"] = "must-gather paths"
-    stripped = text.strip()
+    stripped = whole_text.strip()
     one_line = "\n" not in stripped and 3 <= len(stripped) <= 300 and bool(_WORD.search(stripped))
     asked = stripped.endswith("?") or bool(_QUESTION.match(stripped))
-    if (not found and (asked or one_line)) or (asked and one_line and set(found) <= {"policy-denial", "ticket"}):
+    technical = bool(_TECH.search(stripped[:300]) or _CAMEL.search(stripped[:300]))
+    if (not found and (asked or (one_line and technical))) or (
+        asked and one_line and set(found) <= {"policy-denial", "ticket"}
+    ):
         found["question"] = "a question or symptom in words"
+    elif found and _ASKED_LINE.search(stripped[:3000]):
+        found["question"] = "a question next to what was pasted"
+    keys = _ticket_keys(stripped[:20_000])
+    if keys and "ticket" not in found:
+        found["ticket"] = f"Red Hat Jira key {keys[0]}"
     return [Kind(k, found[k]) for k in KINDS if k in found]
 
 
@@ -353,6 +461,9 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
     context: dict[str, Any] = {}
     signals: list[Any] = []
 
+    doc = _json(text)
+    if isinstance(doc, dict) and doc.get("kind") == "Status" and isinstance(doc.get("message"), str):
+        tail = f"{doc['message']}\n{tail}"  # the denial as the API server wrote it, quotes unescaped
     if names & textual or not names:
         d = budget.run(
             "diagnose", lambda: kit.diagnose(tk.DiagnoseIn(text=tail, platform=platform, version=version, limit=5))
@@ -424,14 +535,15 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
 
         docs = _yaml_docs(text)
         manifests = text if docs and all("apiVersion" in x and "kind" in x for x in docs) else None
-        manifests = manifests or "\n---\n".join(manifest_segments(text))
+        manifests = manifests or "\n---\n".join(manifest_segments(text)) or text  # YAML that does not parse: the
+        # audit's loader says why
         where = {k: v for k, v in (("platform", platform), ("version", version)) if v}
 
         def audit() -> Any:
             try:
                 return kit.audit(tk.AuditIn(manifests=manifests[: tk.MAX_MANIFEST_CHARS], **where))
-            except ManifestError as exc:
-                return exc
+            except (ManifestError, ValueError) as exc:
+                return ManifestError(str(exc).splitlines()[0][:300])
 
         rep = budget.run("audit", audit)
         if isinstance(rep, ManifestError):

@@ -32,11 +32,12 @@ def test_the_eval_gate() -> None:
     assert len(benign) >= 100 and noisy == []
 
 
-def test_the_held_out_set_is_measured_not_tuned() -> None:
-    """Written after tuning; 23 of 25 on 2026-10-28 (misses H03, H06 are known gaps). The gate guards regressions."""
+def test_the_former_held_out_set() -> None:
+    """Written after the first tuning and measured blind at 23 of 25 (2026-10-28). The RT1 fixes (rewrite of the
+    phrase rules) then used its misses, so it is a regression set now, 25 of 25; RT2 brings a fresh held-out set."""
     held, benign = EVAL["heldout_injections"], EVAL["heldout_benign"]
     detected = {c["id"] for c in held if sanitize.detect(c["text"])}
-    assert len(detected) >= 23, sorted({c["id"] for c in held} - detected)
+    assert len(detected) == 25, sorted({c["id"] for c in held} - detected)
     assert [line for line in benign if sanitize.detect(line)] == []
 
 
@@ -45,7 +46,8 @@ def _shipped_texts() -> list[tuple[str, str]]:
     data = Path(str(resources.files("kube_noob") / "data"))
     for base in (data, ROOT / "tests" / "fixtures", ROOT / "docs", ROOT / "examples", ROOT / "plugin" / "kube-noob"):
         for p in sorted(base.rglob("*")):
-            if p.is_file() and p.suffix in TEXT_SUFFIXES and p.name != "injection.yaml":
+            hostile = p.name.startswith("injection") or p.name == "rt1_held_out.jsonl"  # red-team input on purpose
+            if p.is_file() and p.suffix in TEXT_SUFFIXES and not hostile:
                 out.append((str(p.relative_to(ROOT) if p.is_relative_to(ROOT) else p), p.read_text("utf-8")))
     for p in sorted((ROOT / "src" / "kube_noob").rglob("*.py")):
         if p.name == "sanitize.py":

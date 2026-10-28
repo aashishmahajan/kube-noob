@@ -93,7 +93,7 @@ def test_recogniser_precision_and_recall_gate(seed: int) -> None:
         ("apiVersion: v2\nname: web\nversion: 0.1.0\n", {"helm-chart"}),
         ("FROM node:20\nRUN npm ci\nUSER 1001\n", {"containerfile"}),
         ("why does my pod stay Pending?", {"question"}),
-        ("is OCPBUGS-1234 fixed?", {"question"}),
+        ("is OCPBUGS-1234 fixed?", {"question", "ticket"}),
         ("lorem ipsum dolor sit amet\nconsectetur adipiscing elit\nsed do eiusmod", set()),
         ("", set()),
     ],
@@ -152,9 +152,9 @@ def test_a_mixed_paste_answers_every_section_in_one_call(kit: tk.Toolkit) -> Non
     segs = ins.manifest_segments(MIXED)
     assert len(segs) == 1 and segs[0].startswith("apiVersion: apps/v1") and segs[0].endswith("servicePort: 80}")
     out = kit.insight(tk.InsightIn(text=MIXED, platform="openshift", version="4.20.5"))
-    assert [k["kind"] for k in out["kinds"]] == ["events", "manifests", "policy-denial"]
-    assert "inside the paste" in out["kinds"][1]["evidence"]
-    assert out["ran"] == ["diagnose", "tickets", "audit"]
+    assert [k["kind"] for k in out["kinds"]] == ["events", "ticket", "manifests", "policy-denial", "question"]
+    assert "inside the paste" in out["kinds"][2]["evidence"]
+    assert out["ran"] == ["diagnose", "tickets", "search", "audit"]
     by = {(f["source"], f["id"]) for f in out["findings"]}
     assert {("policy", "pod-security/restricted:latest"), ("playbook", "DBG-PULLSECRET"), ("rule", "KN-S001")} <= by
     removed = next(f for f in out["findings"] if f["id"] == "KN-V005")
@@ -254,7 +254,10 @@ def test_input_bounds_and_hostile_text(kit: tk.Toolkit) -> None:
     deep = "[" * 50_000 + "]" * 50_000  # deeply nested JSON must not crash the recogniser
     assert ins.recognise(deep) == []
     nasty = "apiVersion: v1\nkind: Pod\nmetadata: &a [*a, *a, *a]\n" + "x: !!python/object:os.system ls\n"
-    assert "manifests" not in _kinds(nasty)
+    kinds = {k.kind: k.evidence for k in ins.recognise(nasty)}
+    assert kinds == {"manifests": "Kubernetes YAML that does not parse (cut short or mis-indented)"}
+    out = kit.insight(tk.InsightIn(text=nasty))
+    assert out["ran"] == [] and out["skipped"][0]["why"].startswith("not audited")  # the safe loader refused it
 
 
 def test_mcp_tool_listed_first_and_sanitised(settings: Settings) -> None:

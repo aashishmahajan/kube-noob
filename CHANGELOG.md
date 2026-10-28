@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- Red team phase 1 (RT1, an independent reviewer; every finding is a regression test in
+  `tests/test_red_team_rt1.py`):
+  - Fixed (high): a Kubernetes RBAC denial whose user name carried shell syntax (`$(...)`, quotes, backticks, `;`,
+    a newline) put it into the "read-only" `oc auth can-i --as=...` and `grep` steps of diagnose and insight;
+    pasting one ran it. Names now go into a step only when they hold nothing a shell treats specially; otherwise the
+    placeholder stays. A service account keeps its own namespace in `--as=`.
+  - Fixed (high): `insight` took seconds per 10 KB on pastes with many blank lines (quadratic patterns, outside the
+    time budget); every line pattern is now linear and long pastes are sampled at both ends: 2 MB in under 0.5 s.
+  - Fixed: an API server `Status` response (what `oc apply -o json` prints when refused) crashed signal extraction;
+    it is now read as the denial it carries. Fields that should be objects but are strings no longer break signals or
+    a Jira sync.
+  - Fixed: prompt-injection detection caught 8 of 50 new attacks and rewrote 47 of 55 lines of everyday operations
+    text. Rewritten as two tiers (removed / flagged only) on a normalised copy with more languages and base64; now 48
+    of 50, and of the 55 operations lines 1 is altered (a remote badge image) and 8 are flagged. The
+    `kubenoob://knowledge/{doc}` resource returned ingested text unsanitised; it is cleaned too. Emoji joiners and a
+    leading byte-order mark are no longer reported.
+  - Fixed: Jira anonymisation kept a commenter's name in the record title and missed spelled-out, URL-encoded,
+    full-width and suffix-less emails, international phone numbers, @handles, GitHub, GitLab, LinkedIn and
+    Confluence profile links, the name in a quoted reply's "On ..., Name wrote:", a "Thanks, Name" closing, the line
+    under a signature delimiter, names in other letter case or without accents, and "Last, First" display names.
+    Copies already stored are re-scrubbed once on the next sync, offline. The `jira-audit` self-check now runs the
+    anonymiser's own patterns, so anything they would still change is reported. Image digests, package versions,
+    `@types/...` and repository links are kept.
+  - Fixed: a refused `corpus import` could leave a valid shard copied before a later one failed; all shards are
+    checked before any is copied and they move into place together. The index reads only shards the corpus manifest
+    lists.
+  - Fixed: `corpus history` cloned its repositories back to back; clones are now spaced by a random pause.
+  - Fixed: `selftest --cases` crashed on a deeply nested JSONL line; it is refused with the line number.
+  - The recogniser, measured blind by the red team on 86 real-shaped pastes, had precision 0.94 and recall 0.64.
+    It now reads `get pods` tables (also with colour codes and CRLF), scanner tables (Trivy, Grype, roxctl), tshark
+    and tcpdump text with interfaces, GitHub Actions, Tekton and BuildKit logs, Prometheus `/api/v1/alerts`,
+    alert notification text, access logs, lowercase Dockerfiles, SPDX tag-value, truncated YAML and Event JSON,
+    must-gather output, a JSON paste with words before or logs after it, a question next to a paste, and Red Hat
+    Jira keys; small talk is no longer a question. On the same set (now a regression set): 1.00 and 0.98.
 - Roadmap rewritten to the moat program (M1 to M12): signal-keyed matching, fixes-as-code memory, must-gather
   pre-flight, network truth, verifier hardening, integrations without AI, the kube-noob gate and governance. The
   trained-model track is cut; the grader and `kube-noob train bench` stay as an evaluation product; learner tracks,
@@ -116,7 +150,7 @@
   severity, CVSS base score and, per product, each component's status (fixed with its erratum, affected with the
   remediation category, not affected with the VEX justification, under investigation), plus a summary search reads.
   `--cves`, `--since` (from `changes.csv`) or `--from-archive` (a downloaded archive, read offline; `.tar.zst` through
-  `zstd`). GET-only, HTTPS to security.access.redhat.com only, one request a second plus jitter, `Retry-After`
+  `zstd`). GET-only, HTTPS to Red Hat's security data hosts only (security.access.redhat.com, access.redhat.com), one request a second plus jitter, `Retry-After`
   honoured, a request budget, 25 MB per document, 4,000 statements per CVE. The source's licence is checked against
   the public bundle's allow-list before anything is written: a source not on it stops the build. The `redhat-vex`
   shard ships in `kube-noob-db` with Red Hat's attribution; the `db-image` workflow refreshes it daily from Red Hat's

@@ -24,6 +24,31 @@ _COMMENTER = re.compile(r"\bby (Commenter [A-Z]{1,3})\b")
 PLACEHOLDERS = ("<email>", "<phone>", "<account>", "@user")
 
 
+def _person_shapes(body: str) -> list[str]:
+    """Kinds of person-shaped text left in a stored record: the anonymiser's own patterns, run again, plus account
+    ids and Jira profile paths. Anything the anonymiser would still change is a leak."""
+    from kube_noob.sources import jira
+
+    kinds = []
+    for rx, kind in (
+        (_EMAIL, "email"),
+        (jira._EMAIL_LOCAL, "email"),
+        (jira._EMAIL_SPELLED, "spelled-out email"),
+        (_ACCOUNT_ID, "account id"),
+        (_PROFILE, "profile link"),
+        (jira._PROFILE_URL, "profile link"),
+        (jira._PHONE_INTL, "phone"),
+        (jira._HANDLE, "handle"),
+        (jira._QUOTE_HEADER, "quoted reply name"),
+    ):
+        m = rx.search(body)
+        if m and not (kind == "phone" and sum(c.isdigit() for c in m.group(0)) < 8) and kind not in kinds:
+            if kind == "quoted reply name" and " someone wrote:" in m.group(0):
+                continue
+            kinds.append(kind)
+    return kinds
+
+
 def _key_number(record_id: str) -> int:
     m = re.fullmatch(r"jira-[A-Z][A-Z0-9_]{1,29}-(\d{1,9})", record_id)
     return int(m.group(1)) if m else -1
@@ -77,9 +102,8 @@ def _project_report(path: Path) -> tuple[dict[str, Any], Counter[str], list[str]
                 scrub[p] += text.count(p)
             scrub["commenter labels"] += len(set(_COMMENTER.findall(text)))
             body = text + " " + str(rec.get("title") or "")
-            for rx, kind in ((_EMAIL, "email"), (_ACCOUNT_ID, "account id"), (_PROFILE, "profile link")):
-                m = rx.search(body)
-                if m and len(leaks) < 50:
+            for kind in _person_shapes(body):
+                if len(leaks) < 50:
                     leaks.append(f"{rid.removeprefix('jira-')}: {kind}")
     span = (max(keys) - min(keys) + 1) if keys else 0
     report = {

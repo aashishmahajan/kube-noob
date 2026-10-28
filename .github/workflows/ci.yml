@@ -466,7 +466,9 @@ jobs:
           KUBE_NOOB_DATA_DIR: /tmp/db-data
         run: |
           set -euo pipefail
-          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-3094 --format json | tee /tmp/vex.json
+          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-3094 --format json > /tmp/vex.json \
+            2> /tmp/vex.err || { echo "::error title=Red Hat VEX live::$(tr '\n' ' ' < /tmp/vex.err | cut -c1-1500)"; exit 1; }
+          cat /tmp/vex.json
           python -c "
           import json
           out = json.load(open('/tmp/vex.json'))

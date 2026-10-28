@@ -1,0 +1,1 @@
+{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"pods \"web-1\" is forbidden: violates PodSecurity \"restricted:latest\": privileged (container \"web\" must not set securityContext.privileged=true)","reason":"Forbidden","details":{"name":"web-1","kind":"pods"},"code":403}

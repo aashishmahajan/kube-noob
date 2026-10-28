@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 HOST = "security.access.redhat.com"
+HOSTS = frozenset({HOST, "access.redhat.com"})  # Red Hat serves the same security data under both names
 BASE = f"https://{HOST}/data/csaf/v2/vex"
 MIN_DELAY = 1.0
 MAX_DOC = 25_000_000  # bytes: one VEX document (OpenShift CVEs list thousands of components)
@@ -276,8 +277,10 @@ def vex_http(settings: Any) -> httpx.Client:
     client = http_client(settings, Purpose.SOURCES, allow_sources=True, timeout=60)
 
     def _guard(request: httpx.Request) -> None:
-        if request.url.scheme != "https" or request.url.host != HOST or request.method != "GET":
-            raise DomainNotAllowedError(f"{request.method} {request.url.host} (advisories only read from {HOST})")
+        if request.url.scheme != "https" or request.url.host not in HOSTS or request.method != "GET":
+            raise DomainNotAllowedError(
+                f"{request.method} {request.url.host} (advisories only read from {', '.join(sorted(HOSTS))})"
+            )
 
     hooks = client.event_hooks
     client.event_hooks = {"request": [*hooks.get("request", []), _guard], "response": hooks.get("response", [])}
@@ -332,7 +335,12 @@ class VexClient:
         if not m:
             raise AdvisoryError(f"not a CVE id: {cve!r}")
         body = self._get(f"{m.group(1)}/{cve.lower()}.json", MAX_DOC)
-        return None if body is None else json.loads(body)
+        if body is None:
+            return None
+        try:
+            return json.loads(body)
+        except (ValueError, RecursionError) as exc:
+            raise AdvisoryError(f"{cve}: the VEX document is not JSON ({body[:60]!r}...)") from exc
 
     def changed_since(self, since: str) -> list[str]:
         """CVE ids whose VEX changed after ``since`` (ISO 8601), newest first, from changes.csv."""

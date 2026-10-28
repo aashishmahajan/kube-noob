@@ -1625,14 +1625,26 @@ def _advisories(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             cves = [c.strip().upper() for c in a.cves.split(",") if c.strip()] if a.cves else []
             if a.since:
                 cves = client.changed_since(a.since)[: max(0, a.max_requests - 1)]
-            docs = []
-            missing = []
+            docs: list[Any] = []
+            missing: list[str] = []
+            failed: list[str] = []
             for cve in cves:
-                doc = client.document(cve)
+                try:
+                    doc = client.document(cve)
+                except advisories.AdvisoryError as exc:
+                    if "budget" in str(exc):
+                        failed.append(f"{cve}: {exc}")
+                        break
+                    failed.append(f"{cve}: {exc}")
+                    continue
                 (docs.append(doc) if doc is not None else missing.append(cve))
+            if failed and not docs:
+                raise advisories.AdvisoryError("no VEX document read: " + "; ".join(failed[:5]))
             out = {**advisories.run(s.data_dir, docs, replace=a.replace), "requests": client.requests}
             if missing:
                 out["notPublished"] = missing
+            if failed:
+                out["failed"] = failed
     if a.format == "text":
         _tprint(
             f"{out['source']} ({out['license']}): {out['documents']} documents read, {out['kept']} about the default "
@@ -1640,6 +1652,8 @@ def _advisories(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         )
         if out.get("notPublished"):
             _tprint("no VEX published for: " + ", ".join(out["notPublished"]))
+        for f in out.get("failed", []):
+            _tprint(f"failed: {f}")
     else:
         _emit(out, fmt)
     return 0
@@ -1734,11 +1748,14 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         errors = [p for p in out["projects"] if p.get("error")]
         return 4 if errors and len(errors) == len(out["projects"]) else 0
     if cc == "history":
+        from kube_noob.sources import pacing
         from kube_noob.sources.history import minor_timeline, tags_with_dates, timeline_record
         from kube_noob.sources.registry import HISTORY_REPOS
 
         recs = []
-        for name, repo in HISTORY_REPOS.items():
+        for i, (name, repo) in enumerate(HISTORY_REPOS.items()):
+            if i:
+                pacing.pause(pacing.CLONE_PAUSE)  # clones from the same host spaced by a random pause
             try:
                 tl = minor_timeline(tags_with_dates(repo))
                 recs.append(timeline_record(name, repo, tl))

@@ -37,10 +37,11 @@ _POD_PATTERNS = (
     re.compile(r"^Name:\s+([a-z0-9][-a-z0-9.]{0,252})$", re.MULTILINE),
 )
 _PVC_PATTERN = re.compile(r"(?:persistentvolumeclaim|pvc)[/ ]\"?([a-z0-9][-a-z0-9.]{0,252})\"?", re.IGNORECASE)
-_SA_PATTERN = re.compile(r"system:serviceaccount:[a-z0-9-]+:([a-z0-9][-a-z0-9]{0,62})")
+_SA_PATTERN = re.compile(r"system:serviceaccount:(?P<ns>[a-z0-9][-a-z0-9]{0,62}):([a-z0-9][-a-z0-9]{0,62})")
 _SA_SPEC = re.compile(r"\bserviceAccountName[=:]\s*\"?([a-z0-9][-a-z0-9.]{0,252})")
 _FORBIDDEN = re.compile(
-    r"User \"(?P<subject>[^\"]{1,253})\" cannot (?P<verb>[a-z]+) resource \"(?P<resource>[a-z0-9./-]{1,253})\""
+    r"User \"(?P<subject>[A-Za-z0-9@._:/=+#%-]{1,253})\" cannot (?P<verb>[a-z]+) resource "
+    r"\"(?P<resource>[a-z0-9./-]{1,253})\""
     r"(?: in API group \"(?P<group>[a-z0-9.-]*)\")?"
 )
 _EXIT_PATTERN = re.compile(r"(?:exit ?code|exitCode)[\"':\s]+(\d{1,3})", re.IGNORECASE)
@@ -159,8 +160,10 @@ def extract_context(text: str) -> dict[str, str]:
     m = _PVC_PATTERN.search(text)
     if m:
         ctx["pvc"] = m.group(1)
-    m = _SA_PATTERN.search(text) or _SA_SPEC.search(text)
+    m = _SA_PATTERN.search(text)
     if m:
+        ctx["sa"], ctx["sa_ns"] = m.group(2), m.group("ns")
+    elif m := _SA_SPEC.search(text):
         ctx["sa"] = m.group(1)
     m = _FORBIDDEN.search(text)
     if m:
@@ -170,9 +173,16 @@ def extract_context(text: str) -> dict[str, str]:
     return ctx
 
 
+_SAFE_VALUE = re.compile(r"^[A-Za-z0-9@._:/=+#%-]{1,253}$")  # nothing a shell treats specially, no spaces
+
+
 def _fill(cmd: str, ctx: dict[str, str]) -> str:
+    """``cmd`` with the names found in the input. A value that could do anything in a shell (quotes, $, `, ;, |, &,
+    spaces, newlines...) is never pasted into a command: its placeholder stays, so a copied step only ever reads."""
+    ctx = {k: v for k, v in ctx.items() if isinstance(v, str) and _SAFE_VALUE.match(v)}
     out = cmd
-    sa_subject = f"system:serviceaccount:{ctx.get('ns', '<namespace>')}:{ctx.get('sa', 'default')}"
+    sa_ns = ctx.get("sa_ns") or ctx.get("ns", "<namespace>")
+    sa_subject = f"system:serviceaccount:{sa_ns}:{ctx.get('sa', 'default')}"
     defaults = {
         "ns": "<namespace>",
         "pod": "<pod>",

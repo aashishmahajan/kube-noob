@@ -428,8 +428,19 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
     cdir = data_dir / "corpus"
     if not cdir.is_dir():
         return out
+    listed: set[str] | None = None  # a shard the manifest does not list (a refused import, a stray file) is not read
+    manifest = cdir / "MANIFEST.json"
+    if manifest.is_file():
+        try:
+            shards = json.loads(manifest.read_text(encoding="utf-8")).get("shards") or {}
+            listed = {str(e.get("file")) for e in shards.values() if isinstance(e, dict)}
+        except (ValueError, AttributeError):
+            listed = None
     for f in sorted(cdir.glob("*.jsonl")):
         if _ticket_shard(f):
+            continue
+        if listed is not None and f.name not in listed:
+            _log.warning("skipping %s: not listed in the corpus MANIFEST.json", f.name)
             continue
         with f.open(encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
@@ -437,7 +448,7 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
                     continue
                 try:
                     rec = json.loads(line)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, RecursionError):
                     _log.warning("skipping malformed JSON in %s line %d", f.name, lineno)
                     continue
                 if not isinstance(rec, dict) or not isinstance(rec.get("id"), str) or not rec["id"]:

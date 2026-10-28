@@ -180,7 +180,7 @@ def _structured(doc: Any, out: _Collector, where: str) -> None:
         _event(doc, out, where)
     elif kind == "ClusterOperator":
         _cluster_operator(doc, out, where)
-    elif kind == "Pod" or isinstance((doc.get("status") or {}).get("containerStatuses"), list):
+    elif kind == "Pod" or isinstance(_dict(doc.get("status")).get("containerStatuses"), list):
         _pod(doc, out, where)
     else:
         _text(_strings(doc), out, where)
@@ -228,11 +228,11 @@ def _event(doc: dict[str, Any], out: _Collector, where: str) -> None:
 
 
 def _cluster_operator(doc: dict[str, Any], out: _Collector, where: str) -> None:
-    name = str((doc.get("metadata") or {}).get("name") or "")
+    name = str(_dict(doc.get("metadata")).get("name") or "")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", name):
         return
     out.add("component", name, where)
-    for cond in (doc.get("status") or {}).get("conditions") or []:
+    for cond in _dict(doc.get("status")).get("conditions") or []:
         if not isinstance(cond, dict):
             continue
         ctype, status, reason = cond.get("type"), str(cond.get("status")), cond.get("reason")
@@ -244,7 +244,7 @@ def _cluster_operator(doc: dict[str, Any], out: _Collector, where: str) -> None:
 
 
 def _pod(doc: dict[str, Any], out: _Collector, where: str) -> None:
-    status = doc.get("status") or {}
+    status = _dict(doc.get("status"))
     if isinstance(status.get("reason"), str) and status["reason"] in POD_REASONS:
         out.add("pod_reason", status["reason"], f"{where}.status")
     for group in ("initContainerStatuses", "containerStatuses", "ephemeralContainerStatuses"):
@@ -260,7 +260,7 @@ def _pod(doc: dict[str, Any], out: _Collector, where: str) -> None:
                         out.add("pod_reason", reason, f"{where}.{group}[{i}].{state_key}.{phase}")
                     if isinstance(detail, dict) and isinstance(detail.get("message"), str):
                         _text(detail["message"], out, f"{where}.{group}[{i}].{state_key}.{phase}")
-    name = (doc.get("metadata") or {}).get("name")
+    name = _dict(doc.get("metadata")).get("name")
     if isinstance(name, str):
         _components(name, out, f"{where}.metadata")
 

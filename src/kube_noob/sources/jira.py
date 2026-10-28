@@ -64,8 +64,36 @@ MAX_COMMENTS = 2_000  # comments kept per ticket: in practice every one
 MAX_TEXT = 20_000
 SYNC_MAX_TEXT = 1_000_000  # characters per ticket in the copy: the full anonymised text; a longer one keeps its end
 TEXT_VERSION = 2  # 2: every comment, authors as pseudonyms; a copy made before refetches its tickets once
+SCRUB_VERSION = 2  # 2: spelled-out and suffix-less emails, international phones, handles, profiles, signatures
 COMMENT_PAGE = 100
 _PHONE = re.compile(r"(?<![\w.])\+?\(?\d{1,4}\)?[ -]\d{2,4}[ -]\d{3,4}(?:[ -]\d{2,4})?(?!\w|\.\d)")
+_PHONE_INTL = re.compile(r"(?<![\w.+])\+\d{1,3}(?:[ .-]?\(?\d{1,5}\)?){2,6}(?![\w.]?\d)")  # +1.415..., +33 1 23 ...
+_EMAIL_SPELLED = re.compile(
+    r"\b[A-Za-z0-9._%+-]{1,64}\s*(?:\(at\)|\[at\]|\{at\}|\s+at\s+)\s*[A-Za-z0-9-]{1,63}"
+    r"(?:\s*(?:\.|\(dot\)|\[dot\]|\{dot\}|\s+dot\s+)\s*[A-Za-z0-9-]{1,63}){1,4}\b(?<=[A-Za-z]{2})",
+    re.IGNORECASE,
+)
+_EMAIL_LOCAL = re.compile(  # user@host with no suffix, or URL-encoded; never image@sha256:..., pkg@1.2.3
+    r"(?<![\w.%+-])[A-Za-z0-9._%+-]{1,64}(?:@|%40)(?!sha\d{3}:)[A-Za-z][A-Za-z0-9-]{0,62}(?:\.[A-Za-z0-9-]{1,63})*\b(?!:)"
+)
+_HANDLE = re.compile(
+    r"(?<![\w@/.])@(?!(?:property|staticmethod|classmethod|Override|Test|Before|After|Autowired|Bean|Component|"
+    r"Deprecated|SuppressWarnings|FunctionalInterface|dataclass|pytest|user|Commenter)\b)[A-Za-z][\w.-]{1,38}\w(?![\w/:@])"
+)
+_PROFILE_URL = re.compile(
+    r"https?://(?:www\.)?(?:github\.com|gitlab\.com|twitter\.com|x\.com|bsky\.app/profile|keybase\.io)/"
+    r"[A-Za-z0-9_.-]{1,60}/?(?=[\s)\]>\"',.;]|$)"
+    r"|https?://(?:[a-z]{2,3}\.|www\.)?linkedin\.com/(?:in|pub)/[^\s)\]>\"']{1,100}"
+    r"|https?://[^\s/]+/wiki/people/[^\s)\]>\"']{1,100}",
+    re.IGNORECASE,
+)
+_QUOTE_HEADER = re.compile(r"^(>?[ \t]*On [^\n]{0,60}?,)[^\n<]{1,80}?(?:<+[^\n]{0,120}?>+)?[ \t]*wrote:", re.MULTILINE)
+_CLOSING = re.compile(
+    r"^((?:Thanks|Thank you|Cheers|Regards|Best regards|Best|BR|Kind regards)[ \t]*,?[ \t]*\n?[ \t]*)"
+    r"[A-Z][a-z]{1,20}(?:[ \t]+[A-Z][a-z]{1,20}){0,2}[ \t]*$",
+    re.MULTILINE,
+)
+_SIGNATURE = re.compile(r"^-- ?\n[^\n]{1,120}$", re.MULTILINE)  # the delimiter and the name line under it
 _ADDRESS = r"(?:Hi|Hello|Hey|Thanks|Thank you|Thx|cc|CC|Cc|Dear|ping|@)[ ,]{1,2}"
 LONG_JQL = 1500  # characters; above this the search request is sent as POST
 MAX_RETRY_AFTER = 120.0  # seconds; a larger Retry-After is capped so a pull cannot hang for hours
@@ -87,9 +115,29 @@ class BudgetExhausted(JiraError):
 
 
 def scrub(text: str) -> str:
+    """Emails (also spelled out, URL-encoded or without a domain suffix), phone numbers (also international forms),
+    account ids, profile links on Jira, GitHub, GitLab, LinkedIn and social sites, @handles that are not a known
+    the name in a quoted reply's "On ..., Name wrote:" line, and signatures after "-- " (``scrub_handles`` then
+    replaces the @handles ``unname`` did not label)."""
+    import unicodedata
+
+    if not text.isascii():
+        text = unicodedata.normalize("NFKC", text)  # a full-width at sign is an at sign
     text = _EMAIL.sub("<email>", text)
+    text = _EMAIL_LOCAL.sub("<email>", text)
+    text = _EMAIL_SPELLED.sub("<email>", text)
+    text = _PROFILE_URL.sub("<profile>", text)
+    text = _PHONE_INTL.sub(lambda m: "<phone>" if sum(c.isdigit() for c in m.group(0)) >= 8 else m.group(0), text)
     text = _PHONE.sub("<phone>", text)
-    return _ACCOUNT.sub("<account>", text)
+    text = _ACCOUNT.sub("<account>", text)
+    text = _QUOTE_HEADER.sub(lambda m: f"{m.group(1)} someone wrote:", text)
+    text = _CLOSING.sub(lambda m: f"{m.group(1)}someone", text)
+    return _SIGNATURE.sub("-- \n<signature>", text)
+
+
+def scrub_handles(text: str) -> str:
+    """@handles left after the commenters' own were labelled (``unname`` runs first)."""
+    return _HANDLE.sub("@user", text)
 
 
 def _label(i: int) -> str:
@@ -121,17 +169,32 @@ def pseudonyms(comments: list[Any]) -> tuple[dict[str, str], dict[str, str]]:
     return by_id, by_name
 
 
+def _fold(name: str) -> str:
+    import unicodedata
+
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+
+
 def unname(text: str, by_name: dict[str, str]) -> str:
-    """Replace each commenter's display name, and their first name where it addresses them ("Hi Jane", "cc Jane",
-    "@Jane"), with the commenter's label."""
+    """Replace each commenter's display name in any letter case, with or without accents, and their first name
+    where it addresses or thanks them ("Hi Jane", "cc Jane", "@Jane", "Thanks,\nJane"), with the commenter's
+    label."""
     for name in sorted(by_name, key=len, reverse=True):
         label = by_name[name]
-        text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", label, text)
+        forms = [name, _fold(name)]
+        if name.count(",") == 1:  # "Doe, Sam" is written "Sam Doe" in the text
+            last, first_name = (x.strip() for x in name.split(","))
+            forms += [f"{first_name} {last}", _fold(f"{first_name} {last}")]
+        for form in dict.fromkeys(forms):
+            text = re.sub(rf"(?<!\w){re.escape(form)}(?!\w)", label, text, flags=re.IGNORECASE)
         first = name.split()[0]
         if len(name.split()) > 1 and len(first) >= 3 and first.isalpha():
-            address = re.compile(rf"\b({_ADDRESS}){re.escape(first)}(?!\w)")
-            text = address.sub(rf"\g<1>{label}", text)
-            text = re.sub(rf"@{re.escape(first)}(?!\w)", f"@{label}", text)
+            for form in dict.fromkeys((first, _fold(first))):
+                address = re.compile(
+                    rf"\b({_ADDRESS}|(?:Thanks|Thank you|Cheers|Regards|Best),?\s*\n){re.escape(form)}(?!\w)"
+                )
+                text = address.sub(rf"\g<1>{label}", text)
+                text = re.sub(rf"@{re.escape(form)}(?!\w)", f"@{label}", text, flags=re.IGNORECASE)
     return text
 
 
@@ -153,16 +216,16 @@ def adf_to_text(node: Any, people: dict[str, str] | None = None) -> str:
     if t == "hardBreak":
         return "\n"
     if t == "mention":
-        ident = str((node.get("attrs") or {}).get("id") or "")
+        ident = str(_obj(node.get("attrs")).get("id") or "")
         return "@" + people[ident] if people and ident in people else "@user"
     if t == "emoji":
-        return str((node.get("attrs") or {}).get("text", ""))
+        return str(_obj(node.get("attrs")).get("text", ""))
     if t in {"inlineCard", "blockCard", "embedCard"}:
-        return str((node.get("attrs") or {}).get("url", ""))
+        return str(_obj(node.get("attrs")).get("url", ""))
     if t == "paragraph":
         return adf_to_text(content, people) + "\n\n"
     if t == "heading":
-        level = int((node.get("attrs") or {}).get("level", 2))
+        level = int(_obj(node.get("attrs")).get("level", 2))
         return "#" * min(max(level, 1), 6) + " " + adf_to_text(content, people) + "\n\n"
     if t == "codeBlock":
         return "```\n" + adf_to_text(content, people) + "\n```\n\n"
@@ -195,6 +258,12 @@ class PullStats:
     kept: int = 0
     strategy: str = ""
     errors: list[str] = field(default_factory=list)
+
+
+def _obj(value: Any) -> dict[str, Any]:
+    """``value`` when it is a JSON object, else an empty one: a field that is null, a string or a list never breaks
+    a sync."""
+    return value if isinstance(value, dict) else {}
 
 
 class JiraClient:
@@ -378,8 +447,8 @@ def issue_to_record(
     comment_text = "\n".join(
         f"Comment ({str(c.get('created', ''))[:10]}) by "
         + by_id.get(
-            str((c.get("author") or {}).get("accountId") or (c.get("author") or {}).get("name") or ""),
-            by_id.get(str((c.get("author") or {}).get("displayName") or ""), "a commenter"),
+            str(_obj(c.get("author")).get("accountId") or _obj(c.get("author")).get("name") or ""),
+            by_id.get(str(_obj(c.get("author")).get("displayName") or ""), "a commenter"),
         )
         + ": "
         + (
@@ -390,10 +459,10 @@ def issue_to_record(
     comments_total = max(int(comment_field.get("total") or 0), len(all_comments))
     fix, aff = _names(f.get("fixVersions")), _names(f.get("versions"))
     comps, labels = _names(f.get("components")), [str(x) for x in f.get("labels") or []]
-    status = (f.get("status") or {}).get("name")
-    itype = (f.get("issuetype") or {}).get("name")
-    prio = (f.get("priority") or {}).get("name")
-    resolution = (f.get("resolution") or {}).get("name")
+    status = _obj(f.get("status")).get("name")
+    itype = _obj(f.get("issuetype")).get("name")
+    prio = _obj(f.get("priority")).get("name")
+    resolution = _obj(f.get("resolution")).get("name")
     header = [
         f"# {key}: {f.get('summary', '')}",
         f"Type: {itype} | Status: {status} | Priority: {prio} | Resolution: {resolution or 'Unresolved'}",
@@ -408,21 +477,23 @@ def issue_to_record(
         room = max(max_text // 2, max_text - len(desc_text) - 600)
         comment_text = "...\n" + comment_text[-room:].split("\n", 1)[-1]
         cut = True
-    full = unname(
-        scrub(
-            "\n".join(header)
-            + "\n\n## Description\n\n"
-            + desc_text.strip()
-            + ("\n\n## Comments\n\n" + comment_text if comment_text else "")
-        ),
-        by_name,
+    full = scrub_handles(
+        unname(
+            scrub(
+                "\n".join(header)
+                + "\n\n## Description\n\n"
+                + desc_text.strip()
+                + ("\n\n## Comments\n\n" + comment_text if comment_text else "")
+            ),
+            by_name,
+        )
     )
     text = full[:max_text]
     cut = cut or len(full) > max_text
-    status_category = ((f.get("status") or {}).get("statusCategory") or {}).get("key")
+    status_category = _obj(_obj(f.get("status")).get("statusCategory")).get("key")
     return {
         "id": f"jira-{key}",
-        "title": scrub(f"{key}: {f.get('summary', '')}"),
+        "title": scrub_handles(unname(scrub(f"{key}: {f.get('summary', '')}"), by_name)),
         "text": text,
         "url": f"{base_url.rstrip('/')}/browse/{key}",
         "sourceId": f"jira:{project}",
@@ -826,13 +897,13 @@ def sync_project(
         prev = records.get(f"jira-{key}")
         fields_now = issue.get("fields") or {}
         total_now = int(
-            ((fields_now.get("comment") or {}) if isinstance(fields_now.get("comment"), dict) else {}).get("total") or 0
+            (_obj(fields_now.get("comment")) if isinstance(fields_now.get("comment"), dict) else {}).get("total") or 0
         )
         if (
             prev
             and prev.get("updated") == fields_now.get("updated")
-            and prev.get("status") == (fields_now.get("status") or {}).get("name")
-            and prev.get("resolution") == (fields_now.get("resolution") or {}).get("name")
+            and prev.get("status") == _obj(fields_now.get("status")).get("name")
+            and prev.get("resolution") == _obj(fields_now.get("resolution")).get("name")
             and prev.get("fixVersions") == _names(fields_now.get("fixVersions"))
             and prev.get("comments") == prev.get("commentsTotal")
             and int(prev.get("commentsTotal") or 0) >= total_now
@@ -850,6 +921,11 @@ def sync_project(
         res.fetched += 1
         return key
 
+    if int(state.get("scrubVersion") or 1) < SCRUB_VERSION:  # offline: what the newer anonymiser finds goes now
+        for rec in records.values():
+            rec["text"] = scrub_handles(scrub(str(rec.get("text") or "")))
+            rec["title"] = scrub_handles(scrub(str(rec.get("title") or "")))
+        state["scrubVersion"] = SCRUB_VERSION
     if int(state.get("textVersion") or 1) < TEXT_VERSION:
         if state.get("lowestKey") or state.get(
             "complete"
