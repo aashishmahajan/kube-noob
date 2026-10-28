@@ -284,6 +284,9 @@ def _text(text: str, out: _Collector, where: str) -> None:
     for d in explain_denials(text[:200_000])["denials"]:
         parts = [p for p in (d.get("policy"), d.get("rule")) if p]
         out.add("admission", f"{d['engine']}:{'/'.join(parts)}" if parts else d["engine"], where)
+    from kube_noob.signals.catalogue import _alert_names
+
+    known_alerts = _alert_names()
     lines = text.splitlines()[:MAX_LINES]
     for n, raw in enumerate(lines, 1):
         line = raw[:MAX_LINE]
@@ -311,6 +314,8 @@ def _text(text: str, out: _Collector, where: str) -> None:
         for word in _WORD.findall(line):
             if word in POD_REASONS and word not in STRUCTURED_ONLY:
                 out.add("pod_reason", word, src)
+            elif word in known_alerts:  # a catalogued alert name written in prose ("etcdNoLeader is firing")
+                out.add("alert", word, src)
         _components(line, out, src)
         if out.templates < MAX_TEMPLATES and _ERRORISH.search(line):
             template, digest = normalise_error(line)

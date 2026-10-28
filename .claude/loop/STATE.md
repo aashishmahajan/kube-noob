@@ -11,7 +11,7 @@ Statuses: `todo`, `in-progress`, `done`, `blocked` (reason and the exact questio
 | 2 | F2 | Strategy into the docs (roadmap, editions) | F1 | done | docs/roadmap.md rewritten (principles, M1-M12, frozen, set aside, assumptions); docs/editions.md; check.sh green 428/1 skipped, selftest 61/61 |
 | 3 | F3 | Capability tiers framework | F1 | done | kube_noob/tiers.py (R,P,D,W,G; Approval; Writer), settings probe/dryRun/itsm/notify/gate, doctor rows and conflicts, ToolSpec.tier filter, chart rbac-tiers.yaml + guards + schema, KN-S017 extended; tests/test_tiers.py 10 passed; check.sh 438 passed; CI green on the branch (run 40614349955: chart tier guards, kind e2e x4) |
 | 4 | S1 | Signal extraction module | F1 | done | kube_noob/signals (core.py, vocab.py with upstream citations), CLI `kube-noob signals`; tests/test_signals.py 11 passed; check.sh 451 passed, selftest 61/61 |
-| 5 | S2 | Signal catalogue (verified names only) | S1 | todo | |
+| 5 | S2 | Signal catalogue (verified names only) | S1 | done | data/signals.yaml 74 entries, signals/catalogue.py (entries, get, infer, terms_for); tests/test_signal_catalogue.py 5 passed; check.sh 456 passed |
 | 6 | S3 | Known-issue matching with signals plus recall eval | S2 | todo | |
 | 7 | S4 | Signals in diagnose, debug, bundle, policy explain; Alertmanager payload input | S3 | todo | |
 | 8 | MEM1 | Memory entry schema | S1 | todo | |
@@ -120,6 +120,10 @@ which ships tested and documented on its own.
 | FailedScheduling, FailedCreate, Evicted | kubernetes/kubernetes scheduler/schedule_one.go, controller/controller_utils.go, kubelet/eviction/helpers.go | 2026-10-28 | signals/vocab.py |
 | OOMKilled, Completed, Error termination reasons | https://github.com/cri-o/cri-o/blob/main/server/container_status.go | 2026-10-28 | signals/vocab.py |
 | ClusterOperator condition types | https://github.com/openshift/api/blob/master/config/v1/types_cluster_operator.go | 2026-10-28 | signals/vocab.py |
+| etcd, apiserver, kubelet, workload, storage, resource, node alert names | etcd-io/etcd contrib/mixin/alerts/alerts.libsonnet; kubernetes-monitoring/kubernetes-mixin alerts/*.libsonnet and lib/absent_alert.libsonnet; prometheus/node_exporter docs/node-mixin/alerts/alerts.libsonnet | 2026-10-28 | data/signals.yaml |
+| OpenShift alert names (etcd, CVO, MCO, ingress, OVN-Kubernetes) | openshift/cluster-etcd-operator manifests/0000_90_etcd-operator_03_prometheusrule.yaml; cluster-version-operator install/0000_90_cluster-version-operator_02_servicemonitor.yaml; machine-config-operator install/0000_90_machine-config_01_prometheus-rules.yaml; cluster-ingress-operator manifests/0000_90_ingress-operator_03_prometheusrules.yaml; cluster-network-operator bindata/network/ovn-kubernetes/{common/alert-rules.yaml,self-hosted/alert-rules-control-plane.yaml} | 2026-10-28 | data/signals.yaml |
+| etcd error strings (leader changed, no leader, database space exceeded, apply request took too long) | etcd-io/etcd api/v3rpc/rpctypes/error.go; server/etcdserver/txn/util.go | 2026-10-28 | data/signals.yaml aliases |
+| kubelet "pleg was last seen active" | kubernetes/kubernetes pkg/kubelet/pleg/generic.go | 2026-10-28 | data/signals.yaml aliases |
 
 ## Blocked and unverified
 
@@ -138,6 +142,7 @@ which ships tested and documented on its own.
 
 ## Iteration log (newest first; at most 10 lines per entry)
 
+- 2026-10-28 S2: signal catalogue with 74 entries verified in etcd-io/etcd mixin, openshift/cluster-etcd-operator rules, kubernetes-mixin alerts (apiserver, kubelet, apps, storage, resource; KubeAPIDown from lib/absent_alert), node-exporter mixin, CVO, MCO, ingress-operator and CNO OVN rules, plus the S1 reason sources. Spec names corrected by the sources: MCDDrainError is MCCDrainError; OpenShift splits etcdGRPCRequestsSlow into Read and Write. No unverified names left out. Proof: catalogue.infer('etcd leader changed frequently, apiserver timeouts after upgrade') -> KubeAPIErrorBudgetBurn, etcdHighNumberOfLeaderChanges. Next: S3.
 - 2026-10-28 S1: signal extraction for Alertmanager v4 payloads, core/v1 and events.k8s.io/v1 events, ClusterOperator YAML/JSON and `oc get co`, pod status, admission denials, components and normalised error templates (sha256[:12]). Vocab verified in kubelet events.go, images/types.go, sync_result.go, kuberuntime_container.go, schedule_one.go, controller_utils.go, eviction/helpers.go, CRI-O container_status.go, openshift/api types_cluster_operator.go. Found and fixed a shipped bug: redaction quadratic on dashed tokens (240 KB took 136 s, now 0.3 s). Proof: alert payload | kube-noob signals -> 'alert etcdHighNumberOfLeaderChanges', 'component etcd'. Next: S2.
 - 2026-10-28 F3: capability tiers framework. Defaults off; doctor prints tier R-G and contradictions; Writer cannot exist with its tier off; Approval bound to one action, 15 min, single use; backends proven write-free. Chart renders probe/dry-run Roles only when enabled (guards in CI). Found and fixed: KN-S017 missed workload creation, ephemeral containers and PV creation (RBAC good practices). Guidance G36 (Jira copy, missing since 0.5.0) and G37 (tiers). Proof: `kube-noob doctor` shows 'tier P off probe (probe.enabled)'. Next: S1.
 - 2026-10-28 F2: roadmap rewritten to the moat program with status history kept; trained-model track cut, grader and train bench kept as evaluation; learner tracks, credits, videos frozen; docs/editions.md (documentation only). Proof: tests/test_guidance.py 5 passed; check.sh green. Next: F3.

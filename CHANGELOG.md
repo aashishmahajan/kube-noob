@@ -21,6 +21,11 @@
   waiting and terminated reasons, admission rules, components, and normalised error templates with a short hash.
   Vocabularies are copied from the upstream files that emit them (kubelet, scheduler, controllers, CRI-O,
   openshift/api) and cited in the code. Signals are the join key the next items use for known issues and memory.
+- Signal catalogue (`kube_noob/data/signals.yaml`, 74 entries): etcd, API server, node, workload, OpenShift
+  platform (ClusterOperators, cluster version, machine config, ingress, OVN-Kubernetes) alerts plus event and
+  container reasons, each with the phrases people use for it, search terms, components, playbooks and the upstream
+  rule file it comes from. Where OpenShift names differ from upstream both are listed (etcdGRPCReadRequestsSlow and
+  etcdGRPCWriteRequestsSlow next to etcdGRPCRequestsSlow; the machine-config alert is MCCDrainError).
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.
