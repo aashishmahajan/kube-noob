@@ -36,10 +36,12 @@ bad: |
   spec:
     replicas: 2
     selector:
-      matchLabels: {app: web}
+      matchLabels:
+        app: web
     template:
       metadata:
-        labels: {app: web}
+        labels:
+          app: web
       spec:
         containers:
         - name: web
@@ -70,3 +72,4 @@ bad: |
               port: 8080
             periodSeconds: 10
             failureThreshold: 3
+        hostUsers: false

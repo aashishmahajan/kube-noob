@@ -678,6 +678,8 @@ jobs:
         engine: [vap, kyverno]
     env:
       KYVERNO_VERSION: v1.19.1
+      # install.yaml of that release, first read by run 40646897729 (GitHub's runner) and pinned here
+      KYVERNO_SHA256: d3322cb346d3d42dd0f41e230b0d1d7bc5619960e1c36fdac4d9151d724b88e6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -698,7 +700,8 @@ jobs:
           set -euo pipefail
           url="https://github.com/kyverno/kyverno/releases/download/${KYVERNO_VERSION}/install.yaml"
           curl -fsSL --retry 3 -o /tmp/kyverno-install.yaml "$url"
-          echo "::notice title=Kyverno install.yaml::${KYVERNO_VERSION} sha256 $(sha256sum /tmp/kyverno-install.yaml | cut -d' ' -f1)"
+          echo "${KYVERNO_SHA256}  /tmp/kyverno-install.yaml" | sha256sum -c - \
+            || { echo "::error title=Kyverno install.yaml::sha256 differs from the pinned ${KYVERNO_SHA256}"; exit 1; }
           kubectl create -f /tmp/kyverno-install.yaml > /tmp/kyverno.out 2>&1 \
             || { echo "::error title=Kyverno install::$(tail -c 1500 /tmp/kyverno.out | tr '\n' ' ')"; exit 1; }
           kubectl -n kyverno rollout status deploy/kyverno-admission-controller --timeout=300s
