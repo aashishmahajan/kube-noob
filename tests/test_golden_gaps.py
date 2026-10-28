@@ -215,3 +215,49 @@ def test_helm_repo_list_is_a_read_and_repo_add_a_change() -> None:
     assert classify_step("helm repo list") == "read"
     assert classify_step("helm repo add bitnami https://charts.bitnami.com/bitnami --force-update") == "change"
     assert classify_step("helm repo update") == "change"
+
+
+def test_insight_findings_carry_the_cause_and_fix_that_fit_the_text(kit: tk.Toolkit) -> None:
+    out = kit.insight(
+        tk.InsightIn(
+            text="Built shop:latest locally on my laptop, kubectl apply on minikube: ErrImagePull, pull access denied "
+            "for shop, repository does not exist"
+        )
+    )
+    top = out["findings"][0]
+    assert top["id"] == "DBG-IMAGEPULL"
+    assert "in no registry" in top["cause"] and "minikube image load" in top["fix"]
+    psa = kit.insight(
+        tk.InsightIn(
+            text='Error creating: pods "web-1" is forbidden: violates PodSecurity "restricted:latest": '
+            'allowPrivilegeEscalation != false (container "web" must set '
+            "securityContext.allowPrivilegeEscalation=false)"
+        )
+    )
+    pol = next(f for f in psa["findings"] if f["source"] == "policy")
+    assert "allowPrivilegeEscalation: false" in pol["fix"]
+    import contextlib
+    import io
+
+    from kube_noob.cli import _print_insight
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _print_insight(out)
+    assert "fix: " in buf.getvalue()
+
+
+def test_every_pod_security_violation_is_read_even_with_prose_after_the_message() -> None:
+    from kube_noob.debug.policy import explain
+
+    text = (
+        'pods "api-1" is forbidden: violates PodSecurity "restricted:latest": allowPrivilegeEscalation != false '
+        '(container "api" must set securityContext.allowPrivilegeEscalation=false), runAsNonRoot != true (pod or '
+        'container "api" must set securityContext.runAsNonRoot=true). How do I fix the pod spec?'
+    )
+    den = explain(text)["denials"][0]
+    assert [v["check"] for v in den["details"]["violations"]] == [
+        "allowPrivilegeEscalation != false",
+        "runAsNonRoot != true",
+    ]
+    assert "breaks 2 of its checks" in den["meaning"]

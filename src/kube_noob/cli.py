@@ -77,6 +77,8 @@ def _print_insight(res: dict[str, Any]) -> None:
         _tprint(f"  {f['source']:15} {f.get('id')!s:28} {str(f.get('title') or '')[:90]}  {extra}")
         if f.get("cause"):
             _tprint(f"  {'':15} cause: {f['cause'][:150]}")
+        if f.get("fix"):
+            _tprint(f"  {'':15} fix: {f['fix'][:150]}")
     if res.get("readOnlyNextSteps"):
         _tprint("read-only next steps:")
         for st in res["readOnlyNextSteps"]:

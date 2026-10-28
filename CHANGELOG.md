@@ -89,6 +89,12 @@
   the bundled docs (`GENERAL_MAX_CHUNKS`, a count), not 2% of them: as a share, the new documents had made more words
   rare and four rows that pointed at the right bug named an unrelated one.
   `helm repo list` is classified as a read-only step (`helm repo add`, `update` and `remove` stay changes).
+- `insight` findings show the cause and fix that fit the input, not the first of the playbook's list: each cause and
+  fix is scored by the words it shares with the pasted text, each word weighted by how rare it is across all
+  playbook text (a pasted minikube `ErrImagePull` now shows the local-image cause and `minikube image load`, not a
+  registry typo and an image pull secret). Playbook and policy findings carry a `fix`, printed by the CLI; a policy
+  finding lists every change the requester can make (exceptions and new permissions stay with the policy owner). A
+  Pod Security denial followed by a question in the same paste now reads every violated check, not only the first.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

@@ -11,8 +11,10 @@ source, the read-only next steps, and what was skipped and why. Rules only: no m
 
 from __future__ import annotations
 
+import functools
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -571,6 +573,36 @@ class _DocFit:
         return all(any(w in words for w in group) for group in extra.get("requires") or [])
 
 
+def _closest(options: list[str], text: str, hint: str = "") -> str:
+    """The option that shares the most specific words with ``text``, then with ``hint`` at half weight (the first on
+    a tie): a playbook lists every cause and fix it knows, and the finding should show the one this input points at.
+    Each shared word counts by how rare it is across all playbook text ("minikube" says much, "pull" little)."""
+    if not options:
+        return ""
+    df = _playbook_word_counts()
+    want = _specific_terms(text, kubernetes_words=True)
+    also = _specific_terms(hint, kubernetes_words=True) - want if hint else set()
+
+    def score(option: str) -> float:
+        ts = _specific_terms(option, kubernetes_words=True)
+        return sum(1.0 / df.get(t, 1) for t in want & ts) + sum(0.5 / df.get(t, 1) for t in also & ts)
+
+    scores = [score(o) for o in options]
+    return options[max(range(len(options)), key=lambda n: (scores[n], -n))]
+
+
+@functools.lru_cache(maxsize=1)
+def _playbook_word_counts() -> dict[str, int]:
+    """In how many playbook causes, checks and fixes each specific word appears."""
+    from kube_noob.debug.playbooks import PLAYBOOKS
+
+    counts: Counter[str] = Counter()
+    for pb in PLAYBOOKS:
+        for line in (*pb.root_causes, *pb.checks, *pb.fixes):
+            counts.update(_specific_terms(line, kubernetes_words=True))
+    return dict(counts)
+
+
 def _specific_terms(text: str, *, kubernetes_words: bool = False) -> set[str]:
     """Words of ``text`` in base form that carry meaning: not stop words or everyday English and, unless
     ``kubernetes_words``, not everyday Kubernetes words either (pod, node, error, pending)."""
@@ -617,13 +649,15 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         d = d or {}
         signals = list(d.get("signals") or [])
         for i, x in enumerate(d.get("diagnoses", [])[:3]):
+            likely = _closest(x.get("rootCauses") or [], tail)
             findings.append(
                 {
                     "source": "playbook",
                     "id": x["id"],
                     "title": x["title"],
                     "confidence": x["confidence"],
-                    "cause": (x.get("rootCauses") or [""])[0],
+                    "cause": likely,
+                    "fix": _closest([c.get("change", "") for c in x.get("proposedChanges") or []], tail, likely),
                     "rank": 10 + i,
                 }
             )
@@ -656,6 +690,12 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                     "source": "policy",
                     "id": "/".join(str(x) for x in (den.get("engine"), den.get("policy"), den.get("rule")) if x),
                     "title": den.get("meaning") or den.get("message"),
+                    # every change the requester can make; exceptions and new permissions stay with the policy owner
+                    "fix": " ".join(
+                        str(c.get("change", ""))
+                        for c in (den.get("proposedChanges") or [])[:4]
+                        if not c.get("needsPolicyOwner")
+                    )[:800],
                     "rank": 1,
                 }
             )

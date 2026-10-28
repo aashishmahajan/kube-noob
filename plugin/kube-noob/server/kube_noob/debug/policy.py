@@ -458,7 +458,8 @@ _PSA = re.compile(
     r"(?P<mode>would violate|violates) PodSecurity \"(?P<level>[a-z]{1,20}):(?P<ver>[^\"\n]{1,20})\": "
     r"(?P<list>[^\n]{1,8000})"
 )
-_PSA_ITEM = re.compile(r"(?P<check>[^,()][^()]{0,200}?) \((?P<detail>[^()]{0,2000})\)(?:,\s*|$)")
+# An item ends at a comma, at the end, or at a period that ends the message (a pasted question may follow it).
+_PSA_ITEM = re.compile(r"(?P<check>[^,()][^()]{0,200}?) \((?P<detail>[^()]{0,2000})\)(?:,\s*|\.?\s*$|\.\s)")
 _CONTAINERS = re.compile(r"containers? ((?:\"[^\"]+\"(?:, | and )?)+)")
 _POD_FORBIDDEN = re.compile(r"pods \"(?P<pod>[^\"]+)\" is forbidden")
 _CREATED = re.compile(r"^(?P<kind>[a-z]+(?:\.[a-z.]+)?)/(?P<name>" + _NAME + r") (?:created|configured)", re.MULTILINE)
