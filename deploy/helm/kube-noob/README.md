@@ -29,7 +29,7 @@ Clients connect to `http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `A
 | `auth.existingSecret` | `""` | Your token Secret; empty generates one |
 | `config.offline` | `false` | Admin lock: no web, no downloads, local models only |
 | `config.webEnabled` | `false` | HTTPS GET to allowlisted documentation domains; opens egress 443 |
-| `config.clusterEnabled` | `false` | Read-only cluster tools (never Secrets); needs `networkPolicy.egress.apiServerCIDRs` |
+| `config.clusterEnabled` | `false` | Read-only cluster tools (never Secrets), including the attack-path scan, which reads RBAC objects (Roles and RoleBindings; ClusterRoles and ClusterRoleBindings with `rbac.scope: cluster`); needs `networkPolicy.egress.apiServerCIDRs` |
 | `watch.enabled` | `false` | Always-on incident watch in the release namespace and `rbac.namespaces`; needs `config.clusterEnabled` and `replicaCount: 1` |
 | `probe.enabled`, `dryRun.enabled` | `false` | Capability tiers P and D (SECURITY.md): render a Role in the release namespace and `rbac.namespaces` only when enabled; need `config.clusterEnabled`; every action still needs a person's approval; `dryRun.rules` lists what may be dry-run (never Secrets) |
 | `itsm.writeEnabled`, `notify.enabled`, `gate.enabled` | `false` | Tiers W and G: attach evidence to tickets, forward reports, forward approved tool calls; W is refused under `config.offline` |

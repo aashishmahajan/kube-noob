@@ -705,6 +705,9 @@ jobs:
           kubectl get crd validatingpolicies.policies.kyverno.io
       - name: Generated policies on the API server
         run: python scripts/policy_kind_test.py --engine ${{ matrix.engine }}
+      - name: Attack-path scan ranks the planted path first, reading no Secrets (R3.2)
+        if: matrix.engine == 'vap'
+        run: python scripts/posture_kind_test.py
       - name: Diagnostics on failure
         if: failure()
         run: |

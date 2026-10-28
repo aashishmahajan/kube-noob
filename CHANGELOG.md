@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `kube-noob posture scan` (and the MCP tools `posture_scan` and, with cluster access, `cluster_posture_scan`):
+  attack paths from an exposure (Route, Ingress, LoadBalancer, NodePort, externalIPs) through the Service and the pods
+  it selects to node access or the RBAC of the pod's ServiceAccount token, ranked by exposure x blast radius, each step
+  with its evidence and a fix. Built-in roles (cluster-admin, admin, edit, view) are known by their documented
+  meaning; aggregated ClusterRoles in a bundle are resolved; OpenShift SCCs count with the right to create workloads.
+  `--fail-above` gates CI. On a kind cluster seeded with decoys, the planted path internet -> Route -> pod ->
+  ServiceAccount -> get secrets ranks first, and every kubectl call is a read with none for Secrets. The read-only
+  allowlist (and the chart's read Role) now includes Roles, RoleBindings, ClusterRoles, ClusterRoleBindings and
+  DeploymentConfigs; Secrets stay out.
 - `kube-noob policy generate` (and the MCP tool `policy_generate`): admission policies from the audit rules, as
   ValidatingAdmissionPolicy + binding and/or Kyverno ValidatingPolicy (`policies.kyverno.io/v1`, the CEL policy type
   that replaces ClusterPolicy from Kyverno 1.19), in audit or enforce mode, for a platform. 39 of 61 rules on

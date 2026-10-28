@@ -414,6 +414,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pgen.add_argument("-o", "--output", help="write the YAML here (default: stdout)")
 
+    pos = sub.add_parser(
+        "posture",
+        help="Attack paths: from what is exposed to what a compromised pod could do (read-only)",
+        description="Ranks paths from a Route, Ingress, LoadBalancer or NodePort Service to the pods it reaches and "
+        "what they can do: node access (privileged, hostPath, host namespaces) or Kubernetes API rights through "
+        "the ServiceAccount token (read Secrets, exec, create workloads, escalate). Score = exposure x blast radius. "
+        "Secrets are never read. Example: kube-noob posture scan -f k8s/",
+    )
+    posub = pos.add_subparsers(dest="posture_cmd", required=True)
+    _patch(posub, common)
+    psc = posub.add_parser("scan", help="Rank the attack paths in manifests (-f) or the live cluster (--live)")
+    psc.add_argument("-f", "--file", action="append", default=[], help="YAML file or directory; repeat for several")
+    psc.add_argument("--live", action="store_true", help="read the cluster (read-only, never Secrets)")
+    psc.add_argument(
+        "-n", "--namespace", dest="namespaces", action="append", default=[], help="with --live: only these; repeat"
+    )
+    psc.add_argument("--top", type=int, default=20, help="paths to show (1-200, default 20)")
+    psc.add_argument(
+        "--fail-above", type=int, default=None, help="exit 1 when a path scores above this (CI gate; max score 30)"
+    )
+
     wt = sub.add_parser(
         "watch",
         help="Watch namespaces read-only: open, explain and remember incidents (needs cluster access)",
@@ -964,6 +985,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd == "policy":
         return _policy(a, s, kit, fmt)
 
+    if a.cmd == "posture":
+        return _posture(a, s, fmt)
     if a.cmd == "watch":
         return _watch(a, s, fmt)
 
@@ -1347,6 +1370,48 @@ def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     for line in lines:
         print(line, file=sys.stdout if a.output else sys.stderr)
     return 0
+
+
+def _posture(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob import attack_paths as ap
+
+    if not 1 <= a.top <= ap.MAX_PATHS:
+        raise ConfigError(f"--top must be 1-{ap.MAX_PATHS}")
+    if a.live:
+        if a.file:
+            raise ConfigError("pass -f manifests or --live, not both")
+        if not s.cluster.enabled:
+            raise ConfigError("--live needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
+        from kube_noob.debug.cluster import get_backend
+
+        out = ap.scan(ap.collect_live(get_backend(s), a.namespaces), top=a.top)
+    else:
+        if not a.file:
+            raise ConfigError("pass the manifests with -f (repeat for several), or --live with --cluster-enabled")
+        if a.namespaces:
+            raise ConfigError("-n works with --live; with -f every namespace in the files is scanned")
+        try:
+            out = ap.scan_manifests("\n---\n".join(_read(f) for f in a.file), top=a.top)
+        except ap.ScanError as exc:
+            raise ConfigError(str(exc)) from exc
+    if a.format == "text":
+        _tprint(out["summary"])
+        for path in out["paths"]:
+            br = path["blastRadius"]
+            head = f"#{path['rank']}  score {path['score']}  {path['exposure']['kind']}"
+            _tprint(f"\n{head} -> {br['capability']} ({br['scope']})")
+            for st in path["steps"]:
+                _tprint(f"    {st['from']} --{st['edge']}--> {st['to']}")
+                _tprint(f"        {st['evidence']}")
+            _tprint("    fix: " + "; or ".join(path["fix"]))
+        if out["notRead"]:
+            _tprint("\nnot read: " + "; ".join(out["notRead"][:10]))
+        if out["secretsIgnored"]:
+            _tprint(f"{out['secretsIgnored']} Secret object(s) in the input were ignored, unread.")
+    else:
+        _emit(out, fmt)
+    top_score = out["paths"][0]["score"] if out["paths"] else 0
+    return 1 if a.fail_above is not None and top_score > a.fail_above else 0
 
 
 def _print_poll(result: dict[str, Any]) -> None:

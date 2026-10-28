@@ -376,6 +376,24 @@ class NamespaceCheckIn(_In):
     namespace: str = Field(..., max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
 
+class PostureScanIn(_In):
+    manifests: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MANIFEST_CHARS,
+        description="Routes, Ingresses, Services, workloads, ServiceAccounts and RBAC objects (YAML). Secret objects "
+        "are dropped unread.",
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked paths to return.")
+
+
+class ClusterPostureIn(_In):
+    namespaces: list[Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", max_length=63)]] = Field(
+        default_factory=list, max_length=50, description="Namespaces to read (default: all the account can list)."
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked paths to return.")
+
+
 class LearningNoteIn(_In):
     symptom: str = Field(..., min_length=3, max_length=400, description="What was observed, in one or two sentences.")
     cause: str = Field(..., min_length=3, max_length=600, description="The confirmed root cause.")
@@ -837,6 +855,19 @@ class Toolkit:
         header = policies.header(g, platform=p.platform, platform_version=p.version, mode=p.mode, engines=engines)
         return {**g.summary(), "yaml": g.yaml(header)}
 
+    def posture_scan(self, p: PostureScanIn) -> dict[str, Any]:
+        from kube_noob import attack_paths
+
+        out = attack_paths.scan_manifests(p.manifests, top=p.top)
+        self._observe([f"posture:{len(out['paths'])}"])
+        return out
+
+    def cluster_posture_scan(self, p: ClusterPostureIn) -> dict[str, Any]:
+        from kube_noob import attack_paths
+
+        inv = attack_paths.collect_live(get_backend(self.settings), list(p.namespaces))
+        return attack_paths.scan(inv, top=p.top)
+
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
         inv = Inventory.from_yaml(p.manifests, p.default_namespace)
         cli = "oc" if p.platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
@@ -1258,6 +1289,17 @@ class Toolkit:
                 self.policy_generate,
             ),
             ToolSpec(
+                "posture_scan",
+                "Attack paths in manifests",
+                "Rank the paths from an exposure (Route, Ingress, LoadBalancer or NodePort Service) to what a "
+                "compromised pod could do: node access (privileged, hostPath, host namespaces) or Kubernetes API "
+                "rights through its ServiceAccount token (read Secrets, exec, create workloads, escalate). Score = "
+                "exposure x blast radius; every step names the field that proves it, with a fix. Secret objects are "
+                "dropped unread.",
+                PostureScanIn,
+                self.posture_scan,
+            ),
+            ToolSpec(
                 "check_network_policy",
                 "Would this traffic be allowed?",
                 "Evaluate NetworkPolicies offline: can the source reach the destination on this port? Checks egress "
@@ -1399,6 +1441,15 @@ class Toolkit:
                     "and evaluate them like check_network_policy.",
                     TrafficIn,
                     self.cluster_check_traffic,
+                    open_world=True,
+                ),
+                ToolSpec(
+                    "cluster_posture_scan",
+                    "Attack paths in the cluster (live, read-only)",
+                    "Read Routes, Ingresses, Services, workloads, ServiceAccounts, RBAC and SCCs from the cluster "
+                    "(never Secrets) and rank the attack paths like posture_scan.",
+                    ClusterPostureIn,
+                    self.cluster_posture_scan,
                     open_world=True,
                 ),
                 ToolSpec(

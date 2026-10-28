@@ -1,0 +1,222 @@
+# Seeded cluster for the attack-path scan (requirements R3.2): the planted path internet -> Route -> pod ->
+# ServiceAccount -> get secrets must rank first; every other object is a decoy that scores lower or has no path.
+# Applied as-is to a kind cluster in CI (scripts/posture_kind_test.py, with the Route CRD stand-in); replicas: 0 so
+# nothing is pulled or run.
+apiVersion: v1
+kind: Namespace
+metadata: {name: shop}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: ops}
+# --- the planted path ---------------------------------------------------------------------------------------------
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata: {name: web, namespace: shop}
+spec:
+  host: web.shop.example.com
+  to: {kind: Service, name: web}
+  tls: {termination: edge}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web, namespace: shop}
+spec:
+  selector: {app: web}
+  ports: [{port: 8080}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: web-sa, namespace: shop}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: shop}
+spec:
+  replicas: 0
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec:
+      serviceAccountName: web-sa
+      containers: [{name: web, image: registry.example.com/web:1.0.0}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: secret-reader, namespace: shop}
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: web-secrets, namespace: shop}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: secret-reader}
+subjects: [{kind: ServiceAccount, name: web-sa, namespace: shop}]
+# --- decoy: an internal load balancer to a pod bound to edit: 1 x 6 ------------------------------------------------
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-lb
+  namespace: ops
+  annotations: {service.beta.kubernetes.io/aws-load-balancer-internal: "true"}
+spec:
+  type: LoadBalancer
+  selector: {app: admin}
+  ports: [{port: 443}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: admin-sa, namespace: ops}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: admin, namespace: ops}
+spec:
+  replicas: 0
+  selector: {matchLabels: {app: admin}}
+  template:
+    metadata: {labels: {app: admin}}
+    spec:
+      serviceAccountName: admin-sa
+      containers: [{name: admin, image: registry.example.com/admin:1.0.0}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: admin-edit, namespace: ops}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: edit}
+subjects: [{kind: ServiceAccount, name: admin-sa, namespace: ops}]
+# --- decoy: a NodePort to a pod on the host network: 2 x 6 ---------------------------------------------------------
+---
+apiVersion: v1
+kind: Service
+metadata: {name: metrics, namespace: ops}
+spec:
+  type: NodePort
+  selector: {app: node-agent}
+  ports: [{port: 9100}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: node-agent, namespace: ops}
+spec:
+  replicas: 0
+  selector: {matchLabels: {app: node-agent}}
+  template:
+    metadata: {labels: {app: node-agent}}
+    spec:
+      hostNetwork: true
+      automountServiceAccountToken: false
+      containers: [{name: agent, image: registry.example.com/agent:1.0.0}]
+# --- decoy: exposed, cluster-admin, but no token in the pod: no path ----------------------------------------------
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata: {name: api, namespace: shop}
+spec:
+  to: {kind: Service, name: api}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: api, namespace: shop}
+spec:
+  selector: {app: api}
+  ports: [{port: 8080}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: api-sa, namespace: shop}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api, namespace: shop}
+spec:
+  replicas: 0
+  selector: {matchLabels: {app: api}}
+  template:
+    metadata: {labels: {app: api}}
+    spec:
+      serviceAccountName: api-sa
+      automountServiceAccountToken: false
+      containers: [{name: api, image: registry.example.com/api:1.0.0}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: api-sa-cluster-admin}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, name: api-sa, namespace: shop}]
+# --- decoy: cluster-admin, token mounted, but not exposed: no path ------------------------------------------------
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: batch-sa, namespace: ops}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: batch, namespace: ops}
+spec:
+  schedule: "0 3 * * *"
+  suspend: true
+  jobTemplate:
+    spec:
+      template:
+        metadata: {labels: {app: batch}}
+        spec:
+          serviceAccountName: batch-sa
+          restartPolicy: Never
+          containers: [{name: batch, image: registry.example.com/batch:1.0.0}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: batch-sa-cluster-admin}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, name: batch-sa, namespace: ops}]
+# --- decoy: exposed through an Ingress, bound to view only: no path -----------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: docs, namespace: shop}
+spec:
+  rules:
+  - host: docs.shop.example.com
+    http:
+      paths: [{path: /, pathType: Prefix, backend: {service: {name: docs, port: {number: 80}}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: docs, namespace: shop}
+spec:
+  selector: {app: docs}
+  ports: [{port: 80}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: docs-sa, namespace: shop}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: docs, namespace: shop}
+spec:
+  replicas: 0
+  selector: {matchLabels: {app: docs}}
+  template:
+    metadata: {labels: {app: docs}}
+    spec:
+      serviceAccountName: docs-sa
+      containers: [{name: docs, image: registry.example.com/docs:1.0.0}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: docs-view, namespace: shop}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+subjects: [{kind: ServiceAccount, name: docs-sa, namespace: shop}]
+# --- a Secret: never read, never echoed ---------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: db, namespace: shop}
+type: Opaque
+stringData: {password: hunter2-planted}

@@ -60,6 +60,12 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     "clusteroperators": ResourceDef("config.openshift.io/v1", "clusteroperators", False),
     "clusterversions": ResourceDef("config.openshift.io/v1", "clusterversions", False),
     "securitycontextconstraints": ResourceDef("security.openshift.io/v1", "securitycontextconstraints", False),
+    "deploymentconfigs": ResourceDef("apps.openshift.io/v1", "deploymentconfigs", True),
+    # RBAC objects (who may do what; no credentials): read by the attack-path scan (kube_noob.attack_paths)
+    "roles": ResourceDef("rbac.authorization.k8s.io/v1", "roles", True),
+    "rolebindings": ResourceDef("rbac.authorization.k8s.io/v1", "rolebindings", True),
+    "clusterroles": ResourceDef("rbac.authorization.k8s.io/v1", "clusterroles", False),
+    "clusterrolebindings": ResourceDef("rbac.authorization.k8s.io/v1", "clusterrolebindings", False),
     "egressfirewalls": ResourceDef("k8s.ovn.org/v1", "egressfirewalls", True),
     "centrals": ResourceDef("platform.stackrox.io/v1alpha1", "centrals", True),
     "securedclusters": ResourceDef("platform.stackrox.io/v1alpha1", "securedclusters", True),
@@ -109,6 +115,12 @@ ALIASES = {
     "egressfirewall": "egressfirewalls",
     "central": "centrals",
     "securedcluster": "securedclusters",
+    "dc": "deploymentconfigs",
+    "deploymentconfig": "deploymentconfigs",
+    "role": "roles",
+    "rolebinding": "rolebindings",
+    "clusterrole": "clusterroles",
+    "clusterrolebinding": "clusterrolebindings",
 }
 
 _NAME = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$")

@@ -19,3 +19,5 @@ description: >
 - Use `kubenoob_audit_manifests` with `platform: openshift` and a `version`, and `kubenoob_diagnose` for errors.
 - To enforce the audit rules in the cluster, `kubenoob_policy_generate` writes ValidatingAdmissionPolicy or Kyverno
   ValidatingPolicy YAML; suggest `mode: audit` first and switch a rule to enforce once its warnings are gone.
+- For "what could an attacker reach?", `kubenoob_posture_scan` ranks paths from a Route, Ingress or exposed
+  Service to node access or the pod's ServiceAccount rights; lead with rank 1, its evidence and its fix.

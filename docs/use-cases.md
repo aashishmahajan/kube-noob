@@ -352,6 +352,25 @@ kube-noob redteam -f k8s/ --platform openshift
 kube-noob explain KN-S004
 ```
 
+### Which exposure leads where? Attack paths
+
+`posture scan` follows what is exposed (a Route, an Ingress, a LoadBalancer, NodePort or externalIPs Service) to the
+pods it reaches and what an attacker running code in them could do: take the node (a privileged container, a
+hostPath volume, the host's PID or network namespace, near-root capabilities) or use the pod's ServiceAccount token
+(read Secrets, exec into pods, create workloads that run as any ServiceAccount of the namespace, escalate, bind or
+impersonate, the kubelet API, or on OpenShift a privileged SCC plus the right to create pods). Each path scores
+exposure (internet 3, node network or a restricted load balancer 2, internal 1) times blast radius (1-10, cluster-wide
+above one namespace), lists every step with the field that proves it, and ends with a fix. A pod with
+`automountServiceAccountToken: false` has no token step; unexposed pods are not paths. It reads RBAC objects, never
+Secrets (Secret objects in a bundle are dropped unread). `--fail-above` makes it a CI gate. NetworkPolicies on the
+entry edge are not applied: check a path with `policy reach`.
+
+```bash
+kube-noob posture scan -f k8s/
+kube-noob posture scan -f k8s/ --fail-above 17
+kube-noob --cluster-enabled posture scan --live -n shop -n payments
+```
+
 ### Enforce the audit rules at admission
 
 `policy generate` turns every audit rule that can be decided from one object into an admission policy: a

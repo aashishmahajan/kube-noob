@@ -50,7 +50,7 @@ each tier and what it needs.
 
 | Tier | Switch | Allows | Needs |
 |---|---|---|---|
-| R | `cluster.enabled` | get, list and logs on the allowlisted resources; Secrets never | get/list/watch RBAC |
+| R | `cluster.enabled` | get, list and logs on the allowlisted resources (including Roles, RoleBindings, ClusterRoles and ClusterRoleBindings for the attack-path scan); Secrets never | get/list/watch RBAC |
 | P | `probe.enabled` | an ephemeral debug container or a probe Job | patch on `pods/ephemeralcontainers`; create and delete on Jobs (chart Role only when enabled) |
 | D | `dryRun.enabled` | server-side dry-run (`?dryRun=All`) of a manifest | create and patch on `dryRun.rules` resources, never Secrets: Kubernetes authorizes a dry-run exactly like the real request |
 | W | `itsm.writeEnabled`, `notify.enabled` | attach evidence to a ticket; forward a report | the external system's token; refused under the offline lock |
