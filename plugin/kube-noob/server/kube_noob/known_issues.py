@@ -135,6 +135,9 @@ def openshift_context(text: str) -> bool:
 _NOT_THE_CLUSTER = frozenset({"rhel", "red hat", "redhat", "rhacs", "stackrox", "registry.redhat.io"})
 
 
+_RHACS_TEXT = re.compile(r"(?i)\b(?:rhacs|stackrox|roxctl|roxie|ROX-\d+|advanced cluster security)\b")
+
+
 def openshift_cluster_context(text: str) -> bool:
     """Whether the text says the cluster itself is OpenShift (or ROSA, ARO, OKD...): what decides OpenShift steps and
     causes. "RHEL", "Red Hat" or RHACS alone do not."""
@@ -312,6 +315,19 @@ class Index:
             out["note"] = (
                 "The text does not say it is about OpenShift, so the OpenShift release notes were not searched; give "
                 "the platform (openshift, rosa-hcp) to search them."
+            )
+            return out
+        if (
+            require_context
+            and not platform
+            and _RHACS_TEXT.search(text[:200_000])
+            and not openshift_cluster_context(text)
+        ):
+            # A RHACS ticket (roxctl, Scanner, Central, the UI) that never says the cluster is OpenShift: OpenShift
+            # release-note issues matched it only on shared words (community graders, 2026-10-28).
+            out["note"] = (
+                "The text is about RHACS and does not say the cluster is OpenShift, so the OpenShift release notes "
+                "were not searched; give the platform (openshift, rosa-hcp) to search them."
             )
             return out
         from kube_noob.signals import extract

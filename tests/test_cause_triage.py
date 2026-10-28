@@ -8,6 +8,7 @@ file order. Every question here is written for this file; the held-out set lives
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -555,3 +556,15 @@ def test_a_kyverno_validatingpolicy_denial_names_its_policy() -> None:
     )
     denials = _kyverno(text, None)
     assert denials and denials[0].policy == "require-team-label", denials
+
+
+def test_a_rhacs_ticket_that_never_says_openshift_gets_no_openshift_release_notes(tmp_path: Path) -> None:
+    # Community graders (2026-10-28): OCPBUGS items matched RHACS tickets on shared words only (10 of 10 were better
+    # without them).
+    from kube_noob.known_issues import match
+
+    rhacs = "RHACS 4.8 Central UI: the Download baseline button does nothing for a deployment"
+    out = match(rhacs, None, None, 3, tmp_path, require_context=True)
+    assert out["matches"] == [] and "RHACS" in out["note"]
+    ocp = match("RHACS on OpenShift 4.16: the Download baseline button does nothing", None, None, 3, tmp_path, True)
+    assert "RHACS" not in str(ocp.get("note", ""))

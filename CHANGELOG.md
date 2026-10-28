@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A RHACS ticket (roxctl, Scanner, Central, the UI) that never says the cluster is OpenShift is no longer matched
+  against the OpenShift release notes: the OCPBUGS items it got shared only words with it. Graders on the 10 community
+  rows that changed: 10 better. Jira key recall unchanged.
 - Kyverno and Gatekeeper have no playbook of their own, so a question about the policy itself ("How do I exempt only
   this Job without editing the policy?") gets the document section on that mechanism first (the PolicyException
   section), then the policy explainer. Golden pol-004 now answers: in scope 89 of 96; no community row changed. A

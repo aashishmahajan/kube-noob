@@ -147,9 +147,9 @@ which ships tested and documented on its own.
 - Run the headline test: "No AI inside. Works with yours." versus "The ground truth your AI SRE checks against",
   a week apart, compare click-through to the repository.
 - Submit the OpenShift Helm catalog pull requests (`docs/openshift-catalog.md`).
-- Set the `CORPUS_PASSPHRASE` repository secret (without it the daily Jira main copy cannot be kept between runs),
-  optionally `JIRA_EVERY_DAYS=2`, and build the private seed image from the decrypted snapshot (docs/use-cases.md,
-  "One main copy for the whole organisation").
+- `CORPUS_PASSPHRASE` repository secret: set by the owner on 2026-10-28 (a random passphrase; keep the local file in a
+  password manager). Still open: optionally `JIRA_EVERY_DAYS=2`, and build the private seed image from the decrypted
+  snapshot (docs/use-cases.md, "One main copy for the whole organisation").
 - Requirements doc (https://claude.ai/artifact/WjUWqoNzVZkgruxo9CYGzu) open questions: an OpenShift 4.20/4.22 cluster for
   CI, the private registry and key holder for kube-noob-db-jira, the approved load image for tier L, RHACS read access.
 - Plugin directory: the listing is in review (held: "Runs a pinned npx or uvx package", always reviewed); the portal
@@ -310,6 +310,7 @@ which ships tested and documented on its own.
 - CI (GitHub Actions) has helm, kind and docker: chart, image and cluster behaviour is proven there.
 
 ## Iteration log (newest first; at most 10 lines per entry)
+- 2026-10-28 QA8 follow-up (RHACS issues): RHACS text without OpenShift cluster context skips the OpenShift release-note matcher (`require_context`). Community: 239 RHACS rows, reported-issue findings 13 -> 3; 1 top answer moved (train); one blinded grader on the 10 changed rows: 10 better. Jira recall unchanged. Owner set CORPUS_PASSPHRASE (gh secret list shows it). New owner file questions_with_answers_by_technology.csv (2,486 answered rows, none in questions.csv) copied to the scratchpad, never committed: QA9.
 - 2026-10-28 QA7 (20w, pol-004): Kyverno denial + 'How do I exempt only this Job without editing the policy?' -> kn:kyverno-troubleshooting#1 (PolicyException) first, then the kyverno explainer; the same denial + 'What do I add to the Job?' keeps the explainer first. Golden 89/96, 21/23, regressed 0; community policy-denial rows (9) unchanged.
 - 2026-10-28 QA8 follow-up (graders' notes): `kube-noob diagnose 'roxctl image scan prints a goroutine leak warning in the stackrox CI job'` -> no DBG-STACKROX-ADMISSION (the bare product name named it on 53 of 60 RHACS tickets). Kubespray on RHEL -> kube-system DNS steps (openshift_cluster_context; RHOCP counts). Blinded graders: RHACS change test 60 (58/58 better, 1/1 worse: the stackrox webhook-selector bug lost its webhook step), train 77 (75 better); cluster context test 60 (7/2 better, 4/3 worse), train 66 (7 better, 4 worse). Golden 88/96, 21/23, regressed 0; held-out 80/114; train 136/171.
 - 2026-10-28 QA7 (20w, engine order): `kube-noob insight "... unable to validate against any security context constraint: [provider restricted-v2: ...privileged...]. Should I just edit restricted-v2?" --platform openshift` -> DBG-SCC first (never edit the default SCCs), openshift-scc/restricted-v2 second. A first rule (engine playbook always first) regressed golden pol-001 and pol-006, where the explainer's specific change is the answer; the shipped rule keys on the asked sentence. `python scripts/eval_golden.py` -> 88/96 in scope (pol-002, pol-015, rhacs-001 raised to pass), 21/23, regressed 0. Community: 9 rows carry a policy denial, 0 changed.
