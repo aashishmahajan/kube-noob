@@ -314,6 +314,37 @@
         }
       }
     },
+    "db": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/:-]{0,254}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
+            }
+          }
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,8}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\\.tgz$"
+        },
+        "sizeLimit": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,4}(Mi|Gi)$"
+        }
+      }
+    },
     "memory": {
       "type": "object",
       "additionalProperties": false,

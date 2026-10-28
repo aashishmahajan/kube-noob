@@ -107,6 +107,20 @@ jira:
       subPath: ""            # the folder inside the claim that holds *.tgz
     sizeLimit: 4Gi           # the scratch volume the image's snapshot is copied to
 
+db:
+  # The public kube-noob-db image: the documentation corpus with its licenses, release history and the release-note
+  # known issues, rebuilt daily, signed, and checked to hold no Jira data and nothing that may not be redistributed.
+  # An init container copies the archive; kube-noob serve imports it on start when it is newer than the one the data
+  # folder already has, so rolling out a newer digest refreshes every pod. Pinned by digest only. No egress needed.
+  # Verify the signature first: cosign verify <repository>@<digest> --certificate-identity-regexp
+  # 'https://github.com/aashishmahajan/kube-noob/' --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  enabled: false
+  image:
+    repository: ghcr.io/aashishmahajan/kube-noob-db
+    digest: ""               # sha256:... (required when enabled)
+  path: /kube-noob-db/kube-noob-db.tgz   # the archive inside the image
+  sizeLimit: 2Gi             # the scratch volume the archive is copied to
+
 memory:
   # Your team's memory repository (kube-noob memory init), mounted read-only at /srv/kube-noob/memory and read by
   # every tool; never uploaded or exported. source: none | configMap | pvc | git.

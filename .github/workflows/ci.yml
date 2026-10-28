@@ -348,6 +348,38 @@ jobs:
           if mt | grep -q "jira-seed"; then
             echo "::error title=chart::jira-seed must not render with jira.seed.source none"; exit 1
           fi
+          dbd="--set db.image.digest=sha256:$(printf 'a%.0s' $(seq 64))"
+          for args in "--set db.enabled=true" "--set db.enabled=true --set db.image.digest=latest" \
+              "--set db.enabled=true $dbd --set db.path=/kube-noob-db-seed/x.tgz" \
+              "--set db.enabled=true $dbd --set db.path=/db/../x.tgz" "--set db.enabled=true $dbd --set db.image.tag=1"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::db values must fail to render: $args"; exit 1
+            fi
+          done
+          mt --set db.enabled=true $dbd $seed --set jira.seed.image.tag=1 | python -c "
+          import sys, yaml
+          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
+          pod = dep['spec']['template']['spec']
+          assert [c['name'] for c in pod['initContainers']] == ['kube-noob-db', 'jira-seed'], pod['initContainers']
+          init = pod['initContainers'][0]
+          assert init['image'] == 'ghcr.io/aashishmahajan/kube-noob-db@sha256:' + 'a' * 64, init
+          assert init['command'] == ['cp', '--', '/kube-noob-db/kube-noob-db.tgz', '/kube-noob-db-seed/kube-noob-db.tgz']
+          assert init['securityContext']['readOnlyRootFilesystem'] is True and init['volumeMounts'] == [
+              {'name': 'kube-noob-db', 'mountPath': '/kube-noob-db-seed'}], init
+          mounts = pod['containers'][0]['volumeMounts']
+          assert {'name': 'kube-noob-db', 'mountPath': '/var/lib/kube-noob/seed-db', 'readOnly': True} in mounts, mounts
+          assert {'name': 'kube-noob-db', 'emptyDir': {'sizeLimit': '2Gi'}} in pod['volumes'], pod['volumes']
+          "
+          mt --set db.enabled=true $dbd | python -c "
+          import sys, yaml
+          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
+          assert {'name': 'data', 'emptyDir': {'sizeLimit': '4Gi'}} in dep['spec']['template']['spec']['volumes']
+          "
+          mt --set db.enabled=true $dbd --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if mt | grep -q "kube-noob-db"; then
+            echo "::error title=chart::kube-noob-db must not render unless db.enabled"; exit 1
+          fi
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"
@@ -392,6 +424,73 @@ jobs:
             helm lint --strict /tmp/charts-$p/demo
             helm template demo /tmp/charts-$p/demo -n demo | kube-noob audit -f - --platform $p --fail-on high
           done
+
+  db-image:
+    # The public kube-noob-db image end to end: bundle, gate, image, the chart's cp init container (read-only, no
+    # capabilities, user 1001) and the server importing the bundle on start.
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Bundle a small public corpus and gate it
+        env:
+          KUBE_NOOB_DATA_DIR: /tmp/db-data
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, shutil
+          from importlib import resources
+          from pathlib import Path
+          from kube_noob.sources.corpus import write_shard
+
+          data = Path("/tmp/db-data")
+          doc = {"sourceId": "k8s-docs", "license": "CC-BY-4.0", "redistributable": True}
+          write_shard(data, "k8s-docs", [{**doc, "id": f"k{i}", "title": f"doc {i}", "text": f"Pods {i}"} for i in range(5)])
+          write_shard(data, "jira-ocpbugs", [{"id": "j1", "title": "t", "text": "PRIVATE", "sourceId": "jira:OCPBUGS",
+                                              "license": "public, not redistributable", "redistributable": False}])
+          (data / "known_issues").mkdir()
+          src = resources.files("kube_noob").joinpath("data", "known_issues", "openshift-4.21-known-1.json")
+          (data / "known_issues" / "openshift-4.21-known-1.json").write_text(src.read_text())
+          PY
+          mkdir -p dist/kube-noob-db
+          kube-noob corpus db-bundle -o dist/kube-noob-db/kube-noob-db.tgz
+          tar -xzf dist/kube-noob-db/kube-noob-db.tgz -C dist/kube-noob-db ATTRIBUTION.md
+          kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
+          if tar -xzOf dist/kube-noob-db/kube-noob-db.tgz | grep -q PRIVATE; then
+            echo "::error title=db::Jira text reached the public bundle"; exit 1; fi
+      - name: Build both images
+        run: |
+          docker build -f Containerfile.db -t kube-noob-db:ci .
+          docker build -f Containerfile -t kube-noob:ci .
+          [ "$(docker image inspect kube-noob-db:ci --format '{{.Config.User}}')" = "1001" ]
+      - name: The init container copies the archive and the server imports it on start
+        run: |
+          set -euo pipefail
+          docker volume create kn-db-seed
+          # an emptyDir is group-writable for the pod's group 0; a fresh docker volume is root-only until set so
+          docker run --rm -v kn-db-seed:/kube-noob-db-seed --user 0 kube-noob-db:ci chmod 0770 /kube-noob-db-seed
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --user 1001:0 \
+            -v kn-db-seed:/kube-noob-db-seed kube-noob-db:ci \
+            cp -- /kube-noob-db/kube-noob-db.tgz /kube-noob-db-seed/kube-noob-db.tgz
+          docker run -d --name kn -e KUBE_NOOB_HTTP_TOKEN=ci-token -p 18080:8080 \
+            -v kn-db-seed:/var/lib/kube-noob/seed-db:ro kube-noob:ci
+          for _ in $(seq 60); do curl -fsS http://127.0.0.1:18080/healthz >/dev/null 2>&1 && break; sleep 1; done
+          docker logs kn 2>&1 | tee /tmp/kn.log
+          grep -q "kube-noob-db imported from /var/lib/kube-noob/seed-db/kube-noob-db.tgz" /tmp/kn.log
+          docker exec kn kube-noob corpus stats --format json > /tmp/stats.json
+          docker exec kn cat /var/lib/kube-noob/corpus/DB_SEED.json
+          python -c "
+          import json
+          s = json.load(open('/tmp/stats.json'))
+          assert 'k8s-docs' in json.dumps(s) and 'jira' not in json.dumps(s['manifest']['shards']), s
+          "
+          docker rm -f kn
 
   e2e-kind:
     # One leg per supported OpenShift minor (by its Kubernetes version) plus the newest Kubernetes kind ships.

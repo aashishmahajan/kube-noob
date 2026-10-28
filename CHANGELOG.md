@@ -111,6 +111,18 @@
   runs every `jira.sync.intervalHours` +/- 10%; clones from GitHub (`corpus build`, `corpus known-issues`) are spaced
   by a random 1 to 4 s; the scheduled `corpus-refresh` starts at a random offset of up to 15 minutes (the Jira client
   already spaced requests by the crawl delay plus random jitter).
+- The public `kube-noob-db` image (requirements R1.3): `kube-noob corpus db-bundle` packs what may be shared (the
+  documentation of every redistributable source with its license, release history, the release-note known issues)
+  into one reproducible `kube-noob-db.tgz` with `ATTRIBUTION.md`; shards not marked redistributable and every Jira
+  shard (ticket text and the per-project counts alike) are left out by design. `kube-noob corpus db-check` is the
+  gate (exit 1): every record redistributable under a license on the allow-list (Apache-2.0, CC-BY-4.0, MIT, BSD,
+  facts from public Git metadata), nothing from Jira, every file listed with its checksum and nothing else in the
+  archive, no links or special files, size and count caps. `corpus import` recognises the bundle and validates all
+  of it before copying anything. New workflow `db-image` rebuilds it every day at a random offset from public sources
+  only, gates the archive and the image's own copy (UBI minimal, user 1001, `Containerfile.db`), and uploads the
+  archive; it pushes to ghcr.io, attests and keyless-signs only when the maintainer sets `DB_IMAGE_PUBLISH`. Chart
+  `db.enabled` with `db.image.digest` (digest only; the chart refuses a tag): an init container copies the archive and
+  `serve` imports it when it was built after the one the pod already has, so a newer digest refreshes every pod.
 - `kube-noob insight` (MCP: `kubenoob_insight`, listed first for anything pasted): names what the input is, with the
   evidence (Alertmanager payload, events, pod status, logs, ticket, manifests, Helm template, policy denial, build log,
   Containerfile, SBOM, scanner report, packet capture or `.pcap` file, must-gather paths, question; several at once),

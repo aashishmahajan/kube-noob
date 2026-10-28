@@ -85,5 +85,10 @@ flowchart LR
   sizes, checksums and that it comes from the same Jira before copying anything. `serve` imports a seed from
   `<dataDir>/seed/` only when there is no copy, and the chart mounts the seed read-only (an init container copies it
   from a pinned image, or a read-only claim). The scheduled main copy leaves the runner only encrypted.
+- The public `kube-noob-db` bundle is the only data kube-noob publishes. It is built from redistributable sources
+  only, checked by `corpus db-check` (allow-listed licenses, no Jira data, every file listed and checksummed), and
+  shipped in an image the chart pins by digest. The init container copies the archive into a scratch volume that the
+  server mounts read-only; `serve` validates the whole archive and imports it only when it is newer than the copy
+  it has. Trust boundary: the image registry and its signature, checked by the operator with `cosign verify`.
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.

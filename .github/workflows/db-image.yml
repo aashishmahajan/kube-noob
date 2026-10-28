@@ -1,0 +1,194 @@
+name: db-image
+
+# The public kube-noob-db image (requirements R1.3): the documentation corpus of every redistributable source with its
+# license, release history and the release-note known issues, packed by `kube-noob corpus db-bundle`, gated by
+# `kube-noob corpus db-check` (no Jira data, no record that may not be redistributed, licenses on the allow-list, every
+# file listed with its checksum) before and after it becomes an image. Rebuilt every day at a random offset.
+#
+# Publishing is the maintainer's switch: the image is pushed to ghcr.io, attested and keyless-signed only when the
+# repository variable DB_IMAGE_PUBLISH is 'true' and the run is on main. Otherwise the run builds, gates and uploads
+# the archive as an artifact. The chart pins the image by digest (db.image.digest); the digest is in the run summary.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "29 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-image
+  cancel-in-progress: false
+
+jobs:
+  db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      KUBE_NOOB_DATA_DIR: ${{ github.workspace }}/db-data
+    steps:
+      - name: Start at a random offset (scheduled runs)
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "schedule" ]; then
+            wait=$(( $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 900 ))
+            echo "::notice title=Jitter::starting in $wait s"
+            sleep "$wait"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Public sources only (clones paced with a random pause)
+        run: |
+          sources=$(python -c "from kube_noob.sources.registry import GIT_SOURCES as G; print(','.join(s.source_id for s in G if s.redistributable))")
+          kube-noob corpus build --online --sources "$sources" --format json | tee git-summary.json
+          kube-noob corpus history --online --format json | tee history-summary.json
+          kube-noob corpus known-issues --online --format json | tee known-issues-summary.json
+          kube-noob corpus verify
+      - name: Pack the bundle
+        run: |
+          mkdir -p dist/kube-noob-db
+          kube-noob corpus db-bundle -o dist/kube-noob-db/kube-noob-db.tgz --format json | tee bundle.json
+          tar -xzf dist/kube-noob-db/kube-noob-db.tgz -C dist/kube-noob-db ATTRIBUTION.md
+      - name: "Gate: nothing private, nothing unlicensed"
+        run: kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Resolve base image digest
+        id: base
+        run: |
+          set -euo pipefail
+          src=registry.access.redhat.com/ubi9/ubi-minimal:latest
+          d=$(docker buildx imagetools inspect "$src" --format '{{json .Manifest}}' | jq -r .digest)
+          case "$d" in sha256:*) ;; *) echo "::error::could not resolve digest for $src"; exit 1;; esac
+          echo "ref=registry.access.redhat.com/ubi9/ubi-minimal@${d}" >> "$GITHUB_OUTPUT"
+          echo "built=$(jq -r .builtAt bundle.json)" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile.db
+          load: true
+          push: false
+          tags: kube-noob-db:gate
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.ref }}
+            BUILT_AT=${{ steps.base.outputs.built }}
+      - name: Gate the image's own copy
+        run: |
+          set -euo pipefail
+          id=$(docker create kube-noob-db:gate)
+          mkdir -p from-image
+          docker cp "$id:/kube-noob-db/kube-noob-db.tgz" from-image/
+          docker rm "$id" >/dev/null
+          cmp from-image/kube-noob-db.tgz dist/kube-noob-db/kube-noob-db.tgz
+          kube-noob corpus db-check from-image/kube-noob-db.tgz
+          user=$(docker image inspect kube-noob-db:gate --format '{{.Config.User}}')
+          [ "$user" = "1001" ] || { echo "::error::the image must run as 1001, not '$user'"; exit 1; }
+      - name: Summary
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          b = json.load(open("bundle.json"))
+          print(f"### kube-noob-db built {b['builtAt']}\n")
+          print(f"- archive sha256 `{b['sha256']}`, {b['bytes'] / 1e6:.1f} MB, {b['records']} records")
+          print(f"- shards: {', '.join(b['shards'])}; known-issue files: {b['knownIssueFiles']}")
+          print(f"- licenses: {', '.join(f'{k} {v}' for k, v in b['licenses'].items())}")
+          print(f"- left out: {', '.join(b['leftOut']) or 'none'}")
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kube-noob-db
+          path: |
+            dist/kube-noob-db/
+            bundle.json
+            *-summary.json
+          retention-days: 14
+
+  publish:
+    needs: db
+    if: vars.DB_IMAGE_PUBLISH == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kube-noob-db
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kube-noob-db
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: "Gate again: the archive this job pushes"
+        run: kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve base image digest
+        id: base
+        run: |
+          set -euo pipefail
+          src=registry.access.redhat.com/ubi9/ubi-minimal:latest
+          d=$(docker buildx imagetools inspect "$src" --format '{{json .Manifest}}' | jq -r .digest)
+          case "$d" in sha256:*) ;; *) echo "::error::could not resolve digest for $src"; exit 1;; esac
+          echo "ref=registry.access.redhat.com/ubi9/ubi-minimal@${d}" >> "$GITHUB_OUTPUT"
+          built=$(jq -r .builtAt bundle.json)
+          echo "built=${built}" >> "$GITHUB_OUTPUT"
+          echo "day=$(echo "$built" | cut -c1-10)" >> "$GITHUB_OUTPUT"
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile.db
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.ref }}
+            BUILT_AT=${{ steps.base.outputs.built }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.base.outputs.day }}
+            ${{ env.IMAGE }}:latest
+          provenance: mode=max
+          sbom: true
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Keyless-sign the image (Sigstore)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Gate the pushed image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker pull "${IMAGE}@${DIGEST}"
+          id=$(docker create "${IMAGE}@${DIGEST}")
+          mkdir -p pushed
+          docker cp "$id:/kube-noob-db/kube-noob-db.tgz" pushed/
+          docker rm "$id" >/dev/null
+          kube-noob corpus db-check pushed/kube-noob-db.tgz
+          {
+            echo "### kube-noob-db published"
+            echo ""
+            echo "Pin it in the chart: \`--set db.enabled=true --set db.image.digest=${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

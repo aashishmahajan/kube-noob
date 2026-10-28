@@ -42,6 +42,15 @@
 {{- if and (eq $seedSource "pvc") (not .Values.jira.seed.pvc.claimName) }}
 {{- fail "jira.seed.source pvc needs jira.seed.pvc.claimName" }}
 {{- end }}
+{{- $db := include "kube-noob.dbEnabled" . }}
+{{- if $db }}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" (.Values.db.image.digest | default "")) }}
+{{- fail "db.enabled needs db.image.digest (sha256:...): the public kube-noob-db image is pinned by digest only" }}
+{{- end }}
+{{- if hasPrefix "/kube-noob-db-seed/" .Values.db.path }}
+{{- fail "db.path is the archive inside the image; /kube-noob-db-seed/ is where the chart copies it to" }}
+{{- end }}
+{{- end }}
 {{- $memSource := include "kube-noob.memorySource" . }}
 {{- $memSsh := false }}
 {{- if and (eq $memSource "configMap") (not .Values.memory.configMap.name) }}
@@ -125,8 +134,24 @@ spec:
       {{- with .Values.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if or (eq $memSource "git") (eq $seedSource "image") }}
+      {{- if or (eq $memSource "git") (eq $seedSource "image") $db }}
       initContainers:
+      {{- end }}
+      {{- if $db }}
+        - name: kube-noob-db
+          image: "{{ .Values.db.image.repository }}@{{ .Values.db.image.digest }}"
+          imagePullPolicy: IfNotPresent
+          command: ["cp", "--", {{ .Values.db.path | quote }}, "/kube-noob-db-seed/kube-noob-db.tgz"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: kube-noob-db, mountPath: /kube-noob-db-seed}
       {{- end }}
       {{- if eq $seedSource "image" }}
         - name: jira-seed
@@ -228,6 +253,9 @@ spec:
             - {name: config, mountPath: /etc/kube-noob, readOnly: true}
             - {name: data, mountPath: /var/lib/kube-noob}
             - {name: tmp, mountPath: /tmp}
+            {{- if $db }}
+            - {name: kube-noob-db, mountPath: /var/lib/kube-noob/seed-db, readOnly: true}
+            {{- end }}
             {{- if eq $seedSource "image" }}
             - {name: jira-seed, mountPath: /var/lib/kube-noob/seed, readOnly: true}
             {{- else if eq $seedSource "pvc" }}
@@ -259,8 +287,12 @@ spec:
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim: {claimName: {{ include "kube-noob.fullname" . }}-data}
           {{- else }}
-          emptyDir: {sizeLimit: {{ if eq $seedSource "none" }}2Gi{{ else }}8Gi{{ end }}}
+          emptyDir: {sizeLimit: {{ if eq $seedSource "none" }}{{ if $db }}4Gi{{ else }}2Gi{{ end }}{{ else }}8Gi{{ end }}}
           {{- end }}
+        {{- if $db }}
+        - name: kube-noob-db
+          emptyDir: {sizeLimit: {{ .Values.db.sizeLimit }}}
+        {{- end }}
         {{- if eq $seedSource "image" }}
         - name: jira-seed
           emptyDir: {sizeLimit: {{ .Values.jira.seed.sizeLimit }}}

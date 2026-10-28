@@ -303,6 +303,16 @@ kube-noob doctor
 - nothing later in the config chain can lift it;
 - the chart refuses to render if web access is also requested.
 
+Start answering from day one without any egress: the public `kube-noob-db` image carries the documentation corpus
+(with its licenses), release history and known issues, rebuilt daily and checked to hold no Jira data. Pin it by
+digest; pods import it on start when it is newer than what they have.
+
+```bash
+cosign verify ghcr.io/aashishmahajan/kube-noob-db@sha256:<digest> --certificate-identity-regexp https://github.com/aashishmahajan/kube-noob/ --certificate-oidc-issuer https://token.actions.githubusercontent.com
+helm upgrade --install kube-noob deploy/helm/kube-noob --set db.enabled=true --set db.image.digest=sha256:<digest> --set config.offline=true
+kube-noob corpus db-check kube-noob-db.tgz
+```
+
 `doctor` prints what the process can reach and exits 1 if the configuration contradicts the lock. To add kube-noob
 as a tool in OpenShift Lightspeed, or to run it as a sidecar, follow [openshift.md](openshift.md). Index your own
 runbooks with `kube-noob corpus add-docs <folder> --source platform-runbooks`, and prove the answers on your

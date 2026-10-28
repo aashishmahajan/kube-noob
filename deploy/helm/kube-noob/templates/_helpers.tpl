@@ -48,6 +48,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- if $i.digest -}}{{ $i.repository }}@{{ $i.digest }}{{- else -}}{{ $i.repository }}:{{ $i.tag }}{{- end -}}
 {{- end -}}
 
+{{- define "kube-noob.dbEnabled" -}}
+{{- if ((.Values.db | default dict).enabled | default false) }}true{{ end -}}
+{{- end -}}
+
 {{- define "kube-noob.seedSource" -}}
 {{- ((.Values.jira | default dict).seed | default dict).source | default "none" -}}
 {{- end -}}

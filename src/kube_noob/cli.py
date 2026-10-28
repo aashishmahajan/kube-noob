@@ -616,8 +616,23 @@ def build_parser() -> argparse.ArgumentParser:
     cad.add_argument("path", help="folder with .md, .adoc, .txt or .rst files (for example a cloned wiki)")
     cad.add_argument("--source", required=True, help="short name, e.g. platform-runbooks")
     cad.add_argument("--base-url", help="link prefix for citations, e.g. https://git.example.com/runbooks/blob/main")
-    ci = csub.add_parser("import", help="Import a corpus directory or .tgz (e.g. the corpus-refresh artifact)")
+    ci = csub.add_parser(
+        "import", help="Import a corpus directory or .tgz (the corpus-refresh artifact, a Jira snapshot, kube-noob-db)"
+    )
     ci.add_argument("path")
+    cdb = csub.add_parser(
+        "db-bundle",
+        help="Pack what may be shared (redistributable docs, release history, known issues) into kube-noob-db.tgz",
+        description="Shards marked not redistributable and every Jira shard are left out; the archive is checked "
+        "before it is written. Example: kube-noob corpus db-bundle -o dist/kube-noob-db.tgz",
+    )
+    cdb.add_argument("-o", "--output", default="kube-noob-db.tgz", help="the archive to write")
+    cdc = csub.add_parser(
+        "db-check",
+        help="Check a kube-noob-db archive or folder: redistributable records on allowed licenses only, no Jira data, "
+        "every file listed with its checksum (exit 1 on any problem)",
+    )
+    cdc.add_argument("path")
 
     t = sub.add_parser("train", help="Training enforcer, credit system and dataset export")
     tsub = t.add_subparsers(dest="train_cmd", required=True)
@@ -1010,8 +1025,20 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             s.server.host = a.host
         if a.port:
             s.server.port = a.port
+        from kube_noob.sources import db_bundle
         from kube_noob.sources.jira_snapshot import seed_on_start
 
+        try:  # a pod starts with the public kube-noob-db (docs, known issues) when its image is newer
+            db_seeded = db_bundle.seed_on_start(s.data_dir)
+        except (OSError, ValueError, KubeNoobError) as exc:
+            print(f"kube-noob-db seed not imported: {exc}", file=sys.stderr)
+        else:
+            if db_seeded:
+                print(
+                    f"kube-noob-db imported from {db_seeded['seed']} (built {db_seeded['bundle']['builtAt']}): "
+                    f"{', '.join(db_seeded['imported'])}",
+                    file=sys.stderr,
+                )
         try:  # a pod starts with the organisation's Jira copy instead of waiting for a first sync
             seeded = seed_on_start(s.data_dir)
         except (OSError, ValueError, KubeNoobError) as exc:
@@ -1692,10 +1719,46 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             _emit({**res, "openTickets": opened}, fmt)
         return 0
     if cc == "import":
+        from kube_noob.sources import db_bundle
         from kube_noob.sources.corpus import import_corpus
 
-        _emit(import_corpus(Path(a.path), s.data_dir), fmt)
+        where = Path(a.path)
+        if not where.exists():
+            raise ConfigError(f"no such file or folder: {where}")
+        if db_bundle.is_bundle(where):
+            _emit(db_bundle.import_bundle(where, s.data_dir), fmt)
+        else:
+            _emit(import_corpus(where, s.data_dir), fmt)
         return 0
+    if cc == "db-bundle":
+        from kube_noob.sources import db_bundle
+
+        out = db_bundle.build(s.data_dir, Path(a.output))
+        if a.format == "text":
+            _tprint(
+                f"wrote {out['bundle']} ({out['bytes'] / 1_000_000:.1f} MB, sha256 {out['sha256'][:16]}...): "
+                f"{out['records']} records in {len(out['shards'])} shards, {out['knownIssueFiles']} known-issue files"
+            )
+            _tprint("licenses: " + ", ".join(f"{n} {k}" for k, n in out["licenses"].items()))
+            if out["leftOut"]:
+                _tprint("left out (not redistributable or Jira): " + ", ".join(out["leftOut"]))
+        else:
+            _emit(out, fmt)
+        return 0
+    if cc == "db-check":
+        from kube_noob.sources import db_bundle
+
+        where = Path(a.path)
+        if not where.exists():
+            raise ConfigError(f"no such file or folder: {where}")
+        problems = db_bundle.check_archive(where)
+        if a.format == "text":
+            _tprint(f"{where}: ok" if not problems else f"{where}: {len(problems)} problems")
+            for p in problems:
+                _tprint(f"  {p}")
+        else:
+            _emit({"ok": not problems, "problems": problems}, fmt)
+        return 1 if problems else 0
     problems = verify(s.data_dir)
     _emit({"ok": not problems, "problems": problems}, fmt)
     return 0 if not problems else 1
