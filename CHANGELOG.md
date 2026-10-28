@@ -19,7 +19,10 @@
   as nginx's `mkdir() ... (13: Permission denied)`, still name it). New trigger phrases: a PVC stuck in words, DNS
   trouble in words, `oc get co` rows and `*ControllerDegraded` reasons. Documents are offered only when they share
   enough specific words with the question; forum posts that ask in their title or a sentence are read as questions;
-  reported-issue findings in `insight` carry the issue summary as their title.
+  reported-issue findings in `insight` carry the issue summary as their title. A graded sample of 76 rows is in
+  [docs/evals/community-questions-grades.csv](docs/evals/community-questions-grades.csv) (ids and verdicts, no
+  question text); `--grades` carries each verdict over while the row's answer is unchanged and lists the rows a
+  change moved, so a tuning change is re-graded only where it changed an answer.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

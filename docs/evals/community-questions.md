@@ -18,8 +18,11 @@ the platform from the row's tags. The CSV has no reference answers, so three thi
 - Misfires that are wrong by construction: an OpenShift release-note bug as the answer to a question about another
   platform, the ROSA playbook on a non-ROSA question, the OpenShift arbitrary-UID playbook off OpenShift.
 
-A stratified sample of 76 rows (4 per topic) was graded by hand (correct lead, partly relevant, wrong, nothing where
-kube-noob should have helped, nothing where the question is outside kube-noob's scope).
+A stratified sample of 76 rows (4 per topic) was graded by hand: correct lead, partly relevant, wrong, nothing where
+kube-noob should have helped, nothing on a Red Hat bug whose key only a synced Jira copy holds, and nothing where
+the question is outside what an offline Kubernetes and OpenShift assistant should know. The verdicts are in
+[`community-questions-grades.csv`](community-questions-grades.csv) (row ids, kube-noob's answer, verdict and a short
+note; no question text).
 
 ## Results (2026-10-28)
 
@@ -37,7 +40,8 @@ kube-noob should have helped, nothing where the question is outside kube-noob's 
 | Graded sample: correct or partly relevant answers | 4 | 7 |
 | Graded sample: wrong answers | 16 | 11 |
 | Graded sample: in-scope questions with no answer | 10 | 6 |
-| Graded sample: out-of-scope questions with no answer | 46 | 52 |
+| Graded sample: no answer, Red Hat bug outside the index or out of scope | 46 | 8 + 44 |
+| Graded sample: helpful share of the answers given (correct or partly relevant) | 20% | 39% |
 | Run time for all rows | 114 s | 85 s |
 
 What changed: release notes are searched for a text with no platform only when it says it is about OpenShift
@@ -60,3 +64,16 @@ questions.
   not more matching rules.
 - An accuracy grade needs reference answers. Accepted answers for a stratified set (or a person grading the review
   sample) would turn the coverage numbers into an accuracy number.
+
+## Re-grading after a tuning change
+
+```sh
+python scripts/eval_questions.py questions.csv --out ../qa-run --sample-review 76 \
+  --grades docs/evals/community-questions-grades.csv
+```
+
+A verdict carries over only while kube-noob gives the same answer kind and the same top finding for that row.
+`summary.json` → `graded` counts the carried verdicts and lists every graded row whose answer moved (`changed`, with
+the old verdict and the old and new answers); in `review.csv` those rows keep the old verdict in `previousVerdict`
+and an empty `verdict` to fill in. Update the grades file with the new verdicts and commit it with the change, so
+the graded numbers above always describe the code next to them.

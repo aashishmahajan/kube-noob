@@ -15,11 +15,18 @@ documents, and the top answer. It then scores what can be scored without referen
   come from the dataset and are themselves noisy, so this is a signal, not a grade.
 
 Usage:
-  python scripts/eval_questions.py questions.csv --out <dir> [--limit N] [--sample-review 60] [--seed 7]
+  python scripts/eval_questions.py questions.csv --out <dir> [--limit N] [--sample-review 76] [--seed 7]
+      [--grades docs/evals/community-questions-grades.csv]
 
 Writes ``<dir>/results.csv`` (one row per question, no question text), ``<dir>/summary.json`` and, with
-``--sample-review``, ``<dir>/review.csv``: a stratified sample with the question, kube-noob's top answer and empty
+``--sample-review``, ``<dir>/review.csv``: a stratified sample with the question, kube-noob's top answer and
 ``verdict`` / ``expected`` columns for a person to fill in.
+
+``--grades`` reads earlier verdicts (id, answer, top, verdict; no question text, so the file can live in the repo).
+A verdict carries over only while kube-noob still gives the same answer kind and the same top finding for that row;
+a row whose answer changed is listed under ``graded.changed`` and its review row shows the old verdict in
+``previousVerdict`` with ``verdict`` left empty, so a tuning change is re-graded where it moved an answer and
+nowhere else.
 """
 
 from __future__ import annotations
@@ -79,6 +86,78 @@ PLAYBOOK_TOPICS: dict[str, set[str]] = {
     "DBG-EGRESSIP": {"networking-ip", "openshift-specific"},
 }
 _KEY = re.compile(r"/browse/((?:OCPBUGS|ROX)-\d{1,7})\b")
+
+# What a person can say about one answer. "not-indexed": a Red Hat bug report whose key the bundled release-note
+# index does not hold (a synced local Jira copy would); "out-of-scope": nothing an offline Kubernetes and OpenShift
+# assistant should know (application code, Docker alone, another cloud's console, an upstream code bug).
+VERDICTS = ("correct", "partial", "wrong", "missed", "not-indexed", "out-of-scope")
+GRADE_COLUMNS = ("id", "topic", "source", "answer", "top", "verdict", "note")
+MAX_GRADES = 5000
+MAX_NOTE = 300
+
+
+class GradesError(ValueError):
+    """The grades file is malformed: the eval stops instead of scoring against it."""
+
+
+def load_grades(path: Path) -> dict[str, dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        missing = [c for c in ("id", "answer", "top", "verdict") if c not in (reader.fieldnames or [])]
+        if missing:
+            raise GradesError(f"{path}: missing column(s) {', '.join(missing)}")
+        grades: dict[str, dict[str, str]] = {}
+        for n, row in enumerate(reader, start=2):
+            if len(grades) >= MAX_GRADES:
+                raise GradesError(f"{path}: more than {MAX_GRADES} graded rows")
+            rid, verdict = (row.get("id") or "").strip(), (row.get("verdict") or "").strip()
+            if not rid:
+                raise GradesError(f"{path}:{n}: empty id")
+            if verdict not in VERDICTS:
+                raise GradesError(f"{path}:{n}: verdict {verdict!r} is not one of {', '.join(VERDICTS)}")
+            if rid in grades:
+                raise GradesError(f"{path}:{n}: id {rid} is graded twice")
+            if len(row.get("note") or "") > MAX_NOTE:
+                raise GradesError(f"{path}:{n}: note longer than {MAX_NOTE} characters")
+            grades[rid] = {k: (row.get(k) or "").strip() for k in GRADE_COLUMNS}
+    return grades
+
+
+def apply_grades(res: list[dict[str, Any]], grades: dict[str, dict[str, str]]) -> dict[str, Any]:
+    """Carry each verdict over while the row's answer is unchanged; list the rows to re-grade."""
+    by_id = {r["id"]: r for r in res}
+    verdicts: Counter[str] = Counter()
+    changed: list[dict[str, str]] = []
+    not_run = 0
+    for rid, g in grades.items():
+        r = by_id.get(rid)
+        if r is None:
+            not_run += 1
+            continue
+        if r["answer"] == g["answer"] and r["topId"] == g["top"]:
+            r["verdict"] = g["verdict"]
+            verdicts[g["verdict"]] += 1
+        else:
+            r["previousVerdict"] = g["verdict"]
+            changed.append(
+                {
+                    "id": rid,
+                    "verdict": g["verdict"],
+                    "was": f"{g['answer']} {g['top']}".strip(),
+                    "now": f"{r['answer']} {r['topId']}".strip(),
+                }
+            )
+    answered = verdicts["correct"] + verdicts["partial"] + verdicts["wrong"]
+    return {
+        "graded": len(grades),
+        "unchanged": sum(verdicts.values()),
+        "notRun": not_run,
+        "verdicts": {v: verdicts[v] for v in VERDICTS},
+        "helpfulWhenAnswered": round(100.0 * (verdicts["correct"] + verdicts["partial"]) / answered, 1)
+        if answered
+        else 0.0,
+        "changed": changed,
+    }
 
 
 def _key(url: str) -> str:
@@ -217,7 +296,8 @@ def review_sample(rows: list[dict[str, str]], res: list[dict[str, Any]], k: int,
                 "playbooks": x["playbooks"],
                 "issues": x["issues"],
                 "docs": x["docs"],
-                "verdict": "",
+                "verdict": x.get("verdict", ""),
+                "previousVerdict": x.get("previousVerdict", ""),
                 "expected": "",
             }
         )
@@ -231,19 +311,29 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--sample-review", type=int, default=0)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--grades", type=Path, help="earlier verdicts to carry over (id, answer, top, verdict)")
     a = ap.parse_args(argv)
     csv.field_size_limit(10**8)
+    try:
+        grades = load_grades(a.grades) if a.grades else {}
+    except (OSError, GradesError) as e:
+        print(f"eval_questions: {e}", file=sys.stderr)
+        return 2
     with a.csv.open(newline="", encoding="utf-8", errors="replace") as f:
         rows = list(csv.DictReader(f))
     if a.limit:
         rows = random.Random(a.seed).sample(rows, min(a.limit, len(rows)))  # noqa: S311 - reproducible sample
     a.out.mkdir(parents=True, exist_ok=True)
     res, meta = evaluate(rows, a.out / "data")
+    graded = apply_grades(res, grades) if grades else None
     with (a.out / "results.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(res[0]))
+        base = [k for k in res[0] if k not in ("verdict", "previousVerdict")]
+        w = csv.DictWriter(f, fieldnames=[*base, "verdict", "previousVerdict"], restval="")
         w.writeheader()
         w.writerows(res)
     summary = summarise(res, meta)
+    if graded is not None:
+        summary["graded"] = graded
     (a.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     if a.sample_review:
         sample = review_sample(rows, res, a.sample_review, a.seed)
@@ -251,7 +341,8 @@ def main(argv: list[str]) -> int:
             w = csv.DictWriter(f, fieldnames=list(sample[0]))
             w.writeheader()
             w.writerows(sample)
-    print(json.dumps({k: summary[k] for k in ("rows", "seconds", "answerCoverage", "groundTruth")}, indent=1))
+    keys = ("rows", "seconds", "answerCoverage", "groundTruth", "graded")
+    print(json.dumps({k: summary[k] for k in keys if k in summary}, indent=1))
     return 0
 
 

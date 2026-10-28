@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
 import sys
 import time
 from pathlib import Path
@@ -142,3 +143,62 @@ def test_the_eval_script_runs_on_a_small_csv(tmp_path: Path) -> None:
     assert "question" not in rows[0]  # results never carry the question text
     review = list(csv.DictReader((out / "review.csv").open()))
     assert len(review) == 2 and review[0]["verdict"] == ""
+
+    # Grades carry over while the answer is unchanged; a moved answer is listed for re-grading.
+    grades = tmp_path / "grades.csv"
+    with grades.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(mod.GRADE_COLUMNS))
+        w.writeheader()
+        w.writerow({"id": "1", "answer": rows[0]["answer"], "top": rows[0]["topId"], "verdict": "correct"})
+        w.writerow({"id": "2", "answer": "docs", "top": "kn:somewhere#0", "verdict": "wrong"})
+        w.writerow({"id": "9", "answer": "none", "top": "", "verdict": "out-of-scope"})
+    out2 = tmp_path / "out2"
+    assert mod.main([str(path), "--out", str(out2), "--sample-review", "2", "--grades", str(grades)]) == 0
+    graded = json.loads((out2 / "summary.json").read_text())["graded"]
+    assert graded["unchanged"] == 1 and graded["notRun"] == 1 and graded["verdicts"]["correct"] == 1
+    assert graded["helpfulWhenAnswered"] == 100.0
+    assert [c["id"] for c in graded["changed"]] == ["2"] and graded["changed"][0]["was"] == "docs kn:somewhere#0"
+    by_id = {r["id"]: r for r in csv.DictReader((out2 / "review.csv").open())}
+    assert by_id["1"]["verdict"] == "correct" and by_id["2"]["verdict"] == ""
+    assert by_id["2"]["previousVerdict"] == "wrong"
+    results = {r["id"]: r for r in csv.DictReader((out2 / "results.csv").open())}
+    assert results["1"]["verdict"] == "correct" and results["2"]["previousVerdict"] == "wrong"
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("id,answer,top\n1,none,\n", "missing column(s) verdict"),
+        ("id,answer,top,verdict\n1,none,,great\n", "is not one of"),
+        ("id,answer,top,verdict\n1,none,,wrong\n1,none,,wrong\n", "graded twice"),
+        ("id,answer,top,verdict\n,none,,wrong\n", "empty id"),
+        ("id,answer,top,verdict,note\n1,none,,wrong," + "x" * 301 + "\n", "note longer"),
+    ],
+)
+def test_a_malformed_grades_file_stops_the_eval(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], body: str, message: str
+) -> None:
+    spec = importlib.util.spec_from_file_location("eval_questions_g", ROOT / "scripts" / "eval_questions.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["eval_questions_g"] = mod
+    spec.loader.exec_module(mod)
+    grades = tmp_path / "grades.csv"
+    grades.write_text(body)
+    (tmp_path / "q.csv").write_text("id,question,body_excerpt\n1,a,b\n")
+    assert mod.main([str(tmp_path / "q.csv"), "--out", str(tmp_path / "o"), "--grades", str(grades)]) == 2
+    assert message in capsys.readouterr().err
+    assert not (tmp_path / "o").exists()  # nothing was scored against a bad file
+
+
+def test_the_committed_grades_file_is_well_formed() -> None:
+    spec = importlib.util.spec_from_file_location("eval_questions_c", ROOT / "scripts" / "eval_questions.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["eval_questions_c"] = mod
+    spec.loader.exec_module(mod)
+    path = ROOT / "docs" / "evals" / "community-questions-grades.csv"
+    grades = mod.load_grades(path)
+    assert len(grades) == 76
+    header = path.read_text(encoding="utf-8").splitlines()[0]
+    assert header == ",".join(mod.GRADE_COLUMNS)  # ids and verdicts only: no question text in the repo

@@ -1,0 +1,77 @@
+id,topic,source,answer,top,verdict,note
+1327,acs-scanning-threat,github:aquasecurity/trivy-operator,none,,out-of-scope,trivy-operator retention feature
+2667,aws-eks-ecr,github-discussions:kubernetes-sigs/karpenter,docs,kn:ocp-egressip#1,wrong,Karpenter batching question; top document is about egress IPs
+3784,compliance-fedramp,redhat-jira:CMP,none,,not-indexed,Compliance Operator bug report
+4622,containers-docker,stackexchange:stackoverflow,none,,out-of-scope,application build layout
+5004,dns,discourse:discuss.kubernetes.io,docs,kn:k8s-networkpolicy#2,partial,second document (Ingress) is relevant; the top one (NetworkPolicy for the router) is not
+6009,etcd-control-plane,github-discussions:k3s-io/k3s,none,,out-of-scope,k3s design question
+7499,helm,stackexchange:stackoverflow,none,,missed,Helm templating question with no answer
+7789,image-pull,discourse:forums.docker.com,docs,kn:rosa-egress-zero#2,wrong,Docker Compose sharing question; top document is ROSA egress zero
+8857,ingress-routing,stackexchange:serverfault,none,,out-of-scope,application behind a third-party ingress
+10437,kubernetes-general,stackexchange:stackoverflow,none,,out-of-scope,Azure Container Apps
+10691,manifests-yaml,discourse:discuss.hashicorp.com,none,,out-of-scope,Vault policy templates
+13533,networking-ip,github:projectcalico/calico,none,,out-of-scope,Calico code bug
+15060,openshift-specific,redhat-jira:OCPBUGS,none,OCPBUGS-49880,not-indexed,OpenShift bug; its key and the cloned key are outside the bundled index
+15583,policy-kyverno-opa,github:kubernetes-sigs/secrets-store-csi-driver,none,,out-of-scope,CSI driver feature request
+17158,rbac-security,discourse:community.traefik.io,none,,out-of-scope,Traefik tooling
+19466,rosa-hcp-aws,redhat-jira:OCPBUGS,reported-issue,OCPBUGS-78152,wrong,HyperShift deletion bug; top issue is an unrelated autoscaler fix
+21368,storage-odf,redhat-jira:DFBUGS,none,,not-indexed,ODF bug report
+22214,upgrade,github:argoproj/argo-cd,none,,out-of-scope,Argo CD bug
+24168,workloads-debugging,github:kubernetes/kubernetes,none,,out-of-scope,upstream feature work
+372,acs-scanning-threat,github-discussions:aquasecurity/trivy,none,,out-of-scope,Trivy output fields
+3488,aws-eks-ecr,stackexchange:stackoverflow,none,,out-of-scope,EKS CloudFormation option
+3800,compliance-fedramp,redhat-jira:OCPBUGS,none,OCPBUGS-63367,not-indexed,OpenShift bug clone outside the index
+4016,containers-docker,discourse:forums.docker.com,none,,out-of-scope,GPU passthrough in Docker
+5802,dns,stackexchange:stackoverflow,none,,out-of-scope,Docker build of a web app
+6262,etcd-control-plane,discourse:discuss.kubernetes.io,none,,missed,etcd backup and restore is core operations and gets no answer
+6655,helm,github:bitnami/charts,none,,out-of-scope,third-party chart bug
+7922,image-pull,github:apache/superset,none,,missed,image pull errors from a chart's defaults; the image pull playbook would help
+9129,ingress-routing,stackexchange:stackoverflow,docs,kn:ocp-routes#2,wrong,Ingress listen ports; top document is about Route failures
+10529,kubernetes-general,stackexchange:stackoverflow,docs,kn:k8s-probes#1,partial,probe document is on topic but does not answer where the name comes from
+11229,manifests-yaml,stackexchange:stackoverflow,none,,out-of-scope,PromQL
+11708,networking-ip,discourse:forums.docker.com,none,,out-of-scope,Docker daemon IPv6
+15432,openshift-specific,stackexchange:stackoverflow,playbook,DBG-ARBITRARY-UID,partial,"non-root cannot bind low ports on OpenShift, but the playbook is about writing files"
+16707,policy-kyverno-opa,github:open-policy-agent/gatekeeper,none,,out-of-scope,Gatekeeper chart bug
+17795,rbac-security,github:external-secrets/external-secrets,none,,out-of-scope,External Secrets drift
+19072,rosa-hcp-aws,github:openshift/rosa,none,,out-of-scope,release asset naming
+20561,storage-odf,github:red-hat-storage/ocs-ci,none,,out-of-scope,test-suite bug
+22166,upgrade,github-discussions:istio/istio,none,,out-of-scope,Istio on EKS
+23728,workloads-debugging,github:argoproj/argo-cd,none,,out-of-scope,Argo CD UI bug
+1188,acs-scanning-threat,github:aquasecurity/trivy,none,,out-of-scope,Trivy flags
+3218,aws-eks-ecr,github:kubernetes-sigs/aws-load-balancer-controller,none,,out-of-scope,AWS ALB tagging
+3655,compliance-fedramp,github:canonical/k8s-operator,none,,out-of-scope,Canonical Kubernetes hardening rule
+4510,containers-docker,stackexchange:stackoverflow,none,,out-of-scope,ZAP with Podman on WSL
+5076,dns,discourse:forums.docker.com,playbook,DBG-DNS,wrong,host DNS for Docker Compose; the playbook is about DNS inside pods
+6266,etcd-control-plane,discourse:discuss.kubernetes.io,docs,kn:k8s-common-errors#1,wrong,kubelet will not start; top document is about ConfigMap updates
+7034,helm,github:helm/helm,none,,out-of-scope,Helm CLI bug
+8268,image-pull,stackexchange:stackoverflow,none,,out-of-scope,Docker registry mirror path
+9183,ingress-routing,stackexchange:stackoverflow,docs,kn:k8s-networkpolicy#2,wrong,exposing an Ingress on bare metal; top document is NetworkPolicy for the OpenShift router
+9614,kubernetes-general,github-discussions:argoproj/argo-cd,none,,out-of-scope,Argo CD project configuration
+10738,manifests-yaml,github-discussions:argoproj/argo-cd,none,,out-of-scope,Argo CD metric
+13839,networking-ip,redhat-jira:OCPBUGS,none,,not-indexed,OVN multicast bug report
+15426,openshift-specific,stackexchange:stackoverflow,docs,kn:rosa-egress-zero#2,wrong,moving Compose to OpenShift; top document is ROSA egress zero
+16817,policy-kyverno-opa,stackexchange:stackoverflow,docs,kn:helm-troubleshooting#3,wrong,Kyverno escaping inside Helm; top document is about values not applied
+17367,rbac-security,discourse:forums.docker.com,playbook,DBG-IMAGEPULL,partial,"registry authentication failure; the playbook is written for pods, the question is a host"
+19404,rosa-hcp-aws,redhat-jira:OCPBUGS,playbook,DBG-ROSA-HCP-NODES,wrong,HCP KubeletConfig validation bug; the node-joining playbook does not fit
+20055,storage-odf,github:ceph/ceph-csi,playbook,DBG-PVC-PENDING,correct,PVC stuck Pending with a CSI driver
+22200,upgrade,github-discussions:siderolabs/talos,none,,out-of-scope,Talos upgrade
+23427,workloads-debugging,github-discussions:argoproj/argo-cd,none,,out-of-scope,Argo CD log levels
+845,acs-scanning-threat,github-discussions:aquasecurity/trivy,none,,out-of-scope,scanner false positives in a third-party image
+3377,aws-eks-ecr,stackexchange:stackoverflow,none,,missed,OCI runtime create failure at pod start gets no answer
+3933,compliance-fedramp,stackexchange:stackoverflow,none,,missed,API server kubelet CA flag for a CIS check gets no answer
+4501,containers-docker,stackexchange:stackoverflow,none,,out-of-scope,dev container caching
+5394,dns,github:k3s-io/k3s,playbook,DBG-DNS,correct,DNS trouble on k3s
+6372,etcd-control-plane,stackexchange:stackoverflow,none,,missed,kubelet exits at start gets no answer
+7047,helm,github:helm/helm,none,,out-of-scope,Helm feature request
+8171,image-pull,redhat-jira:OCPBUGS,none,,not-indexed,Cincinnati bug report
+9083,ingress-routing,stackexchange:unix,none,,out-of-scope,desktop GUI in Docker
+10173,kubernetes-general,github:kubernetes/kubernetes,none,,out-of-scope,upstream garbage collector bug
+11004,manifests-yaml,github:kubernetes/kubernetes,none,,out-of-scope,client-go panic
+12683,networking-ip,github:cilium/cilium,none,,out-of-scope,Cilium code bug
+15096,openshift-specific,redhat-jira:OCPBUGS,playbook,DBG-CLUSTEROPERATOR,correct,etcd operator degraded during an upgrade
+15876,policy-kyverno-opa,github:kyverno/kyverno,none,,out-of-scope,Kyverno code bug
+18416,rbac-security,stackexchange:stackoverflow,none,,out-of-scope,Docker Compose entrypoint permissions
+19272,rosa-hcp-aws,redhat-jira:OCPBUGS,none,,not-indexed,HyperShift metric bug report
+19991,storage-odf,github:aws/containers-roadmap,none,,out-of-scope,S3 mount feature request
+22688,upgrade,redhat-jira:OCPBUGS,none,,not-indexed,documentation bug report
+25213,workloads-debugging,stackexchange:stackoverflow,docs,kn:k8s-common-errors#4,wrong,listing a Deployment's pods; top document is about stuck namespaces
