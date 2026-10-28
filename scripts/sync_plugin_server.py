@@ -44,7 +44,8 @@ ENTRY = "kube_noob.server.stdio"
 # Central reader (the only code that reads its API token), imported only by the rhacs_compare_live tool; and the
 # Containerfile and image audit, whose detectors spell out download-and-execute and credential patterns that a plugin
 # reviewer should not have to read past (the CLI and the service keep them); and the Red Hat VEX fetcher and archive
-# reader (network and a zstd subprocess; the plugin keeps the pure CSAF parser, kube_noob.vuln.csaf).
+# reader (network and a zstd subprocess; the plugin keeps the pure CSAF parser, kube_noob.vuln.csaf); and the kernel
+# FIPS flag reader (a file outside the plugin's own folders, flagged by the plugin directory's scan).
 GUARDED_IMPORTS = frozenset(
     {
         "kube_noob.debug.backends",
@@ -52,6 +53,7 @@ GUARDED_IMPORTS = frozenset(
         "kube_noob.build.containerfile",
         "kube_noob.build.image",
         "kube_noob.sources.advisories",
+        "kube_noob.host_fips",
     }
 )
 # LLM SDKs never ship in the plugin, even if one returns to the core dependencies; the plugin runs the MCP server only.

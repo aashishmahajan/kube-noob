@@ -168,7 +168,21 @@ def test_sync_on_states_its_jittered_schedule(tmp_path: Path, monkeypatch: pytes
     (tmp_path / "c.yaml").write_text("jira:\n  syncEnabled: true\n  intervalHours: 48\n")
     monkeypatch.setattr(jira, "run_sync", lambda s: pytest.fail("the first run must wait"))
     monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
-    main(["serve", "--allow-unauthenticated"])
+    started: list[Any] = []
+    real_start = jira.start_background
+
+    def spy(settings: Any, rng: Any = None) -> Any:
+        stop = real_start(settings, rng)
+        started.append(stop)
+        return stop
+
+    monkeypatch.setattr(jira, "start_background", spy)
+    try:
+        main(["serve", "--allow-unauthenticated"])
+    finally:  # the thread would otherwise run a real sync 30-600 s later, holding the sync lock (CI 40669926452)
+        for stop in started:
+            stop.set()
+    assert len(started) == 1
     err = capsys.readouterr().err
     line = next(x for x in err.splitlines() if x.startswith("jira sync: first run in"))
     first = int(line.split()[5])

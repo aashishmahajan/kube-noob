@@ -23,7 +23,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import yaml
@@ -295,6 +295,23 @@ class CiSettings(_Base):
         return v
 
 
+_RULE_ID = r"^KN-[A-Z]{1,2}\d{3}$"
+_NAMESPACE = r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+
+
+class AdmissionSettings(_Base):
+    """The ``kube-noob admission serve`` webhook (R3.3, tier A). Warnings only unless a rule is listed in
+    ``enforce``; the system namespaces are always excluded; rules that need other objects run only with ``lookups``
+    (which needs ``cluster.enabled``) and are never enforced."""
+
+    enforce: list[Annotated[str, Field(pattern=_RULE_ID)]] = Field(default_factory=list, max_length=100)
+    excluded_namespaces: list[Annotated[str, Field(pattern=_NAMESPACE)]] = Field(default_factory=list, max_length=200)
+    exceptions_file: Path | None = None
+    lookups: bool = False
+    max_warnings: int = Field(default=10, ge=1, le=50)
+    version: str | None = Field(default=None, pattern=r"^\d+\.\d+(\.\d+)?$")
+
+
 class ProbeSettings(_Base):
     """Tier P: ephemeral debug containers or probe Jobs. Off by default; every probe needs an approval."""
 
@@ -398,6 +415,7 @@ class Settings(_Base):
     posture: PostureSettings = Field(default_factory=PostureSettings)
     rhacs: RhacsSettings = Field(default_factory=RhacsSettings)
     ci: CiSettings = Field(default_factory=CiSettings)
+    admission: AdmissionSettings = Field(default_factory=AdmissionSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     probe: ProbeSettings = Field(default_factory=ProbeSettings)

@@ -475,6 +475,64 @@ def _vuln_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     return 1 if bad else 0
 
 
+def _admission_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob import admission
+
+    ad = s.admission
+    try:
+        cfg = admission.Config.build(
+            enforce=list(a.enforce) if getattr(a, "enforce", None) is not None else list(ad.enforce),
+            excluded=list(ad.excluded_namespaces),
+            platform=s.default_platform,
+            version=ad.version,
+            max_warnings=ad.max_warnings,
+            exceptions_text=ad.exceptions_file.read_text(encoding="utf-8") if ad.exceptions_file else None,
+            lookups=ad.lookups,
+        )
+    except (admission.AdmissionConfigError, OSError, ValueError) as exc:
+        raise ConfigError(str(exc)) from exc
+    if a.admission_cmd == "review":
+        out = admission.review_bytes(_read(a.file).encode("utf-8"), cfg)
+        if a.format == "yaml":
+            _emit(out, fmt)
+        else:  # the AdmissionReview the API server would receive
+            print(json.dumps(out, indent=1))
+        return 0 if out["response"]["allowed"] else 1
+    context = None
+    if ad.lookups:
+        if not s.cluster.enabled:
+            raise ConfigError("admission.lookups reads the namespace's other objects: set cluster.enabled (read-only)")
+        from kube_noob.debug.cluster import get_backend
+
+        lookups = admission.Lookups(get_backend(s))
+        lookups.start()
+        context = lookups
+    import os
+    import signal
+
+    import uvicorn
+
+    for path in (a.tls_cert, a.tls_key):
+        if not Path(path).is_file():
+            raise ConfigError(f"{path}: no such file (mount the serving certificate Secret)")
+    admission.watch_certificate([a.tls_cert, a.tls_key], lambda: os.kill(os.getpid(), signal.SIGTERM))
+    mode = f"enforcing {', '.join(sorted(cfg.enforce))}" if cfg.enforce else "warn mode (nothing is denied)"
+    print(f"kube-noob-admission: {mode}; lookups {'on' if context else 'off'}", file=sys.stderr)
+    uvicorn.run(
+        admission.app(cfg, context),
+        host=a.host,
+        port=a.port,
+        ssl_certfile=a.tls_cert,
+        ssl_keyfile=a.tls_key,
+        log_level="warning",
+        proxy_headers=False,
+        server_header=False,
+        limit_concurrency=200,
+        timeout_keep_alive=30,
+    )
+    return 0
+
+
 def _blueprint_from_args(a: argparse.Namespace) -> dict[str, Any]:
     if a.blueprint:
         data = yaml.safe_load(_read(a.blueprint)) or {}
@@ -756,6 +814,26 @@ def build_parser() -> argparse.ArgumentParser:
     vt.add_argument("--platform", choices=PLATFORMS)
     vt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     vt.add_argument("-r", "--report", action="append", default=[], help="a scanner report of an image; repeat")
+    ad = sub.add_parser(
+        "admission",
+        help="The kube-noob-admission webhook: admission warnings for every rule, denials only for enforced rules",
+        description="serve answers AdmissionReview requests over HTTPS (POST /validate; /healthz, /readyz, /metrics). "
+        "Warn mode by default: nothing is denied. admission.enforce lists the rules that deny; on UPDATE an enforced "
+        "rule denies only a finding the old object did not have. System namespaces are excluded and nothing is "
+        "mutated. review evaluates one AdmissionReview JSON offline. Install with the chart (admission.enabled). "
+        "Examples: kube-noob admission review -f review.json; kube-noob admission serve --tls-cert tls.crt --tls-key "
+        "tls.key",
+    )
+    ad_sub = ad.add_subparsers(dest="admission_cmd", required=True)
+    _patch(ad_sub, common)
+    ads = ad_sub.add_parser("serve", help="Serve the webhook over HTTPS")
+    ads.add_argument("--host", default="0.0.0.0", help="address to listen on (default 0.0.0.0)")  # noqa: S104
+    ads.add_argument("--port", type=int, default=8443)
+    ads.add_argument("--tls-cert", required=True, help="the serving certificate (PEM)")
+    ads.add_argument("--tls-key", required=True, help="its private key (PEM)")
+    adr = ad_sub.add_parser("review", help="Evaluate one AdmissionReview (JSON) offline and print the response")
+    adr.add_argument("-f", "--file", required=True, help="the AdmissionReview JSON, - for stdin")
+    adr.add_argument("--enforce", action="append", default=None, help="a rule to enforce (overrides the config)")
     manifests_cmd("validate", "Schema/API/platform validation only")
     manifests_cmd("redteam", "Red-team scenarios only")
     fx = manifests_cmd("fix", "Apply safe mechanical fixes")
@@ -1540,6 +1618,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _rhacs_cmd(a, s, fmt)
     if a.cmd == "vuln":
         return _vuln_cmd(a, s, fmt)
+    if a.cmd == "admission":
+        return _admission_cmd(a, s, fmt)
     if a.cmd == "build":
         return _build_cmd(a, kit, fmt)
     if a.cmd == "gate":

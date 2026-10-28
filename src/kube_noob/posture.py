@@ -27,14 +27,15 @@ def crypto_posture() -> dict[str, Any]:
     every cryptographic operation goes through the FIPS-validated module.
     """
     import ssl
-    from pathlib import Path
 
     kernel: bool | None = None
-    flag = Path("/proc/sys/crypto/fips_enabled")
+    kernel_note = ""
     try:
-        kernel = flag.read_text(encoding="ascii").strip() == "1"
-    except OSError:
-        kernel = None
+        from kube_noob.host_fips import kernel_fips
+    except ImportError:  # the Claude plugin reads nothing from the machine: OpenSSL's own mode is still reported
+        kernel_note = "not read by the Claude plugin; run kube-noob doctor for the kernel flag"
+    else:
+        kernel = kernel_fips()
     openssl: bool | None = None
     try:
         import _hashlib
@@ -54,6 +55,7 @@ def crypto_posture() -> dict[str, Any]:
         "opensslFipsMode": openssl,
         "openssl": ssl.OPENSSL_VERSION,
         "algorithms": "SHA-256 for integrity checks; TLS through the system OpenSSL; no MD5, SHA-1 or custom crypto",
+        **({"kernelFipsNote": kernel_note} if kernel_note else {}),
     }
 
 

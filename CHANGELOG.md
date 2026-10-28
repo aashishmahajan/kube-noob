@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The Claude plugin no longer reads the kernel's FIPS flag (`/proc/sys/crypto/fips_enabled`): the plugin directory's
+  scan flags reads outside the plugin's own folders, and it held 0.5.0 for it. `kube-noob doctor` and the service
+  still report it; the plugin reports OpenSSL's FIPS mode and says the kernel flag was not read. A test keeps host
+  paths out of the bundle.
 - `kube-noob vuln report` (and the MCP tool `vuln_report`, and `insight` for a pasted report): vulnerability findings
   from what scanners already produce. Trivy and Grype JSON, CycloneDX (as Trivy and as Grype write it) and RHACS
   image scans give one finding per package, installed version, CVE and fix version, the same in every format; SPDX 2
