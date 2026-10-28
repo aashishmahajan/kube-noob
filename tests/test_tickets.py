@@ -400,8 +400,12 @@ def test_an_imported_copy_resumes_without_a_state_file(tmp_path: Path) -> None:
             issue_to_record(i, BASE, "OCPBUGS", [], "sync", "2026-10-20T00:00:00+00:00") for i in (ROUTER_DUP, OVN)
         )
     }
-    st = state_from_records(records)
+    st = state_from_records(records, "OCPBUGS")
     assert st == {"complete": False, "lowestKey": "OCPBUGS-103", "lastSyncAt": "2026-10-20T00:00:00Z"}
+    foreign = {**records, "jira-ROX-1": {**records["jira-OCPBUGS-103"], "id": "jira-ROX-1"}}
+    assert state_from_records(foreign, "OCPBUGS")["lowestKey"] == "OCPBUGS-103"
+    filtered = {k: {**r, "versionBasis": "explicit-version"} for k, r in records.items()}
+    assert state_from_records(filtered, "OCPBUGS") == {}  # 0.4's version-filtered pull is not contiguous by key
 
 
 def test_records_keep_links_and_the_latest_comments() -> None:
@@ -492,9 +496,172 @@ def test_incident_headline_names_the_ticket() -> None:
 
 
 def test_only_one_sync_runs_per_data_folder(tmp_path: Path) -> None:
-    from kube_noob.sources.jira import _sync_lock
+    from kube_noob.sources.jira import sync_lock
 
     fake = FakeJira({"OCPBUGS": [ROUTER]})
-    with _sync_lock(tmp_path), pytest.raises(JiraError, match="another Jira sync"):
+    with sync_lock(tmp_path), pytest.raises(JiraError, match="another Jira sync"):
         sync_projects(_client(fake, []), ["OCPBUGS"], tmp_path, BASE, NOW)
     assert sync_projects(_client(fake, []), ["OCPBUGS"], tmp_path, BASE, NOW)["projects"][0]["fetched"] == 1
+
+
+# ---------------------------------------------------------------------------------------------------- review fixes
+
+
+def test_each_project_measures_its_window_from_its_own_start(tmp_path: Path) -> None:
+    """A project synced late in a long run must still reach back to its own last sync."""
+    from kube_noob.sources.jira import sync_project
+
+    fake = FakeJira({"ROX": [SENSOR]})
+    last = datetime.now(UTC) - timedelta(minutes=30)
+    state = {"lastSyncAt": last.isoformat(), "complete": True}
+    sync_project(_client(fake, []), "ROX", {}, state, BASE)  # no fixed `now`: the clock is read here
+    minutes = int(fake.jql[0].split("updated >= -", 1)[1].split("m", 1)[0])
+    assert 40 <= minutes <= 42  # 30 minutes since the last sync, rounded up, plus the 10-minute overlap
+
+
+def test_an_interrupted_forward_pass_does_not_move_the_mark(tmp_path: Path) -> None:
+    from kube_noob.sources.jira import sync_project
+
+    fake = FakeJira({"OCPBUGS": [ROUTER, MIRROR, OVN]}, page=1)
+    fake.updated = {i["key"]: i for i in (ROUTER, MIRROR, OVN)}
+    state = {"lastSyncAt": "2026-10-28T10:00:00Z", "complete": True}
+    res = sync_project(_client(fake, [], budget=2), "OCPBUGS", {}, state, BASE, NOW)
+    assert res.stopped == "budget" and state["lastSyncAt"] == "2026-10-28T10:00:00Z"
+
+
+def test_a_replaced_or_old_style_shard_restarts_the_backfill(tmp_path: Path) -> None:
+    old = [issue_to_record(i, BASE, "ROX", ["4.10.1"], "explicit-version", "t") for i in (SENSOR,)]
+    write_shard(tmp_path, "jira-rox", old)  # what `corpus jira` wrote before the full sync existed
+    fake = FakeJira({"ROX": [SENSOR, _issue("ROX-150", "older", "older ticket", status="New")]})
+    out = sync_projects(_client(fake, []), ["ROX"], tmp_path, BASE, NOW)
+    assert fake.jql == ["project = ROX ORDER BY key DESC"] and out["projects"][0]["complete"]
+    assert out["projects"][0]["total"] == 2
+    _seed(tmp_path, [SENSOR])  # `corpus import` replaces the shard: the stored state no longer describes it
+    fake.jql.clear()
+    sync_projects(_client(fake, []), ["ROX"], tmp_path, BASE, NOW + timedelta(hours=1))
+    assert fake.jql[-1] == "project = ROX AND key < ROX-201 ORDER BY key DESC"
+
+
+def test_a_foreign_lowest_key_cannot_stall_the_backfill(tmp_path: Path) -> None:
+    from kube_noob.sources.jira import sync_project
+
+    fake = FakeJira({"ROX": [SENSOR]})
+    state = {"lowestKey": "OCPBUGS-1", "complete": False}
+    res = sync_project(_client(fake, []), "ROX", {}, state, BASE, NOW)
+    assert res.complete and state["lowestKey"] == "ROX-201" and fake.jql == ["project = ROX ORDER BY key DESC"]
+
+
+def test_backfill_steps_past_a_key_the_server_rejects(tmp_path: Path) -> None:
+    from kube_noob.sources.jira import sync_project
+
+    fake = FakeJira({"OCPBUGS": [ROUTER, MIRROR]})
+    handler = fake.handler
+
+    def rejecting(req: httpx.Request) -> httpx.Response:
+        if "key < OCPBUGS-99" in req.url.params.get("jql", ""):
+            return httpx.Response(400, json={"errorMessages": ["An issue with key 'OCPBUGS-99' does not exist"]})
+        return handler(req)
+
+    client = JiraClient(httpx.Client(transport=httpx.MockTransport(rejecting)), BASE, sleep=lambda _: None)
+    held = {f"jira-{i['key']}": issue_to_record(i, BASE, "OCPBUGS", [], "sync", "t") for i in (OVN, ROUTER_DUP)}
+    state = {"lowestKey": "OCPBUGS-99", "complete": False, "lastSyncAt": NOW.isoformat()}
+    res = sync_project(client, "OCPBUGS", held, state, BASE, NOW)
+    assert res.error is None and res.complete and state["lowestKey"] == "OCPBUGS-101"
+
+
+def test_retries_wait_at_least_the_crawl_delay() -> None:
+    calls = {"n": 0}
+
+    def flaky(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503) if calls["n"] == 1 else httpx.Response(200, json={"values": [], "isLast": True})
+
+    sleeps: list[float] = []
+    client = JiraClient(
+        httpx.Client(transport=httpx.MockTransport(flaky)), BASE, sleep=sleeps.append, rng=random.Random(0)
+    )
+    client.projects()
+    assert sleeps and all(x >= CRAWL_DELAY for x in sleeps)
+
+
+def test_a_second_sync_sends_nothing(tmp_path: Path) -> None:
+    from kube_noob.config import load_settings
+    from kube_noob.sources.jira import run_sync, sync_lock
+
+    sent: list[str] = []
+    fake = FakeJira({"OCPBUGS": [ROUTER]})
+
+    def counting(req: httpx.Request) -> httpx.Response:
+        sent.append(str(req.url))
+        return fake.handler(req)
+
+    s = load_settings(overrides={"dataDir": str(tmp_path)})
+    with sync_lock(tmp_path), pytest.raises(JiraError):
+        run_sync(s, "OCPBUGS", 10, None, NOW, httpx.Client(transport=httpx.MockTransport(counting)))
+    assert sent == []
+
+
+def test_operator_versions_are_not_compared_with_openshift_versions(tmp_path: Path) -> None:
+    assert tickets.fix_assessment(["OADP 1.4.2"], "4.16.5") == (None, None, "")
+    oadp = _issue(
+        "OADP-7",
+        "Velero restore hangs on the quibblefish plugin",
+        "restore stuck: quibblefish plugin timeout in the wumbleset with gronkle snapshots",
+        status="Closed",
+        resolution="Done",
+        fix=["OADP 1.4.2"],
+    )
+    _seed(tmp_path, [oadp, *_filler(120)])
+    top = tickets.match("quibblefish wumbleset gronkle", "openshift", "4.16.5", 3, tmp_path)["matches"][0]
+    assert top["id"] == "OADP-7" and top["fixedIn"] == "OADP 1.4.2" and "You run" not in top["status"]
+
+
+def test_generic_errors_stay_unmatched_even_when_some_tickets_paste_describe_output(tmp_path: Path) -> None:
+    describe = (
+        "Warning BackOff kubelet Back-off restarting failed container app in pod web. Last State: Terminated "
+        "Reason: OOMKilled Exit Code: 137. Warning Failed: ErrImagePull rpc error: code = NotFound failed to pull "
+        "and unpack image. CrashLoopBackOff"
+    )
+    pasted = [_issue(f"OCPBUGS-{500 + i}", f"Odd thing {i}", f"{describe} zorblax{i}") for i in range(3)]
+    quiet = [_issue(f"OCPBUGS-{900 + i}", f"Quiet ticket {i}", f"Nothing to see in area{i}.") for i in range(120)]
+    _seed(tmp_path, [*pasted, *quiet])
+    for text in (
+        "Back-off restarting failed container",
+        "Last State: Terminated Reason: OOMKilled Exit Code: 137",
+        "Failed to pull image: rpc error: code = NotFound failed to pull and unpack image",
+        "CrashLoopBackOff",
+    ):
+        assert tickets.match(text, "openshift", None, 3, tmp_path)["matches"] == [], text
+
+
+def test_hostile_records_and_odd_paths_never_break_answers(tmp_path: Path) -> None:
+    data = tmp_path / "odd #dir?%"
+    good = issue_to_record(ROUTER, BASE, "OCPBUGS", [], "sync", "t")
+    bad = [
+        {**good, "id": "jira-OCPBUGS-7", "links": 1, "fixVersions": "4.21.3", "text": 5, "title": None},
+        {**good, "id": "jira-OCPBUGS-8", "url": "https://evil.example/browse/OCPBUGS-8"},
+        {**good, "id": "not-a-key"},
+    ]
+    entry = write_shard(data, "jira-ocpbugs", [good])
+    shard = data / "corpus" / entry["file"]  # what a hand-made or damaged import could hold: write_shard refuses it
+    shard.write_text("".join(json.dumps(r) + "\n" for r in [good, *bad]) + "not json\n", encoding="utf-8")
+    import hashlib
+
+    manifest = data / "corpus" / "MANIFEST.json"
+    doc = json.loads(manifest.read_text())
+    doc["shards"]["jira-ocpbugs"]["sha256"] = hashlib.sha256(shard.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(doc))
+    t = tickets.ticket("OCPBUGS-8", data)
+    assert t["found"] and t["url"] == f"{BASE}/browse/OCPBUGS-8"  # an imported record cannot relabel another site
+    assert tickets.ticket("OCPBUGS-7", data)["found"]
+    assert tickets.stats(data)["tickets"] == 3  # type: ignore[index]
+    out = tickets.match("unable to load default certificate file frobnicator", "openshift", None, 3, data)
+    assert out["available"]
+
+
+def test_scrub_removes_server_mentions_and_profile_links() -> None:
+    from kube_noob.sources.jira import scrub
+
+    text = "thanks [~jsmith], see https://redhat.atlassian.net/jira/people/712020:abc-def and [~accountid:5b10]"
+    cleaned = scrub(text)
+    assert "jsmith" not in cleaned and "712020" not in cleaned and "5b10" not in cleaned

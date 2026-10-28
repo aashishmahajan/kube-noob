@@ -116,9 +116,20 @@ jobs:
           if tried < 10 or found < tried * 0.6:
               print("::error title=Real-ticket recall::too low")
               raise SystemExit(1)
-          generic = ["Back-off restarting failed container", "OOMKilled", "ImagePullBackOff", "CrashLoopBackOff"]
+          generic = [
+              "Back-off restarting failed container",
+              "OOMKilled",
+              "ImagePullBackOff",
+              "CrashLoopBackOff",
+              "Last State: Terminated Reason: OOMKilled Exit Code: 137",
+              "Failed to pull image: rpc error: code = NotFound failed to pull and unpack image",
+              "Readiness probe failed: Get http://10.128.2.14:8080/healthz: dial tcp: connect: connection refused",
+          ]
           noisy = {g: [m["id"] for m in tickets.match(g, "openshift", None, 3, data)["matches"]] for g in generic}
           print(f"::notice title=Generic errors::{noisy}")
+          if any(noisy.values()):
+              print("::error title=Generic errors::a generic error matched a ticket")
+              raise SystemExit(1)
           PY
       - name: Git documentation sources
         run: |

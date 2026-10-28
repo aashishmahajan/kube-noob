@@ -46,6 +46,11 @@ DEFAULT_PROJECTS: dict[str, str] = {
 }
 
 
+# Projects whose fixVersions are OpenShift releases (4.21.3), so they can be compared with the cluster's version.
+# Operators (OADP 1.4, Logging 5.9, Pipelines 1.17, CNV's own z-streams...) and RHACS have their own version lines.
+OPENSHIFT_VERSIONED = frozenset({"OCPBUGS", "OKD", "HOSTEDCP", "USHIFT"})
+
+
 def product_of(project: str) -> str:
     """ "openshift" for projects whose tickets only concern OpenShift; "any" otherwise (including unknown projects)."""
     return DEFAULT_PROJECTS.get(project, "any")

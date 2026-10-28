@@ -18,7 +18,13 @@ Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and w
   cause or "why closed" sentence from the latest comments. Matches need rare shared words or a distinctive error line
   found word for word, so generic errors never pull in a ticket. SQLite FTS5 index: about 50 ms per lookup over
   100,000 tickets.
+- Fix versions are compared with the cluster's version only for projects that ship OpenShift releases (OCPBUGS, OKD,
+  HOSTEDCP, USHIFT); operators with their own version lines (OADP 1.4, Logging 5.9...) and RHACS are never called
+  "already fixed in your version". Kubernetes status words and everyday English never count as evidence, so pasted
+  `describe` output in a few tickets cannot make CrashLoopBackOff or OOMKilled match one.
 - `kube-noob ticket OCPBUGS-12345 --version 4.21.1` and the MCP tool `kubenoob_ticket` look up one ticket.
+- Upgrading from 0.4: the version-filtered ROX copy that `corpus jira` wrote before is refreshed by the first full
+  sync; an imported copy resumes where it ends.
 - The service can keep the copy current: `jira.sync.enabled` in the chart (needs persistence and one replica; opens
   egress 443, and the EgressFirewall allows redhat.atlassian.net only).
 - Tickets are public but not redistributable: they stay in the data directory, are never in the package, plugin or

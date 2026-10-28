@@ -24,6 +24,7 @@ import os
 import random
 import re
 import tempfile
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -53,7 +54,12 @@ SYNC_FIELDS = DEFAULT_FIELDS + ",issuelinks"
 DEFAULT_TARGET_FIELD = "customfield_10855"
 _NON_PRODUCT_HINT = re.compile(r"(?i)\b(ocp|openshift|k8s|kubernetes|rhel|go|golang|python|node|helm|java|ubi)\b")
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_ACCOUNT = re.compile(r"\[~accountid:[^\]]+\]|accountId[\"=:]\s*\"?[0-9a-f:-]{10,}\"?", re.IGNORECASE)
+_ACCOUNT = re.compile(
+    r"\[~[^\]\s]{1,120}\]"  # [~accountid:...] and Server-style [~jsmith]
+    r"|accountId[\"=:]\s*\"?[0-9a-f:-]{10,}\"?"
+    r"|https?://[^\s/]+/(?:jira/)?(?:people|secure/ViewProfile\.jspa\?name=)[^\s)\]>\"']*",  # profile links
+    re.IGNORECASE,
+)
 MAX_COMMENTS = 20
 MAX_TEXT = 20_000
 SYNC_MAX_TEXT = 12_000  # per issue in a full-project copy: description and the latest comments carry the signal
@@ -216,8 +222,7 @@ class JiraClient:
 
     def _backoff(self, attempt: int, retry_after: str | None) -> None:
         self.stats.retries += 1
-        delay = min(60.0, (2**attempt) * 1.0)
-        delay = self.rng.uniform(0, delay)  # full jitter
+        delay = self.min_delay + self.rng.uniform(0, min(60.0, 2.0**attempt))  # never sooner than the crawl delay
         if retry_after:
             with contextlib.suppress(ValueError):
                 delay = max(delay, min(float(retry_after), MAX_RETRY_AFTER))
@@ -639,18 +644,21 @@ def save_state(data_dir: Path, state: dict[str, Any]) -> None:
         raise
 
 
-def state_from_records(records: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Resume from a copy that came without a state file (``corpus import``): the lowest key held and the oldest
-    retrieval time, so the next run only fetches what is missing or changed since."""
-    keys = [str(r.get("id", "")).removeprefix("jira-") for r in records.values()]
-    keys = [k for k in keys if ISSUE_KEY.fullmatch(k)]
-    times = [t for r in records.values() if (t := _parse_iso(r.get("retrievedAt")))]
-    st: dict[str, Any] = {"complete": False}
-    if keys:
-        st["lowestKey"] = min(keys, key=key_number)
-    if times:
-        st["lastSyncAt"] = _iso(min(times))
-    return st
+def state_from_records(records: dict[str, dict[str, Any]], project: str) -> dict[str, Any]:
+    """Resume from a copy that came without matching state (``corpus import``, or a state file from another copy).
+
+    Only a copy written by this sync is contiguous by key, so only then is the lowest key a safe place to resume and
+    the oldest retrieval time a safe start for the forward pass. Anything else (the version-filtered pull of 0.4 and
+    earlier, a hand-made shard) starts over: the records are kept and refreshed as the sync reaches them."""
+    recs = list(records.values())
+    if not recs or any(r.get("versionBasis") != "sync" for r in recs):
+        return {}
+    keys = [str(r.get("id", "")).removeprefix("jira-") for r in recs]
+    keys = [k for k in keys if ISSUE_KEY.fullmatch(k) and k.startswith(project + "-")]
+    times = [t for r in recs if (t := _parse_iso(r.get("retrievedAt")))]
+    if not keys or not times:
+        return {}
+    return {"complete": False, "lowestKey": min(keys, key=key_number), "lastSyncAt": _iso(min(times))}
 
 
 @dataclass
@@ -677,14 +685,15 @@ def sync_project(
 ) -> ProjectSync:
     """Update ``records`` (id -> record) and ``state`` for one project, in place.
 
-    1. Forward: issues updated since the last run (``updated >= -Nm`` is relative to the server's clock, so time zones
-       never matter), oldest change first, so an interrupted run resumes where it stopped.
+    1. Forward: issues updated since the last completed forward pass. The window ``updated >= -Nm`` is relative to the
+       server's clock, and N comes from this machine's clock read just before the search, so time zones and a steady
+       clock offset never matter; ``OVERLAP_MINUTES`` covers drift. ``lastSyncAt`` only moves when the pass finished.
     2. Backfill: issues below the lowest key held, newest first, until the project is complete.
     """
     if not PROJECT_KEY.fullmatch(project):
         raise JiraError(f"not a Jira project key: {project!r}")
-    now = now or datetime.now(UTC)
-    retrieved = _iso(now)
+    started = now or datetime.now(UTC)  # read here, per project: an earlier project may have taken an hour
+    retrieved = _iso(started)
     fields = f"{SYNC_FIELDS},{target_field}" if target_field else SYNC_FIELDS
     res = ProjectSync(project)
 
@@ -697,27 +706,18 @@ def sync_project(
         res.fetched += 1
         return key
 
+    lowest = str(state.get("lowestKey") or "")
+    if not (ISSUE_KEY.fullmatch(lowest) and lowest.startswith(project + "-")):
+        state.pop("lowestKey", None)  # foreign or malformed: restart the backfill from the top
     last = _parse_iso(state.get("lastSyncAt")) if state.get("lastSyncAt") else None
     try:
         if last is not None:
-            minutes = max(0, int((now - last).total_seconds() // 60)) + OVERLAP_MINUTES
-            through: datetime | None = None
+            minutes = max(0, -int(-(started - last).total_seconds() // 60)) + OVERLAP_MINUTES  # rounded up
             for issue in client.search(f"project = {project} AND updated >= -{minutes}m ORDER BY updated ASC", fields):
-                if keep(issue):
-                    through = jira_time((issue.get("fields") or {}).get("updated")) or through
-                    if through is not None:
-                        state["lastSyncAt"] = _iso(min(through, now))
-            state["lastSyncAt"] = retrieved
-        else:
-            state["lastSyncAt"] = retrieved  # changes after this moment are picked up by the next forward pass
+                keep(issue)
+        state["lastSyncAt"] = retrieved  # the forward pass finished (or this is the first run): changes from here on
         if not state.get("complete"):
-            lowest = str(state.get("lowestKey") or "")
-            below = f" AND key < {lowest}" if ISSUE_KEY.fullmatch(lowest) and lowest.startswith(project + "-") else ""
-            for issue in client.search(f"project = {project}{below} ORDER BY key DESC", fields):
-                key = keep(issue)
-                if key and (not state.get("lowestKey") or key_number(key) < key_number(str(state["lowestKey"]))):
-                    state["lowestKey"] = key
-            state["complete"] = True
+            _backfill(client, project, fields, records, state, keep, res)
     except BudgetExhausted:
         res.stopped = "budget"
     except JiraError as exc:
@@ -725,6 +725,45 @@ def sync_project(
     res.complete = bool(state.get("complete"))
     res.total = len(records)
     return res
+
+
+def _backfill(
+    client: JiraClient,
+    project: str,
+    fields: str,
+    records: dict[str, dict[str, Any]],
+    state: dict[str, Any],
+    keep: Callable[[dict[str, Any]], str],
+    res: ProjectSync,
+) -> None:
+    """Older issues by key. If the server rejects the lowest key held (moved or deleted since), resume below the
+    next keys held instead; the few tickets fetched twice are simply refreshed."""
+    held = sorted(
+        (k for r in records.values() if (k := str(r.get("id", "")).removeprefix("jira-")).startswith(project + "-")),
+        key=key_number,
+    )
+    lowest = str(state.get("lowestKey") or "")
+    anchors = [lowest] if lowest else [""]
+    if lowest:
+        anchors += [k for k in held if key_number(k) > key_number(lowest)][:4]
+    for i, anchor in enumerate(anchors):
+        if anchor:
+            state["lowestKey"] = anchor  # a rejected key is not kept: the next run starts from one that worked
+        below = f" AND key < {anchor}" if anchor else ""
+        try:
+            for issue in client.search(f"project = {project}{below} ORDER BY key DESC", fields):
+                key = keep(issue)
+                if key and (not state.get("lowestKey") or key_number(key) < key_number(str(state["lowestKey"]))):
+                    state["lowestKey"] = key
+        except BudgetExhausted:
+            raise
+        except JiraError as exc:
+            if anchor and i + 1 < len(anchors) and "400" in str(exc):
+                res.error = None
+                continue
+            raise
+        state["complete"] = True
+        return
 
 
 def sync_projects(
@@ -736,40 +775,75 @@ def sync_projects(
     target_field: str = DEFAULT_TARGET_FIELD,
 ) -> dict[str, Any]:
     """Sync each project in turn, writing its shard and the state after every project so progress is never lost."""
-    from kube_noob.sources.corpus import write_shard
+    with sync_lock(data_dir):
+        return sync_projects_locked(client, projects, data_dir, base_url, now, target_field)
 
-    with _sync_lock(data_dir):
-        return _sync_projects_locked(client, projects, data_dir, base_url, now, target_field, write_shard)
+
+_THREAD_LOCK = threading.Lock()
 
 
 @contextlib.contextmanager
-def _sync_lock(data_dir: Path) -> Iterator[None]:
-    """One sync per data folder at a time: two would double the load on the server and race on the same files."""
+def sync_lock(data_dir: Path) -> Iterator[None]:
+    """One sync per data folder at a time: two would double the load on the server and race on the same files.
+    A thread lock covers this process (the service's background sync and a tool call); ``flock`` covers others."""
+    if not _THREAD_LOCK.acquire(blocking=False):
+        raise JiraError("another Jira sync is running in this process; try again when it finishes")
+    try:
+        try:
+            import fcntl
+        except ImportError:  # pragma: no cover - Windows: in-process lock only
+            yield
+            return
+        with open(jira_dir(data_dir) / ".sync.lock", "a", encoding="utf-8") as fh:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise JiraError("another Jira sync is running on this data folder; try again when it finishes") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        _THREAD_LOCK.release()
+
+
+def sync_running(data_dir: Path) -> bool:
+    """True while another process or thread holds the sync lock for this data folder."""
+    if _THREAD_LOCK.locked():
+        return True
+    lock = data_dir / "jira" / ".sync.lock"
+    if not lock.is_file():
+        return False
     try:
         import fcntl
-    except ImportError:  # pragma: no cover - Windows: no cross-process lock
-        yield
-        return
-    with open(jira_dir(data_dir) / ".sync.lock", "a", encoding="utf-8") as fh:
+    except ImportError:  # pragma: no cover
+        return False
+    with open(lock, "a", encoding="utf-8") as fh:
         try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise JiraError("another Jira sync is running on this data folder; try again when it finishes") from exc
-        try:
-            yield
-        finally:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(fh.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    return False
 
 
-def _sync_projects_locked(
+def _shard_sha(data_dir: Path, project: str) -> str | None:
+    from kube_noob.sources.corpus import read_manifest
+
+    entry = (read_manifest(data_dir).get("shards") or {}).get(shard_name(project)) or {}
+    return entry.get("sha256") if isinstance(entry, dict) else None
+
+
+def sync_projects_locked(
     client: JiraClient,
     projects: list[str],
     data_dir: Path,
     base_url: str,
-    now: datetime | None,
-    target_field: str,
-    write_shard: Callable[[Path, str, list[dict[str, Any]]], dict[str, Any]],
+    now: datetime | None = None,
+    target_field: str = DEFAULT_TARGET_FIELD,
 ) -> dict[str, Any]:
+    from kube_noob.sources.corpus import write_shard
+
     state = load_state(data_dir)
     per = state.setdefault("projects", {})
     state["baseUrl"] = base_url
@@ -777,12 +851,15 @@ def _sync_projects_locked(
     all_records: list[dict[str, Any]] = []
     for project in projects:
         records = load_shard(data_dir, project)
-        if project not in per:
-            per[project] = state_from_records(records) if records else {}
+        current = per.get(project)
+        if not isinstance(current, dict) or current.get("shardSha256") != _shard_sha(data_dir, project):
+            # no state, or the shard was replaced since (corpus import, an older kube-noob): derive it from the copy
+            per[project] = state_from_records(records, project) if records else {}
         res = sync_project(client, project, records, per[project], base_url, now, target_field)
         if records:
             ordered = sorted(records.values(), key=lambda r: -key_number(str(r["id"]).removeprefix("jira-")))
-            write_shard(data_dir, shard_name(project), ordered)
+            entry = write_shard(data_dir, shard_name(project), ordered)
+            per[project]["shardSha256"] = entry["sha256"]
             all_records.extend(ordered)
         per[project]["total"] = res.total
         save_state(data_dir, state)
@@ -843,17 +920,19 @@ def run_sync(
     base_url = settings.jira.base_url
     spec = projects if projects is not None else settings.jira.projects
     budget = max_requests if max_requests is not None else settings.jira.max_requests
-    now = now or datetime.now(UTC)
+    now = now or datetime.now(UTC)  # stamps the insights; projects read the clock themselves
     own = http is None
-    client_http = http if http is not None else jira_http(settings, base_url)
-    try:
-        client = JiraClient(client_http, base_url, auth=auth, max_requests=budget)
-        available = client.projects()
-        chosen = select_projects(spec, available)
-        out = sync_projects(client, chosen, settings.data_dir, base_url, now)
-    finally:
-        if own:
-            client_http.close()
+    with sync_lock(settings.data_dir):  # before the first request: a second sync must not add load, even briefly
+        client_http = http if http is not None else jira_http(settings, base_url)
+        try:
+            client = JiraClient(client_http, base_url, auth=auth, max_requests=budget)
+            available = client.projects()
+            chosen = select_projects(spec, available)
+            # no fixed `now`: each project reads the clock when its forward pass starts
+            out = sync_projects_locked(client, chosen, settings.data_dir, base_url, None)
+        finally:
+            if own:
+                client_http.close()
     records = out.pop("records")
     by_project: dict[str, list[dict[str, Any]]] = {}
     for r in records:

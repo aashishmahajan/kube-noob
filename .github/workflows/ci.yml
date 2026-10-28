@@ -192,7 +192,8 @@ jobs:
           jt --set replicaCount=1 --show-only templates/networkpolicy.yaml | grep -q "cidr: 0.0.0.0/0"
           jt --set replicaCount=1 --set egressFirewall.enabled=true --show-only templates/egressfirewall.yaml \
             | grep -q "dnsName: redhat.atlassian.net"
-          jt --set replicaCount=1 | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          jt --set replicaCount=1 --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"

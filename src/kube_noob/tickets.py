@@ -28,7 +28,7 @@ from typing import Any
 
 from kube_noob.catalog import OPENSHIFT_FAMILY
 from kube_noob.errors import KubeNoobError
-from kube_noob.jira_catalog import DEFAULT_BASE_URL, DEFAULT_PROJECTS, ISSUE_KEY, parse_version, product_of
+from kube_noob.jira_catalog import DEFAULT_BASE_URL, DEFAULT_PROJECTS, ISSUE_KEY, OPENSHIFT_VERSIONED, parse_version
 
 try:
     import fcntl
@@ -38,8 +38,10 @@ except ImportError:  # pragma: no cover - Windows
 MIN_RARE_TERMS = 3  # rare words the error and the ticket must share
 RARE_SHARE = 0.03  # a word in at most 3% of tickets is rare
 GENERAL_SHARE = 0.02  # and in at most 2% of the bundled Kubernetes and OpenShift docs
-PHRASE_MAX_HITS = 25  # a line found word for word in more tickets than this is too common to identify one
+PHRASE_MAX_HITS = 25  # a line found word for word in more tickets than this is too common to identify one,
+PHRASE_MAX_SHARE = 0.005  # and in more than 0.5% of a smaller copy
 PHRASE_MIN_WORDS = 5
+PHRASE_MIN_DISTINCT = 2  # words in the phrase that are neither everyday English nor Kubernetes status vocabulary
 MAX_QUERY_TERMS = 24
 CANDIDATES = 40
 MAX_BODY = 20_000
@@ -48,6 +50,26 @@ OPENSHIFT_ONLY = tuple(sorted(k for k, v in DEFAULT_PROJECTS.items() if v == "op
 BUG_TYPES = {"bug", "vulnerability", "weakness", "defect"}
 
 _lock = threading.Lock()
+_failed: dict[str, str] = {}  # index path -> fingerprint whose build failed
+
+
+def _sync_running(data_dir: Path) -> bool:
+    """A sync holds ``jira/.sync.lock`` (see sources.jira.sync_lock) while it rewrites shards."""
+    lock = data_dir / "jira" / ".sync.lock"
+    if fcntl is None or not lock.is_file():
+        return False
+    try:
+        with open(lock, "a", encoding="utf-8") as fh:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        return False
+    return False
+
+
 _WORD = re.compile(r"[a-z0-9]+")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 _ERRORISH = re.compile(
@@ -104,6 +126,29 @@ _RESOLUTION_VERDICTS: tuple[tuple[str, str], ...] = (
     ("complete", "fixed"),
 )
 _IN_PROGRESS = {"modified", "on_qa", "on qa", "verified", "release pending", "ready for release"}
+
+
+# Words that never identify a ticket on their own: Kubernetes reasons, events and status vocabulary, and everyday
+# English. A copy where a few tickets paste `oc describe` output would otherwise make them look rare.
+GENERIC_WORDS = frozenset(
+    """
+    the and for with from that this was were are not but has have had been will can could should would into onto
+    when then than there their they them its also any all one two use used using via per out off back after before
+    while still again only just more most some such each other our your you yes may might must does did done
+    error errors failed failure fails failing fail unable cannot timeout timed refused invalid denied forbidden
+    unauthorized rejected conflict deadline exceeded panic crash crashed crashing warning warn normal info debug
+    reason message status code exit exited killed kill signal restart restarts restarting restarted started start
+    starting created create creating pulling pulled pull pulls image images container containers pod pods node
+    nodes deployment deployments replicaset statefulset daemonset job jobs service services namespace namespaces
+    backoff crashloopbackoff oomkilled imagepullbackoff errimagepull containercreating pending running succeeded
+    evicted unschedulable failedmount failedscheduling failedcreate unhealthy probe readiness liveness startup
+    event events kubelet scheduled scheduling ready true false none null nil value values object objects resource
+    resources request requests response cluster clusters openshift kubernetes version versions issue bug ticket
+    rpc grpc desc notfound unpack terminated last state context canceled cancelled eof dial tcp udp http https
+    connection connect lookup host port address get post put read write file files directory path permission
+    unknown exists already found available unavailable internal server client api default system kube
+    """.split()  # noqa: SIM905 - a word list reads better as text
+)
 
 
 class TicketIndexError(KubeNoobError):
@@ -190,6 +235,9 @@ def fix_assessment(fix_names: list[str], running: str | None) -> tuple[str | Non
     if not running or (r := parse_version(running)) is None:
         name = min(parsed, key=lambda p: p[1])[0]
         return name, None, ""
+    parsed = [p for p in parsed if p[1][0] == r[0]]  # "OADP 1.4.2" or "Logging 5.9" say nothing about OpenShift 4.x
+    if not parsed:
+        return None, None, ""
     same = [p for p in parsed if p[1][:2] == r[:2]]
     if same:
         name, v = min(same, key=lambda p: p[1])
@@ -290,9 +338,14 @@ def _fingerprint(shards: list[tuple[str, dict[str, Any]]]) -> str:
     return h.hexdigest()
 
 
+def _ro_uri(db: Path) -> str:
+    """A read-only SQLite URI that survives '#', '?' or '%' in the path (as_uri percent-encodes them)."""
+    return db.resolve().as_uri() + "?mode=ro"
+
+
 def _meta(db: Path) -> dict[str, str]:
     try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con = sqlite3.connect(_ro_uri(db), uri=True)
         try:
             return dict(con.execute("SELECT k, v FROM meta").fetchall())
         finally:
@@ -317,9 +370,21 @@ def _records(data_dir: Path, shards: list[tuple[str, dict[str, Any]]]) -> Iterat
                     yield rec
 
 
-def _url(rec: dict[str, Any], key: str) -> str:
-    m = _URL.fullmatch(str(rec.get("url") or ""))
-    return str(rec["url"]) if m and m.group(1) == key else f"{DEFAULT_BASE_URL}/browse/{key}"
+def _sync_base(data_dir: Path) -> str:
+    """The Jira site this copy was synced from (state.json), else Red Hat's."""
+    try:
+        state = json.loads((data_dir / "jira" / "state.json").read_text(encoding="utf-8"))
+        base = str(state.get("baseUrl") or "") if isinstance(state, dict) else ""
+    except (OSError, ValueError):
+        base = ""
+    return base.rstrip("/") if re.fullmatch(r"https://[A-Za-z0-9.-]+\.[A-Za-z]{2,}/?", base) else DEFAULT_BASE_URL
+
+
+def _url(rec: dict[str, Any], key: str, base: str) -> str:
+    """The record's link only if it points at the synced site; an imported record cannot relabel another site."""
+    url = str(rec.get("url") or "")
+    m = _URL.fullmatch(url)
+    return url if m and m.group(1) == key and url.startswith(base + "/") else f"{base}/browse/{key}"
 
 
 def _strs(value: Any, limit: int = 40) -> list[str]:
@@ -327,6 +392,45 @@ def _strs(value: Any, limit: int = 40) -> list[str]:
         [str(x)[:80] for x in value or [] if isinstance(x, str | int | float)][:limit]
         if isinstance(value, list)
         else []
+    )
+
+
+def _text(value: Any, limit: int) -> str:
+    return value[:limit] if isinstance(value, str) else ""
+
+
+def _row_values(rec: dict[str, Any], base: str) -> tuple[Any, ...] | None:
+    key = _text(rec.get("id"), 60).removeprefix("jira-")
+    m = ISSUE_KEY.fullmatch(key)
+    if not m:
+        return None
+    title = _text(rec.get("title"), 500).removeprefix(f"{key}: ")
+    itype, status, resolution = (_text(rec.get(k), 80) or None for k in ("issueType", "status", "resolution"))
+    links_value = rec.get("links")
+    raw_links: list[Any] = links_value if isinstance(links_value, list) else []
+    links = [
+        {k: _text(link.get(k), 60) for k in ("type", "relation", "key")}
+        for link in raw_links
+        if isinstance(link, dict) and ISSUE_KEY.fullmatch(_text(link.get("key"), 60))
+    ][:20]
+    return (
+        key,
+        m.group(1),
+        title,
+        itype,
+        status,
+        resolution,
+        verdict(itype, status, resolution),
+        json.dumps(_strs(rec.get("fixVersions"))),
+        json.dumps(_strs(rec.get("affectsVersions"))),
+        json.dumps(_strs(rec.get("components"))),
+        json.dumps(links),
+        _text(rec.get("created"), 32),
+        _text(rec.get("updated"), 32),
+        _text(rec.get("resolved"), 32),
+        _text(rec.get("retrievedAt"), 32),
+        _url(rec, key, base),
+        _text(rec.get("text"), MAX_BODY),
     )
 
 
@@ -357,46 +461,23 @@ def _build(target: Path, data_dir: Path, shards: list[tuple[str, dict[str, Any]]
         count = 0
         projects: set[str] = set()
         newest = ""
+        base = _sync_base(data_dir)
         for rec in _records(data_dir, shards):
-            key = str(rec.get("id", "")).removeprefix("jira-")
-            m = ISSUE_KEY.fullmatch(key)
-            if not m:
+            try:
+                row = _row_values(rec, base)
+            except (TypeError, ValueError, AttributeError):
+                continue  # a malformed record (hand-made or damaged shard) is skipped, never fatal
+            if row is None:
                 continue
-            title = str(rec.get("title") or "").removeprefix(f"{key}: ")[:500]
-            itype, status, resolution = (str(rec.get(k) or "") or None for k in ("issueType", "status", "resolution"))
-            links = [
-                {k: str(v)[:60] for k, v in link.items() if k in {"type", "relation", "key"}}
-                for link in rec.get("links") or []
-                if isinstance(link, dict) and ISSUE_KEY.fullmatch(str(link.get("key") or ""))
-            ][:20]
-            retrieved = str(rec.get("retrievedAt") or "")[:32]
-            newest = max(newest, retrieved)
             con.execute(
                 "INSERT OR REPLACE INTO tickets (key, project, title, type, status, resolution, verdict, fix, affects, "
                 "components, links, created, updated, resolved, retrieved, url, body) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    key,
-                    m.group(1),
-                    title,
-                    itype,
-                    status,
-                    resolution,
-                    verdict(itype, status, resolution),
-                    json.dumps(_strs(rec.get("fixVersions"))),
-                    json.dumps(_strs(rec.get("affectsVersions"))),
-                    json.dumps(_strs(rec.get("components"))),
-                    json.dumps(links),
-                    str(rec.get("created") or "")[:32],
-                    str(rec.get("updated") or "")[:32],
-                    str(rec.get("resolved") or "")[:32],
-                    retrieved,
-                    _url(rec, key),
-                    str(rec.get("text") or "")[:MAX_BODY],
-                ),
+                row,
             )
             count += 1
-            projects.add(m.group(1))
+            projects.add(row[1])
+            newest = max(newest, row[14])
         con.execute("INSERT INTO fts(fts) VALUES('rebuild')")
         meta = {
             "fingerprint": fingerprint,
@@ -419,8 +500,10 @@ def ensure_index(data_dir: Path) -> Path | None:
         return None
     fingerprint = _fingerprint(shards)
     db = index_path(data_dir)
-    if db.is_file() and _meta(db).get("fingerprint") == fingerprint:
-        return db
+    if db.is_file() and (_meta(db).get("fingerprint") == fingerprint or _sync_running(data_dir)):
+        return db  # current, or a sync is rewriting shards: answer from the last index rather than rebuild per shard
+    if _failed.get(str(db)) == fingerprint:
+        raise TicketIndexError("the local Jira copy could not be indexed (see the earlier error); fix or re-sync it")
     with _lock:
         db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with open(db.parent / ".index.lock", "a", encoding="utf-8") as lockf:
@@ -435,6 +518,9 @@ def ensure_index(data_dir: Path) -> Path | None:
                     _build(tmp, data_dir, shards, fingerprint)
                     os.chmod(tmp, 0o600)
                     os.replace(tmp, db)
+                except (sqlite3.Error, OSError, TicketIndexError):
+                    _failed[str(db)] = fingerprint  # do not rebuild on every question; a new copy retries
+                    raise
                 finally:
                     tmp.unlink(missing_ok=True)
                     tmpdir.rmdir()
@@ -450,7 +536,7 @@ def _open(data_dir: Path | None) -> Iterator[sqlite3.Connection | None]:
     if db is None:
         yield None
         return
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con = sqlite3.connect(_ro_uri(db), uri=True)
     con.row_factory = sqlite3.Row
     try:
         yield con
@@ -562,12 +648,12 @@ def _ticket(row: sqlite3.Row) -> dict[str, Any]:
 def _present(
     con: sqlite3.Connection, t: dict[str, Any], running: str | None, as_of: str | None
 ) -> tuple[dict[str, Any], bool | None]:
-    # Cluster versions are OpenShift versions: compare them only with OpenShift tickets' fix versions.
-    sentence, applies, fixed_in = describe(t, running if product_of(t["project"]) == "openshift" else None)
+    # Cluster versions are OpenShift versions: compare them only with projects whose fixVersions are OpenShift releases.
+    sentence, applies, fixed_in = describe(t, running if t["project"] in OPENSHIFT_VERSIONED else None)
     target = t.get("duplicateOf")
     if t["verdict"] == "duplicate" and target and (row := _row(con, target)) is not None:
         other = _ticket(row)
-        other_running = running if product_of(other["project"]) == "openshift" else None
+        other_running = running if other["project"] in OPENSHIFT_VERSIONED else None
         other_sentence, applies, fixed_in = describe(other, other_running)
         sentence += f" {target}: {other_sentence}"
     rem = remarks(t["body"] or "")
@@ -604,8 +690,8 @@ def match(
             if con is None:
                 return {"available": False, "matches": []}
             return _match(con, text, platform, version, limit)
-    except TicketIndexError as exc:
-        return {"available": False, "matches": [], "note": str(exc)}
+    except (TicketIndexError, sqlite3.Error, OSError) as exc:
+        return {"available": False, "matches": [], "note": f"the local Jira copy is unavailable: {exc}"}
 
 
 def _match(con: sqlite3.Connection, text: str, platform: str | None, version: str | None, limit: int) -> dict[str, Any]:
@@ -622,7 +708,11 @@ def _match(con: sqlite3.Connection, text: str, platform: str | None, version: st
         q = f"SELECT term, doc FROM vocab WHERE term IN ({','.join('?' * len(part))})"  # noqa: S608 - placeholders only
         df.update({str(term): int(doc) for term, doc in con.execute(q, part).fetchall()})
     ceiling = max(1, int(RARE_SHARE * n))
-    rare = {w for w, d in df.items() if 0 < d <= ceiling and _general_frequency(w) <= GENERAL_SHARE}
+    rare = {
+        w
+        for w, d in df.items()
+        if 0 < d <= ceiling and w not in GENERIC_WORDS and _general_frequency(w) <= GENERAL_SHARE
+    }
     project_filter = ""
     params: list[Any] = []
     if skip_openshift:
@@ -640,13 +730,16 @@ def _match(con: sqlite3.Connection, text: str, platform: str | None, version: st
         ).fetchall()
         for row in rows:
             candidates[row["key"]] = {"score": -float(row["score"]), "exact": False}
+    phrase_cap = min(PHRASE_MAX_HITS, max(2, int(n * PHRASE_MAX_SHARE)))
     for phrase in error_phrases(text):
+        if len({w for w in phrase.split() if len(w) > 2 and w not in GENERIC_WORDS}) < PHRASE_MIN_DISTINCT:
+            continue  # "back off restarting failed container" is in hundreds of tickets and identifies none
         rows = con.execute(
             "SELECT tickets.key AS key FROM fts JOIN tickets ON tickets.rowid = fts.rowid "  # noqa: S608 - placeholders
             f"WHERE fts MATCH ?{project_filter} LIMIT {PHRASE_MAX_HITS + 1}",
             [f'"{phrase}"', *params],
         ).fetchall()
-        if 0 < len(rows) <= PHRASE_MAX_HITS:
+        if 0 < len(rows) <= phrase_cap:
             for row in rows:
                 candidates.setdefault(row["key"], {"score": 0.0, "exact": False})["exact"] = True
     ranked: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
@@ -703,5 +796,5 @@ def ticket(key: str, data_dir: Path | None, version: str | None = None) -> dict[
                 }
             )
             return item
-    except TicketIndexError as exc:
-        return {"found": False, "note": str(exc)}
+    except (TicketIndexError, sqlite3.Error, OSError) as exc:
+        return {"found": False, "note": f"the local Jira copy is unavailable: {exc}"}
