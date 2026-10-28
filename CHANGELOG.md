@@ -16,6 +16,14 @@
 - KN-S017 also flags workload creation and changes (pods, Deployments, Jobs...), ephemeral containers and
   PersistentVolume creation: each lets a subject act as any ServiceAccount in the namespace or reach the host
   (Kubernetes RBAC good practices).
+- `kube-noob signals` extracts the canonical names in an error: Alertmanager alert names (webhook payload or text),
+  Kubernetes event reasons, ClusterOperator conditions with their reasons (YAML, JSON or `oc get co`), container
+  waiting and terminated reasons, admission rules, components, and normalised error templates with a short hash.
+  Vocabularies are copied from the upstream files that emit them (kubelet, scheduler, controllers, CRI-O,
+  openshift/api) and cited in the code. Signals are the join key the next items use for known issues and memory.
+- Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
+  `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
+  test.
 
 ## 0.5.0 - 2026-10-28
 

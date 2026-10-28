@@ -287,6 +287,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="Show one ticket from the local copy of Red Hat's public Jira (kube-noob corpus jira --online). "
         "Example: kube-noob ticket OCPBUGS-12345 --version 4.21.1",
     )
+    sig = sub.add_parser(
+        "signals",
+        help="Extract signals: alert names, event and condition reasons, container reasons, admission rules, "
+        "components and error templates",
+        description="Find the canonical names in an alert payload, events, ClusterOperators, pod status or pasted "
+        "text. Example: oc get events -o json | kube-noob signals",
+    )
+    sig.add_argument("text", nargs="*", help="text to read; or -f FILE; or pipe it in")
+    sig.add_argument("-f", "--file", default=None, help="a file, '-' for stdin, or the text itself")
     tik.add_argument("key", help="a Jira key such as OCPBUGS-12345 or ROX-30000")
     tik.add_argument("--version", dest="pversion", help="your OpenShift version: says whether the fix is in it")
 
@@ -648,6 +657,23 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _print_known_issues(out)
         else:
             _emit(out, fmt)
+        return 0
+
+    if a.cmd == "signals":
+        from kube_noob.signals import extract as extract_signals
+
+        if a.text and a.file is not None:
+            raise ConfigError("pass the text or -f, not both")
+        text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
+        found = [x.as_dict() for x in extract_signals(text)]
+        if a.format == "text":
+            for x in found:
+                detail = f"  {x['detail']}" if x.get("detail") else ""
+                _tprint(f"{x['kind']:15} {x['name']}{detail}")
+            if not found:
+                print("no signals found")
+        else:
+            _emit({"signals": found}, fmt)
         return 0
 
     if a.cmd == "ticket":

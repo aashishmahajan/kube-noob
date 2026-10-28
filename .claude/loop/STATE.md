@@ -9,8 +9,8 @@ Statuses: `todo`, `in-progress`, `done`, `blocked` (reason and the exact questio
 |---|---|---|---|---|---|
 | 1 | F1 | Baseline and loop scaffolding | - | done | check.sh green: 428 passed, 1 skipped, selftest 61/61, 23 s (2026-10-28); toolchain below |
 | 2 | F2 | Strategy into the docs (roadmap, editions) | F1 | done | docs/roadmap.md rewritten (principles, M1-M12, frozen, set aside, assumptions); docs/editions.md; check.sh green 428/1 skipped, selftest 61/61 |
-| 3 | F3 | Capability tiers framework | F1 | done | kube_noob/tiers.py (R,P,D,W,G; Approval; Writer), settings probe/dryRun/itsm/notify/gate, doctor rows and conflicts, ToolSpec.tier filter, chart rbac-tiers.yaml + guards + schema, KN-S017 extended; tests/test_tiers.py 10 passed; check.sh 438 passed |
-| 4 | S1 | Signal extraction module | F1 | todo | |
+| 3 | F3 | Capability tiers framework | F1 | done | kube_noob/tiers.py (R,P,D,W,G; Approval; Writer), settings probe/dryRun/itsm/notify/gate, doctor rows and conflicts, ToolSpec.tier filter, chart rbac-tiers.yaml + guards + schema, KN-S017 extended; tests/test_tiers.py 10 passed; check.sh 438 passed; CI green on the branch (run 40614349955: chart tier guards, kind e2e x4) |
+| 4 | S1 | Signal extraction module | F1 | done | kube_noob/signals (core.py, vocab.py with upstream citations), CLI `kube-noob signals`; tests/test_signals.py 11 passed; check.sh 451 passed, selftest 61/61 |
 | 5 | S2 | Signal catalogue (verified names only) | S1 | todo | |
 | 6 | S3 | Known-issue matching with signals plus recall eval | S2 | todo | |
 | 7 | S4 | Signals in diagnose, debug, bundle, policy explain; Alertmanager payload input | S3 | todo | |
@@ -111,6 +111,15 @@ which ships tested and documented on its own.
 
 | Fact | Source URL | Verified on | Used in |
 |---|---|---|---|
+| kubectl debug PATCHes the pods/ephemeralcontainers subresource | https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/debug/debug.go (line 514) | 2026-10-28 | tiers.py, chart rbac-tiers.yaml |
+| Dry-run is authorized identically to the real request | https://github.com/kubernetes/website/blob/main/content/en/docs/reference/using-api/api-concepts.md ("Dry-run authorization") | 2026-10-28 | tiers.py, SECURITY.md |
+| Workload creation, PV creation are escalation paths | https://github.com/kubernetes/website/blob/main/content/en/docs/concepts/security/rbac-good-practices.md | 2026-10-28 | KN-S017 |
+| Alertmanager webhook payload version 4 fields | https://github.com/prometheus/alertmanager/blob/main/docs/configuration.md | 2026-10-28 | signals/core.py |
+| kubelet event reasons | https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/events/event.go | 2026-10-28 | signals/vocab.py |
+| image and container error reasons | kubelet images/types.go, container/sync_result.go, kuberuntime/kuberuntime_container.go (kubernetes/kubernetes master) | 2026-10-28 | signals/vocab.py |
+| FailedScheduling, FailedCreate, Evicted | kubernetes/kubernetes scheduler/schedule_one.go, controller/controller_utils.go, kubelet/eviction/helpers.go | 2026-10-28 | signals/vocab.py |
+| OOMKilled, Completed, Error termination reasons | https://github.com/cri-o/cri-o/blob/main/server/container_status.go | 2026-10-28 | signals/vocab.py |
+| ClusterOperator condition types | https://github.com/openshift/api/blob/master/config/v1/types_cluster_operator.go | 2026-10-28 | signals/vocab.py |
 
 ## Blocked and unverified
 
@@ -129,6 +138,7 @@ which ships tested and documented on its own.
 
 ## Iteration log (newest first; at most 10 lines per entry)
 
+- 2026-10-28 S1: signal extraction for Alertmanager v4 payloads, core/v1 and events.k8s.io/v1 events, ClusterOperator YAML/JSON and `oc get co`, pod status, admission denials, components and normalised error templates (sha256[:12]). Vocab verified in kubelet events.go, images/types.go, sync_result.go, kuberuntime_container.go, schedule_one.go, controller_utils.go, eviction/helpers.go, CRI-O container_status.go, openshift/api types_cluster_operator.go. Found and fixed a shipped bug: redaction quadratic on dashed tokens (240 KB took 136 s, now 0.3 s). Proof: alert payload | kube-noob signals -> 'alert etcdHighNumberOfLeaderChanges', 'component etcd'. Next: S2.
 - 2026-10-28 F3: capability tiers framework. Defaults off; doctor prints tier R-G and contradictions; Writer cannot exist with its tier off; Approval bound to one action, 15 min, single use; backends proven write-free. Chart renders probe/dry-run Roles only when enabled (guards in CI). Found and fixed: KN-S017 missed workload creation, ephemeral containers and PV creation (RBAC good practices). Guidance G36 (Jira copy, missing since 0.5.0) and G37 (tiers). Proof: `kube-noob doctor` shows 'tier P off probe (probe.enabled)'. Next: S1.
 - 2026-10-28 F2: roadmap rewritten to the moat program with status history kept; trained-model track cut, grader and train bench kept as evaluation; learner tracks, credits, videos frozen; docs/editions.md (documentation only). Proof: tests/test_guidance.py 5 passed; check.sh green. Next: F3.
 - 2026-10-28 F1: baseline recorded (above); main merged into the branch; E4 marked done by 0.5.0 with remainder

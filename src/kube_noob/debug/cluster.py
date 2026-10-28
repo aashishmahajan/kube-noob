@@ -129,7 +129,11 @@ _LOG_REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhv[sbr]\.[A-Za-z0-9_-]{20,}"), "***vault-token***"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), "***github-token***"),
     (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "***slack-token***"),
-    (re.compile(r"(?i)(--?[a-z0-9_.-]*(?:password|passwd|secret|token|api[-_]?key)[=\s]+)[^\s\"',;]+"), r"\1***"),
+    # The flag-name prefix is bounded: unbounded, a long "a-a-a-..." token made this quadratic (minutes per 200 KB).
+    (
+        re.compile(r"(?i)(--?[a-z0-9_.-]{0,64}(?:password|passwd|secret|token|api[-_]?key)[=\s]+)[^\s\"',;]+"),
+        r"\1***",
+    ),
 ]
 
 
