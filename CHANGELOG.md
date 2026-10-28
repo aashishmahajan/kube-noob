@@ -62,6 +62,13 @@
 - Faster on long input: search walks each distinct query word's postings instead of every chunk for every word
   (scores unchanged), so a 100 KB repetitive error no longer costs seconds in known-issue matching; JSON input is
   parsed as JSON only, and each playbook pattern scans the text once.
+- Memory in every runtime: `memory.paths` in the config (or `KUBE_NOOB_MEMORY_PATHS`) is read by the CLI, the
+  stdio MCP server and the HTTP server; `kube-noob doctor` lists each repository with its entry counts and warns
+  about one it cannot read; `memory match` uses the paths when `--dir` is not given. Chart: `memory.source`
+  `configMap`, `pvc` or `git` mounts the repository read-only at `/srv/kube-noob/memory`; the git source clones it in
+  an init container (https:// or ssh:// with a deploy-key Secret, never credentials in the URL), opens egress only to
+  `memory.git.egressCIDRs`, names the host in the EgressFirewall, and under `config.offline` accepts only an
+  in-cluster host.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.

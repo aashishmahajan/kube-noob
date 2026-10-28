@@ -37,6 +37,14 @@ spec:
       ports:
         - {protocol: UDP, port: {{ .Values.networkPolicy.egress.dnsPort }}}
         - {protocol: TCP, port: {{ .Values.networkPolicy.egress.dnsPort }}}
+    {{- if eq (include "kube-noob.memorySource" .) "git" }}
+    - to:
+        {{- range .Values.memory.git.egressCIDRs }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: {{ include "kube-noob.memoryGitPort" . }}}
+    {{- end }}
     {{- if .Values.config.clusterEnabled }}
     {{- if not .Values.networkPolicy.egress.apiServerCIDRs }}
     {{- fail "config.clusterEnabled requires networkPolicy.egress.apiServerCIDRs (or networkPolicy.egress.enabled=false)" }}

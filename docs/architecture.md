@@ -73,6 +73,9 @@ flowchart LR
   `memory init`, `add`, `outcome` and `migrate-learning` (new files created exclusively, rewrites atomic), never runs
   git, and never bundles, publishes or exports it. Entries are untrusted input until `memory validate` passes:
   bounded YAML, content rules, and the verifier on every fix (validate, audit and red team on patches; privileged
-  SCC, cluster-admin, hostPath and wildcard RBAC grants fail without a recorded risk acceptance).
+  SCC, cluster-admin, hostPath and wildcard RBAC grants fail without a recorded risk acceptance). In the chart the
+  repository is mounted read-only; the git source is cloned by an init container (no credentials in the URL, a
+  deploy key from a Secret, strict host keys), with egress only to the git host's CIDRs and, under the offline
+  lock, only from an in-cluster host.
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.

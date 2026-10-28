@@ -33,6 +33,12 @@ spec:
       ports:
         - {protocol: TCP, port: 443}
     {{- end }}
+    {{- if and (eq (include "kube-noob.memorySource" .) "git") (not (include "kube-noob.memoryGitInCluster" .)) }}
+    - type: Allow
+      to: {dnsName: {{ include "kube-noob.memoryGitHost" . }}}
+      ports:
+        - {protocol: TCP, port: {{ include "kube-noob.memoryGitPort" . }}}
+    {{- end }}
     {{- range .Values.egressFirewall.denyCIDRs }}
     - type: Deny
       to: {cidrSelector: {{ . }}}

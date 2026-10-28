@@ -35,6 +35,10 @@ data:
       enabled: {{ .Values.notify.enabled }}
     gate:
       enabled: {{ .Values.gate.enabled }}
+    {{- if ne (include "kube-noob.memorySource" .) "none" }}
+    memory:
+      paths: [/srv/kube-noob/memory]
+    {{- end }}
     jira:
       syncEnabled: {{ .Values.jira.sync.enabled }}
       projects: {{ .Values.jira.sync.projects | quote }}

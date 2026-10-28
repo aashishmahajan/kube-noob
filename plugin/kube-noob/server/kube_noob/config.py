@@ -220,6 +220,19 @@ class GateSettings(_Base):
     enabled: bool = False
 
 
+class MemorySettings(_Base):
+    """Team memory repositories (``kube-noob memory init``) read where kube-noob runs: the CLI, the stdio MCP server
+    and the HTTP server. Read-only; kube-noob never uploads, bundles or exports them. ``$KUBE_NOOB_MEMORY_PATHS``
+    (paths separated by ``:``) overrides the list."""
+
+    paths: list[Path] = Field(default_factory=list, max_length=10)
+
+    @field_validator("paths")
+    @classmethod
+    def _expand(cls, v: list[Path]) -> list[Path]:
+        return [p.expanduser() for p in v]
+
+
 class JiraSettings(_Base):
     """Local copy of Red Hat's public Jira (``kube-noob corpus jira``) for "has Red Hat seen this error?" answers.
 
@@ -278,6 +291,7 @@ class Settings(_Base):
     server: ServerSettings = Field(default_factory=ServerSettings)
     watch: WatchSettings = Field(default_factory=WatchSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
     probe: ProbeSettings = Field(default_factory=ProbeSettings)
     dry_run: DryRunSettings = Field(default_factory=DryRunSettings)
     itsm: ItsmSettings = Field(default_factory=ItsmSettings)
@@ -398,6 +412,9 @@ def _env_overrides() -> dict[str, Any]:
             for part in path[:-1]:
                 cur = cur.setdefault(part, {})
             cur[path[-1]] = val
+    memory = os.environ.get("KUBE_NOOB_MEMORY_PATHS")
+    if memory is not None:
+        o["memory"] = {"paths": [p for p in memory.split(os.pathsep) if p.strip()]}
     port = os.environ.get("KUBE_NOOB_SERVER_PORT")
     if port:
         try:

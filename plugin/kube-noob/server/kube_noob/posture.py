@@ -100,6 +100,8 @@ def posture(s: Settings) -> dict[str, Any]:
 
     conflicts += tiers.conflicts(s)
     learning = s.data_dir / "learning.json"
+    memory = memory_posture(s)
+    warnings += [f"memory path {m['path']}: {m['error']}" for m in memory if m.get("error")]
     return {
         "version": __version__,
         "configFile": str(s.source_path) if s.source_path else None,
@@ -116,12 +118,36 @@ def posture(s: Settings) -> dict[str, Any]:
         "model": model,
         "judge": judge,
         "dataDir": {"path": str(s.data_dir), "exists": s.data_dir.is_dir(), "learningFile": str(learning)},
+        "memory": memory,
         "telemetry": "none",
         "crypto": crypto_posture(),
         "conflicts": conflicts,
         "warnings": warnings,
         "status": "conflict" if conflicts else "ok",
     }
+
+
+def memory_posture(s: Settings) -> list[dict[str, Any]]:
+    """Each configured memory repository: entry counts, or why it cannot be read. Read-only."""
+    from kube_noob.memory.repo import load_repo
+
+    out: list[dict[str, Any]] = []
+    for path in s.memory.paths:
+        row: dict[str, Any] = {"path": str(path)}
+        try:
+            loaded = load_repo(path)
+        except (OSError, ValueError) as exc:
+            row["error"] = str(exc)
+        else:
+            entries = [x.entry for x in loaded if x.entry is not None]
+            row.update(
+                entries=len(loaded),
+                approved=sum(1 for e in entries if e.status == "approved"),
+                proposed=sum(1 for e in entries if e.status == "proposed"),
+                unreadable=len(loaded) - len(entries),
+            )
+        out.append(row)
+    return out
 
 
 def render_text(p: dict[str, Any]) -> str:
@@ -142,6 +168,16 @@ def render_text(p: dict[str, Any]) -> str:
             for t in p.get("tiers", [])
         ),
         f"  data dir       {p['dataDir']['path']}",
+        *(
+            f"  memory         {m['path']}: "
+            + (
+                f"{m['entries']} entries ({m['approved']} approved, {m['proposed']} proposed)"
+                if "error" not in m
+                else "unreadable"
+            )
+            for m in p.get("memory", [])
+        ),
+        *(["  memory         none (memory.paths)"] if not p.get("memory") else []),
         f"  telemetry      {p['telemetry']}",
         f"  FIPS mode      {p['crypto']['fipsMode']} ({p['crypto']['openssl']})",
         f"  config file    {p['configFile'] or 'none (defaults + environment)'}",

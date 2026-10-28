@@ -444,7 +444,9 @@ def build_parser() -> argparse.ArgumentParser:
     mm = msub.add_parser("match", help="Entries for an error, an alert payload or a symptom (approved only)")
     mm.add_argument("text", nargs="*", help="the error or symptom, in quotes")
     mm.add_argument("-f", "--file", default=None, help="a file (e.g. an Alertmanager payload), or '-' for stdin")
-    mm.add_argument("--dir", action="append", default=[], dest="dirs", help="memory repository (repeat)")
+    mm.add_argument(
+        "--dir", action="append", default=[], dest="dirs", help="memory repository (repeat); default: memory.paths"
+    )
     mm.add_argument("--version", dest="pversion", help="your OpenShift version: entries fixed there show as retired")
     mm.add_argument("--platform", choices=PLATFORMS)
     mm.add_argument("--operator", action="append", default=[], help="name=version of an installed operator (repeat)")
@@ -1193,8 +1195,9 @@ def _memory(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
         text = "\n".join(a.text) if a.text else _read_text_or_file(a.file if a.file is not None else "-")
         if len(text.strip()) < 3:
             raise ConfigError("nothing to match: pass the error text in quotes, a file with -f, or pipe it in")
-        if not a.dirs:
-            raise ConfigError("pass the memory repository with --dir (repeat for several)")
+        dirs = a.dirs or [str(d) for d in s.memory.paths]
+        if not dirs:
+            raise ConfigError("pass the memory repository with --dir (repeat for several) or set memory.paths")
         operators: dict[str, str] = {}
         for raw in a.operator:
             name, sep, ver = raw.partition("=")
@@ -1202,7 +1205,7 @@ def _memory(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
                 raise ConfigError(f"--operator {raw!r}: use name=version")
             operators[name] = ver
         out = mmatch.match(
-            [Path(d) for d in a.dirs],
+            [Path(d) for d in dirs],
             text,
             version=a.pversion,
             platform=a.platform,

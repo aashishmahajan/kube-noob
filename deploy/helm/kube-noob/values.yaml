@@ -94,6 +94,25 @@ jira:
     intervalHours: 24
     maxRequests: 600         # per run, one second or more apart: about 60,000 tickets a run at most
 
+memory:
+  # Your team's memory repository (kube-noob memory init), mounted read-only at /srv/kube-noob/memory and read by
+  # every tool; never uploaded or exported. source: none | configMap | pvc | git.
+  source: none
+  configMap:
+    name: ""                 # entries as keys MEM-<n>.yaml: kubectl create configmap team-memory --from-file=entries/
+  pvc:
+    claimName: ""            # a claim holding the repository (README.md, entries/...), mounted read-only
+    subPath: ""
+  git:
+    # Cloned once per pod start by an init container (restart the pods to pick up new entries). https:// or ssh://
+    # URLs only, never with credentials in them. Under config.offline only an in-cluster host (*.svc) is allowed.
+    url: ""
+    ref: main
+    image: {repository: "", tag: "", digest: ""}   # an image with git (and sh and ssh for ssh:// URLs)
+    sshSecret: ""            # Secret with keys ssh-privatekey and known_hosts, for ssh:// URLs; read by git only
+    egressCIDRs: []          # the git host's addresses: a NetworkPolicy cannot name hosts (egressFirewall adds its name)
+    port: null               # default 443 for https://, 22 for ssh://
+
 # Capability tiers beyond read-only (tier R is config.clusterEnabled). Each is off by default, every action needs a
 # person's approval, and probe and dryRun get their own Role (templates/rbac-tiers.yaml) only when enabled.
 probe:

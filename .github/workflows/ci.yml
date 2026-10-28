@@ -232,6 +232,82 @@ jobs:
           "
           tt --api-versions security.openshift.io/v1 | kube-noob audit -f - --platform openshift --version 4.22 \
             --fail-on high
+          mt() { helm template kn deploy/helm/kube-noob -n shop $base "$@"; }
+          git="--set memory.source=git --set memory.git.url=https://git.example.com/team/memory.git"
+          gimg="--set memory.git.image.repository=quay.io/acme/git --set memory.git.image.tag=2.47.1"
+          gcidr="--set memory.git.egressCIDRs={203.0.113.10/32}"
+          for args in "--set memory.source=configMap" "--set memory.source=pvc" "--set memory.source=git" \
+              "$git" "$git $gimg" "$git $gimg $gcidr --set config.offline=true" \
+              "--set memory.source=git --set memory.git.url=ssh://git@git.example.com/team/memory.git $gimg $gcidr"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::memory values must fail to render: $args"; exit 1
+            fi
+          done
+          if mt --set memory.source=git --set "memory.git.url=https://u:p@git.example.com/x" $gimg $gcidr \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::credentials in memory.git.url must be refused by the schema"; exit 1
+          fi
+          mt --set memory.source=configMap --set memory.configMap.name=team-memory | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          assert {'name': 'memory', 'configMap': {'name': 'team-memory'}} in pod['volumes'], pod['volumes']
+          mounts = pod['containers'][0]['volumeMounts']
+          assert {'name': 'memory', 'mountPath': '/srv/kube-noob/memory/entries', 'readOnly': True} in mounts, mounts
+          assert 'initContainers' not in pod
+          cfg = yaml.safe_load(docs['ConfigMap']['data']['config.yaml'])
+          assert cfg['memory'] == {'paths': ['/srv/kube-noob/memory']}, cfg
+          assert [str(x) for x in Settings.model_validate(cfg).memory.paths] == ['/srv/kube-noob/memory']
+          "
+          mt --set memory.source=pvc --set memory.pvc.claimName=team-memory --set memory.pvc.subPath=repo | python -c "
+          import sys, yaml
+          pod = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')['spec']['template']['spec']
+          assert {'name': 'memory', 'persistentVolumeClaim': {'claimName': 'team-memory', 'readOnly': True}} in pod['volumes']
+          m = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == 'memory')
+          assert m == {'name': 'memory', 'mountPath': '/srv/kube-noob/memory', 'readOnly': True, 'subPath': 'repo'}, m
+          "
+          mt $git $gimg $gcidr --set egressFirewall.enabled=true --set memory.git.ref=release-1 | python -c "
+          import sys, yaml
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          init = pod['initContainers'][0]
+          assert init['name'] == 'memory-clone' and init['image'] == 'quay.io/acme/git:2.47.1', init
+          assert init['command'] == ['git'] and init['args'] == ['clone', '--depth=1', '--branch', 'release-1', '--',
+            'https://git.example.com/team/memory.git', '/srv/kube-noob/memory'], init['args']
+          assert init['securityContext']['readOnlyRootFilesystem'] is True
+          assert {'name': 'memory', 'mountPath': '/srv/kube-noob/memory', 'readOnly': True} in pod['containers'][0]['volumeMounts']
+          assert {'name': 'memory', 'emptyDir': {'sizeLimit': '256Mi'}} in pod['volumes']
+          egress = docs['NetworkPolicy']['spec']['egress']
+          assert {'to': [{'ipBlock': {'cidr': '203.0.113.10/32'}}], 'ports': [{'protocol': 'TCP', 'port': 443}]} in egress, egress
+          fw = docs['EgressFirewall']['spec']['egress']
+          assert {'type': 'Allow', 'to': {'dnsName': 'git.example.com'}, 'ports': [{'protocol': 'TCP', 'port': 443}]} in fw, fw
+          assert fw[-1]['type'] == 'Deny'
+          "
+          mt --set memory.source=git --set memory.git.url=ssh://git@git.example.com:2222/team/memory.git $gimg $gcidr \
+            --set memory.git.sshSecret=memory-deploy-key | python -c "
+          import sys, yaml
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          init = pod['initContainers'][0]
+          assert init['command'] == ['sh', '-c'] and '\"\$MEMORY_URL\"' in init['args'][0], init
+          assert 'StrictHostKeyChecking=yes' in init['args'][0]
+          env = {e['name']: e['value'] for e in init['env']}
+          assert env['MEMORY_URL'] == 'ssh://git@git.example.com:2222/team/memory.git' and env['MEMORY_REF'] == 'main'
+          assert {'name': 'memory-ssh', 'secret': {'secretName': 'memory-deploy-key', 'defaultMode': 288}} in pod['volumes']
+          assert pod['securityContext']['fsGroup'] == 1001
+          egress = docs['NetworkPolicy']['spec']['egress']
+          assert any(r.get('ports') == [{'protocol': 'TCP', 'port': 2222}] for r in egress), egress
+          "
+          mt --set memory.source=git --set memory.git.url=https://gitea.tools.svc/team/memory.git $gimg $gcidr \
+            --set config.offline=true --set egressFirewall.enabled=true --show-only templates/egressfirewall.yaml \
+            | python -c "
+          import sys, yaml
+          fw = yaml.safe_load(sys.stdin)['spec']['egress']
+          assert not any('dnsName' in r['to'] for r in fw), fw
+          "
+          mt $git $gimg $gcidr --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"
