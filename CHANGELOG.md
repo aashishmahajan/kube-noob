@@ -142,6 +142,12 @@
   helm-010 now answer, a fit), and an independent regrade of every golden miss moved RHACS to 14 of 16; in scope 76
   of 96. Community: train half 8 answers moved (3 better, 5 neither), test half 10 moved (5 better, 0 worse, 5
   neither).
+- A `#` line inside a fenced code block (a shell or YAML comment) no longer starts a new document section: the SCC
+  document's `openshift.io/required-scc` section had been cut in three at the `# ...` lines of its example, so its
+  first part lacked the example, the "SCC must exist" rule and the check command. Golden ocp-011 and pol-018 now
+  answer: in scope 78 of 96 (OpenShift 12, policy 10). Community: train half 3 answers moved (1 better, 2 neither);
+  test half 7 moved (1 better, 2 worse, 4 neither: the two worse rows moved because one document has fewer, longer
+  sections, which shifts every search score a little).
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

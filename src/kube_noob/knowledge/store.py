@@ -167,10 +167,15 @@ class Chunk:
 
 
 def _split_markdown(body: str) -> Iterator[tuple[str, str]]:
+    """Sections by heading. A ``#`` line inside a fenced code block is a shell or YAML comment, not a heading."""
     heading = ""
     buf: list[str] = []
+    fence = ""
     for line in body.splitlines():
-        m = re.match(r"^(#{1,3})\s+(.*)$", line)
+        marker = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if marker and (not fence or marker.group(1).startswith(fence)):
+            fence = "" if fence else marker.group(1)
+        m = None if fence or marker else re.match(r"^(#{1,3})\s+(.*)$", line)
         if m:
             if "".join(buf).strip():
                 yield heading, "\n".join(buf).strip()

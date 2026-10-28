@@ -294,8 +294,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-requiring.adoc'
   outOfScope: false
-  status: miss
-  gap: 'rank: kn:ocp-scc#4 required-scc annotation doc must be returned first'
+  status: pass
+  expect:
+  - 'kn:ocp-scc#4'
 - id: pol-019
   technology: policy
   kind: out-of-scope

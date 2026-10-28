@@ -345,3 +345,18 @@ def test_helm_releases_missing_after_helm_2_point_at_namespaces(kit: tk.Toolkit)
     # (helm-www e5a4c62 faq/changes_since_helm2.md "Release Names are now scoped to the Namespace").
     text = "Since we moved from Helm 2 to Helm 3, helm list is empty although the apps still run. Where did they go?"
     assert _top(kit, text)[:1] == ["kn:helm-templates-values#6"]  # "helm list shows few or no releases"
+
+
+def test_a_comment_inside_a_code_block_is_not_a_heading() -> None:
+    # Golden ocp-011 and pol-018: the required-scc section was cut in three at the "# ..." comments of its YAML
+    # example, so its first chunk lost the example, the "SCC must exist" rule and the check command.
+    from kube_noob.knowledge.store import _split_markdown, get_store
+
+    body = (
+        "## Real\n\ntext\n\n```sh\n# list pods\nkubectl get pods\n```\n\nmore\n\n"
+        "~~~yaml\n# ...\nkind: Pod\n~~~\n\n## Next\n\nx"
+    )
+    assert [h for h, _ in _split_markdown(body)] == ["Real", "Next"]
+    chunk = get_store().get("kn:ocp-scc#4")
+    assert chunk is not None and chunk.heading.startswith("openshift.io/required-scc")
+    assert "openshift\\.io\\/scc" in chunk.text and "unless the SCC exists" in chunk.text
