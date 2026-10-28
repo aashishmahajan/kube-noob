@@ -49,7 +49,7 @@ spec:
         - {protocol: TCP, port: {{ .Values.networkPolicy.egress.apiServerPort }}}
         - {protocol: TCP, port: 443}
     {{- end }}
-    {{- if and .Values.config.webEnabled (not (.Values.config.offline | default false)) }}
+    {{- if and (or .Values.config.webEnabled .Values.jira.sync.enabled) (not (.Values.config.offline | default false)) }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

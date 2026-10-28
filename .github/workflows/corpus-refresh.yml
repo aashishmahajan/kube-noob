@@ -1,18 +1,20 @@
 name: corpus-refresh
 
-# Builds the kube-noob corpus in the cloud: public Git docs (with licenses), release history and a jittered pull of the
-# public Red Hat Jira ROX project (RHACS 4.10+). Jira content is not redistributable, so it is uploaded only encrypted
-# (CORPUS_PASSPHRASE secret); everything else is uploaded as a plain artifact.
+# Builds the kube-noob corpus in the cloud: public Git docs (with licenses), release history and a copy of Red Hat's
+# public Jira (every ticket of the default projects, any status) through its REST API, one request per second or
+# slower within a request budget. Jira content is not redistributable, so it is uploaded only encrypted
+# (CORPUS_PASSPHRASE secret); everything else is uploaded as a plain artifact. Import either with
+# kube-noob corpus import <dir-or-tgz>.
 
 on:
   workflow_dispatch:
     inputs:
-      jira_target:
-        description: "Number of ROX issues to keep"
-        default: "1200"
-      min_version:
-        description: "Minimum RHACS version"
-        default: "4.10"
+      jira_projects:
+        description: "Jira projects: default, all, or keys such as OCPBUGS,ROX"
+        default: "default"
+      jira_max_requests:
+        description: "Jira request budget (1+ s apart; 100 tickets per request)"
+        default: "3000"
       git_sources:
         description: "Git sources (comma separated ids or 'all')"
         default: "all"
@@ -25,7 +27,7 @@ permissions:
 jobs:
   corpus:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     env:
       KUBE_NOOB_DATA_DIR: ${{ github.workspace }}/corpus-out
     steps:
@@ -36,32 +38,98 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
-      - name: Jira ROX (jittered pull)
+      - name: Red Hat Jira copy (paced, budgeted)
+        env:
+          JIRA_PROJECTS: ${{ inputs.jira_projects || 'default' }}
+          JIRA_MAX_REQUESTS: ${{ inputs.jira_max_requests || '3000' }}
         run: |
-          kube-noob corpus jira --online --project ROX --min-version "${{ inputs.min_version || '4.10' }}" \
-            --target "${{ inputs.jira_target || '1200' }}" --max-scan 8000 --format json > jira-summary.json
+          kube-noob corpus jira --online --projects "$JIRA_PROJECTS" --max-requests "$JIRA_MAX_REQUESTS" \
+            --format json > jira-summary.json
+          python - <<'PY'
+          import json, os
+          s = json.load(open("jira-summary.json"))
+          idx = s.get("index") or {}
+          fetched = sum(p["fetched"] for p in s["projects"])
+          print(json.dumps({k: s[k] for k in ("requests", "retries", "stoppedBy", "skipped", "selected")}, indent=1))
+          print(f"::notice title=Jira sync::fetched={fetched} requests={s['requests']} retries={s['retries']} "
+                f"stoppedBy={s['stoppedBy']} visibleProjects={s['visibleProjects']} indexed={idx.get('tickets')}")
+          print(f"::notice title=Jira verdicts::{idx.get('byVerdict')}")
+          import glob
+          total = commented = 0
+          for path in glob.glob(os.path.join(os.environ["KUBE_NOOB_DATA_DIR"], "corpus", "jira-*.jsonl")):
+              for line in open(path, encoding="utf-8"):
+                  rec = json.loads(line)
+                  if str(rec.get("sourceId", "")).startswith("jira:"):
+                      total += 1
+                      commented += "## Comments" in rec["text"]
+          print(f"::notice title=Jira comments::{commented} of {total} tickets carry comments")
+          per = ", ".join(f"{p['project']}={p['total']}{'' if p.get('complete') else '+'}" for p in s["projects"])
+          print(f"::notice title=Jira projects::{per}")
+          for p in s["projects"]:
+              if p.get("error"):
+                  print(f"::warning title=Jira {p['project']}::" + p["error"][:900].replace("%", "%25").replace("\n", " "))
+          if fetched == 0 or not idx.get("tickets"):
+              print("::error title=Jira sync::no tickets fetched or indexed")
+              raise SystemExit(1)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(f"### Red Hat Jira copy: {idx.get('tickets')} tickets, {s['requests']} requests\n")
+              fh.write("| project | tickets | complete |\n|---|---|---|\n")
+              for p in s["projects"]:
+                  fh.write(f"| {p['project']} | {p['total']} | {p.get('complete', False)} |\n")
+          PY
+      - name: Resume pass (changes since the first pass, then older tickets by key)
+        run: |
+          first=$(python -c "import json; print(json.load(open('jira-summary.json'))['selected'][0])")
+          kube-noob corpus jira --online --projects "$first" --max-requests 8 --format json > jira-resume.json
           python - <<'PY'
           import json
-          s = json.load(open("jira-summary.json"))
-          print(json.dumps({k: s[k] for k in ("records", "scanned", "requests", "retries", "strategy", "errors",
-                                              "versionsConsidered", "gaFloor")}, indent=1))
-          print(json.dumps(s["insights"], indent=1))
-          by_version = ", ".join(f"{v}={n}" for v, n in s["insights"]["byVersion"][:12])
-          print(f"::notice title=ROX Jira pull::kept={s['records']} scanned={s['scanned']} requests={s['requests']} "
-                f"retries={s['retries']} strategy={s['strategy']} errors={len(s['errors'])}")
-          print(f"::notice title=ROX versions::{by_version}")
-          print(f"::notice title=ROX components::{dict(s['insights']['byComponent'][:10])}")
-          for err in s["errors"][:5]:
-              print("::warning title=ROX Jira strategy error::" + str(err)[:900].replace("%", "%25").replace("\n", " "))
-          minimum = int("${{ inputs.jira_target || '1200' }}") * 5 // 6
-          if s["records"] < minimum:
-              print(f"::error title=ROX Jira pull::only {s['records']} issues kept (< {minimum})")
+          r = json.load(open("jira-resume.json"))["projects"][0]
+          print(f"::notice title=Jira resume::{r}")
+          if r.get("error"):
+              print("::error title=Jira resume::" + r["error"][:900])
               raise SystemExit(1)
-          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as fh:
-              fh.write(f"### ROX issues kept: {s['records']} (scanned {s['scanned']}, strategy {s['strategy']})\n")
-              fh.write("| version | issues |\n|---|---|\n")
-              for v, n in s["insights"]["byVersion"]:
-                  fh.write(f"| {v} | {n} |\n")
+          PY
+      - name: Known bugs found on real tickets (each ticket's own error line finds it)
+        run: |
+          python - <<'PY'
+          import json, os, random, sqlite3
+          from pathlib import Path
+          from kube_noob import tickets
+
+          data = Path(os.environ["KUBE_NOOB_DATA_DIR"])
+          db = tickets.ensure_index(data)
+          con = sqlite3.connect(db)
+          rows = con.execute("SELECT key, body FROM tickets WHERE type = 'Bug' ORDER BY key").fetchall()
+          random.Random(7).shuffle(rows)
+          tried = found = 0
+          for key, body in rows:
+              desc, _ = tickets.split_body(body)
+              lines = [ln for ln in desc.splitlines() if tickets.error_phrases(ln)]
+              if not lines:
+                  continue
+              tried += 1
+              out = tickets.match(lines[0], "openshift", None, 3, data)
+              found += any(m["id"] == key for m in out["matches"])
+              if tried == 50:
+                  break
+          print(f"::notice title=Real-ticket recall::{found} of {tried} bugs found from their own first error line")
+          if tried < 10 or found < tried * 0.6:
+              print("::error title=Real-ticket recall::too low")
+              raise SystemExit(1)
+          generic = [
+              "Back-off restarting failed container",
+              "OOMKilled",
+              "ImagePullBackOff",
+              "CrashLoopBackOff",
+              "Last State: Terminated Reason: OOMKilled Exit Code: 137",
+              "Failed to pull image: rpc error: code = NotFound failed to pull and unpack image",
+              "Readiness probe failed: Get http://10.128.2.14:8080/healthz: dial tcp: connect: connection refused",
+          ]
+          noisy = {g: [m["id"] for m in tickets.match(g, "openshift", None, 3, data)["matches"]] for g in generic}
+          print(f"::notice title=Generic errors::{noisy}")
+          if any(noisy.values()):
+              print("::error title=Generic errors::a generic error matched a ticket")
+              raise SystemExit(1)
           PY
       - name: Git documentation sources
         run: |

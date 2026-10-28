@@ -30,9 +30,11 @@ Clients connect to `http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `A
 | `config.offline` | `false` | Admin lock: no web, no downloads, local models only |
 | `config.webEnabled` | `false` | HTTPS GET to allowlisted documentation domains; opens egress 443 |
 | `config.clusterEnabled` | `false` | Read-only cluster tools (never Secrets); needs `networkPolicy.egress.apiServerCIDRs` |
+| `watch.enabled` | `false` | Always-on incident watch in the release namespace and `rbac.namespaces`; needs `config.clusterEnabled` and `replicaCount: 1` |
+| `jira.sync.enabled` | `false` | Keep a local copy of Red Hat's public Jira (`jira.sync.projects`, default set) for "what became of this bug?" answers; REST API at one request per second, `jira.sync.maxRequests` per run every `jira.sync.intervalHours`; opens egress 443 (EgressFirewall: redhat.atlassian.net only); needs `persistence.enabled` and `replicaCount: 1`; refused under `config.offline` |
 | `rbac.namespaces` | `[]` | Namespaces it may read besides its own (`rbac.scope=cluster` for all) |
 | `egressFirewall.enabled` | `false` | OVN-Kubernetes EgressFirewall: API server and allowlisted domains only, then deny (namespace-wide) |
-| `persistence.enabled` | `false` | Keep progress, notes and indexed runbooks on a PVC |
+| `persistence.enabled` | `false` | Keep progress, notes and indexed runbooks on a PVC; with the default ReadWriteOnce access mode it needs `replicaCount: 1` and switches the Deployment to the Recreate strategy |
 | `route.enabled` | `false` | OpenShift Route with edge TLS |
 | `resources` | 256Mi request, 512Mi limit | About 85 MiB peak with built-in knowledge, plus about 25 MiB per MB of indexed text |
 

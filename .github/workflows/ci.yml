@@ -127,13 +127,20 @@ jobs:
       - name: Chart guards (fail-closed NetworkPolicy, fsGroup only off-OpenShift, web flag wired to env)
         run: |
           set -euo pipefail
+          trap 'echo "::error title=chart guard failed::line $LINENO: $BASH_COMMAND"' ERR
           base="--set auth.existingSecret=kn-token"
           if helm template kn deploy/helm/kube-noob $base --set networkPolicy.allowSameNamespace=false \
                --set networkPolicy.allowRouter=false >/dev/null 2>&1; then
             echo "::error title=chart::NetworkPolicy with no allowed source must fail to render"; exit 1
           fi
-          helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true | grep -q "fsGroup: 1001"
-          if helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true \
+          if helm template kn deploy/helm/kube-noob $base --set persistence.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::a ReadWriteOnce PVC with two replicas must fail to render"; exit 1
+          fi
+          pv="--set persistence.enabled=true --set replicaCount=1"
+          helm template kn deploy/helm/kube-noob $base $pv | grep -q "fsGroup: 1001"
+          helm template kn deploy/helm/kube-noob $base $pv | grep -q "type: Recreate"
+          helm template kn deploy/helm/kube-noob $base $pv | kube-noob audit -f - --platform kubernetes --fail-on high
+          if helm template kn deploy/helm/kube-noob $base $pv \
                --api-versions security.openshift.io/v1 | grep -q "fsGroup"; then
             echo "::error title=chart::fsGroup must not be set on OpenShift"; exit 1
           fi
@@ -147,6 +154,46 @@ jobs:
                >/dev/null 2>&1; then
             echo "::error title=chart::offline + webEnabled must fail to render"; exit 1
           fi
+          if helm template kn deploy/helm/kube-noob $base --set watch.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::watch.enabled without config.clusterEnabled must fail to render"; exit 1
+          fi
+          wt() { helm template kn deploy/helm/kube-noob -n shop $base --set watch.enabled=true \
+            --set config.clusterEnabled=true --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" "$@"; }
+          if wt >/dev/null 2>&1; then
+            echo "::error title=chart::watch.enabled with two replicas (two ledgers) must fail to render"; exit 1
+          fi
+          wt --set replicaCount=1 --set "rbac.namespaces={payments}" --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['watch'] == {'enabled': True, 'intervalSeconds': 60, 'namespaces': ['shop', 'payments']}, cfg
+          "
+          wt --set replicaCount=1 | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if helm template kn deploy/helm/kube-noob $base --set jira.sync.enabled=true --set replicaCount=1 \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::jira.sync.enabled without persistence must fail to render"; exit 1
+          fi
+          jt() { helm template kn deploy/helm/kube-noob $base --set jira.sync.enabled=true \
+            --set persistence.enabled=true "$@"; }
+          if jt >/dev/null 2>&1; then
+            echo "::error title=chart::jira.sync.enabled with two replicas must fail to render"; exit 1
+          fi
+          if jt --set replicaCount=1 --set config.offline=true >/dev/null 2>&1; then
+            echo "::error title=chart::jira.sync.enabled under config.offline must fail to render"; exit 1
+          fi
+          jt --set replicaCount=1 --set "jira.sync.projects=OCPBUGS\,ROX" --show-only templates/configmap.yaml \
+            | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          want = {'syncEnabled': True, 'projects': 'OCPBUGS,ROX', 'intervalHours': 24, 'maxRequests': 600}
+          assert cfg['jira'] == want, cfg
+          assert Settings.model_validate(cfg).jira.sync_enabled
+          "
+          jt --set replicaCount=1 --show-only templates/networkpolicy.yaml | grep -q "cidr: 0.0.0.0/0"
+          jt --set replicaCount=1 --set egressFirewall.enabled=true --show-only templates/egressfirewall.yaml \
+            | grep -q "dnsName: redhat.atlassian.net"
+          jt --set replicaCount=1 --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"
@@ -248,6 +295,37 @@ jobs:
         run: |
           docker build -f Containerfile -t kube-noob:ci .
           kind load docker-image kube-noob:ci --name kn
+      - name: The image answers from a local Red Hat Jira copy (SQLite FTS5 present)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kn-tickets
+          python - <<'PY'
+          from pathlib import Path
+          from kube_noob.sources.corpus import write_shard
+
+          base = {"sourceId": "jira:OCPBUGS", "license": "public, not redistributable", "redistributable": False,
+                  "issueType": "Bug", "status": "Closed", "retrievedAt": "2026-10-28T00:00:00Z"}
+          recs = [{**base, "id": f"jira-OCPBUGS-{i}", "title": f"OCPBUGS-{i}: pod restarts {i}",
+                   "text": f"Pod restarts in namespace team{i}", "resolution": "Done", "fixVersions": ["4.20.0"]}
+                  for i in range(1, 80)]
+          recs.append({**base, "id": "jira-OCPBUGS-900", "title": "OCPBUGS-900: router cannot load its certificate",
+                       "text": "## Description\n\nhaproxy: unable to load default certificate file\n\n## Comments\n\n"
+                               "Comment (2026-07-01): This is expected behavior: the secret was malformed.",
+                       "resolution": "Not a Bug"})
+          write_shard(Path("/tmp/kn-tickets"), "jira-ocpbugs", recs)
+          PY
+          chmod -R a+rwX /tmp/kn-tickets
+          docker run --rm -e KUBE_NOOB_DATA_DIR=/data -v /tmp/kn-tickets:/data kube-noob:ci \
+            known-issues "router: unable to load default certificate file" --platform openshift --format json \
+            > /tmp/ki.json
+          python -c "
+          import json
+          k = json.load(open('/tmp/ki.json'))
+          top = k['matches'][0]
+          assert top['id'] == 'OCPBUGS-900' and top['verdict'] == 'not-a-bug' and top['exactError'], top
+          assert k['knowledge']['jiraTickets']['tickets'] == 80, k['knowledge']
+          print('::notice title=Image ticket index::' + top['status'])
+          "
       - name: Install chart with read-only cluster tools
         run: |
           kubectl create namespace kube-noob
@@ -280,6 +358,29 @@ jobs:
           kubectl -n demo create secret generic do-not-read --from-literal=k=v
           sleep 45
           kubectl -n demo get pods
+      - name: Incident watch finds and explains the crash loop and a Pod Security denial (read-only)
+        run: |
+          set -euo pipefail
+          kubectl create namespace strict
+          kubectl label namespace strict pod-security.kubernetes.io/enforce=restricted
+          kubectl -n strict create deployment rooty --image=busybox:1.36 -- sleep 3600
+          sleep 20
+          export KUBE_NOOB_DATA_DIR=/tmp/kn-watch
+          kube-noob --cluster-enabled --format json watch -n demo -n strict --once > /tmp/watch.json
+          python - <<'PY'
+          import json
+          out = json.load(open("/tmp/watch.json"))
+          rows = {(r["workload"], r["signal"]): r for r in out["open"]}
+          assert out["errors"] == [], out["errors"]
+          crash = rows.get(("deployment/crasher", "CrashLoopBackOff"))
+          assert crash and crash["diagnosis"] == "DBG-CRASHLOOP", rows
+          denied = rows.get(("deployment/rooty", "FailedCreate"))
+          assert denied and "Pod Security" in denied["headline"], rows
+          ledger = open("/tmp/kn-watch/incidents.json").read()
+          assert "hunter2" not in ledger, "a secret from the crashing container's output reached the ledger"
+          print(json.dumps(sorted(rows), indent=1))
+          PY
+          kube-noob incidents
       - name: MCP end-to-end over HTTP
         run: |
           kubectl -n kube-noob port-forward svc/kn-kube-noob 18080:8080 &

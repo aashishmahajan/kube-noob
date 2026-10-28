@@ -118,7 +118,7 @@ def test_bundled_index_cites_every_issue_and_fits_the_plugin_limits() -> None:
     assert len(idx.issues) > 500
     for issue in idx.issues:
         assert re.fullmatch(r"[A-Z][A-Z0-9]+-\d+", issue.id), issue.id
-        assert issue.url == f"https://issues.redhat.com/browse/{issue.id}"
+        assert issue.url == f"https://redhat.atlassian.net/browse/{issue.id}"
         assert re.match(
             r"https://github.com/openshift/openshift-docs/blob/[0-9a-f]{40}/modules/\S+\.adoc$", issue.source
         )
@@ -133,7 +133,7 @@ def test_real_errors_match_the_reported_issue(issue_id: str, text: str) -> None:
     assert out["matches"], text
     top = out["matches"][0]
     assert top["id"] == issue_id
-    assert top["url"].startswith("https://issues.redhat.com/browse/") and "openshift-docs" in top["source"]
+    assert top["url"].startswith("https://redhat.atlassian.net/browse/") and "openshift-docs" in top["source"]
     assert len(top["sharedTerms"]) >= ki.MIN_RARE_TERMS
 
 

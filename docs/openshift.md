@@ -28,8 +28,9 @@ helm test kube-noob -n kube-noob
   in its own namespace plus `rbac.namespaces`; `rbac.scope=cluster` widens that. Every holder of the token reads
   through this ServiceAccount, so grant only the namespaces its users may see.
 - Over HTTP, tools that write the learning file are not offered, because callers share one file. Add team notes with
-  `oc exec deploy/kube-noob -- kube-noob learning note ...` (with `persistence.enabled=true`).
-- Persist notes, corpus and progress with `--set persistence.enabled=true`.
+  `oc exec deploy/kube-noob -- kube-noob learning note ...` (with `persistence.enabled=true` and `replicaCount=1`).
+- Persist notes, corpus and progress with `--set persistence.enabled=true --set replicaCount=1` (a ReadWriteOnce
+  volume attaches to one node, so the chart uses one replica and the Recreate strategy with it).
 - Your own runbooks: `kube-noob corpus add-docs <folder> --source platform-runbooks` indexes them wherever the CLI
   or plugin runs. Loading runbooks into the in-cluster service (an init container that reads a Git repo or a
   ConfigMap) is on the roadmap.
