@@ -37,6 +37,7 @@ from typing import Any, Literal
 import yaml
 
 from kube_noob import __version__
+from kube_noob.audit.exceptions import Checked
 from kube_noob.audit.rules import (
     CREDENTIAL_FLAG_NAME,
     EMBEDDED_CREDENTIAL,
@@ -670,8 +671,11 @@ def checks_for(platform: str, platform_version: str | None = None) -> dict[str, 
     return _checks(platform, platform_version)[0]
 
 
-def _exempt(c: Check, platform: str) -> str:
+def _exempt(c: Check, platform: str, exceptions: Sequence[Checked] = ()) -> str:
     parts: list[str] = []
+    accepted = exception_cel([e for e in exceptions if e.rule == c.rule_id])
+    if accepted:
+        parts.append(accepted)
     if platform in OPENSHIFT_FAMILY:
         parts.append(
             "('namespace' in object.metadata && (object.metadata['namespace'] == 'openshift' || "
@@ -688,6 +692,77 @@ def _exempt(c: Check, platform: str) -> str:
     return " || ".join(parts) or "false"
 
 
+def _glob(value: str) -> str:
+    """A CEL test of ``value`` against a name glob (only ``*`` is a wildcard in exception scopes)."""
+    return "^" + re.escape(value).replace(r"\*", ".*") + "$"
+
+
+def _name_test(field: str, pattern: str | None) -> str:
+    if pattern is None:
+        return "true"
+    if "*" in pattern:
+        return f"{field}.matches({_raw(_glob(pattern))})"
+    return f"{field} == '{pattern}'"
+
+
+def _owned_by(kind: str, pattern: str | None) -> str:
+    return (
+        "(has(object.metadata.ownerReferences) && object.metadata.ownerReferences.exists(o, "
+        f"o.kind == '{kind}' && {_name_test('o.name', pattern)}))"
+    )
+
+
+# What a controller makes from a workload, so that an exception for the workload also covers its children (else the
+# workload is admitted and its ReplicaSets or pods are refused): (child kind, owner kind, owner name suffix).
+_CHILDREN: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "Deployment": (("ReplicaSet", "Deployment", ""), ("Pod", "ReplicaSet", "-*")),
+    "DeploymentConfig": (("ReplicationController", "DeploymentConfig", "-*"), ("Pod", "ReplicationController", "-*")),
+    "StatefulSet": (("Pod", "StatefulSet", ""),),
+    "DaemonSet": (("Pod", "DaemonSet", ""),),
+    "ReplicaSet": (("Pod", "ReplicaSet", ""),),
+    "ReplicationController": (("Pod", "ReplicationController", ""),),
+    "Job": (("Pod", "Job", ""),),
+    "CronJob": (("Job", "CronJob", ""), ("Pod", "Job", "-*")),
+}
+
+
+def exception_cel(entries: Sequence[Checked]) -> str | None:
+    """CEL that is true for the objects the active ``entries`` cover, and for the ReplicaSets, Jobs and pods their
+    workloads make; None when none is active. Mirrors kube_noob.audit.exceptions.Checked.covers."""
+    terms: list[str] = []
+    for e in entries:
+        if e.status != "active":
+            continue
+        sc = e.scope
+        parts: list[str] = []
+        ns = sc.get("namespace")
+        if ns is not None:
+            test = (
+                f"object.metadata['namespace'].startsWith('{ns[:-1]}')"
+                if ns.endswith("*")
+                else (f"object.metadata['namespace'] == '{ns}'")
+            )
+            parts.append(f"('namespace' in object.metadata && {test})")
+        kind, name = sc.get("kind"), sc.get("name")
+        direct = [f"object.kind == '{kind}'"] if kind else []
+        direct.append(f"(has(object.metadata.name) && {_name_test('object.metadata.name', name)})" if name else "true")
+        shapes = [" && ".join(direct)]
+        for child, owner, suffix in _CHILDREN.get(kind or "", ()):
+            shapes.append(f"(object.kind == '{child}' && {_owned_by(owner, (name + suffix) if name else None)})")
+        if kind is None and name:
+            shapes.append(_owned_by_any(name))
+        parts.append("(" + " || ".join(shapes) + ")")
+        terms.append("(" + " && ".join(parts) + ")")
+    return " || ".join(terms) or None
+
+
+def _owned_by_any(name: str) -> str:
+    return (
+        "(has(object.metadata.ownerReferences) && object.metadata.ownerReferences.exists(o, "
+        f"{_name_test('o.name', name)} || {_name_test('o.name', name + '-*')}))"
+    )
+
+
 def _sources(r: Rule) -> list[str]:
     return [SOURCES[s].url for s in r.citations if s in SOURCES]
 
@@ -701,8 +776,8 @@ def message(c: Check) -> str:
     return " ".join(text.split())
 
 
-def _variables(c: Check, platform: str) -> list[dict[str, str]]:
-    out = [{"name": "exempt", "expression": _exempt(c, platform)}]
+def _variables(c: Check, platform: str, exceptions: Sequence[Checked] = ()) -> list[dict[str, str]]:
+    out = [{"name": "exempt", "expression": _exempt(c, platform, exceptions)}]
     if c.pod:
         out += [{"name": n, "expression": e} for n, e in POD_VARIABLES]
     out += [{"name": n, "expression": e} for n, e in c.variables]
@@ -760,7 +835,12 @@ def name_of(rule_id: str) -> str:
 
 
 def documents(
-    c: Check, engine: Engine, mode: Mode, platform: str, exclude: Sequence[str] = DEFAULT_EXCLUDED_NAMESPACES
+    c: Check,
+    engine: Engine,
+    mode: Mode,
+    platform: str,
+    exclude: Sequence[str] = DEFAULT_EXCLUDED_NAMESPACES,
+    exceptions: Sequence[Checked] = (),
 ) -> list[dict[str, Any]]:
     """The policy objects for one check: a VAP and its binding, or one Kyverno ValidatingPolicy."""
     name = name_of(c.rule_id)
@@ -775,7 +855,7 @@ def documents(
             "spec": {
                 "failurePolicy": "Fail" if mode == "enforce" else "Ignore",
                 "matchConstraints": _match(c, exclude),
-                "variables": _variables(c, platform),
+                "variables": _variables(c, platform, exceptions),
                 "validations": validations,
             },
         }
@@ -795,7 +875,7 @@ def documents(
                 "validationActions": ["Deny"] if mode == "enforce" else ["Audit", "Warn"],
                 "evaluation": {"background": {"enabled": False}},
                 "matchConstraints": _match(c, exclude),
-                "variables": _variables(c, platform),
+                "variables": _variables(c, platform, exceptions),
                 "validations": validations,
             },
         }
@@ -829,6 +909,7 @@ def generate(
     mode: Mode = "audit",
     rules: Sequence[str] | None = None,
     exclude_namespaces: Sequence[str] = (),
+    exceptions: Sequence[Checked] = (),
 ) -> Generated:
     """Policies for ``rules`` (default: all) on ``platform``, one set per engine, in rule-id order."""
     unknown_engines = [e for e in engines if e not in ENGINES]
@@ -857,16 +938,25 @@ def generate(
             skipped.append({"ruleId": rid, "reason": reason})
             continue
         for engine in engines:
-            docs.extend(documents(c, engine, mode, platform, exclude))
+            docs.extend(documents(c, engine, mode, platform, exclude, exceptions))
             row = {"ruleId": rid, "engine": engine, "name": name_of(rid), "coverage": c.coverage}
             if c.limitation:
                 row["limitation"] = c.limitation
+            accepted = [e.id for e in exceptions if e.rule == rid and e.status == "active"]
+            if accepted:
+                row["exceptions"] = ", ".join(accepted)
             generated.append(row)
     return Generated(docs, generated, skipped)
 
 
 def header(
-    g: Generated, *, platform: str, platform_version: str | None, mode: Mode, engines: Sequence[str]
+    g: Generated,
+    *,
+    platform: str,
+    platform_version: str | None,
+    mode: Mode,
+    engines: Sequence[str],
+    exceptions: Sequence[Checked] = (),
 ) -> list[str]:
     rules = sorted({row["ruleId"] for row in g.generated})
     out = [
@@ -875,6 +965,10 @@ def header(
         "Apply with: kubectl apply -f <this file> (or oc apply). Audit mode warns and records; enforce refuses.",
         "Each policy names its rule (kube-noob-kn-...), and its message carries the fix and the source.",
     ]
+    if exceptions:
+        active = [e for e in exceptions if e.status == "active"]
+        out.append(f"Exceptions applied as exemptions: {', '.join(f'{e.id} ({e.rule})' for e in active) or 'none'}.")
+        out += [f"  not applied, {e.status}: {e.id} ({e.rule}): {e.reason}" for e in exceptions if e.status != "active"]
     if g.skipped:
         out.append("Not generated:")
         out += [f"  {row['ruleId']}: {row['reason']}" for row in g.skipped]

@@ -78,6 +78,13 @@ class ManifestsIn(_In):
 
 
 class AuditIn(ManifestsIn):
+    exceptions: str | None = Field(
+        None,
+        max_length=1_000_000,
+        description="An exception list (YAML, apiVersion kube-noob.io/v1, kind ExceptionList): each entry names a "
+        "rule, a scope, an owner, a reason and an expiry date. Active entries hide the findings they cover; expired "
+        "and refused entries are reported and fail the gate.",
+    )
     min_severity: Literal["info", "low", "medium", "high", "critical"] = Field(
         "low", description="Hide findings below this severity."
     )
@@ -309,6 +316,12 @@ class PolicyGenerateIn(_In):
         default_factory=list,
         max_length=50,
         description="Namespaces the policies skip, besides kube-system, kube-public and kube-node-lease.",
+    )
+    exceptions: str | None = Field(
+        None,
+        max_length=1_000_000,
+        description="An exception list (YAML, kube-noob.io/v1 ExceptionList): active entries become exemptions in "
+        "their rule's policy (with the ReplicaSets and pods their workloads make); expired or refused ones are listed.",
     )
 
 
@@ -550,9 +563,29 @@ class Toolkit:
         return r.as_dict()
 
     def audit(self, p: AuditIn) -> dict[str, Any]:
+        from kube_noob.audit import exceptions as exc
+
         stages = {Stage(s) for s in p.stages}
         r = analyze(p.manifests, p.platform, p.version, stages=stages, min_severity=Severity.parse(p.min_severity))
+        excepted: list[dict[str, Any]] = []
+        review = exc.review(p.exceptions) if p.exceptions else None
+        if review is not None:
+            kept = []
+            used: set[str] = set()
+            for f in r.findings:
+                hit = exc.match(review, f.rule_id, f.resource)
+                if hit is None:
+                    kept.append(f)
+                else:
+                    used.add(hit.id)
+                    excepted.append(
+                        {**f.as_dict(), "exception": {"id": hit.id, "owner": hit.owner, "expires": hit.expires}}
+                    )
+            r.findings = kept
         out = r.as_dict()
+        if review is not None:
+            out["excepted"] = excepted
+            out["exceptions"] = {**review.summary(), "unused": [e.id for e in review.active if e.id not in used]}
         self._observe(
             [f"platform:{out.get('platform')}"]
             + [f"rule:{f['ruleId']}" for f in out.get("findings", []) if "ruleId" in f]
@@ -840,9 +873,11 @@ class Toolkit:
         return out
 
     def policy_generate(self, p: PolicyGenerateIn) -> dict[str, Any]:
+        from kube_noob.audit import exceptions as exc
         from kube_noob.generate import policies
 
         engines = tuple(dict.fromkeys(p.engines))
+        entries = exc.review(p.exceptions).entries if p.exceptions else []
         g = policies.generate(
             platform=p.platform,
             platform_version=p.version,
@@ -850,9 +885,12 @@ class Toolkit:
             mode=p.mode,
             rules=p.rules or None,
             exclude_namespaces=p.exclude_namespaces,
+            exceptions=entries,
         )
         self._observe([f"policy-generate:{e}" for e in engines])
-        header = policies.header(g, platform=p.platform, platform_version=p.version, mode=p.mode, engines=engines)
+        header = policies.header(
+            g, platform=p.platform, platform_version=p.version, mode=p.mode, engines=engines, exceptions=entries
+        )
         return {**g.summary(), "yaml": g.yaml(header)}
 
     def posture_scan(self, p: PostureScanIn) -> dict[str, Any]:

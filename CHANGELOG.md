@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Exceptions as code (`kube-noob.io/v1` `ExceptionList`): `kube-noob exceptions check`, `audit --exceptions` and
+  `policy generate --exceptions` (MCP: `exceptions` on `audit_manifests` and `policy_generate`). Each entry names a
+  rule, a scope, an owner, a reason and an expiry; expired, ownerless, unexplained, too-broad or far-future entries are
+  refused with the reason and fail the gate; active entries hide only the findings they cover and become exemptions
+  in the generated admission policies (with the ReplicaSets, Jobs and pods of the excepted workload).
 - `kube-noob posture scan` (and the MCP tools `posture_scan` and, with cluster access, `cluster_posture_scan`):
   attack paths from an exposure (Route, Ingress, LoadBalancer, NodePort, externalIPs) through the Service and the pods
   it selects to node access or the RBAC of the pod's ServiceAccount token, ranked by exposure x blast radius, each step

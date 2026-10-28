@@ -169,6 +169,48 @@ def _print_report(rep: dict[str, Any]) -> None:
                 print(f"           - {e}")
 
 
+def _print_exceptions(rep: dict[str, Any]) -> None:
+    ex = rep.get("exceptions")
+    if not ex:
+        return
+    c = ex["counts"]
+    print(f"exceptions: {c['active']} active, {c['expired']} expired, {c['refused']} refused")
+    for e in ex["entries"]:
+        if e["status"] != "active":
+            print(f"  [{e['status'].upper()}] {e['id']} ({e['rule']}): {e['reason']}")
+    for f in rep.get("excepted", []):
+        x = f["exception"]
+        print(f"  excepted {f['ruleId']} {f['resource']} by {x['id']} (owner {x['owner']}, until {x['expires']})")
+    for eid in ex.get("unused", []):
+        print(f"  unused {eid}: covers no finding; delete it if the object is gone")
+    if not ex["gate"]:
+        print("gate: failed (an exception is expired or refused)")
+
+
+def _exceptions_cmd(a: argparse.Namespace, fmt: str) -> int:
+    import datetime as dt
+
+    from kube_noob.audit import exceptions as exc
+
+    try:
+        today = dt.date.fromisoformat(a.today) if a.today else None
+    except ValueError as err:
+        raise ConfigError("--today must be a date: YYYY-MM-DD") from err
+    try:
+        rev = exc.review(_read(a.file), today)
+    except exc.ExceptionsError as err:
+        raise ConfigError(f"{a.file}: {err}") from err
+    out = rev.summary()
+    if a.format == "text":
+        c = out["counts"]
+        print(f"{a.file}: {c['active']} active, {c['expired']} expired, {c['refused']} refused")
+        for e in out["entries"]:
+            print(f"  [{e['status'].upper():7}] {e['id']} {e['rule']}: {e['reason']}")
+    else:
+        _emit(out, fmt)
+    return 0 if out["gate"] else 1
+
+
 def _blueprint_from_args(a: argparse.Namespace) -> dict[str, Any]:
     if a.blueprint:
         data = yaml.safe_load(_read(a.blueprint)) or {}
@@ -256,6 +298,24 @@ def build_parser() -> argparse.ArgumentParser:
     a = manifests_cmd("audit", "Validate + audit + calibrate + red-team manifests")
     a.add_argument("--min-severity", default="low", choices=["info", "low", "medium", "high", "critical"])
     a.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
+    a.add_argument(
+        "--exceptions",
+        default=None,
+        help="exception list (kube-noob.io/v1 ExceptionList): active entries hide the findings they cover; an expired "
+        "or refused entry fails the gate (exit 1)",
+    )
+    exc_p = sub.add_parser(
+        "exceptions",
+        help="Check an exception list: owner, reason, expiry and scope of every entry",
+        description="Refuses entries with no owner or reason, an unknown rule, a scope wider than a namespace (or a "
+        "named cluster-scoped object), or an expiry more than 400 days ahead; reports expired ones. Exit 1 when any "
+        "entry is refused or expired. Example: kube-noob exceptions check kube-noob-exceptions.yaml",
+    )
+    exc_sub = exc_p.add_subparsers(dest="exceptions_cmd", required=True)
+    _patch(exc_sub, common)
+    exc_chk = exc_sub.add_parser("check", help="Check every entry and say why one is refused or expired")
+    exc_chk.add_argument("file", help="the exception list (YAML)")
+    exc_chk.add_argument("--today", default=None, help="check as of this date (YYYY-MM-DD), for planning renewals")
     manifests_cmd("validate", "Schema/API/platform validation only")
     manifests_cmd("redteam", "Red-team scenarios only")
     fx = manifests_cmd("fix", "Apply safe mechanical fixes")
@@ -411,6 +471,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="a namespace the policies skip, besides kube-system, kube-public and kube-node-lease; repeat",
+    )
+    pgen.add_argument(
+        "--exceptions",
+        default=None,
+        help="exception list (kube-noob.io/v1 ExceptionList): active entries become exemptions in their rule's policy",
     )
     pgen.add_argument("-o", "--output", help="write the YAML here (default: stdout)")
 
@@ -791,13 +856,28 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     if a.cmd in {"audit", "validate", "redteam", "fix"}:
         text = _read(a.file)
         if a.cmd == "audit":
-            rep = kit.audit(
-                tk.AuditIn(manifests=text, platform=platform, version=a.pversion, min_severity=a.min_severity)
-            )
+            from kube_noob.audit.exceptions import ExceptionsError
+
+            exceptions = _read(a.exceptions) if a.exceptions else None
+            try:
+                rep = kit.audit(
+                    tk.AuditIn(
+                        manifests=text,
+                        platform=platform,
+                        version=a.pversion,
+                        min_severity=a.min_severity,
+                        exceptions=exceptions,
+                    )
+                )
+            except ExceptionsError as exc:
+                raise ConfigError(f"{a.exceptions}: {exc}") from exc
             if a.format == "text":
                 _print_report(rep)
+                _print_exceptions(rep)
             else:
                 _emit(rep, fmt)
+            if rep.get("exceptions") and not rep["exceptions"]["gate"]:
+                return 1
             if a.fail_on == "never":
                 return 0
             from kube_noob.audit.model import Severity
@@ -987,6 +1067,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
 
     if a.cmd == "posture":
         return _posture(a, s, fmt)
+    if a.cmd == "exceptions":
+        return _exceptions_cmd(a, fmt)
     if a.cmd == "watch":
         return _watch(a, s, fmt)
 
@@ -1334,11 +1416,13 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
 
 
 def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob.audit import exceptions as exc_mod
     from kube_noob.generate import policies
 
     platform = a.platform or s.default_platform or "kubernetes"
     engines = tuple(dict.fromkeys(a.engines)) or policies.ENGINES
     try:
+        entries = exc_mod.review(_read(a.exceptions)).entries if a.exceptions else []
         g = policies.generate(
             platform=platform,
             platform_version=a.pversion,
@@ -1346,10 +1430,15 @@ def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             mode=a.mode,
             rules=a.rules or None,
             exclude_namespaces=a.exclude_namespaces,
+            exceptions=entries,
         )
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
-    text = g.yaml(policies.header(g, platform=platform, platform_version=a.pversion, mode=a.mode, engines=engines))
+    text = g.yaml(
+        policies.header(
+            g, platform=platform, platform_version=a.pversion, mode=a.mode, engines=engines, exceptions=entries
+        )
+    )
     if a.output:
         Path(a.output).write_text(text, encoding="utf-8")
     if a.format != "text":

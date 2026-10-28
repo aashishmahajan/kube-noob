@@ -1,0 +1,19 @@
+# Exceptions as code: keep this file next to your manifests and change it by pull request.
+# kube-noob audit -f k8s/ --exceptions examples/kube-noob-exceptions.yaml
+# kube-noob exceptions check examples/kube-noob-exceptions.yaml
+apiVersion: kube-noob.io/v1
+kind: ExceptionList
+exceptions:
+- id: EXC-001
+  rule: KN-S009
+  scope: {namespace: monitoring, kind: DaemonSet, name: node-exporter}
+  owner: team-observability
+  reason: Node metrics need the host network and PID namespaces; reviewed with security
+  expires: 2027-06-30
+  ticket: OPS-1234
+- id: EXC-002
+  rule: KN-C007
+  scope: {namespace: team-*, kind: Deployment, name: "*-canary"}
+  owner: platform-team
+  reason: Canary deployments run one replica by design and are scaled by the rollout tool
+  expires: 2027-03-31

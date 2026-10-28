@@ -371,6 +371,23 @@ kube-noob posture scan -f k8s/ --fail-above 17
 kube-noob --cluster-enabled posture scan --live -n shop -n payments
 ```
 
+### Accept a risk on purpose: exceptions as code
+
+An exception is a file entry, reviewed by pull request like the manifests: the rule, the objects it covers (a
+namespace, or a prefix such as `team-*`, optionally a kind and a name pattern; a cluster-scoped object by kind and
+exact name), who owns it, why, and when it expires (at most 400 days ahead). `kube-noob audit --exceptions` hides
+exactly the findings an active exception covers and lists them as excepted with the owner and expiry; the same rule on
+any other object still fails. An expired entry, or one refused for a missing owner or reason, an unknown rule, a scope
+wider than a namespace or an expiry too far out, fails the gate (exit 1) with the reason. Exceptions nothing uses are
+reported so they can be deleted. `policy generate --exceptions` turns the active entries into exemptions in their
+rule's admission policy, including the ReplicaSets and pods the excepted workload makes.
+
+```bash
+kube-noob exceptions check examples/kube-noob-exceptions.yaml
+kube-noob audit -f k8s/ --exceptions examples/kube-noob-exceptions.yaml
+kube-noob policy generate --mode enforce --exceptions examples/kube-noob-exceptions.yaml -o policies.yaml
+```
+
 ### Enforce the audit rules at admission
 
 `policy generate` turns every audit rule that can be decided from one object into an admission policy: a
