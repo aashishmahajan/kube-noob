@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Roadmap rewritten to the moat program (M1 to M12): signal-keyed matching, fixes-as-code memory, must-gather
+  pre-flight, network truth, verifier hardening, integrations without AI, the kube-noob gate and governance. The
+  trained-model track is cut; the grader and `kube-noob train bench` stay as an evaluation product; learner tracks,
+  credits and brand videos are frozen. New `docs/editions.md` records where an enterprise line could fall
+  (documentation only).
+
 ## 0.5.0 - 2026-10-28
 
 Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and what became of each ticket.

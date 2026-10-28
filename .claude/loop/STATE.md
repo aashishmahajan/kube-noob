@@ -8,7 +8,7 @@ Statuses: `todo`, `in-progress`, `done`, `blocked` (reason and the exact questio
 | # | ID | Item | Depends on | Status | Evidence / notes |
 |---|---|---|---|---|---|
 | 1 | F1 | Baseline and loop scaffolding | - | done | check.sh green: 428 passed, 1 skipped, selftest 61/61, 23 s (2026-10-28); toolchain below |
-| 2 | F2 | Strategy into the docs (roadmap, editions) | F1 | todo | |
+| 2 | F2 | Strategy into the docs (roadmap, editions) | F1 | done | docs/roadmap.md rewritten (principles, M1-M12, frozen, set aside, assumptions); docs/editions.md; check.sh green 428/1 skipped, selftest 61/61 |
 | 3 | F3 | Capability tiers framework | F1 | todo | |
 | 4 | S1 | Signal extraction module | F1 | todo | |
 | 5 | S2 | Signal catalogue (verified names only) | S1 | todo | |
@@ -129,6 +129,7 @@ which ships tested and documented on its own.
 
 ## Iteration log (newest first; at most 10 lines per entry)
 
+- 2026-10-28 F2: roadmap rewritten to the moat program with status history kept; trained-model track cut, grader and train bench kept as evaluation; learner tracks, credits, videos frozen; docs/editions.md (documentation only). Proof: tests/test_guidance.py 5 passed; check.sh green. Next: F3.
 - 2026-10-28 F1: baseline recorded (above); main merged into the branch; E4 marked done by 0.5.0 with remainder
   E4b; decisions on reusing the incident ledger. M1 gap reproduced: `known-issues 'etcd leader changed frequently,
   apiserver timeouts after upgrade' --version 4.21.0` returns no match (expected OCPBUGS-73881). Next: F2.
