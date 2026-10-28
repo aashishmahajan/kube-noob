@@ -200,9 +200,9 @@ def diagnose(
         evidence: list[str] = [f"signal {x.kind} {x.name}" for x in linked.get(p.pid, [])]
         hits = 0
         for pat in _COMPILED[p.pid]:
-            matched_line = next((ln.strip() for ln in lines if pat.search(ln)), None)
-            if matched_line is None and pat.search(text):
-                matched_line = pat.pattern
+            if not pat.search(text):  # one scan of the text; the line is looked up only for patterns that match
+                continue
+            matched_line = next((ln.strip() for ln in lines if pat.search(ln)), pat.pattern)
             if matched_line is not None:
                 hits += 1
                 clipped = matched_line[:300]

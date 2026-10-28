@@ -59,6 +59,9 @@
   payload, matches approved entries on signals first and distinctive words second, shows negative entries as "tried,
   did not work" and entries fixed in your version as retired, with "matched N times, resolved M"; `outcome`, `stats
   --by cluster|signal|component` and `migrate-learning`. New demo: `kube-noob demo memory`.
+- Faster on long input: search walks each distinct query word's postings instead of every chunk for every word
+  (scores unchanged), so a 100 KB repetitive error no longer costs seconds in known-issue matching; JSON input is
+  parsed as JSON only, and each playbook pattern scans the text once.
 - Fixed: redaction was quadratic on long dashed tokens (a 240 KB "a-a-a-..." line took over two minutes in
   `diagnose`, `policy explain` and log redaction); the flag-name prefix is now bounded and the case is a regression
   test.

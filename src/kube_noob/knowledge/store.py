@@ -301,12 +301,15 @@ class KnowledgeStore:
         self._tf: list[Counter[str]] = []
         self._len: list[int] = []
         self._df: Counter[str] = Counter()
-        for c in self.chunks:
+        self._postings: dict[str, list[int]] = {}  # term -> chunks that contain it, in chunk order
+        for i, c in enumerate(self.chunks):
             toks = tokenize(f"{c.title} {c.heading} {c.heading} {c.text}")
             tf = Counter(toks)
             self._tf.append(tf)
             self._len.append(len(toks))
             self._df.update(tf.keys())
+            for t in tf:
+                self._postings.setdefault(t, []).append(i)
         self._avg = (sum(self._len) / len(self._len)) if self._len else 0.0
 
     def search(
@@ -321,25 +324,31 @@ class KnowledgeStore:
         if not q or not self.chunks:
             return []
         n = len(self.chunks)
-        scores: list[tuple[float, int]] = []
-        for i, c in enumerate(self.chunks):
-            if origin and c.origin != origin:
+        # BM25 with the query's term counts: a word the query repeats counts that many times. Scoring walks each
+        # distinct term's postings, so a long or repetitive query costs its distinct words, not its length.
+        sums: dict[int, float] = {}
+        allowed: dict[int, bool] = {}
+        for t, qtf in Counter(q).items():
+            df = self._df.get(t)
+            if not df:
                 continue
-            if source_prefix and not c.source_id.startswith(source_prefix):
-                continue
-            if not include_restricted and not c.redistributable:
-                continue
-            tf = self._tf[i]
-            s = 0.0
-            for t in q:
-                f = tf.get(t)
-                if not f:
+            idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
+            for i in self._postings[t]:
+                ok = allowed.get(i)
+                if ok is None:
+                    c = self.chunks[i]
+                    ok = not (
+                        (origin and c.origin != origin)
+                        or (source_prefix and not c.source_id.startswith(source_prefix))
+                        or (not include_restricted and not c.redistributable)
+                    )
+                    allowed[i] = ok
+                if not ok:
                     continue
-                df = self._df[t]
-                idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
-                s += idf * (f * 2.5) / (f + 1.5 * (1 - 0.75 + 0.75 * self._len[i] / (self._avg or 1)))
-            if s > 0:
-                scores.append((s * c.extra.get("searchWeight", 1.0), i))
+                f = self._tf[i][t]
+                part = idf * (f * 2.5) / (f + 1.5 * (1 - 0.75 + 0.75 * self._len[i] / (self._avg or 1)))
+                sums[i] = sums.get(i, 0.0) + qtf * part
+        scores = [(s * self.chunks[i].extra.get("searchWeight", 1.0), i) for i, s in sums.items() if s > 0]
         scores.sort(reverse=True)
         return [Hit(self.chunks[i], s) for s, i in scores[:limit]]
 

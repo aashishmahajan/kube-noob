@@ -8,6 +8,7 @@ the same input gives the same signals in the same order. Input is bounded in siz
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -139,7 +140,14 @@ def _parse(text: str) -> list[Any] | None:
     """Structured input: JSON or YAML that parses to objects with a known shape. Prose that happens to be valid YAML
     (a plain scalar) is treated as text."""
     head = text.lstrip()[:200]
-    if not (head.startswith(("{", "[")) or re.match(r"(?m)^(apiVersion|kind|items|alerts|status|metadata):", head)):
+    if head.startswith(("{", "[")):  # JSON (kubectl -o json, Alertmanager): parsed as JSON only, fast to refuse
+        try:
+            doc = json.loads(text)
+        except (ValueError, RecursionError):
+            return None
+        docs = doc if isinstance(doc, list) and doc and all(isinstance(d, dict) for d in doc) else [doc]
+        return [d for d in docs if isinstance(d, dict)] or None
+    if not re.match(r"(?m)^(apiVersion|kind|items|alerts|status|metadata):", head):
         return None
     from kube_noob.yamlio import load_documents
 

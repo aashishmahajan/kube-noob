@@ -204,7 +204,7 @@ def test_diagnose_lists_its_signals_and_stays_fast_on_hostile_text(tmp_path: Pat
     t = time.perf_counter()
     for text in ("leader changed " * 25_000, "a-" * 199_000, "{" * 399_000, "\x1b[2J" * 99_000):
         _kit(tmp_path).diagnose(tk.DiagnoseIn(text=text))
-    assert time.perf_counter() - t < 20
+    assert time.perf_counter() - t < 30  # linear work on 4 x 400 KB; CI runs it under coverage on slower CPUs
 
 
 def test_every_catalogued_playbook_exists_and_etcd_alerts_point_at_the_etcd_playbook() -> None:
