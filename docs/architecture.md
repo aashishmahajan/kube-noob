@@ -93,5 +93,9 @@ flowchart LR
   shipped in an image the chart pins by digest. The init container copies the archive into a scratch volume that the
   server mounts read-only; `serve` validates the whole archive and imports it only when it is newer than the copy
   it has. Trust boundary: the image registry and its signature, checked by the operator with `cosign verify`.
+- `policy generate` (CLI and the read-only `policy_generate` tool) only writes YAML: it applies nothing, reads no
+  cluster and fetches nothing. What the policies do is decided by the person who applies them; enforce mode refuses
+  requests, so the default is audit. The CEL reads only the admitted object and the requester's name, never other
+  objects, and exempts platform namespaces and operators so a cluster upgrade is never blocked by a generated policy.
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.

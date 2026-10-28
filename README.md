@@ -17,7 +17,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. It makes no net
 
 - **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
   removed-API checks, safe auto-fixes, 9 red-team scenarios, RHACS policy mapping.
-- **Generate**: hardened manifests and Helm charts, re-audited before return.
+- **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno) from the rules.
 - **Debug**: 40 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
   denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
   evidence (never Secrets).
@@ -50,7 +50,6 @@ kube-noob selftest
 
 Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+, not macOS's
 built-in 3.9). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
-Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
 
 ## Use with Claude or any MCP client
 

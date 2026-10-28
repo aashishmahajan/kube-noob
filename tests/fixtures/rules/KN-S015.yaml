@@ -1,0 +1,17 @@
+rule: KN-S015
+good: |
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: Role
+  metadata: {name: r, namespace: shop}
+  rules:
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list]
+bad: |
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: Role
+  metadata: {name: r, namespace: shop}
+  rules:
+  - apiGroups: ['*']
+    resources: ['*']
+    verbs: ['*']

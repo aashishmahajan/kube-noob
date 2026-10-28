@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `kube-noob policy generate` (and the MCP tool `policy_generate`): admission policies from the audit rules, as
+  ValidatingAdmissionPolicy + binding and/or Kyverno ValidatingPolicy (`policies.kyverno.io/v1`, the CEL policy type
+  that replaces ClusterPolicy from Kyverno 1.19), in audit or enforce mode, for a platform. 39 of 61 rules on
+  OpenShift (32 on Kubernetes, 40 on ROSA HCP) become policies named after the rule, with the fix and the source in
+  the message; the other 21 are listed with the reason (they need other objects, or the API server already refuses
+  them, or, for committed Secrets, belong in CI). A policy refuses exactly what the audit reports for that object at
+  low severity or above: compared on 2,700 generated objects with cel-python, and applied to a kind cluster in CI
+  (server-side dry-run of every rule's good and bad fixture, both engines). Platform namespaces and operators are
+  exempt; calibrate rules skip controller-owned objects.
+- Every audit rule now ships a good and a bad fixture (`tests/fixtures/rules/`); the test suite fails when a rule has
+  none or when the audit does not flag the bad one and pass the good one.
+- Fixed: KN-C004, KN-C005 and KN-C006 flagged ephemeral (debug) containers for missing resources, which the API does
+  not allow on them.
+- CI: test failures and the live VEX check are reported as annotations (the runner log was not readable from the
+  build loop). The live VEX step found that Red Hat's document for CVE-2023-44487 is larger than the 25 MB cap: it is
+  reported as not read, as designed; the step now checks a second CVE.
 - Red team phase 1 (RT1, an independent reviewer; every finding is a regression test in
   `tests/test_red_team_rt1.py`):
   - Fixed (high): a Kubernetes RBAC denial whose user name carried shell syntax (`$(...)`, quotes, backticks, `;`,

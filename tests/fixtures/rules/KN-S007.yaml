@@ -1,0 +1,70 @@
+rule: KN-S007
+good: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe: {httpGet: {path: /ready, port: 8080}}
+          livenessProbe: {httpGet: {path: /live, port: 8080}, periodSeconds: 10, failureThreshold: 3}
+bad: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+              - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3

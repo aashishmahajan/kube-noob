@@ -1,0 +1,19 @@
+rule: KN-N006
+platform: openshift
+version: '4.20'
+good: |
+  apiVersion: k8s.ovn.org/v1
+  kind: EgressFirewall
+  metadata: {name: default, namespace: shop}
+  spec:
+    egress:
+    - {type: Allow, to: {dnsName: api.example.com}}
+    - {type: Deny, to: {cidrSelector: 0.0.0.0/0}}
+bad: |
+  apiVersion: k8s.ovn.org/v1
+  kind: EgressFirewall
+  metadata: {name: default, namespace: shop}
+  spec:
+    egress:
+    - {type: Deny, to: {cidrSelector: 0.0.0.0/0}}
+    - {type: Allow, to: {dnsName: api.example.com}}

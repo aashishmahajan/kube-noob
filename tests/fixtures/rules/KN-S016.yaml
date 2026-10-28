@@ -1,0 +1,13 @@
+rule: KN-S016
+good: |
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata: {name: b, namespace: shop}
+  roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+  subjects: [{kind: ServiceAccount, name: web, namespace: shop}]
+bad: |
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata: {name: b, namespace: shop}
+  roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+  subjects: [{kind: ServiceAccount, name: web, namespace: shop}]

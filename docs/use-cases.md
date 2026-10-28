@@ -352,6 +352,32 @@ kube-noob redteam -f k8s/ --platform openshift
 kube-noob explain KN-S004
 ```
 
+### Enforce the audit rules at admission
+
+`policy generate` turns every audit rule that can be decided from one object into an admission policy: a
+ValidatingAdmissionPolicy with its binding (built into Kubernetes 1.30+, so every OpenShift 4.20+), a Kyverno
+ValidatingPolicy (`policies.kyverno.io/v1`, Kyverno 1.18+), or both, carrying the same CEL. Each policy is named
+after its rule (`kube-noob-kn-s001`), and its message carries the rule id, the fix and the source. Start in audit
+mode, which admits and warns (`kubectl` prints the warning; the API audit log and Kyverno reports record it), then
+switch a rule to enforce when its warnings are gone.
+
+The policies refuse exactly what `kube-noob audit` reports for that one object at low severity or above, never
+more: a test compares both on 2,700 generated objects, and CI applies every policy to a kind cluster and checks
+that a server-side dry-run refuses the rule's bad fixture and admits its good one. Four rules check less than the
+audit and say so in a `kube-noob.io/limitation` annotation (a `--password` value in the next argument, a
+ServiceAccount's token opt-out, an HPA-scaled workload, a budget compared with the replica count). Rules that need
+other objects (a Service and its pods, a claim and its StorageClass) or that the API server already enforces are
+listed in the file header with the reason. Platform namespaces (`kube-*`, and `openshift-*` on OpenShift) and the
+platform's operators are exempt; calibrate rules (probes, resources, replicas) skip objects a controller owns, so a
+rollout is never blocked by its own ReplicaSets.
+
+```bash
+kube-noob policy generate --platform openshift --version 4.20 --mode audit -o kube-noob-policies.yaml
+oc apply -f kube-noob-policies.yaml
+kube-noob policy generate --rule KN-S001 --rule KN-S009 --mode enforce --engine vap -o enforce.yaml
+kube-noob policy generate --engine kyverno --exclude-namespace legacy-apps -o kyverno.yaml
+```
+
 ## Claude and MCP users
 
 Install the plugin or add the MCP server (see the [README](../README.md)), then ask for the `getting_started` prompt.

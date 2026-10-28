@@ -284,6 +284,34 @@ class PolicyExplainIn(_In):
     platform: PlatformT | None = None
 
 
+EngineT = Literal["vap", "kyverno"]
+
+
+def _both_engines() -> list[EngineT]:
+    return ["vap", "kyverno"]
+
+
+class PolicyGenerateIn(_In):
+    platform: PlatformT = "kubernetes"
+    version: str | None = Field(default=None, max_length=20, description="OpenShift (4.20) or Kubernetes (1.33)")
+    engines: list[EngineT] = Field(
+        default_factory=_both_engines,
+        min_length=1,
+        max_length=2,
+        description="vap: ValidatingAdmissionPolicy + binding (built into Kubernetes 1.30+); kyverno: Kyverno "
+        "ValidatingPolicy (policies.kyverno.io/v1, Kyverno 1.18+).",
+    )
+    mode: Literal["audit", "enforce"] = Field(default="audit", description="audit warns and records; enforce refuses")
+    rules: list[Annotated[str, Field(pattern=r"^[A-Za-z]{2}-[A-Za-z]{1,2}\d{3}$", max_length=10)]] = Field(
+        default_factory=list, max_length=100, description="Rule ids such as KN-S001 (default: every rule)."
+    )
+    exclude_namespaces: list[Annotated[str, Field(pattern=r"^[a-z0-9-]{1,63}$", max_length=63)]] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Namespaces the policies skip, besides kube-system, kube-public and kube-node-lease.",
+    )
+
+
 _ENDPOINT_HELP = (
     "namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod "
     "labels, or an IP address / CIDR outside the cluster."
@@ -793,6 +821,22 @@ class Toolkit:
         self._observe([f"policy:{d['engine']}" for d in out["denials"]])
         return out
 
+    def policy_generate(self, p: PolicyGenerateIn) -> dict[str, Any]:
+        from kube_noob.generate import policies
+
+        engines = tuple(dict.fromkeys(p.engines))
+        g = policies.generate(
+            platform=p.platform,
+            platform_version=p.version,
+            engines=engines,
+            mode=p.mode,
+            rules=p.rules or None,
+            exclude_namespaces=p.exclude_namespaces,
+        )
+        self._observe([f"policy-generate:{e}" for e in engines])
+        header = policies.header(g, platform=p.platform, platform_version=p.version, mode=p.mode, engines=engines)
+        return {**g.summary(), "yaml": g.yaml(header)}
+
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
         inv = Inventory.from_yaml(p.manifests, p.default_namespace)
         cli = "oc" if p.platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
@@ -1202,6 +1246,16 @@ class Toolkit:
                 "Security and RBAC) and the audit rules that catch it before deploy.",
                 PolicyExplainIn,
                 self.explain_denial,
+            ),
+            ToolSpec(
+                "policy_generate",
+                "Turn audit rules into admission policies",
+                "Generate ValidatingAdmissionPolicy (with binding) and/or Kyverno ValidatingPolicy YAML from "
+                "kube-noob's audit rules, in audit (warn and record) or enforce mode, for a platform. One policy per "
+                "rule decidable from one object; each names its rule, fix and source. Rules that need other objects "
+                "or that the API server already enforces are listed with the reason. Nothing is applied.",
+                PolicyGenerateIn,
+                self.policy_generate,
             ),
             ToolSpec(
                 "check_network_policy",

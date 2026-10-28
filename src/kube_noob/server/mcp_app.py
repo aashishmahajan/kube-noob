@@ -63,8 +63,9 @@ def _instructions(settings: Settings) -> str:
         "what became of the ticket, not only that it exists. kubenoob_ticket looks up one key; kubenoob_ticket_changes "
         "lists the tickets fixed, closed, reopened or opened since a date and the open tickets. For a denied request "
         "(Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, RBAC) use "
-        "kubenoob_explain_denial; for 'can pod "
-        "A reach pod B?' use kubenoob_check_network_policy"
+        "kubenoob_explain_denial; to enforce the audit rules at admission, kubenoob_policy_generate writes "
+        "ValidatingAdmissionPolicy and Kyverno policy YAML (suggest audit mode first; it applies nothing); "
+        "for 'can pod A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
         + (
             ". Your team's memory is configured: diagnose and known-issue results carry `memory` entries; lead with an "

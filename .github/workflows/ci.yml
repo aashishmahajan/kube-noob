@@ -461,15 +461,15 @@ jobs:
           kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
           if tar -xzOf dist/kube-noob-db/kube-noob-db.tgz | grep -q PRIVATE; then
             echo "::error title=db::Jira text reached the public bundle"; exit 1; fi
-      - name: Live Red Hat VEX (two CVEs, three requests) joins the bundle under CC BY 4.0
+      - name: Live Red Hat VEX (three CVEs, one over the size cap) joins the bundle under CC BY 4.0
         env:
           KUBE_NOOB_DATA_DIR: /tmp/db-data
         run: |
           set -euo pipefail
-          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-3094 --format json > /tmp/vex.json \
-            2> /tmp/vex.err || { echo "::error title=Red Hat VEX live::$(tr '\n' ' ' < /tmp/vex.err | cut -c1-1500)"; exit 1; }
+          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-21626,CVE-2024-3094 --format json \
+            > /tmp/vex.json 2> /tmp/vex.err || { echo "::error title=Red Hat VEX live::$(tr '\n' ' ' < /tmp/vex.err | cut -c1-1500)"; exit 1; }
           curl -s --max-time 120 -o /tmp/vex-raw.json \
-            https://security.access.redhat.com/data/csaf/v2/vex/2023/cve-2023-44487.json || true
+            https://security.access.redhat.com/data/csaf/v2/vex/2024/cve-2024-21626.json || true
           python scripts/vex_ci_check.py /tmp/vex.json /tmp/db-data/corpus/redhat-vex.jsonl /tmp/vex-raw.json
           code=$(curl -s -o /dev/null -w '%{http_code}' https://security.access.redhat.com/data/csaf/v2/vex/archive_latest.txt)
           echo "::notice title=VEX archive pointer::archive_latest.txt HTTP $code"
@@ -665,3 +665,49 @@ jobs:
           enc() { sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g'; }
           echo "::warning title=describe::$(kubectl -n kube-noob describe pods 2>&1 | tail -60 | enc)" || true
           echo "::warning title=logs::$(kubectl -n kube-noob logs deploy/kn-kube-noob --tail=80 2>&1 | enc)" || true
+
+  policy-kind:
+    # R3.1 acceptance: each generated admission policy refuses its rule's bad fixture and admits the good one on a real
+    # API server (server-side dry-run), for the built-in ValidatingAdmissionPolicy and for Kyverno ValidatingPolicy.
+    name: policy-kind (${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [vap, kyverno]
+    env:
+      KYVERNO_VERSION: v1.19.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: kn
+          version: v0.32.0
+          node_image: "kindest/node:v1.33.12@sha256:3f5c8443c620245e4d355cfe09e96a91ead32ceaa569d3f1ca9edf0cb2fe2ff4"
+          kubectl_version: v1.33.12
+      - run: pip install -e .
+      - name: Install Kyverno
+        if: matrix.engine == 'kyverno'
+        run: |
+          set -euo pipefail
+          url="https://github.com/kyverno/kyverno/releases/download/${KYVERNO_VERSION}/install.yaml"
+          curl -fsSL --retry 3 -o /tmp/kyverno-install.yaml "$url"
+          echo "::notice title=Kyverno install.yaml::${KYVERNO_VERSION} sha256 $(sha256sum /tmp/kyverno-install.yaml | cut -d' ' -f1)"
+          kubectl create -f /tmp/kyverno-install.yaml > /tmp/kyverno.out 2>&1 \
+            || { echo "::error title=Kyverno install::$(tail -c 1500 /tmp/kyverno.out | tr '\n' ' ')"; exit 1; }
+          kubectl -n kyverno rollout status deploy/kyverno-admission-controller --timeout=300s
+          kubectl get crd validatingpolicies.policies.kyverno.io
+      - name: Generated policies on the API server
+        run: python scripts/policy_kind_test.py --engine ${{ matrix.engine }}
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          enc() { sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g'; }
+          echo "::warning title=pods::$(kubectl get pods -A 2>&1 | tail -40 | enc)" || true
+          echo "::warning title=kyverno logs::$(kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=60 2>&1 | enc)" || true

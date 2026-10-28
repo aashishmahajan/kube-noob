@@ -385,6 +385,34 @@ def build_parser() -> argparse.ArgumentParser:
     prc.add_argument("--namespace", dest="default_namespace", default="default", help="for objects without one")
     prc.add_argument("--live", action="store_true", help="read the policies from the cluster (read-only)")
     prc.add_argument("--platform", choices=PLATFORMS)
+    pgen = psub.add_parser(
+        "generate",
+        help="Turn kube-noob's audit rules into ValidatingAdmissionPolicy and Kyverno ValidatingPolicy YAML",
+        description="One policy per rule that can be decided from one object at admission; the others are listed "
+        "with the reason. Audit mode warns and records, enforce refuses. Example: kube-noob policy generate "
+        "--platform openshift --version 4.20 --mode audit -o kube-noob-policies.yaml",
+    )
+    pgen.add_argument("--platform", choices=PLATFORMS)
+    pgen.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
+    pgen.add_argument(
+        "--engine",
+        dest="engines",
+        action="append",
+        choices=["vap", "kyverno"],
+        default=[],
+        help="vap (ValidatingAdmissionPolicy, built in) or kyverno (ValidatingPolicy, Kyverno 1.18+); repeat for "
+        "both (default: both)",
+    )
+    pgen.add_argument("--mode", choices=["audit", "enforce"], default="audit", help="audit (default) or enforce")
+    pgen.add_argument("--rule", dest="rules", action="append", default=[], help="a rule id such as KN-S001; repeat")
+    pgen.add_argument(
+        "--exclude-namespace",
+        dest="exclude_namespaces",
+        action="append",
+        default=[],
+        help="a namespace the policies skip, besides kube-system, kube-public and kube-node-lease; repeat",
+    )
+    pgen.add_argument("-o", "--output", help="write the YAML here (default: stdout)")
 
     wt = sub.add_parser(
         "watch",
@@ -1242,6 +1270,8 @@ def _print_reach(out: dict[str, Any]) -> None:
 def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
     from kube_noob import toolkit as tk
 
+    if a.policy_cmd == "generate":
+        return _policy_generate(a, s, fmt)
     if a.policy_cmd == "explain":
         if a.text and a.file is not None:
             raise ConfigError("pass the text or -f, not both")
@@ -1278,6 +1308,45 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
         )
     _print_reach(out) if a.format == "text" else _emit(out, fmt)
     return 0 if out["verdict"] == "allowed" else 1
+
+
+def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob.generate import policies
+
+    platform = a.platform or s.default_platform or "kubernetes"
+    engines = tuple(dict.fromkeys(a.engines)) or policies.ENGINES
+    try:
+        g = policies.generate(
+            platform=platform,
+            platform_version=a.pversion,
+            engines=engines,
+            mode=a.mode,
+            rules=a.rules or None,
+            exclude_namespaces=a.exclude_namespaces,
+        )
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    text = g.yaml(policies.header(g, platform=platform, platform_version=a.pversion, mode=a.mode, engines=engines))
+    if a.output:
+        Path(a.output).write_text(text, encoding="utf-8")
+    if a.format != "text":
+        _emit({**g.summary(), "yaml": text, **({"output": a.output} if a.output else {})}, fmt)
+        return 0
+    if not a.output:
+        sys.stdout.write(text)
+    rules = sorted({row["ruleId"] for row in g.generated})
+    lines = [
+        f"{len(g.documents)} policies for {len(rules)} rules ({', '.join(engines)}, mode {a.mode}, {platform})"
+        + (f" written to {a.output}" if a.output else ""),
+        f"{len(g.skipped)} rules not generated (reasons in the file header): "
+        + ", ".join(row["ruleId"] for row in g.skipped),
+    ]
+    partial = [row["ruleId"] for row in g.generated if row["coverage"] == "partial"]
+    if partial:
+        lines.append(f"partial coverage (see kube-noob.io/limitation): {', '.join(sorted(set(partial)))}")
+    for line in lines:
+        print(line, file=sys.stdout if a.output else sys.stderr)
+    return 0
 
 
 def _print_poll(result: dict[str, Any]) -> None:

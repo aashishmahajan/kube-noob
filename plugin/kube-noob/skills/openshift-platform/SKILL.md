@@ -17,3 +17,5 @@ description: >
   termination mismatch, or a NetworkPolicy missing `policy-group.network.openshift.io/ingress: ""`.
 - EgressFirewall: name must be `default`, one per project, first match wins (specific Allow first, Deny 0.0.0.0/0 last).
 - Use `kubenoob_audit_manifests` with `platform: openshift` and a `version`, and `kubenoob_diagnose` for errors.
+- To enforce the audit rules in the cluster, `kubenoob_policy_generate` writes ValidatingAdmissionPolicy or Kyverno
+  ValidatingPolicy YAML; suggest `mode: audit` first and switch a rule to enforce once its warnings are gone.

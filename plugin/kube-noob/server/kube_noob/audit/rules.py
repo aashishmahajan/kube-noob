@@ -596,15 +596,15 @@ SENSITIVE_ENV = re.compile(
     r"(PASS(WORD|WD)?|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL|ACCESS[_-]?KEY)", re.IGNORECASE
 )
 RUNTIME_SOCKETS = ("docker.sock", "containerd.sock", "crio.sock", "cri-dockerd.sock")
-# --password=x / --token x / password=x style arguments (group 1: dashes, group 3: inline value)
-_SECRET_FLAG = re.compile(
-    r"(?i)^(-{1,2})?([a-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|credentials?))"
-    r"(?:[=:](.+))?$"
-)
-_EMBEDDED_SECRET = re.compile(
+# --password=x / --token x / password=x style arguments (group 1: dashes, group 3: inline value). CREDENTIAL_FLAG_NAME
+# and EMBEDDED_CREDENTIAL are written for RE2 too: kube_noob.generate.policies puts them into admission CEL.
+CREDENTIAL_FLAG_NAME = r"[a-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|credentials?)"
+_SECRET_FLAG = re.compile(r"(?i)^(-{1,2})?(" + CREDENTIAL_FLAG_NAME + r")(?:[=:](.+))?$")
+EMBEDDED_CREDENTIAL = (
     r"://[^:/\s@]+:[^@/\s$]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"
     r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
 )
+_EMBEDDED_SECRET = re.compile(EMBEDDED_CREDENTIAL)
 
 
 def _is_reference(value: str) -> bool:
@@ -625,6 +625,13 @@ def _bare_secret_flag(arg: str) -> bool:
 def _containers(ctx: AuditContext) -> Iterator[tuple[Document, PodTemplate, ContainerRef]]:
     for d, pt in ctx.workloads():
         for c in containers(pt):
+            yield d, pt, c
+
+
+def _resource_containers(ctx: AuditContext) -> Iterator[tuple[Document, PodTemplate, ContainerRef]]:
+    """App and init containers: the API refuses resources on ephemeral (debug) containers, so they cannot be fixed."""
+    for d, pt in ctx.workloads():
+        for c in containers(pt, ephemeral=False):
             yield d, pt, c
 
 
@@ -1692,7 +1699,7 @@ def _c003(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("No CPU request or memory limit specified",),
 )
 def _c004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    for d, _pt, c in _containers(ctx):
+    for d, _pt, c in _resource_containers(ctx):
         req = get_path(c.container, ("resources", "requests")) or {}
         missing = [k for k in ("cpu", "memory") if k not in req]
         if missing:
@@ -1711,7 +1718,7 @@ def _c004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("No CPU request or memory limit specified",),
 )
 def _c005(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    for d, _pt, c in _containers(ctx):
+    for d, _pt, c in _resource_containers(ctx):
         if not get_path(c.container, ("resources", "limits", "memory")):
             yield r.finding(d, (*c.path, "resources"), f"Container '{c.name}' has no memory limit.")
 
@@ -1727,7 +1734,7 @@ def _c005(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("k8s-resources",),
 )
 def _c006(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    for d, _pt, c in _containers(ctx):
+    for d, _pt, c in _resource_containers(ctx):
         req = get_path(c.container, ("resources", "requests")) or {}
         lim = get_path(c.container, ("resources", "limits")) or {}
         for k in ("cpu", "memory", "ephemeral-storage"):
