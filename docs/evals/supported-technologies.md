@@ -130,6 +130,8 @@ answer:
 | Steps and guesses fit the infrastructure (ROSA steps, OpenShift DNS steps, no AWS guess elsewhere, init containers) | 44 | 28; 36 | 1; 1 | 15; 7 |
 | Mount playbook needs volume words next to "timed out waiting for the condition" (both halves, one grader) | 15 | 15 | 0 | 0 |
 | The engine's playbook before the policy explainer when the question is about the policy itself (pol-002, pol-015, rhacs-001) | 0 | 0 | 0 | 0 |
+| RHACS admission playbook needs a denial, not the product name | 60 | 58; 58 | 1; 1 | 1; 1 |
+| RHEL, Red Hat or RHACS alone is not an OpenShift cluster (steps `oc` or `kubectl`) | 60 | 7; 2 | 4; 3 | 49; 55 |
 
 Cause choice has its own held-out set (`tests/fixtures/triage/`, 114 questions, one typed and one pasted per cause,
 written by an agent that saw only the causes): the answer names the labelled cause for 80 (50 before cause-linked

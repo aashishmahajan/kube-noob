@@ -1079,8 +1079,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         "RHACS / StackRox admission controller blocked a deployment",
         (
             r"policyeval\.stackrox\.io",
-            r"stackrox",
-            r"Red Hat Advanced Cluster Security",
+            # The product's name alone (a GitHub or Jira ticket about roxctl, Scanner, the UI) is not a blocked
+            # deployment: community graders found this playbook on 53 of 60 such tickets (2026-10-28).
             r"violated .* polic(y|ies)",
             r"The attempted operation violated \d+ enforced polic",
             r"\b(?:rhacs|stackrox)\b[^.\n]{0,80}\b(?:block\w*|den(?:y|ied|ies)|reject\w*|refus\w*)\b",

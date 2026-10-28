@@ -510,3 +510,26 @@ def test_the_engines_playbook_comes_first_when_the_question_is_about_the_policy(
     ids = [f["id"] for f in out["findings"]]
     assert ids[0] == first, ids
     assert "policy" in {f["source"] for f in out["findings"][:2]}, ids
+
+
+def test_rhel_or_rhacs_alone_does_not_make_the_cluster_openshift() -> None:
+    # Community graders (2026-10-28): a Kubespray-on-RHEL DNS post got openshift-dns steps.
+    from kube_noob.known_issues import openshift_cluster_context, openshift_context
+
+    text = "Kubespray cluster on RHEL 9 with Calico: dns failure, CoreDNS answers slowly"
+    assert openshift_context(text) and not openshift_cluster_context(text)
+    d = next(d for d in diagnose(text).as_dict()["diagnoses"] if d["id"] == "DBG-DNS")
+    assert any("-n kube-system" in c for c in _commands(d)) and not any("openshift-dns" in c for c in _commands(d))
+    assert openshift_cluster_context("ROSA HCP cluster, dns failure") and openshift_cluster_context("oc get pods -A")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "roxctl image scan prints a goroutine leak warning in the stackrox CI job",
+        "Scanner V4 in Red Hat Advanced Cluster Security finds no vulnerabilities for distroless images",
+    ],
+)
+def test_the_rhacs_name_alone_is_not_a_blocked_deployment(text: str) -> None:
+    ids = [d["id"] for d in diagnose(text).as_dict()["diagnoses"]]
+    assert "DBG-STACKROX-ADMISSION" not in ids, ids

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The RHACS admission playbook needs a denial: the product's name alone ("stackrox", "Red Hat Advanced Cluster
+  Security") had named it on almost every RHACS ticket (roxctl and Scanner bugs, CI flakes, feature requests).
+  RHEL, "Red Hat" or RHACS alone no longer make a cluster OpenShift for steps and causes (they still count for the
+  bug matcher); RHOCP does. Golden unchanged (88 of 96). Blinded graders on the rows that changed: the RHACS change
+  test half 60 rows (58 and 58 better, 1 and 1 worse), train half 77 (75 better, 0 worse); the cluster-context change
+  test half 60 rows, mostly `oc` against `kubectl` (7 and 2 better, 4 and 3 worse), train half 66 (7 better, 4 worse),
+  where the losses were OpenShift posts that only say RHOCP (now recognised) or name RHACM.
 - A policy denial whose question is about the policy itself ("Should I just edit restricted-v2?", "how do I make the
   message friendlier?", "what are my options?"), or whose explainer has no change to offer, gets the engine's own
   playbook first (ValidatingAdmissionPolicy, SecurityContextConstraints, Pod Security Admission, RHACS), with the

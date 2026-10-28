@@ -82,7 +82,7 @@ def stems(text: str, known: Callable[[str], bool] | None = None) -> str:
 # matched against OpenShift release notes: on 25,292 community questions (Stack Overflow, GitHub, forums) matching
 # them anyway put an OpenShift bug at the top of 6,177 answers about other platforms (scripts/eval_questions.py).
 _OPENSHIFT_CONTEXT = re.compile(
-    r"(?i)\b(?:openshift|okd|ocp|ocpbugs|rosa|aro|hypershift|hosted control planes?|rhcos|red hat|redhat|rhel|"
+    r"(?i)\b(?:openshift|okd|ocp|rhocp|ocpbugs|rosa|aro|hypershift|hosted control planes?|rhcos|red hat|redhat|rhel|"
     r"oc(?:\s+(?:adm|get|describe|logs|rsh|debug|apply|create|delete|patch|edit|login|project|new-app|"
     r"rollout|whoami|mirror|image|import-image|start-build)\b)|oc-mirror|must-gather|machineconfig(?:pool)?s?|"
     r"machine-config(?:-operator|-daemon)?|clusteroperators?|clusterversions?|cluster-version-operator|"
@@ -128,6 +128,17 @@ EVERYDAY_WORDS = frozenset(
 def openshift_context(text: str) -> bool:
     """Whether the text says it is about OpenShift or the Red Hat products around it."""
     return bool(_OPENSHIFT_CONTEXT.search(text[:200_000]))
+
+
+# Red Hat names that run on any Kubernetes or none: a Kubespray cluster on RHEL, RHACS on EKS, an image from
+# registry.redhat.io. They count for the bug matcher (openshift_context) but do not make the cluster OpenShift.
+_NOT_THE_CLUSTER = frozenset({"rhel", "red hat", "redhat", "rhacs", "stackrox", "registry.redhat.io"})
+
+
+def openshift_cluster_context(text: str) -> bool:
+    """Whether the text says the cluster itself is OpenShift (or ROSA, ARO, OKD...): what decides OpenShift steps and
+    causes. "RHEL", "Red Hat" or RHACS alone do not."""
+    return any(m.group(0).lower() not in _NOT_THE_CLUSTER for m in _OPENSHIFT_CONTEXT.finditer(text[:200_000]))
 
 
 def _forms(token: str) -> tuple[str, ...]:

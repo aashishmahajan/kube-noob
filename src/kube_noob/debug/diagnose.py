@@ -417,9 +417,9 @@ def diagnose(
     results: list[Diagnosis] = []
     openshift = rosa = False
     if not platform:
-        from kube_noob.known_issues import openshift_context
+        from kube_noob.known_issues import openshift_cluster_context
 
-        openshift = openshift_context(text)
+        openshift = openshift_cluster_context(text)
         rosa = bool(_ROSA_CONTEXT.search(text))
     # Steps as the user's platform spells them; with none given, text that never says OpenShift or ROSA gets kubectl
     # and no OpenShift-only steps (G83).
