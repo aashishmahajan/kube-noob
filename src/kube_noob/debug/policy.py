@@ -299,7 +299,7 @@ def _kyverno(text: str, platform: str | None) -> list[Denial]:
         entries.append((m["policy"], m["rule"], _unquote(m["msg"])))
     if not entries and re.search(r"admission webhook \"[^\"]*kyverno[^\"]*\" denied the request", text):
         msg = text.split("denied the request:", 1)[1].strip().splitlines()[0] if "denied the request:" in text else ""
-        pm = re.search(r"\bpolicy (" + _NAME + r")", msg)
+        pm = re.search(r"\b[Pp]olicy (" + _NAME + r")", msg)  # "Policy require-team-label failed" (ValidatingPolicy)
         entries.append((pm.group(1) if pm else "", "", msg or "Kyverno denied the request."))
     seen: set[tuple[str, str]] = set()
     for policy, rule, raw in entries:

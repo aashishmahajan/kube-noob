@@ -4,7 +4,8 @@
 
 - Kyverno and Gatekeeper have no playbook of their own, so a question about the policy itself ("How do I exempt only
   this Job without editing the policy?") gets the document section on that mechanism first (the PolicyException
-  section), then the policy explainer. Golden pol-004 now answers: in scope 89 of 96; no community row changed.
+  section), then the policy explainer. Golden pol-004 now answers: in scope 89 of 96; no community row changed. A
+  Kyverno ValidatingPolicy denial ("Policy require-team-label failed") now names its policy.
 - The RHACS admission playbook needs a denial: the product's name alone ("stackrox", "Red Hat Advanced Cluster
   Security") had named it on almost every RHACS ticket (roxctl and Scanner bugs, CI flakes, feature requests).
   RHEL, "Red Hat" or RHACS alone no longer make a cluster OpenShift for steps and causes (they still count for the

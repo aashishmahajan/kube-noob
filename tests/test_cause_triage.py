@@ -544,3 +544,14 @@ def test_a_question_about_exempting_from_a_kyverno_policy_gets_the_exception_doc
     assert exempt["findings"][0]["id"] == "kn:kyverno-troubleshooting#1", [f["id"] for f in exempt["findings"]]
     fix = kit.insight(tk.InsightIn(text=denial + " What do I add to the Job?"))
     assert fix["findings"][0]["source"] == "policy", [f["id"] for f in fix["findings"]]
+
+
+def test_a_kyverno_validatingpolicy_denial_names_its_policy() -> None:
+    from kube_noob.debug.policy import _kyverno
+
+    text = (
+        'admission webhook "vpol.validate.kyverno.svc-fail" denied the request: Policy require-team-label failed: '
+        "label 'team' is required"
+    )
+    denials = _kyverno(text, None)
+    assert denials and denials[0].policy == "require-team-label", denials
