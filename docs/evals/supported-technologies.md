@@ -127,9 +127,11 @@ answer:
 | Cause-linked triage on 17 playbooks (what users see: cause, fix, first steps) | 121 | 78 | 7 | 36 |
 | Cause tuning and plain-word symptoms, after removing the signals graders found harmful (two blinded graders) | 28 | 15; 17 | 4; 7 | 9; 4 |
 | Most common cause when nothing points at one (CrashLoopBackOff, image pull, OOM; chosen on the train half) | 105 | 24; 25 | 1; 2 | 80; 78 |
+| Steps and guesses fit the infrastructure (ROSA steps, OpenShift DNS steps, no AWS guess elsewhere, init containers) | 44 | 28; 36 | 1; 1 | 15; 7 |
+| Mount playbook needs volume words next to "timed out waiting for the condition" (both halves, one grader) | 15 | 15 | 0 | 0 |
 
 Cause choice has its own held-out set (`tests/fixtures/triage/`, 114 questions, one typed and one pasted per cause,
-written by an agent that saw only the causes): the answer names the labelled cause for 79 (50 before cause-linked
+written by an agent that saw only the causes): the answer names the labelled cause for 80 (50 before cause-linked
 triage, 63 after it); the right playbook is among the findings for 94 and first for 85. Patterns are tuned only on a
 separate training set written the same way (`tests/fixtures/triage-train`, 171 questions: 87 right before tuning,
 136 after). `python scripts/eval_triage.py [--dir ...]` prints either per playbook.

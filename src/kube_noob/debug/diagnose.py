@@ -165,6 +165,9 @@ _NOT_A_NAMESPACE = frozenset(
         "a", "an", "and", "another", "are", "as", "at", "but", "by", "different", "does", "for", "from", "has", "in",
         "into", "is", "it", "its", "level", "of", "on", "or", "other", "same", "scoped", "than", "that", "the", "then",
         "this", "to", "was", "which", "while", "with", "without",
+        "after", "all", "also", "although", "any", "be", "been", "before", "because", "can", "cannot", "could", "did",
+        "do", "each", "even", "every", "here", "if", "isn", "just", "must", "not", "only", "should", "since", "so",
+        "still", "there", "though", "unless", "until", "were", "when", "where", "will", "would", "yet",
     }
 )  # fmt: skip
 # kube-scheduler's Scheduled event: "Successfully assigned <namespace>/<pod> to <node>" (pkg/scheduler/schedule_one.go)
@@ -276,10 +279,17 @@ _OPENSHIFT_ONLY = re.compile(
 _KUBERNETES_ONLY = re.compile(r"#\s*\[K8S\]")  # e.g. kubeadm's static pods in kube-system
 
 
-def _for_platform(cmd: str, platform: str | None) -> str | None:
+_ROSA_STEP = re.compile(r"^rosa\s|#\s*\[ROSA\]")
+
+
+def _for_platform(cmd: str, platform: str | None, rosa: bool = False) -> str | None:
     """Commands as the user's platform spells them: plain Kubernetes gets kubectl and no OpenShift-only steps;
-    OpenShift and ROSA get no steps marked [K8S]. With no platform, both are shown."""
-    if platform and platform != "kubernetes" and _KUBERNETES_ONLY.search(cmd):
+    OpenShift and ROSA get no steps marked [K8S]. ``platform`` None means no platform was given and the text says
+    OpenShift or ROSA, so it is treated as OpenShift. A `rosa` step needs a ROSA platform, or no platform and text
+    that says ROSA (``rosa``)."""
+    if _ROSA_STEP.search(cmd) and not (platform in ("rosa-classic", "rosa-hcp") or (platform is None and rosa)):
+        return None
+    if platform != "kubernetes" and _KUBERNETES_ONLY.search(cmd):
         return None
     if platform != "kubernetes" or not cmd.startswith(("oc ", "openssl", "kubectl")):
         return cmd
@@ -334,7 +344,8 @@ def likely_cause(p: Playbook, text: str, platform: str | None, openshift: bool, 
     """The cause ``text`` points at: three points for each of the cause's own patterns it matches, plus the
     rarity-weighted words it shares with the cause and its fixes; the playbook's order breaks ties. When no cause's
     own patterns match, a playbook with a ``default_cause`` shows that one (its most common cause; graders found shared
-    words a worse guess there). A cause that does not fit the platform (``_fits``) is never chosen."""
+    words a worse guess there), and otherwise the shared-word guess skips AWS causes for text about another cloud or
+    hardware (``_OTHER_INFRA``). A cause that does not fit the platform (``_fits``) is never chosen."""
     if not p.causes:
         return None
     from kube_noob.insight import _playbook_word_counts, _specific_terms
@@ -343,8 +354,11 @@ def likely_cause(p: Playbook, text: str, platform: str | None, openshift: bool, 
     want = _specific_terms(text[:20_000], kubernetes_words=True)
     best: Cause | None = None
     best_score = -1.0
+    guess: Cause | None = None  # the best cause by shared words alone that suits the text's infrastructure
+    guess_score = -1.0
     default: Cause | None = None
     evidence = False
+    elsewhere = bool(_OTHER_INFRA.search(text)) and not _AWS_TEXT.search(text)
     for c in sorted(p.causes, key=lambda c: c.cause):
         cause = p.root_causes[c.cause]
         if not _fits(cause, platform, openshift, rosa):
@@ -357,7 +371,23 @@ def likely_cause(p: Playbook, text: str, platform: str | None, openshift: bool, 
         score = 3.0 * hits + sum(1.0 / df.get(t, 1) for t in want & words)
         if score > best_score:
             best, best_score = c, score
-    return best if evidence or default is None else default
+        if score > guess_score and not (elsewhere and _AWS_CAUSE.search(cause)):
+            guess, guess_score = c, score
+    if evidence:
+        return best
+    return default or guess or best
+
+
+# Without evidence, a cause about AWS pieces (EFS, EBS, security groups) is no guess for text about another cloud or
+# about hardware you run yourself (community graders: EFS advice on GKE and on-prem NFS posts, cloud security groups
+# on a bare-metal cluster).
+_AWS_CAUSE = re.compile(r"\b(?:EFS|EBS|AWS|security groups?|gp[23](?:-csi)?|VPC)\b|\bcloud\b", re.IGNORECASE)
+_AWS_TEXT = re.compile(r"\b(?:aws|amazon|eks|ec2|efs|ebs|rosa|gp[23])\b", re.IGNORECASE)
+_OTHER_INFRA = re.compile(
+    r"\b(?:azure|aks|gke|gce|google cloud|gcp|vsphere|bare[- ]?metal|on[- ]?prem\w*|openstack|homelab|minikube|"
+    r"kind cluster|k3s|microk8s|nutanix|proxmox)\b",
+    re.IGNORECASE,
+)
 
 
 # Patterns too common to name an OpenShift playbook when the text does not say it is OpenShift: a bare "Permission
@@ -425,7 +455,7 @@ def diagnose(
             order = list(range(len(p.checks)))
             if cause is not None:  # the steps that confirm the likely cause first
                 order = [*cause.checks, *(i for i in order if i not in cause.checks)]
-            checks = [_for_platform(_fill(p.checks[i], ctx), steps_platform) for i in order]
+            checks = [_for_platform(_fill(p.checks[i], ctx), steps_platform, rosa) for i in order]
             fixes = [_fill(f, ctx) for f in p.fixes if _fix_applies(f, platform)]
             causes = [_fill(c, ctx) for c in p.root_causes if _fix_applies(c, platform)]
             likely = None

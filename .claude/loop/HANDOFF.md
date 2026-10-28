@@ -38,9 +38,10 @@ right now; STATE.md says what is done. Updated 2026-10-28 late night (QA8 round 
    `PYTHONPATH` on each tree, and have two blinded graders (X/Y in random order, key kept outside their folder, a
    private work dir each) judge only the rows that changed. The training set rewards recall; real posts punish
    false positives: the first plain-word signal set scored higher on both labelled sets and lost on real posts.
-   Grader notes not yet acted on: CRASHLOOP steps miss init containers (`logs --previous` without `-c`); DNS steps
-   use kube-system/kube-dns labels on OpenShift posts; `rosa list machinepools` shows on EKS posts; EFS advice on
-   Azure/GCE PVC posts; ROSA-only steps should need ROSA context like causes do.
+   Round 3 acted on the graders' notes (init containers, ROSA steps, OpenShift DNS steps, AWS guesses elsewhere,
+   the generic timeout signal; G98). Still open from them: `openshift_context` reads "RHEL" as OpenShift (a
+   Kubespray-on-RHEL post got openshift-dns steps); a hyphenated English word can still pass as a pod name
+   ("pod loop-crashes"); PENDING-RESOURCES fires on node-selector/affinity mismatches and unbound-PVC posts.
 0. QA5 (STATE row 20u): per-technology measurement and the golden set. Committed; dispatch CI and mark done when green.
    Golden set: `tests/fixtures/golden/*.yaml` (119 items; status pass/abstain/miss, `gap` says what each miss needs).
    Baseline: in-scope top-1 answers 7/96, out of scope 15/23 unanswered. To regrade after a change:

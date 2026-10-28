@@ -61,12 +61,17 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "CrashLoopBackOff is the waiting state between restarts, not a cause: the kubelet restarts the container "
             "with an exponential back-off (10s, 20s, 40s...) capped at 300 seconds, and resets it once the container "
             "has run for 10 minutes without a problem.",
+            "An init container fails (Init:CrashLoopBackOff): the app containers never start, and `logs --previous` "
+            "without -c shows nothing useful.",
         ),
         (
             "oc logs {pod} -n {ns} --previous            # output of the crashed attempt",
             "oc get pod {pod} -n {ns} -o jsonpath='{{.status.containerStatuses[*].lastState.terminated}}'",
             "oc describe pod {pod} -n {ns}               # Events: probe failures, OOMKilled, exit codes",
             "oc get events -n {ns} --field-selector involvedObject.name={pod} --sort-by=.lastTimestamp",
+            # kubernetes/website ed70e31 content/en/docs/tasks/debug/debug-application/debug-init-containers.md
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.status.initContainerStatuses[*].lastState.terminated}}'",
+            "oc logs {pod} -n {ns} -c <init-container> --previous   # the failing init container's own output",
         ),
         (
             "Fix the error shown by `logs --previous` (most common: missing env var, wrong DB URL, bad flag).",
@@ -75,6 +80,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Slow start -> add a startupProbe instead of loosening liveness.",
             "OpenShift arbitrary UID -> make writable dirs group-0 owned and group-writable "
             "(chgrp -R 0 /app && chmod -R g=u /app) in the image.",
+            "Init container -> fix what its own logs show (a dependency it waits for, a migration, a permissions "
+            "step); the app containers start once every init container exits 0.",
         ),
         related_rules=("KN-C003", "KN-C005"),
         knowledge=("k8s-debug-pods", "ocp-arbitrary-uid"),
@@ -125,6 +132,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
                 (2, 1),
                 (),
             ),
+            Cause(5, (r"Init:CrashLoopBackOff|Init:Error", r"\binit[- ]?containers?\b"), (4, 5, 2), (4,)),
         ),
     ),
     Playbook(
@@ -782,7 +790,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"FailedMount",
             r"MountVolume\.SetUp failed",
             r"Unable to attach or mount volumes",
-            r"timed out waiting for the condition",
+            # kubelet: "Unable to attach or mount volumes: unmounted volumes=[...]: timed out waiting for the
+            # condition"; alone the phrase is Helm's, kubeadm's and every wait loop's (community graders, 2026-10-28).
+            r"(?:mount|attach|volume)[^\n]{0,120}timed out waiting for the condition",
             r"MountVolume\.\w+ failed .*permission denied",
             r"Read-only file system",
             r"\b(?:permission denied|EACCES)\b[^\n]{0,80}\b(?:mounted|volume|pvc|persistent volume)\b|"
@@ -795,7 +805,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Filesystem ownership does not match the container UID/GID (fsGroup missing on vanilla Kubernetes; "
             "arbitrary UID on OpenShift).",
             "readOnlyRootFilesystem: true while the app writes outside its mounted emptyDir paths.",
-            "NFS/EFS mount blocked by security groups (TCP 2049) or missing mount targets in the node's subnet.",
+            "NFS/EFS mount blocked: the node cannot reach the NFS server or EFS mount target (a firewall or security "
+            "group on TCP 2049, no EFS mount target in the node's subnet) or the server's export does not allow the "
+            "node.",
         ),
         (
             "oc describe pod {pod} -n {ns}",
@@ -807,6 +819,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "[ROSA/EKS + EFS] allow NFS (2049/tcp) from worker node security groups to the EFS mount targets.",
             "Create the missing Secret or ConfigMap in the pod's namespace, or mark the volume optional: true if the "
             "app can start without it.",
+            "Let every node reach the NFS server on TCP 2049 and list the node network in the server's exports; for "
+            "EFS, add a mount target in each node subnet and allow 2049 from the nodes' security group.",
         ),
         related_rules=("KN-S007",),
         knowledge=("ocp-arbitrary-uid",),
@@ -823,7 +837,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
                 3,
                 (r"\bnfs\b|\befs\b|2049|mount target|security group", r"timed out waiting for the condition"),
                 (0,),
-                (2,),
+                (4, 2),
             ),
         ),
     ),
@@ -1237,11 +1251,13 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "kubectl exec -ti {pod} -n {ns} -- cat /etc/resolv.conf   # nameserver = the cluster DNS Service IP",
             "oc rsh -n {ns} {pod} getent hosts kubernetes.default.svc",
-            "kubectl get pods -n kube-system -l k8s-app=kube-dns   # CoreDNS (OpenShift: oc get pods -n openshift-dns)",
-            "kubectl logs -n kube-system -l k8s-app=kube-dns",
-            "kubectl get endpointslice -l kubernetes.io/service-name=kube-dns -n kube-system",
+            "kubectl get pods -n kube-system -l k8s-app=kube-dns   # [K8S] CoreDNS",
+            "kubectl logs -n kube-system -l k8s-app=kube-dns   # [K8S]",
+            "kubectl get endpointslice -l kubernetes.io/service-name=kube-dns -n kube-system   # [K8S]",
             "oc get networkpolicy -n {ns} -o yaml | grep -B3 -A10 egress",
             "oc get pods -n openshift-dns   # [OCP]",
+            # openshift-docs 1400f2c modules/nw-dns-viewlog.adoc
+            "oc logs -n openshift-dns -c dns -l dns.operator.openshift.io/daemonset-dns=default --tail=100   # [OCP]",
         ),
         (
             "Allow egress to the cluster DNS pods (port 5353 TCP/UDP to namespace openshift-dns on OpenShift; 53 to "
@@ -1274,7 +1290,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             Cause(
                 2, (r"external|upstream|internet|public (?:name|domain)|\bvpc\b|private cluster|forward",), (0, 1), (2,)
             ),
-            Cause(3, (r"coredns|kube-dns|SERVFAIL|dns pods?|openshift-dns",), (2, 3, 4, 6), (3,)),
+            Cause(3, (r"coredns|kube-dns|SERVFAIL|dns pods?|openshift-dns",), (2, 3, 4, 6, 7), (3,)),
         ),
     ),
     Playbook(

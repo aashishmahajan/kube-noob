@@ -218,6 +218,11 @@ def test_gather_steps_only_for_text_about_a_cluster(kit: tk.Toolkit) -> None:
         ("the readiness probe keeps failing with connection refused on the pod IP", "DBG-PROBE"),
         ("the pod flips between Ready and NotReady every few minutes under load", "DBG-PROBE"),
         ("my worker pod keeps restarting a few seconds after it starts", "DBG-CRASHLOOP"),
+        (
+            "Unable to attach or mount volumes: unmounted volumes=[data], unattached volumes=[data]: timed out waiting "
+            "for the condition",
+            "DBG-MOUNT",
+        ),
         ('Error: failed to prepare subPath for volumeMount "conf" of container "api"', "DBG-CONFIGERR"),
         ("the pod fails to create its container with an unmarshalling error about invalid UTF-8", "DBG-INVALID-UTF8"),
         ("my PVC requests 50Gi from the standard class and it just stays Pending for ages", "DBG-PVC-PENDING"),
@@ -259,6 +264,8 @@ def test_build_tool_and_api_words_do_not_name_dns_or_endpoints(text: str) -> Non
         ("docker compose: the api container gets SERVFAIL from the embedded resolver", "DBG-DNS"),
         ("Calico eBPF: pod-to-pod traffic drops with Multus secondary interfaces", "DBG-NETPOL"),
         ("feature: CoreDNS forward plugin should cache SERVFAIL answers", "DBG-DNS"),
+        ("Error: UPGRADE FAILED: timed out waiting for the condition", "DBG-MOUNT"),
+        ("kubeadm join: error execution phase kubelet-start: timed out waiting for the condition", "DBG-MOUNT"),
     ],
 )
 def test_feature_requests_and_other_runtimes_do_not_name_a_playbook(text: str, playbook: str) -> None:
@@ -278,6 +285,7 @@ def test_feature_requests_and_other_runtimes_do_not_name_a_playbook(text: str, p
         ("kubectl get pvc data-kafka-0 -n streaming", "ns", "streaming"),
         ("volumes:\n- name: data\n  persistentVolumeClaim:\n    claimName: uploads\n", "pvc", "uploads"),
         ("the pods in namespace team-a cannot pull", "ns", "team-a"),
+        ('User "dev" cannot list resource "pods" in namespace though it has a role', "ns", None),
     ],
 )
 def test_names_come_from_command_shaped_text_not_sentences(text: str, key: str, want: str | None) -> None:
@@ -400,3 +408,64 @@ def test_a_conceptual_question_gets_the_explaining_document_before_a_weak_playbo
     symptom = "oc get co shows authentication Degraded True since the upgrade; what do I check?"
     first = kit.insight(tk.InsightIn(text=symptom, platform="openshift"))["findings"][0]
     assert first["id"] == "DBG-CLUSTEROPERATOR"
+
+
+@pytest.mark.parametrize(
+    ("text", "platform", "rosa_steps"),
+    [
+        ("0/3 nodes are available: 3 Insufficient cpu on our EKS cluster", None, False),
+        ("0/3 nodes are available: 3 Insufficient cpu", "openshift", False),
+        ("0/3 nodes are available: 3 Insufficient cpu", "kubernetes", False),
+        ("ROSA HCP: 0/3 nodes are available: 3 Insufficient cpu", None, True),
+        ("0/3 nodes are available: 3 Insufficient cpu", "rosa-hcp", True),
+    ],
+)
+def test_rosa_steps_need_rosa(text: str, platform: str | None, rosa_steps: bool) -> None:
+    # Community grader note (2026-10-28): `rosa list machinepools` was shown on EKS posts.
+    d = next(d for d in diagnose(text, platform=platform).as_dict()["diagnoses"] if d["id"] == "DBG-PENDING-RESOURCES")
+    assert any(c.startswith("rosa ") for c in _commands(d)) is rosa_steps, _commands(d)
+
+
+def test_dns_steps_follow_the_platform() -> None:
+    # Community grader note (2026-10-28): OpenShift posts got kube-system/kube-dns steps.
+    text = "CoreDNS answers slowly and lookups time out: dns failure on our OpenShift 4.16 cluster"
+    ocp = next(d for d in diagnose(text).as_dict()["diagnoses"] if d["id"] == "DBG-DNS")
+    cmds = _commands(ocp)
+    assert any("-n openshift-dns" in c for c in cmds) and not any("kube-system" in c for c in cmds), cmds
+    k8s = next(
+        d
+        for d in diagnose("CoreDNS answers slowly and lookups time out: dns failure", platform="kubernetes").as_dict()[
+            "diagnoses"
+        ]
+        if d["id"] == "DBG-DNS"
+    )
+    assert any("-n kube-system" in c for c in _commands(k8s)) and not any("openshift-dns" in c for c in _commands(k8s))
+
+
+def test_an_init_container_crash_gets_init_container_steps() -> None:
+    # Community grader note (2026-10-28): `logs --previous` without -c misses init containers.
+    d = _first("pod/api-5c9 Init:CrashLoopBackOff 0/1 after the migration init container fails", platform="kubernetes")
+    assert d["id"] == "DBG-CRASHLOOP"
+    assert str(d["likelyCause"]).startswith("An init container fails")
+    cmds = _commands(d)
+    assert (
+        cmds[0] == "kubectl get pod api-5c9 -n <namespace> -o jsonpath="
+        "'{.status.initContainerStatuses[*].lastState.terminated}'"
+    )
+    assert "kubectl logs api-5c9 -n <namespace> -c <init-container> --previous" in cmds
+
+
+def test_without_evidence_an_aws_cause_is_no_guess_for_another_cloud() -> None:
+    from kube_noob.debug.diagnose import likely_cause
+
+    by_id = {p.pid: p for p in PLAYBOOKS}
+    for pid, text in (
+        ("DBG-PVC-PENDING", "On GKE my PersistentVolumeClaim stays Pending and I do not know why"),
+        ("DBG-NETPOL", "our bare-metal cluster: connection timed out between two apps"),
+        ("DBG-MOUNT", "FailedMount on our on-prem cluster, the volume never attaches"),
+    ):
+        p = by_id[pid]
+        c = likely_cause(p, text, "kubernetes", False, False)
+        assert c is not None
+        cause = p.root_causes[c.cause]
+        assert not re.search(r"\b(?:EFS|EBS|AWS|security groups?)\b|\bcloud\b", cause, re.I), (pid, cause)

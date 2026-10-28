@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Answers fit the post's infrastructure (from the community graders' notes). `rosa` steps need a ROSA platform or text
+  that says ROSA (they had shown on EKS, GKE and minikube posts); OpenShift text gets the openshift-dns steps,
+  including `oc logs -n openshift-dns -c dns -l dns.operator.openshift.io/daemonset-dns=default`, and plain
+  Kubernetes the kube-system CoreDNS steps, never both; with nothing pointing at a cause, an AWS cause (EFS, EBS,
+  security groups, cloud firewalls) is no guess for text about another cloud or self-run hardware, and the NFS mount
+  cause and fix no longer read as EFS-only. An `Init:CrashLoopBackOff` gets its own cause, the init containers'
+  status and `kubectl logs <pod> -c <init-container> --previous`. "timed out waiting for the condition" names the
+  mount playbook only next to mount, attach or volume words (alone it is Helm's, kubeadm's and every wait loop's).
+  More English words are never taken as a namespace name. Held-out set 79 to 80 of 114; golden unchanged. Blinded
+  graders on the rows that changed: test half 44 rows (28 and 36 better, 1 and 1 worse: a Kubespray-on-RHEL post read
+  as OpenShift), train half 50 (37 better, 2 worse); the timeout change 15 rows, 15 better.
 - Triage tuned on a training set and checked on real posts. Cause patterns for 11 playbooks were tuned on a new
   training set (`tests/fixtures/triage-train`, 171 questions written by an agent that saw only the causes; the
   held-out set is never tuned on): an image that still runs on old nodes points at a removed tag; a bare name in

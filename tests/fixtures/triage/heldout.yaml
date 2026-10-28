@@ -8,7 +8,7 @@
   platform: null
   text: |
     Our payments-worker deployment goes straight into CrashLoopBackOff after every rollout and the container is only alive for a second or two. Where do I look to find out why it exits?
-  status: miss
+  status: pass
 - id: crashloop-0b
   playbook: DBG-CRASHLOOP
   cause: 0
@@ -31,7 +31,7 @@
   platform: null
   text: |
     My Spring Boot pod goes into CrashLoopBackOff, but its own logs look perfectly normal right up until something terminates it. describe shows liveness check failures just before each restart, so what is going on?
-  status: miss
+  status: pass
 - id: crashloop-1b
   playbook: DBG-CRASHLOOP
   cause: 1
@@ -143,7 +143,7 @@
     Warning  Failed   12s (x3 over 52s)  kubelet  Error: ErrImagePull
     Normal   BackOff  2s (x3 over 51s)   kubelet  Back-off pulling image "quay.io/acme-labs/inventory:1.4.0-rc1"
     Why can't it find the image?
-  status: miss
+  status: pass
 - id: imagepull-1a
   playbook: DBG-IMAGEPULL
   cause: 1
