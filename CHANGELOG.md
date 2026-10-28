@@ -95,6 +95,13 @@
   registry typo and an image pull secret). Playbook and policy findings carry a `fix`, printed by the CLI; a policy
   finding lists every change the requester can make (exceptions and new permissions stay with the policy owner). A
   Pod Security denial followed by a question in the same paste now reads every violated check, not only the first.
+- The reported-issue matcher counts each piece of evidence once: "item" and "items", or "openshift-etcd" and
+  "etcd", were two of the three rare shared words a match needs. On the train half of the owner's answered questions
+  55 top answers changed; an independent grader found all 55 earlier answers wrong, and 10 of the rows now point at
+  the bug the report itself names (the original of a clone). On the whole train half, reported-bug answers on posts
+  that are not Red Hat bug reports fell from 234 to 134; recall of the exact key in the top 3, when indexed, went from
+  21 to 19 of 33 (two keys that were third). Checked on the test half, which the change was not tuned on: 52 top
+  answers changed, all 52 earlier ones wrong, 12 better now (11 point at the clone's original), none worse.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

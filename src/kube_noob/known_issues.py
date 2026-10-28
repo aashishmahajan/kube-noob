@@ -327,7 +327,7 @@ class Index:
             if running and not self._applies(issue, running):
                 continue
             doc = self._tokens(issue)
-            r_text, r_sig = self._rare(q_tokens & doc), self._rare(sig_tokens & doc)
+            r_text, r_sig = _distinct(self._rare(q_tokens & doc)), _distinct(self._rare(sig_tokens & doc))
             score = expanded if r_sig else own
             if score <= best.get(issue.id, -1.0):
                 continue
@@ -373,6 +373,21 @@ class Index:
         if _minor(issue.version) != _minor(running):
             return False
         return vkey(running) < vkey(issue.version)
+
+
+def _distinct(words: list[str]) -> list[str]:
+    """One word per base form and per compound: "item" and "items", or "openshift-etcd" and "etcd", are one piece of
+    evidence, not two."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for w in sorted(words, key=lambda t: (-len(t), t)):  # compounds first, so their parts are recognised as seen
+        forms = set(_forms(w))
+        parts = {f for p in re.split(r"[-._/]", w) if p for f in _forms(p)} if re.search(r"[-._/]", w) else set()
+        if forms & seen:
+            continue
+        seen |= forms | parts
+        out.append(w)
+    return sorted(out)
 
 
 def _general_store() -> KnowledgeStore:

@@ -261,3 +261,14 @@ def test_every_pod_security_violation_is_read_even_with_prose_after_the_message(
         "runAsNonRoot != true",
     ]
     assert "breaks 2 of its checks" in den["meaning"]
+
+
+def test_the_bug_matcher_counts_each_word_once() -> None:
+    # Measured on the train half of the owner's answered rows: 55 reported-bug answers changed, all 55 were wrong
+    # before, and 10 now point at the bug the report itself names (the original of a clone).
+    from kube_noob.known_issues import _distinct
+
+    assert _distinct(["item", "items", "visible"]) == ["items", "visible"]
+    assert _distinct(["openshift-etcd", "etcd", "leader"]) == ["leader", "openshift-etcd"]
+    assert _distinct(["values.yaml", "values", "yaml"]) == ["values.yaml"]
+    assert _distinct([]) == []
