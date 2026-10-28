@@ -1023,6 +1023,19 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["low", "medium", "high", "critical", "never"],
         help="exit 1 at or above this severity (shipped code findings; fixable or exploited dependencies)",
     )
+    mg = sub.add_parser(
+        "must-gather",
+        help="Read an OpenShift must-gather safely, offline (nothing extracted or run; Secrets never read)",
+        description="analyze opens a must-gather directory or a .tar, .tar.gz or .tgz archive of one (oc adm "
+        "must-gather, oc adm inspect) without extracting or executing anything. An archive member with an absolute "
+        "path or .. is refused; links, devices and nested archives are not followed or opened; files named like "
+        "Secrets are never read. Prints what was gathered, for which version and when. Example: kube-noob "
+        "must-gather analyze must-gather.tar.gz",
+    )
+    mg_sub = mg.add_subparsers(dest="mg_cmd", required=True)
+    _patch(mg_sub, common)
+    mga = mg_sub.add_parser("analyze", help="Open a must-gather safely and summarise what it holds")
+    mga.add_argument("path", help="a must-gather directory, or a .tar, .tar.gz or .tgz archive of one")
     ad = sub.add_parser(
         "admission",
         help="The kube-noob-admission webhook: admission warnings for every rule, denials only for enforced rules",
@@ -1829,6 +1842,18 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return _vuln_cmd(a, s, fmt)
     if a.cmd == "code":
         return _code_cmd(a, s, fmt)
+    if a.cmd == "must-gather":
+        from kube_noob.mustgather import ingest
+
+        try:
+            bundle = ingest.open_bundle(Path(a.path))
+        except ingest.MustGatherError as exc:
+            raise ConfigError(str(exc)) from exc
+        if a.format == "text":
+            _tprint(ingest.render_text(bundle))
+        else:
+            _emit(bundle.as_dict(), fmt)
+        return 0
     if a.cmd == "admission":
         return _admission_cmd(a, s, fmt)
     if a.cmd == "build":

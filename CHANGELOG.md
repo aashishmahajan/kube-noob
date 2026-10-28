@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `kube-noob must-gather analyze <dir|.tar|.tar.gz|.tgz>`: opens a must-gather (or `oc adm inspect` output) safely
+  and offline, and says what it holds: each gather image's directory with its `version` and `timestamp`, the
+  resource files by group and resource, namespaces, pods and logs. Nothing is extracted to disk and nothing is run:
+  archives are read as a stream; a member with an absolute path, `..` or a NUL refuses the whole archive; links,
+  devices and FIFOs are never followed or read; files named like Secrets are never read (oc adm inspect already
+  elides their values; kube-noob does not open them at all); nested archives are listed, not opened. Caps bound the
+  file count, the bytes processed (a gzip bomb stops at the cap), each file, what is kept in memory and the nesting
+  depth; logs keep their last MiB. The layout was read from openshift/oc's `must-gather` and `inspect` source. The
+  analysers that turn it into findings (backlog G2) come next.
 - `kube-noob code report` (and the MCP tool `code_report`, `insight` for a pasted SARIF, `gate --sarif-report`, and
   the Action, Tekton and GitLab input `sarif-reports`): what your SAST tools already found, where it ships and who
   runs it. kube-noob has no analysis engine of its own; it reads the SARIF 2.1.0 that Semgrep, Bandit,

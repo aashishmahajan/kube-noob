@@ -233,6 +233,22 @@ helm upgrade --install kube-noob deploy/helm/kube-noob --reuse-values --set jira
 `jira.seed.source: pvc` reads the snapshot from a read-only claim instead. Keep the image, bucket or volume private:
 the tickets are public but not licensed for redistribution.
 
+### What is in this must-gather? Opening one safely
+
+A must-gather from a customer or another team is untrusted input. `must-gather analyze` reads the directory, or the
+`.tar.gz` that `tar cvaf` made of it, without extracting anything or running anything: an archive member with an
+absolute path or `..` refuses the whole archive, links and device files are never followed, nested archives (audit
+logs) are listed and not opened, and files named like Secrets are never read. It says which gather images wrote
+what, for which version (`version`) and when (`timestamp`), and how many resources, namespaces, pods and logs each
+holds.
+
+```bash
+oc adm must-gather
+tar cvaf must-gather.tar.gz must-gather.local.*/
+kube-noob must-gather analyze must-gather.tar.gz
+kube-noob --format json must-gather analyze must-gather.local.5421342344627712289/
+```
+
 ### Why was this denied?
 
 `policy explain` reads a denial and explains it policy by policy: Kyverno, OPA Gatekeeper, ValidatingAdmissionPolicy,
