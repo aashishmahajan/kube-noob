@@ -66,6 +66,11 @@ jobs:
             echo "::notice title=Jira main copy::not due today (every $EVERY days)"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT" = "schedule" ]; then
+              wait=$(( $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 900 ))
+              echo "::notice title=Jitter::starting in $wait s"
+              sleep "$wait"
+            fi
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.due.outputs.run == 'true'
@@ -157,6 +162,25 @@ jobs:
           print(f"::notice title=Jira resume::{r}")
           if r.get("error"):
               print("::error title=Jira resume::" + r["error"][:900])
+              raise SystemExit(1)
+          PY
+      - name: Audit the copy (comments kept, cut or older tickets, no people left)
+        if: steps.due.outputs.run == 'true'
+        run: |
+          kube-noob corpus jira-audit
+          kube-noob corpus jira-audit --format json > jira-audit.json
+          python - <<'PY'
+          import json, os
+          a = json.load(open("jira-audit.json"))
+          check = a["selfCheck"]
+          print(f"::notice title=Jira audit::{a['tickets']} tickets, {a['bytes'] // 1_000_000} MB, comments kept {a['commentCompleteness']}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(f"### Jira copy audit: {a['tickets']} tickets, comments kept {a['commentCompleteness']}\n")
+              fh.write("| project | tickets | missing comments | cut | older format | key coverage |\n|---|---|---|---|---|---|\n")
+              for k, p in a["projects"].items():
+                  fh.write(f"| {k} | {p['tickets']} | {p['ticketsMissingComments']} | {p['textCut']} | {p['olderFormat']} | {p['keyCoverage']} |\n")
+          if check["personShapedFindings"]:
+              print(f"::error title=Jira audit::{check['personShapedFindings']} person-shaped findings: {check['examples']}")
               raise SystemExit(1)
           PY
       - name: Reconciliation (what changed in the last two days, and what is open)

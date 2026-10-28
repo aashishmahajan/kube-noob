@@ -568,6 +568,12 @@ def build_parser() -> argparse.ArgumentParser:
     cjc.add_argument("--project", help="one project key, e.g. OCPBUGS")
     cjc.add_argument("--kind", action="append", default=[], help="fixed, not-a-bug, reopened, opened... (repeat)")
     cjc.add_argument("--limit", type=int, default=100)
+    cja = csub.add_parser(
+        "jira-audit",
+        help="What the local Jira copy holds: tickets, comments kept, cut or older tickets, key coverage, and a check "
+        "that no people are left in it",
+    )
+    cja.add_argument("--project", help="one project key, e.g. OCPBUGS")
     cjp = csub.add_parser("jira-projects", help="List the projects on Red Hat's public Jira, marking the default set")
     cjp.add_argument("--online", action="store_true")
     ch = csub.add_parser("history", help="Release timelines from Git tags")
@@ -1511,7 +1517,11 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
 
         sources = GIT_SOURCES if a.sources == "all" else tuple(by_id(x.strip()) for x in a.sources.split(","))
         summary = {}
-        for src in sources:
+        from kube_noob.sources.pacing import pause
+
+        for i, src in enumerate(sources):
+            if i:
+                pause()  # jittered gap between clones from the same host
             try:
                 recs = list(ingest(src, limit=a.limit_per_source))
                 summary[src.source_id] = write_shard(s.data_dir, f"git-{src.source_id}", recs)["records"]
@@ -1551,8 +1561,8 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
                 print(f"not reached this run (budget): {', '.join(out['skipped'])}")
             idx = out.get("index") or {}
             print(
-                f"{out['requests']} requests, {out['retries']} retries; index: {idx.get('tickets', 0)} tickets "
-                f"retrieved {idx.get('asOf')}"
+                f"{out['requests']} requests ({out.get('commentRequests', 0)} for comments), {out['retries']} retries; "
+                f"index: {idx.get('tickets', 0)} tickets retrieved {idx.get('asOf')}"
             )
             changed = out.get("changes") or {}
             if changed:
@@ -1586,6 +1596,16 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
 
         _emit(ingest_org_docs(Path(a.path), s.data_dir, a.source, a.base_url), fmt)
         return 0
+    if cc == "jira-audit":
+        from kube_noob import jira_audit
+
+        report = jira_audit.audit(s.data_dir, a.project)
+        if a.format == "text":
+            for line in jira_audit.text_report(report):
+                _tprint(line)
+        else:
+            _emit(report, fmt)
+        return 0 if report.get("available") is not False else 1
     if cc == "jira-snapshot":
         from kube_noob.sources.jira_snapshot import export_snapshot
 

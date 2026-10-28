@@ -101,6 +101,16 @@
   daily (repository variable `JIRA_EVERY_DAYS=2` for every two days), continues the previous run's encrypted copy,
   writes the changes and open tickets to the run summary, and uploads the new copy only encrypted
   (`jira-main-copy-encrypted`); Git docs and release history stay weekly.
+- `kube-noob corpus jira-audit [--project KEY]`: what the local Jira copy holds (tickets per project, verdict and
+  status category, comments kept against the totals Jira reported and the tickets missing some, tickets cut or in
+  the older format, oldest and newest update, key range and coverage, size, sync state), what the anonymiser
+  replaced, and a self-check for emails, account ids and profile links left in the text. Offline. The daily
+  `corpus-refresh` writes it to the run summary and fails if the self-check finds anything. Syncs report how many
+  requests went to comments.
+- Every enrichment is jittered: the in-cluster Jira sync makes its first run after a random 30 s to 10 min and then
+  runs every `jira.sync.intervalHours` +/- 10%; clones from GitHub (`corpus build`, `corpus known-issues`) are spaced
+  by a random 1 to 4 s; the scheduled `corpus-refresh` starts at a random offset of up to 15 minutes (the Jira client
+  already spaced requests by the crawl delay plus random jitter).
 - `kube-noob selftest --cases <file>`: your own problems as a test. YAML, JSONL, CSV or plain text (one question per
   line, or blocks separated by `---`); each case has an `input` and, optionally, `expect` (playbook in the top N,
   rules that must or must not fire, documents, reported issues, phrases the answer must or must not mention). Cases

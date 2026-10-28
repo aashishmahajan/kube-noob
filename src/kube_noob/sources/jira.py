@@ -190,6 +190,7 @@ class PullStats:
     requests: int = 0
     retries: int = 0
     pages: int = 0
+    comment_pages: int = 0
     scanned: int = 0
     kept: int = 0
     strategy: str = ""
@@ -898,6 +899,7 @@ def with_all_comments(client: JiraClient, key: str, issue: dict[str, Any]) -> di
         page = client.get(
             f"/rest/api/3/issue/{key}/comment", {"startAt": start, "maxResults": COMMENT_PAGE, "orderBy": "created"}
         )
+        client.stats.comment_pages += 1
         batch = [c for c in (page.get("comments") or []) if isinstance(c, dict)] if isinstance(page, dict) else []
         if not batch:
             break
@@ -1089,6 +1091,7 @@ def sync_projects_locked(
         "projects": results,
         "skipped": skipped,
         "requests": client.stats.requests,
+        "commentRequests": client.stats.comment_pages,
         "retries": client.stats.retries,
         "stoppedBy": "budget" if any(r.get("stopped") == "budget" for r in results) else None,
         "changes": dict(sorted(changed.items())),
@@ -1213,15 +1216,22 @@ def run_sync(
     return out
 
 
-def start_background(settings: Any) -> Any:
-    """Keep the copy current from ``kube-noob serve``: one run now, then every ``jira.interval_hours``."""
+def start_background(settings: Any, rng: random.Random | None = None) -> Any:
+    """Keep the copy current from ``kube-noob serve``: a first run after a random 30 s to 10 min (pods that start
+    together do not reach Jira together), then every ``jira.interval_hours`` +/- 10%."""
     import logging
     import threading
 
+    from kube_noob.sources.pacing import jittered_interval, start_delay
+
     log = logging.getLogger("kube_noob.jira")
     stop = threading.Event()
+    r = rng or random.Random()  # noqa: S311 - pacing, not crypto
+    first = start_delay(r)
 
     def loop() -> None:
+        if stop.wait(first):
+            return
         while not stop.is_set():
             try:
                 out = run_sync(settings)
@@ -1234,7 +1244,9 @@ def start_background(settings: Any) -> Any:
                 )
             except Exception:  # one failed run must not stop the service
                 log.exception("jira sync failed")
-            stop.wait(settings.jira.interval_hours * 3600)
+            stop.wait(jittered_interval(settings.jira.interval_hours * 3600, r))
 
+    log.info("jira sync: first run in %d s, then every %s h +/- 10%%", first, settings.jira.interval_hours)
     threading.Thread(target=loop, name="kube-noob-jira-sync", daemon=True).start()
+    stop.first_delay = first  # type: ignore[attr-defined]  # for the operator log and tests
     return stop

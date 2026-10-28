@@ -174,7 +174,10 @@ kube-noob corpus jira-changes --since 2026-10-25 --project OCPBUGS --kind fixed 
 
 You get the tickets fixed (and in which versions), closed as not a bug, won't fix or duplicate, reopened, given a fix
 version or opened, each with its link, and the open tickets per project and verdict. Over MCP the same is the
-`kubenoob_ticket_changes` tool.
+`kubenoob_ticket_changes` tool. `kube-noob corpus jira-audit` shows what the copy holds: tickets per project and
+verdict, comments kept against what Jira reported, tickets cut at the size cap or still in the older format, key
+coverage, size, sync state, what the anonymiser replaced, and a self-check that no email, account id or profile link
+is left (the daily workflow fails if one is).
 
 The `corpus-refresh` workflow keeps the main copy in GitHub Actions: daily at 05:17 UTC (set the repository variable
 `JIRA_EVERY_DAYS` to `2` for every two days), continuing the previous run's copy, with the changes and open tickets in
