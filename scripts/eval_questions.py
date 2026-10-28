@@ -16,7 +16,7 @@ documents, and the top answer. It then scores what can be scored without referen
 
 Usage:
   python scripts/eval_questions.py questions.csv --out <dir> [--limit N] [--sample-review 76] [--seed 7]
-      [--grades docs/evals/community-questions-grades.csv]
+      [--grades docs/evals/community-questions-grades.csv --grades docs/evals/community-questions-heldout.csv]
 
 Writes ``<dir>/results.csv`` (one row per question, no question text), ``<dir>/summary.json`` and, with
 ``--sample-review``, ``<dir>/review.csv``: a stratified sample with the question, kube-noob's top answer and
@@ -311,11 +311,23 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--sample-review", type=int, default=0)
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--grades", type=Path, help="earlier verdicts to carry over (id, answer, top, verdict)")
+    ap.add_argument(
+        "--grades",
+        type=Path,
+        action="append",
+        default=[],
+        help="earlier verdicts to carry over (id, answer, top, verdict); repeat for several files",
+    )
     a = ap.parse_args(argv)
     csv.field_size_limit(10**8)
+    grades: dict[str, dict[str, str]] = {}
     try:
-        grades = load_grades(a.grades) if a.grades else {}
+        for path in a.grades:
+            more = load_grades(path)
+            twice = sorted(set(grades) & set(more))
+            if twice:
+                raise GradesError(f"{path}: id {twice[0]} is already graded in another grades file")
+            grades.update(more)
     except (OSError, GradesError) as e:
         print(f"eval_questions: {e}", file=sys.stderr)
         return 2

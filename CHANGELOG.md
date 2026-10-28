@@ -23,6 +23,20 @@
   [docs/evals/community-questions-grades.csv](docs/evals/community-questions-grades.csv) (ids and verdicts, no
   question text); `--grades` carries each verdict over while the row's answer is unchanged and lists the rows a
   change moved, so a tuning change is re-graded only where it changed an answer.
+- Second tuning round from the graded sample: new knowledge, each fact checked against the Kubernetes and OpenShift
+  documentation, for listing a Deployment's pods by label selector, a kubelet that will not start (swap, cgroup
+  driver, runtime socket, expired client certificate, and the API server's `--kubelet-certificate-authority`), etcd
+  backup and restore (`etcdctl`/`etcdutl`, OpenShift's `cluster-backup.sh`), reaching an Ingress from outside and
+  why an Ingress serves HTTP and HTTPS only, moving a Docker Compose app with Kompose, and a non-root container that
+  cannot write its volume (`fsGroup`). On OpenShift a process
+  cannot listen on a port below 1024: the arbitrary-UID playbook and doc now say so (`listen EACCES` on port 80).
+  Documents are offered more carefully: with no platform given, a doc written only for OpenShift or ROSA needs the
+  question to say OpenShift or ROSA (as the playbooks do); a doc can declare `requires` word groups in its front
+  matter (the Compose page needs Compose and a Kubernetes word, the etcd page a backup word); a typed question that
+  names something the knowledge has never seen needs a document sharing three of its words; and shared words are
+  counted over the whole section, not the 700-character preview. Checked on 40 held-out rows by an independent
+  grader (docs/evals/community-questions-heldout.csv): wrong answers 33 to 14; `scripts/eval_questions.py` takes
+  `--grades` more than once.
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

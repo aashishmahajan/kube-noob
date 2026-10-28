@@ -1,12 +1,12 @@
 id,topic,source,answer,top,verdict,note
 1327,acs-scanning-threat,github:aquasecurity/trivy-operator,none,,out-of-scope,trivy-operator retention feature
-2667,aws-eks-ecr,github-discussions:kubernetes-sigs/karpenter,docs,kn:ocp-egressip#1,wrong,Karpenter batching question; top document is about egress IPs
+2667,aws-eks-ecr,github-discussions:kubernetes-sigs/karpenter,none,,out-of-scope,Karpenter batching settings; no answer is right
 3784,compliance-fedramp,redhat-jira:CMP,none,,not-indexed,Compliance Operator bug report
 4622,containers-docker,stackexchange:stackoverflow,none,,out-of-scope,application build layout
 5004,dns,discourse:discuss.kubernetes.io,docs,kn:k8s-networkpolicy#2,partial,second document (Ingress) is relevant; the top one (NetworkPolicy for the router) is not
 6009,etcd-control-plane,github-discussions:k3s-io/k3s,none,,out-of-scope,k3s design question
 7499,helm,stackexchange:stackoverflow,none,,missed,Helm templating question with no answer
-7789,image-pull,discourse:forums.docker.com,docs,kn:rosa-egress-zero#2,wrong,Docker Compose sharing question; top document is ROSA egress zero
+7789,image-pull,discourse:forums.docker.com,docs,kn:k8s-images#0,wrong,Docker-only sharing question; the image pull doc is about Kubernetes pull secrets
 8857,ingress-routing,stackexchange:serverfault,none,,out-of-scope,application behind a third-party ingress
 10437,kubernetes-general,stackexchange:stackoverflow,none,,out-of-scope,Azure Container Apps
 10691,manifests-yaml,discourse:discuss.hashicorp.com,none,,out-of-scope,Vault policy templates
@@ -14,7 +14,7 @@ id,topic,source,answer,top,verdict,note
 15060,openshift-specific,redhat-jira:OCPBUGS,none,OCPBUGS-49880,not-indexed,OpenShift bug; its key and the cloned key are outside the bundled index
 15583,policy-kyverno-opa,github:kubernetes-sigs/secrets-store-csi-driver,none,,out-of-scope,CSI driver feature request
 17158,rbac-security,discourse:community.traefik.io,none,,out-of-scope,Traefik tooling
-19466,rosa-hcp-aws,redhat-jira:OCPBUGS,reported-issue,OCPBUGS-78152,wrong,HyperShift deletion bug; top issue is an unrelated autoscaler fix
+19466,rosa-hcp-aws,redhat-jira:OCPBUGS,none,,not-indexed,HyperShift deletion bug report outside the index
 21368,storage-odf,redhat-jira:DFBUGS,none,,not-indexed,ODF bug report
 22214,upgrade,github:argoproj/argo-cd,none,,out-of-scope,Argo CD bug
 24168,workloads-debugging,github:kubernetes/kubernetes,none,,out-of-scope,upstream feature work
@@ -23,10 +23,10 @@ id,topic,source,answer,top,verdict,note
 3800,compliance-fedramp,redhat-jira:OCPBUGS,none,OCPBUGS-63367,not-indexed,OpenShift bug clone outside the index
 4016,containers-docker,discourse:forums.docker.com,none,,out-of-scope,GPU passthrough in Docker
 5802,dns,stackexchange:stackoverflow,none,,out-of-scope,Docker build of a web app
-6262,etcd-control-plane,discourse:discuss.kubernetes.io,none,,missed,etcd backup and restore is core operations and gets no answer
+6262,etcd-control-plane,discourse:discuss.kubernetes.io,docs,kn:k8s-etcd-backup#0,correct,etcd backup and restore doc
 6655,helm,github:bitnami/charts,none,,out-of-scope,third-party chart bug
 7922,image-pull,github:apache/superset,none,,missed,image pull errors from a chart's defaults; the image pull playbook would help
-9129,ingress-routing,stackexchange:stackoverflow,docs,kn:ocp-routes#2,wrong,Ingress listen ports; top document is about Route failures
+9129,ingress-routing,stackexchange:stackoverflow,docs,kn:k8s-ingress#2,correct,Ingress serves HTTP and HTTPS only; use a NodePort or LoadBalancer Service for other ports
 10529,kubernetes-general,stackexchange:stackoverflow,docs,kn:k8s-probes#1,partial,probe document is on topic but does not answer where the name comes from
 11229,manifests-yaml,stackexchange:stackoverflow,none,,out-of-scope,PromQL
 11708,networking-ip,discourse:forums.docker.com,none,,out-of-scope,Docker daemon IPv6
@@ -42,14 +42,14 @@ id,topic,source,answer,top,verdict,note
 3655,compliance-fedramp,github:canonical/k8s-operator,none,,out-of-scope,Canonical Kubernetes hardening rule
 4510,containers-docker,stackexchange:stackoverflow,none,,out-of-scope,ZAP with Podman on WSL
 5076,dns,discourse:forums.docker.com,playbook,DBG-DNS,wrong,host DNS for Docker Compose; the playbook is about DNS inside pods
-6266,etcd-control-plane,discourse:discuss.kubernetes.io,docs,kn:k8s-common-errors#1,wrong,kubelet will not start; top document is about ConfigMap updates
+6266,etcd-control-plane,discourse:discuss.kubernetes.io,docs,kn:k8s-node-kubelet#0,correct,"kubelet will not start: journal, swap, cgroup driver, runtime, certificates"
 7034,helm,github:helm/helm,none,,out-of-scope,Helm CLI bug
 8268,image-pull,stackexchange:stackoverflow,none,,out-of-scope,Docker registry mirror path
 9183,ingress-routing,stackexchange:stackoverflow,docs,kn:k8s-networkpolicy#2,wrong,exposing an Ingress on bare metal; top document is NetworkPolicy for the OpenShift router
 9614,kubernetes-general,github-discussions:argoproj/argo-cd,none,,out-of-scope,Argo CD project configuration
 10738,manifests-yaml,github-discussions:argoproj/argo-cd,none,,out-of-scope,Argo CD metric
 13839,networking-ip,redhat-jira:OCPBUGS,none,,not-indexed,OVN multicast bug report
-15426,openshift-specific,stackexchange:stackoverflow,docs,kn:rosa-egress-zero#2,wrong,moving Compose to OpenShift; top document is ROSA egress zero
+15426,openshift-specific,stackexchange:stackoverflow,docs,kn:k8s-compose-migration#0,correct,"Kompose conversion, DeploymentConfig deprecation and arbitrary UIDs on OpenShift"
 16817,policy-kyverno-opa,stackexchange:stackoverflow,docs,kn:helm-troubleshooting#3,wrong,Kyverno escaping inside Helm; top document is about values not applied
 17367,rbac-security,discourse:forums.docker.com,playbook,DBG-IMAGEPULL,partial,"registry authentication failure; the playbook is written for pods, the question is a host"
 19404,rosa-hcp-aws,redhat-jira:OCPBUGS,playbook,DBG-ROSA-HCP-NODES,wrong,HCP KubeletConfig validation bug; the node-joining playbook does not fit
@@ -74,4 +74,4 @@ id,topic,source,answer,top,verdict,note
 19272,rosa-hcp-aws,redhat-jira:OCPBUGS,none,,not-indexed,HyperShift metric bug report
 19991,storage-odf,github:aws/containers-roadmap,none,,out-of-scope,S3 mount feature request
 22688,upgrade,redhat-jira:OCPBUGS,none,,not-indexed,documentation bug report
-25213,workloads-debugging,stackexchange:stackoverflow,docs,kn:k8s-common-errors#4,wrong,listing a Deployment's pods; top document is about stuck namespaces
+25213,workloads-debugging,stackexchange:stackoverflow,docs,kn:k8s-kubectl-selectors#0,correct,"label selector from the Deployment, kubectl get pods -l"

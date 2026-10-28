@@ -373,6 +373,20 @@ class KnowledgeStore:
         }
 
 
+def requires_groups(value: Any) -> list[list[str]]:
+    """A knowledge doc's ``requires`` front matter: groups of words, each group any-of, all groups needed, before the
+    doc is offered as the answer to a pasted question. For a doc whose words are broader than its subject: a
+    Compose-to-Kubernetes page shares "docker" and "compose" with every Docker Compose question. Malformed values
+    raise, so a typo cannot silently drop the gate."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(
+        isinstance(g, list) and g and all(isinstance(w, str) and w.strip() for w in g) for g in value
+    ):
+        raise ValueError(f"requires must be a list of non-empty word lists, got {value!r}")
+    return [[w.strip().lower() for w in g] for g in value]
+
+
 def builtin_chunks() -> list[Chunk]:
     out: list[Chunk] = []
     root = resources.files("kube_noob").joinpath("data", "knowledge")
@@ -400,6 +414,7 @@ def builtin_chunks() -> list[Chunk]:
                     "tags": meta.get("tags") or [],
                     "platforms": meta.get("platforms") or [],
                     "searchWeight": float(meta.get("searchWeight", 1.0)),
+                    "requires": requires_groups(meta.get("requires")),
                 },
             )
         )

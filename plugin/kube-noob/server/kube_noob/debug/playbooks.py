@@ -1034,7 +1034,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
     ),
     Playbook(
         "DBG-ARBITRARY-UID",
-        "Permission denied writing files on OpenShift",
+        "Permission denied on OpenShift (writing files, or listening on a port below 1024)",
         (
             r"mkdir: cannot create directory .*Permission denied",
             r"mkdir\(\) \S+ failed \(13: Permission denied\)",
@@ -1047,6 +1047,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "OpenShift runs containers with a random UID (from the namespace range) and GID 0; image directories "
             "owned by a specific user are not writable.",
+            "The process is not privileged, so it cannot listen on a port below 1024 (listen EACCES on port 80).",
         ),
         (
             "oc get pod {pod} -n {ns} -o jsonpath='{{.metadata.annotations.openshift\\.io/scc}}'   # admitting SCC",
@@ -1058,6 +1059,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "In the Dockerfile: RUN chgrp -R 0 <dirs> && chmod -R g=u <dirs>; write only to mounted volumes or "
             "emptyDir; never chown at runtime.",
+            "Listen on a port above 1024 (for example 8080) and map port 80 or 443 in the Service or Route.",
         ),
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
         related_rules=("KN-S004",),

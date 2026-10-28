@@ -165,6 +165,23 @@ def test_the_eval_script_runs_on_a_small_csv(tmp_path: Path) -> None:
     assert results["1"]["verdict"] == "correct" and results["2"]["previousVerdict"] == "wrong"
 
 
+def test_several_grades_files_merge_and_an_id_graded_twice_stops_the_eval(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("eval_questions_m", ROOT / "scripts" / "eval_questions.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["eval_questions_m"] = mod
+    spec.loader.exec_module(mod)
+    (tmp_path / "q.csv").write_text("id,question,body_excerpt\n1,why is my pod Pending?,\n2,a,b\n")
+    one, two, dup = tmp_path / "1.csv", tmp_path / "2.csv", tmp_path / "dup.csv"
+    one.write_text("id,answer,top,verdict\n1,none,,missed\n")
+    two.write_text("id,answer,top,verdict\n2,none,,out-of-scope\n")
+    dup.write_text("id,answer,top,verdict\n1,none,,wrong\n")
+    out = tmp_path / "o"
+    assert mod.main([str(tmp_path / "q.csv"), "--out", str(out), "--grades", str(one), "--grades", str(two)]) == 0
+    assert json.loads((out / "summary.json").read_text())["graded"]["graded"] == 2
+    assert mod.main([str(tmp_path / "q.csv"), "--out", str(out), "--grades", str(one), "--grades", str(dup)]) == 2
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [
@@ -197,8 +214,92 @@ def test_the_committed_grades_file_is_well_formed() -> None:
     mod = importlib.util.module_from_spec(spec)
     sys.modules["eval_questions_c"] = mod
     spec.loader.exec_module(mod)
-    path = ROOT / "docs" / "evals" / "community-questions-grades.csv"
-    grades = mod.load_grades(path)
-    assert len(grades) == 76
-    header = path.read_text(encoding="utf-8").splitlines()[0]
-    assert header == ",".join(mod.GRADE_COLUMNS)  # ids and verdicts only: no question text in the repo
+    sizes = {"community-questions-grades.csv": 76, "community-questions-heldout.csv": 40}
+    seen: set[str] = set()
+    for name, size in sizes.items():
+        path = ROOT / "docs" / "evals" / name
+        grades = mod.load_grades(path)
+        assert len(grades) == size and not seen & set(grades)  # the held-out rows were never tuned on
+        seen |= set(grades)
+        header = path.read_text(encoding="utf-8").splitlines()[0]
+        assert header == ",".join(mod.GRADE_COLUMNS)  # ids and verdicts only: no question text in the repo
+
+
+# QA2: the second tuning round, from the graded sample (docs/evals/community-questions-grades.csv). Each test uses
+# text written for this file.
+
+
+def _docs(kit: tk.Toolkit, text: str, platform: str | None = None) -> list[str]:
+    out = kit.insight(tk.InsightIn(text=text, platform=platform))
+    return [f["id"] for f in out["findings"] if f["source"] == "doc"]
+
+
+def test_new_knowledge_answers_everyday_how_tos(kit: tk.Toolkit) -> None:
+    assert _docs(kit, "how do I list only the pods that belong to my deployment with kubectl?")[0].startswith(
+        "kn:k8s-kubectl-selectors#"
+    )
+    assert _docs(kit, "kubelet service is not starting after I enabled swap")[0].startswith("kn:k8s-node-kubelet#")
+    assert _docs(kit, "how do I back up and restore the etcd database")[0].startswith("kn:k8s-etcd-backup#")
+    post = (
+        "Make an ingress listen on a port other than 80 and 443\n"
+        "Not routing to a backend port: I want the ingress itself to listen on another port. Possible?"
+    )
+    assert _docs(kit, post)[0].startswith("kn:k8s-ingress#")
+
+
+def test_openshift_only_documents_need_openshift_words(kit: tk.Toolkit) -> None:
+    post = (
+        "Container cannot write its cache directory\n"
+        "Why does mkdir fail with permission denied when the image runs as a non-root user on Kubernetes 1.31?"
+    )
+    openshift_only = ("kn:ocp-", "kn:rosa-", "kn:openshift#")
+    assert not [d for d in _docs(kit, post) if d.startswith(openshift_only)]
+
+    def answers(text: str, platform: str | None = None) -> list[str]:
+        out = kit.insight(tk.InsightIn(text=text, platform=platform))
+        return [f["id"] for f in out["findings"] if f["source"] in ("doc", "playbook")]
+
+    on_ocp = post.replace("Kubernetes 1.31", "OpenShift 4.20")
+    for got in (answers(on_ocp), answers(post, platform="openshift")):
+        assert {"DBG-ARBITRARY-UID", "kn:ocp-arbitrary-uid#1"} & set(got), got
+
+
+def test_narrow_documents_keep_to_their_subject(kit: tk.Toolkit) -> None:
+    docker_only = (
+        "Share my compose app with a friend\n"
+        "I have a docker-compose.yml with a web and a db service and want my friend to run the same images."
+    )
+    assert not [d for d in _docs(kit, docker_only) if d.startswith("kn:k8s-compose-migration#")]
+    to_openshift = (
+        "Move a docker-compose app to OpenShift\nWhat is the best way to run my docker-compose services on OpenShift?"
+    )
+    assert _docs(kit, to_openshift)[0].startswith("kn:k8s-compose-migration#")
+    assert not [
+        d
+        for d in _docs(kit, "can other system components store data in the embedded etcd of k3s?")
+        if d.startswith("kn:k8s-etcd-backup#")
+    ]
+
+
+def test_a_question_about_something_unknown_needs_more_shared_words(kit: tk.Toolkit) -> None:
+    assert _docs(kit, "consolidateAfterSeconds per node pool") == []  # a name the knowledge never saw
+    assert _docs(kit, "trying to understand quotas and CPU limits")  # everyday words are not unknown names
+
+
+def test_requires_front_matter_is_checked() -> None:
+    from kube_noob.knowledge.store import builtin_chunks, requires_groups
+
+    assert requires_groups(None) == []
+    assert requires_groups([["Compose", "kompose"], ["pod"]]) == [["compose", "kompose"], ["pod"]]
+    for bad in ("compose", [["compose"], []], [[""]], [["ok", 3]], {"a": ["b"]}):
+        with pytest.raises(ValueError, match="requires"):
+            requires_groups(bad)
+    narrow = {c.doc_id for c in builtin_chunks() if c.extra.get("requires")}
+    assert {"k8s-compose-migration", "k8s-etcd-backup", "ocp-arbitrary-uid"} <= narrow
+
+
+def test_low_ports_on_openshift_name_the_arbitrary_uid_playbook() -> None:
+    out = diagnose("Error: listen EACCES: permission denied 0.0.0.0:80 on OpenShift").as_dict()
+    top = out["diagnoses"][0]
+    assert top["id"] == "DBG-ARBITRARY-UID"
+    assert any("below 1024" in c for c in top["rootCauses"])

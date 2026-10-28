@@ -519,6 +519,41 @@ _STOP = frozenset(
 )
 
 
+_ROSA_ONLY = frozenset({"rosa-classic", "rosa-hcp"})
+
+
+class _DocFit:
+    """Whether a knowledge doc may answer this text, beyond shared words. With no platform given, a doc written only
+    for OpenShift or ROSA needs the text to say it is OpenShift or ROSA (the playbooks' rule, G83); with a platform
+    given, the doc must cover it. A doc's ``requires`` groups each need one of their words in the text."""
+
+    def __init__(self, text: str, platform: str | None) -> None:
+        self.platform = platform
+        self._text = text
+        self._ctx: tuple[bool, bool] | None = None
+
+    def _context(self) -> tuple[bool, bool]:
+        if self._ctx is None:
+            from kube_noob.debug.diagnose import _ROSA_CONTEXT
+            from kube_noob.known_issues import openshift_context
+
+            self._ctx = (openshift_context(self._text), bool(_ROSA_CONTEXT.search(self._text[:200_000])))
+        return self._ctx
+
+    def __call__(self, chunk: Any, words: set[str]) -> bool:
+        if chunk is None:
+            return True
+        extra = getattr(chunk, "extra", None) or {}
+        plats = {str(p) for p in extra.get("platforms") or []}
+        if plats and self.platform and self.platform not in plats:
+            return False
+        if plats and not self.platform and "kubernetes" not in plats:
+            openshift, rosa = self._context()
+            if not (rosa if plats <= _ROSA_ONLY else openshift or rosa):
+                return False
+        return all(any(w in words for w in group) for group in extra.get("requires") or [])
+
+
 def _specific_terms(text: str, *, kubernetes_words: bool = False) -> set[str]:
     """Words of ``text`` in base form that carry meaning: not stop words or everyday English and, unless
     ``kubernetes_words``, not everyday Kubernetes words either (pod, node, error, pending)."""
@@ -724,27 +759,45 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         if fresh:
             findings += budget.run("tickets", lambda: _ticket_findings(kit, fresh, version)) or []
     if "question" in names:
+        from kube_noob.knowledge.store import tokenize
+        from kube_noob.known_issues import _forms
+
         query = text.strip()[:500]
         res = budget.run("search", lambda: kit.search(tk.SearchIn(query=query, limit=8)))
         seen: set[str] = set()
         typed = "\n" not in query  # a question typed to kube-noob, not a pasted post
         asked = _specific_terms(query, kubernetes_words=typed)
+        words = {f for t in tokenize(query) for f in _forms(t)}
         need = MIN_DOC_TERMS
-        if typed and len(asked) <= 2:
-            # A short question needs one shared word, unless it names something the knowledge has never seen
-            # ("Talos", "batchMaxDuration"): then it is about that, and a document sharing one other word is not.
-            from kube_noob.knowledge.store import tokenize
+        store = kit.store()
+        if typed:
+            from kube_noob.known_issues import EVERYDAY_WORDS
 
-            store = kit.store()
-            raw = [t for t in tokenize(query) if len(t) > 3 and t.isalpha()]
-            if not any(store.doc_frequency(t) == 0 for t in raw):
-                need = 1
+            unknown = [
+                t
+                for t in tokenize(query)
+                if len(t) > 3
+                and t.isalpha()
+                and not any(f in _STOP or f in EVERYDAY_WORDS for f in _forms(t))
+                and all(store.doc_frequency(f) == 0 for f in _forms(t))  # "quotas" is known as "quota"
+            ]
+            if unknown:
+                # It names something the knowledge has never seen ("Talos", "batchMaxDuration", "Trivy"): it is
+                # about that, and a document sharing two of its other words ("node", "pool") is not.
+                need = MIN_DOC_TERMS + 1
+            elif len(asked) <= 2:
+                need = 1  # a short question needs one shared word
+        fits = _DocFit(text, platform)
         for h in (res or {}).get("results", []):
             doc = h["chunkId"].split("#", 1)[0]
             if doc in seen or len(seen) == 3:
                 continue
-            shared = asked & _specific_terms(f"{h.get('title') or ''} {h.get('text') or ''}", kubernetes_words=typed)
+            chunk = store.get(h["chunkId"])
+            body = chunk.text if chunk is not None else h.get("text") or ""  # the whole chunk: search results are cut
+            shared = asked & _specific_terms(f"{h.get('title') or ''} {body}", kubernetes_words=typed)
             if len(shared) < need:  # a document that shares one incidental word with a post does not answer it
+                continue
+            if not fits(chunk, words):
                 continue
             seen.add(doc)
             findings.append(

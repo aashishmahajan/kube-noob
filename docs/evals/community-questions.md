@@ -1,4 +1,4 @@
-# Community questions eval (QA1)
+# Community questions eval (QA1, QA2)
 
 How well kube-noob answers what people actually ask, measured on 25,292 public questions, issues and bug reports
 the owner collected (Stack Overflow, Server Fault, GitHub issues and discussions, Red Hat Jira OCPBUGS and ROX,
@@ -24,25 +24,40 @@ the question is outside what an offline Kubernetes and OpenShift assistant shoul
 [`community-questions-grades.csv`](community-questions-grades.csv) (row ids, kube-noob's answer, verdict and a short
 note; no question text).
 
+The graded sample is also the tuning set, so a second sample checks that a change helps beyond it: 40 rows drawn at
+random from the 2,424 rows whose answer the QA2 round changed, none of them in the graded sample, graded by an
+independent agent that wrote a reference answer for each from the Kubernetes and OpenShift documentation without
+seeing earlier verdicts ([`community-questions-heldout.csv`](community-questions-heldout.csv)). The same agent graded
+the 76-row sample too: it gave the same verdict on 67 of 76 rows and the same class (helpful, wrong, no answer) on 74;
+where it differed it was stricter (four answers it called partly relevant where this file says correct).
+
 ## Results (2026-10-28)
 
-| Measure | Before | After |
-|---|---|---|
-| OpenShift bug as the answer to a non-Red Hat question | 5,274 | 29 |
-| ROSA playbook on a non-ROSA question | 53 | 0 |
-| Arbitrary-UID playbook off OpenShift | 71 | 9 |
-| Rows with a reported-issue answer | 30.0% | 6.3% |
-| Rows with a playbook answer | 5.8% | 5.9% |
-| Rows with documents | 17.8% | 15.1% |
-| Rows with no answer | 46.3% | 72.7% |
-| Jira keys found in the top 3, of keys in the index (71) | 69.0% | 70.4% |
-| Jira keys found in the top 3, all 2,943 Jira rows | 1.7% | 1.7% |
-| Graded sample: correct or partly relevant answers | 4 | 7 |
-| Graded sample: wrong answers | 16 | 11 |
-| Graded sample: in-scope questions with no answer | 10 | 6 |
-| Graded sample: no answer, Red Hat bug outside the index or out of scope | 46 | 8 + 44 |
-| Graded sample: helpful share of the answers given (correct or partly relevant) | 20% | 39% |
-| Run time for all rows | 114 s | 85 s |
+| Measure | Before | QA1 | QA2 |
+|---|---|---|---|
+| OpenShift bug as the answer to a non-Red Hat question | 5,274 | 29 | |
+| ROSA playbook on a non-ROSA question | 53 | 0 | |
+| Arbitrary-UID playbook off OpenShift | 71 | 9 | |
+| Rows with a reported-issue answer | 30.0% | 6.3% | 5.8% |
+| Rows with a playbook answer | 5.8% | 5.9% | 5.9% |
+| Rows with documents | 17.8% | 15.1% | 11.7% |
+| Rows with no answer | 46.3% | 72.7% | 76.6% |
+| Jira keys found in the top 3, of keys in the index (71) | 69.0% | 70.4% | 70.4% |
+| Jira keys found in the top 3, all 2,943 Jira rows | 1.7% | 1.7% | 1.7% |
+| Graded sample: correct or partly relevant answers | 4 | 7 | 12 |
+| Graded sample: wrong answers | 16 | 11 | 5 |
+| Graded sample: in-scope questions with no answer | 10 | 6 | 5 |
+| Graded sample: no answer, Red Hat bug outside the index or out of scope | 46 | 8 + 44 | 9 + 45 |
+| Graded sample: helpful share of the answers given | 20% | 39% | 71% |
+| Held-out changed rows (40): correct or partly relevant answers | 5 | | 4 |
+| Held-out changed rows (40): wrong answers | 33 | | 14 |
+| Held-out changed rows (40): helpful share of the answers given | 13% | | 22% |
+| Run time for all rows | 114 s | 85 s | 89 s |
+
+The held-out "before" column is this file's own grading of the earlier answers; "QA2" is the independent agent's.
+Scaled to the 2,424 rows the round changed, that is roughly 1,150 fewer wrong answers for about 60 fewer helpful
+ones: most of what the round removed were wrong documents, and what it added (new knowledge) answers questions the
+earlier code got wrong or left unanswered.
 
 What changed: release notes are searched for a text with no platform only when it says it is about OpenShift
 (diagnose, insight and the watch; `known-issues` still searches them, being an OpenShift question by definition);
@@ -52,6 +67,17 @@ trigger phrases for a stuck PVC, DNS trouble in words and `oc get co` rows; docu
 share enough specific words with the question; forum posts that ask in their title or a sentence are read as
 questions.
 
+QA2 added knowledge for the in-scope questions the graded sample missed or answered wrongly, each fact checked
+against the Kubernetes and OpenShift documentation (a Deployment's pods by label selector; a kubelet that will not
+start; etcd backup and restore; reaching an Ingress from outside and why an Ingress serves HTTP and HTTPS only;
+moving a Compose app with Kompose; a non-root container that cannot write its volume; ports below 1024 on
+OpenShift), and gated documents: with no platform given an OpenShift- or ROSA-only doc needs the question to say
+OpenShift or ROSA; a doc may declare `requires` word groups in its front matter; a typed question that names
+something the knowledge has never seen needs three shared words; and shared words are counted over the whole
+section, not the search preview. One idea was measured and dropped: reading a forum post whose title states a
+symptom ("... not starting", "... issue") as a question answered 3,013 more rows, and 2 of a random 25 of those
+answers helped.
+
 ## What the numbers say, and what is next
 
 - Most of the dataset is outside what an offline Kubernetes and OpenShift assistant can know: application code,
@@ -59,17 +85,19 @@ questions.
 - The reported-issue matcher is now precise; its recall is bounded by what the index holds. With a synced local
   Jira copy (`kube-noob corpus jira`) the 2,872 Jira rows outside the release notes become findable: the next run
   should measure that.
-- Documents are the weakest answers: the bundled knowledge has 122 chunks, so a how-to question ("list the pods of
-  a deployment") often has no relevant chunk and lexical overlap picks a wrong one. Wider knowledge is the lever,
-  not more matching rules.
-- An accuracy grade needs reference answers. Accepted answers for a stratified set (or a person grading the review
-  sample) would turn the coverage numbers into an accuracy number.
+- Documents are still the weakest answers outside the tuned sample: 14 of the 18 held-out answers were wrong, most
+  on questions about other tools (Istio, Argo CD, Trivy, Docker on a laptop) that share Kubernetes words with a
+  bundled doc. Knowledge now has 139 chunks (122 before QA2); the in-scope misses the agents named (an OCI runtime
+  error at pod start, kubeconfig exec plugins, `kubectl proxy`, finding the Ingresses that route to a Service) are
+  the next knowledge to add, each checked against the documentation.
+- An accuracy grade needs reference answers. The independent agent's reference answers stand in for them here;
+  accepted answers from the sources (Stack Exchange cannot be read from this environment) would replace them.
 
 ## Re-grading after a tuning change
 
 ```sh
 python scripts/eval_questions.py questions.csv --out ../qa-run --sample-review 76 \
-  --grades docs/evals/community-questions-grades.csv
+  --grades docs/evals/community-questions-grades.csv --grades docs/evals/community-questions-heldout.csv
 ```
 
 A verdict carries over only while kube-noob gives the same answer kind and the same top finding for that row.

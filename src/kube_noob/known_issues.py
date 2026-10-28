@@ -116,7 +116,9 @@ EVERYDAY_WORDS = frozenset(
     next first second third last main help thanks thank please hello hi regards anyone idea ideas tips solution
     solutions fix fixed fixes fixing behavior behaviour result results output input information details detail list
     lists page pages view views field fields name names label labels tag tags type types mode format line lines
-    number numbers size make local through come custom component components private
+    number numbers size make local through come custom component components private clean cleaned confirm confirmed
+    verify verified understand trying mean means meant actual actually specific being beside besides document
+    documented retrieve whole entire simple simply really
     """.split()  # noqa: SIM905 - a word list reads better as text
 )
 
