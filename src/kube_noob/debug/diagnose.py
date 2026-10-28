@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from kube_noob.debug.cluster import Backend, redact_text
@@ -318,7 +319,13 @@ def collect_evidence(backend: Backend, namespace: str, kind: str, name: str, log
 
 
 def debug_workload(
-    backend: Backend, namespace: str, kind: str, name: str, platform: str | None = None, log_lines: int = 100
+    backend: Backend,
+    namespace: str,
+    kind: str,
+    name: str,
+    platform: str | None = None,
+    log_lines: int = 100,
+    data_dir: Path | None = None,
 ) -> dict[str, Any]:
     from kube_noob.debug.cluster import cluster_info
     from kube_noob.debug.policy import explain as explain_denials
@@ -335,7 +342,7 @@ def debug_workload(
     result = diagnose(blob, platform=platform)
     if "pod" not in result.context:
         result.context["name"] = name
-    reported = known_issue_match(blob, platform, info.get("openshift"), 3)
+    reported = known_issue_match(blob, platform, info.get("openshift"), 3, data_dir)
     denials = explain_denials(blob, platform)["denials"]
     return {
         "backend": backend.name,

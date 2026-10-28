@@ -27,6 +27,12 @@ spec:
         - {protocol: TCP, port: 443}
     {{- end }}
     {{- end }}
+    {{- if and .Values.jira.sync.enabled (not $web) (not (.Values.config.offline | default false)) }}
+    - type: Allow
+      to: {dnsName: redhat.atlassian.net}
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
     {{- range .Values.egressFirewall.denyCIDRs }}
     - type: Deny
       to: {cidrSelector: {{ . }}}

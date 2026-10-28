@@ -21,8 +21,11 @@ are for the user to run: give them as copy-paste lines (no shell comments) and d
 2. Call `kubenoob_diagnose` with the raw text, the platform and, on OpenShift, the cluster version if known (`4.20.8`).
    Present its `readOnlyNextSteps` first.
 3. If `knownIssues` is not empty, or the user asks "is this a known bug?", say so plainly: the issue id with its link,
-   whether a fix exists and in which version (`status`), and the `workaround`. Call `kubenoob_known_issues` directly
-   for a symptom with no playbook. Never claim a bug is reported unless the tool returned it.
+   what became of it (`status`; for Red Hat Jira tickets also `verdict`: fixed, fix in progress, open, not a bug, won't
+   fix, cannot reproduce, obsolete or duplicate), and the `workaround` or `remarks` from the comments. A ticket closed
+   as not a bug usually means configuration: lead with the remark that says why. Call `kubenoob_known_issues` directly
+   for a symptom with no playbook and `kubenoob_ticket` for a key the user names. Never claim a bug is reported unless
+   the tool returned it.
 4. If the request was denied by a policy (`policyDenials` in the diagnosis, or a Kyverno, Gatekeeper, Pod Security,
    SCC, RHACS, quota or RBAC message), call `kubenoob_explain_denial` and name each policy and rule, the failing field
    and the fix (its `patch` for Pod Security and RBAC). Exceptions, quota increases and new permissions are the policy

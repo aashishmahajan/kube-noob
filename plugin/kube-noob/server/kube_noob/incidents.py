@@ -504,6 +504,11 @@ def _headline(inc: dict[str, Any]) -> str:
     for d in analysis.get("policyDenials") or []:
         parts.append(f"denied by {d['engineName']}" + (f" {d['policy']}" if d.get("policy") else ""))
         break
+    for k in analysis.get("knownIssues") or []:
+        verdict = str(k.get("verdict") or ("fixed" if k.get("kind") == "fixed" else "known issue")).replace("-", " ")
+        fixed = f", fixed in {k['fixedIn']}" if k.get("fixedIn") and verdict == "fixed" else ""
+        parts.append(f"reported as {k['id']} ({verdict}{fixed})")
+        break
     changed = analysis.get("whatChanged") or {}
     if changed.get("note"):
         parts.append(changed["note"])

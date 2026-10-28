@@ -50,6 +50,15 @@ def status(data_dir: Path | None = None) -> dict[str, Any]:
     corpus = _corpus_as_of(data_dir)
     if corpus:
         out["corpusAsOf"] = corpus
+    from kube_noob.tickets import summary as ticket_summary
+
+    jira = ticket_summary(data_dir)
+    if jira:
+        out["jiraTickets"] = jira
+        out["note"] += (
+            f" Local copy of Red Hat's public Jira: {jira['tickets']} tickets from {len(jira['projects'])} projects, "
+            f"retrieved {jira['asOf']}."
+        )
     return out
 
 
@@ -68,7 +77,10 @@ def compare(kubernetes: str | None, openshift: str | None) -> dict[str, Any]:
 
 def line(data_dir: Path | None = None) -> str:
     s = status(data_dir)
+    jira = s.get("jiraTickets")
+    tickets = f"; Red Hat Jira copy: {jira['tickets']} tickets retrieved {jira['asOf']}" if jira else ""
     return (
         f"knowledge as of {s['asOf']} (Kubernetes {s['kubernetes']}, OpenShift {s['openshift']}); "
         f"release-note issues as of {s['knownIssuesAsOf']} for OpenShift {', '.join(s['knownIssueReleases'])}"
+        f"{tickets}"
     )

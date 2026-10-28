@@ -116,7 +116,8 @@ class Watcher:
             ]
         known = known_issue_match(text, self.platform, self.version, 2, self.settings.data_dir)["matches"]
         if known:
-            out["knownIssues"] = [{k: m[k] for k in ("id", "url", "status")} for m in known]
+            keep = ("id", "url", "status", "kind", "verdict", "fixedIn", "workaround")  # kind: known, fixed or ticket
+            out["knownIssues"] = [{k: m[k] for k in keep if m.get(k) is not None} for m in known]
         changed = what_changed(obs.workload, snap.get("replicasets", []), now)
         if changed:
             out["whatChanged"] = changed

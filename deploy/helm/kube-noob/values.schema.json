@@ -150,6 +150,35 @@
           "maximum": 3600
         }
       }
+    },
+    "jira": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "projects": {
+              "type": "string",
+              "pattern": "^(default|all|[A-Za-z][A-Za-z0-9_]{1,29}(\\s*,\\s*[A-Za-z][A-Za-z0-9_]{1,29})*)$"
+            },
+            "intervalHours": {
+              "type": "integer",
+              "minimum": 6,
+              "maximum": 168
+            },
+            "maxRequests": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 20000
+            }
+          }
+        }
+      }
     }
   }
 }

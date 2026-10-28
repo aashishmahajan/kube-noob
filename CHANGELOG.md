@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and what became of each ticket.
+
+- `kube-noob corpus jira --online` copies every ticket of the chosen projects, whatever its status: by default the
+  28 OpenShift, ROSA, ACM and RHACS projects (OCPBUGS, ROX, HOSTEDCP, CNV, OSSM, LOG...), or `--projects all` or a
+  list. `corpus jira-projects --online` lists what Red Hat's Jira shows (292 public projects on 2026-10-28).
+- Supported interfaces only: projects from `/rest/api/3/project/search` and tickets from `/rest/api/3/search/jql`,
+  never the web pages (Atlassian's Acceptable Use Policy forbids scraping). One request per second or slower (the
+  site's robots.txt crawl delay) plus jitter, backoff on 429 honouring `Retry-After`, and a request budget per run
+  (`--max-requests`, `jira.maxRequests`, default 600). Later runs fetch only what changed (`updated >= -Nm`) and
+  resume a stopped backfill by key.
+- `known-issues`, `diagnose`, `debug`, `bundle` and the incident watch now say what became of a matching ticket: fixed
+  (in which release, and whether the cluster's version already has it), fix merged or proposed, open, or closed as
+  Not a Bug, Won't Do, Cannot Reproduce, Obsolete or as a duplicate (followed to the original), with the workaround,
+  cause or "why closed" sentence from the latest comments. Matches need rare shared words or a distinctive error line
+  found word for word, so generic errors never pull in a ticket. SQLite FTS5 index: about 50 ms per lookup over
+  100,000 tickets.
+- `kube-noob ticket OCPBUGS-12345 --version 4.21.1` and the MCP tool `kubenoob_ticket` look up one ticket.
+- The service can keep the copy current: `jira.sync.enabled` in the chart (needs persistence and one replica; opens
+  egress 443, and the EgressFirewall allows redhat.atlassian.net only).
+- Tickets are public but not redistributable: they stay in the data directory, are never in the package, plugin or
+  dataset exports, and CI uploads them only encrypted. Reporter, assignee and comment authors are never stored.
+- Release-note issue links point at redhat.atlassian.net (Red Hat's Jira moved to Atlassian Cloud).
+- Ticket shards no longer load into the general search index; they have their own.
+
 ## 0.4.0 - 2026-10-27
 
 An incident watch that remembers: always on, read-only, no model.

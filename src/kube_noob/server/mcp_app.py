@@ -55,8 +55,11 @@ def _instructions(settings: Settings) -> str:
         "chunk ids as [kn:<doc>#<n>]. Debug with kubenoob_diagnose"
         + (" and the read-only kubenoob_cluster_* tools." if settings.cluster.enabled else ".")
         + " For 'is this a known bug?' or any OpenShift error, check kubenoob_known_issues (reported issues from the "
-        "release notes, with the fix version) and give the issue link. For a denied request (Kyverno, Gatekeeper, "
-        "ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, RBAC) use kubenoob_explain_denial; for 'can pod "
+        "release notes and, when this install keeps a local copy of Red Hat's public Jira, the tickets: fixed and in "
+        "which version, still open, or closed as not a bug, won't fix or a duplicate) and give the issue link; say "
+        "what became of the ticket, not only that it exists. kubenoob_ticket looks up one key. For a denied request "
+        "(Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, RBAC) use "
+        "kubenoob_explain_denial; for 'can pod "
         "A reach pod B?' use kubenoob_check_network_policy"
         + (" or kubenoob_cluster_check_traffic" if settings.cluster.enabled else "")
         + ". When asked what is wrong, read kubenoob_incidents first: the watch's open incidents with their diagnosis, "

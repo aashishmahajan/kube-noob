@@ -140,6 +140,21 @@ class DiagnoseIn(_In):
     limit: int = Field(5, ge=1, le=10)
 
 
+class TicketIn(_In):
+    key: str = Field(
+        ...,
+        max_length=40,
+        pattern=r"^[A-Za-z][A-Za-z0-9_]{1,29}-\d{1,9}$",
+        description="A Red Hat Jira key, e.g. OCPBUGS-12345 or ROX-30000.",
+    )
+    version: str | None = Field(
+        None,
+        max_length=20,
+        pattern=r"^\d+\.\d+(\.\d+)?$",
+        description="The cluster's OpenShift version: says whether the fix is already in it.",
+    )
+
+
 class KnownIssuesIn(_In):
     text: str = Field(
         ..., min_length=3, max_length=100_000, description="An error message, events, logs or a symptom in words."
@@ -516,6 +531,14 @@ class Toolkit:
         self._observe([f"known-issue:{m['id']}" for m in out["matches"]])
         return out
 
+    def ticket(self, p: TicketIn) -> dict[str, Any]:
+        from kube_noob import tickets
+
+        out = tickets.ticket(p.key, self.settings.data_dir, p.version)
+        if out.get("found"):
+            self._observe([f"known-issue:{out['id']}"])
+        return out
+
     def explain_denial(self, p: PolicyExplainIn) -> dict[str, Any]:
         out = explain_denials(p.text, p.platform)
         self._observe([f"policy:{d['engine']}" for d in out["denials"]])
@@ -602,7 +625,15 @@ class Toolkit:
 
     def cluster_debug(self, p: ClusterDebugIn) -> dict[str, Any]:
         backend = get_backend(self.settings)
-        out = debug_workload(backend, p.namespace, p.kind, p.name, p.platform, self.settings.cluster.max_log_lines)
+        out = debug_workload(
+            backend,
+            p.namespace,
+            p.kind,
+            p.name,
+            p.platform,
+            self.settings.cluster.max_log_lines,
+            self.settings.data_dir,
+        )
         self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
         return out
 
@@ -861,10 +892,21 @@ class Toolkit:
                 "known_issues",
                 "Is this a reported issue?",
                 "Match an error or symptom against the issues listed in the OpenShift release notes (known issues and "
-                "issues fixed in each update). Returns the issue id and link, whether a fix exists and in which "
-                "version, and the workaround; with `version`, only issues that can affect that version.",
+                "issues fixed in each update) and, when this install keeps a local copy of Red Hat's public Jira, "
+                "against those tickets too. Returns the issue id and link, what became of it (fixed and in which "
+                "version, still open, closed as not a bug, won't fix or a duplicate), the workaround and Red Hat's "
+                "remarks from the comments; with `version`, only issues that can affect that version.",
                 KnownIssuesIn,
                 self.known_issues,
+            ),
+            ToolSpec(
+                "ticket",
+                "Look up a Red Hat Jira ticket",
+                "One ticket from this install's local copy of Red Hat's public Jira (OCPBUGS, ROX, HOSTEDCP...): its "
+                "status, what became of it, fix versions and whether `version` already has the fix, the workaround and "
+                "remarks from the comments, and linked tickets. Local data only; nothing is fetched.",
+                TicketIn,
+                self.ticket,
             ),
             ToolSpec(
                 "explain_denial",

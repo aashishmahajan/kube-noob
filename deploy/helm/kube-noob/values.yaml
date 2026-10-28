@@ -81,6 +81,19 @@ watch:
   enabled: false
   intervalSeconds: 60
 
+jira:
+  # Local copy of Red Hat's public Jira (redhat.atlassian.net) so answers can say "reported as OCPBUGS-12345: fixed in
+  # 4.21.3" or "closed as Not a Bug". The sync reads tickets through Jira's REST API, at most one request per second
+  # and maxRequests per run, every intervalHours, and keeps them on the PVC; ticket text never leaves the pod. Needs
+  # persistence.enabled, replicaCount 1 and egress to redhat.atlassian.net:443 (opened below when enabled); refused
+  # under config.offline. Without egress, build the copy elsewhere and import it: kube-noob corpus import <tgz>.
+  # Disk: about 1 GiB per 100k tickets (copy plus search index); the default projects need 2-3 GiB.
+  sync:
+    enabled: false
+    projects: default        # default (OpenShift, ROSA, ACM, RHACS...), all, or keys such as OCPBUGS,ROX,HOSTEDCP
+    intervalHours: 24
+    maxRequests: 600         # per run, one second or more apart: about 60,000 tickets a run at most
+
 rbac:
   # Read-only, never Secrets. Every holder of the bearer token reads through this ServiceAccount, so the default is
   # the release namespace plus the namespaces listed below; "cluster" grants cluster-wide reads.

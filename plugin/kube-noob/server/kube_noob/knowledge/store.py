@@ -397,12 +397,31 @@ def builtin_chunks() -> list[Chunk]:
     return out
 
 
+def _ticket_shard(f: Path) -> bool:
+    """Jira ticket shards (sourceId ``jira:<PROJECT>``) have their own full-text index in ``kube_noob.tickets``: a full
+    copy runs to 100k+ tickets, too many for this in-memory index. One shard holds one project, so the first record
+    decides."""
+    if not f.name.startswith("jira-"):
+        return False
+    try:
+        with f.open(encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    rec = json.loads(line)
+                    return isinstance(rec, dict) and str(rec.get("sourceId", "")).startswith("jira:")
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def corpus_chunks(data_dir: Path) -> list[Chunk]:
     out: list[Chunk] = []
     cdir = data_dir / "corpus"
     if not cdir.is_dir():
         return out
     for f in sorted(cdir.glob("*.jsonl")):
+        if _ticket_shard(f):
+            continue
         with f.open(encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
                 if not line.strip():
@@ -415,6 +434,8 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
                 if not isinstance(rec, dict) or not isinstance(rec.get("id"), str) or not rec["id"]:
                     _log.warning("skipping corpus record without an id in %s line %d", f.name, lineno)
                     continue
+                if str(rec.get("sourceId", "")).startswith("jira:"):
+                    continue  # a mixed shard; ticket shards are skipped whole above
                 out.extend(
                     chunk_document(
                         rec["id"],
@@ -484,6 +505,8 @@ def _store_key(data_dir: Path | None) -> str:
     h = hashlib.sha256(str(data_dir.resolve()).encode())
     if cdir.is_dir():
         for f in sorted(cdir.glob("*.jsonl")):
+            if _ticket_shard(f):
+                continue
             st = f.stat()
             h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns}".encode())
     learning = data_dir / "learning.json"

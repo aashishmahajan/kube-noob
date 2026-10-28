@@ -190,6 +190,35 @@ class WatchSettings(_Base):
         return v
 
 
+class JiraSettings(_Base):
+    """Local copy of Red Hat's public Jira (``kube-noob corpus jira``) for "has Red Hat seen this error?" answers.
+
+    ``sync_enabled`` makes ``kube-noob serve`` keep the copy current in the background: at most one request per
+    second, ``max_requests`` per run, every ``interval_hours``. Blocked by the offline lock like any download."""
+
+    base_url: str = "https://redhat.atlassian.net"
+    projects: str = "default"  # default | all | comma-separated project keys
+    sync_enabled: bool = False
+    interval_hours: int = Field(default=24, ge=6, le=168)
+    max_requests: int = Field(default=600, ge=10, le=20_000)
+
+    @field_validator("base_url")
+    @classmethod
+    def _https_site(cls, v: str) -> str:
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]+\.[A-Za-z]{2,}", v.rstrip("/")):
+            raise ValueError("jira.baseUrl must be an https:// site root such as https://redhat.atlassian.net")
+        return v.rstrip("/")
+
+    @field_validator("projects")
+    @classmethod
+    def _project_spec(cls, v: str) -> str:
+        v = v.strip()
+        key = r"[A-Za-z][A-Za-z0-9_]{1,29}"
+        if v in {"default", "all"} or re.fullmatch(rf"{key}(\s*,\s*{key})*", v):
+            return v
+        raise ValueError("jira.projects must be default, all, or comma-separated project keys such as OCPBUGS,ROX")
+
+
 class ServerSettings(_Base):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
@@ -218,6 +247,7 @@ class Settings(_Base):
     judge: JudgeSettings = Field(default_factory=JudgeSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     watch: WatchSettings = Field(default_factory=WatchSettings)
+    jira: JiraSettings = Field(default_factory=JiraSettings)
     data_dir: Path = Field(default_factory=_default_data_dir)
     default_platform: Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"] = "kubernetes"
     source_path: Path | None = Field(default=None, exclude=True)

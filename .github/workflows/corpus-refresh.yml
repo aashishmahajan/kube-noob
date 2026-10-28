@@ -1,18 +1,20 @@
 name: corpus-refresh
 
-# Builds the kube-noob corpus in the cloud: public Git docs (with licenses), release history and a jittered pull of the
-# public Red Hat Jira ROX project (RHACS 4.10+). Jira content is not redistributable, so it is uploaded only encrypted
-# (CORPUS_PASSPHRASE secret); everything else is uploaded as a plain artifact.
+# Builds the kube-noob corpus in the cloud: public Git docs (with licenses), release history and a copy of Red Hat's
+# public Jira (every ticket of the default projects, any status) through its REST API, one request per second or
+# slower within a request budget. Jira content is not redistributable, so it is uploaded only encrypted
+# (CORPUS_PASSPHRASE secret); everything else is uploaded as a plain artifact. Import either with
+# kube-noob corpus import <dir-or-tgz>.
 
 on:
   workflow_dispatch:
     inputs:
-      jira_target:
-        description: "Number of ROX issues to keep"
-        default: "1200"
-      min_version:
-        description: "Minimum RHACS version"
-        default: "4.10"
+      jira_projects:
+        description: "Jira projects: default, all, or keys such as OCPBUGS,ROX"
+        default: "default"
+      jira_max_requests:
+        description: "Jira request budget (1+ s apart; 100 tickets per request)"
+        default: "3000"
       git_sources:
         description: "Git sources (comma separated ids or 'all')"
         default: "all"
@@ -25,7 +27,7 @@ permissions:
 jobs:
   corpus:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     env:
       KUBE_NOOB_DATA_DIR: ${{ github.workspace }}/corpus-out
     steps:
@@ -36,33 +38,50 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
-      - name: Jira ROX (jittered pull)
+      - name: Red Hat Jira copy (paced, budgeted)
+        env:
+          JIRA_PROJECTS: ${{ inputs.jira_projects || 'default' }}
+          JIRA_MAX_REQUESTS: ${{ inputs.jira_max_requests || '3000' }}
         run: |
-          kube-noob corpus jira --online --project ROX --min-version "${{ inputs.min_version || '4.10' }}" \
-            --target "${{ inputs.jira_target || '1200' }}" --max-scan 8000 --format json > jira-summary.json
+          kube-noob corpus jira --online --projects "$JIRA_PROJECTS" --max-requests "$JIRA_MAX_REQUESTS" \
+            --format json > jira-summary.json
           python - <<'PY'
-          import json
+          import json, os
           s = json.load(open("jira-summary.json"))
-          print(json.dumps({k: s[k] for k in ("records", "scanned", "requests", "retries", "strategy", "errors",
-                                              "versionsConsidered", "gaFloor")}, indent=1))
-          print(json.dumps(s["insights"], indent=1))
-          by_version = ", ".join(f"{v}={n}" for v, n in s["insights"]["byVersion"][:12])
-          print(f"::notice title=ROX Jira pull::kept={s['records']} scanned={s['scanned']} requests={s['requests']} "
-                f"retries={s['retries']} strategy={s['strategy']} errors={len(s['errors'])}")
-          print(f"::notice title=ROX versions::{by_version}")
-          print(f"::notice title=ROX components::{dict(s['insights']['byComponent'][:10])}")
-          for err in s["errors"][:5]:
-              print("::warning title=ROX Jira strategy error::" + str(err)[:900].replace("%", "%25").replace("\n", " "))
-          minimum = int("${{ inputs.jira_target || '1200' }}") * 5 // 6
-          if s["records"] < minimum:
-              print(f"::error title=ROX Jira pull::only {s['records']} issues kept (< {minimum})")
+          idx = s.get("index") or {}
+          fetched = sum(p["fetched"] for p in s["projects"])
+          print(json.dumps({k: s[k] for k in ("requests", "retries", "stoppedBy", "skipped", "selected")}, indent=1))
+          print(f"::notice title=Jira sync::fetched={fetched} requests={s['requests']} retries={s['retries']} "
+                f"stoppedBy={s['stoppedBy']} visibleProjects={s['visibleProjects']} indexed={idx.get('tickets')}")
+          print(f"::notice title=Jira verdicts::{idx.get('byVerdict')}")
+          import glob
+          total = commented = 0
+          for path in glob.glob(os.path.join(os.environ["KUBE_NOOB_DATA_DIR"], "corpus", "jira-*.jsonl")):
+              for line in open(path, encoding="utf-8"):
+                  rec = json.loads(line)
+                  if str(rec.get("sourceId", "")).startswith("jira:"):
+                      total += 1
+                      commented += "## Comments" in rec["text"]
+          print(f"::notice title=Jira comments::{commented} of {total} tickets carry comments")
+          per = ", ".join(f"{p['project']}={p['total']}{'' if p.get('complete') else '+'}" for p in s["projects"])
+          print(f"::notice title=Jira projects::{per}")
+          for p in s["projects"]:
+              if p.get("error"):
+                  print(f"::warning title=Jira {p['project']}::" + p["error"][:900].replace("%", "%25").replace("\n", " "))
+          if fetched == 0 or not idx.get("tickets"):
+              print("::error title=Jira sync::no tickets fetched or indexed")
               raise SystemExit(1)
-          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as fh:
-              fh.write(f"### ROX issues kept: {s['records']} (scanned {s['scanned']}, strategy {s['strategy']})\n")
-              fh.write("| version | issues |\n|---|---|\n")
-              for v, n in s["insights"]["byVersion"]:
-                  fh.write(f"| {v} | {n} |\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(f"### Red Hat Jira copy: {idx.get('tickets')} tickets, {s['requests']} requests\n")
+              fh.write("| project | tickets | complete |\n|---|---|---|\n")
+              for p in s["projects"]:
+                  fh.write(f"| {p['project']} | {p['total']} | {p.get('complete', False)} |\n")
           PY
+      - name: Known bug lookup works on the fresh copy
+        run: |
+          kube-noob known-issues "ovnkube-node CrashLoopBackOff failed to get node annotation" \
+            --platform openshift --format json > ki.json
+          python -c "import json; k=json.load(open('ki.json')); print('::notice title=Known-issue smoke::' + str([(m['id'], m.get('verdict') or m.get('kind')) for m in k['matches']]))"
       - name: Git documentation sources
         run: |
           kube-noob corpus build --online --sources "${{ inputs.git_sources || 'all' }}" --format json | tee git-summary.json

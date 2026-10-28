@@ -4,6 +4,17 @@
 {{- if and .Values.watch.enabled (gt (int .Values.replicaCount) 1) }}
 {{- fail "watch.enabled keeps one incident ledger: set replicaCount: 1" }}
 {{- end }}
+{{- if .Values.jira.sync.enabled }}
+{{- if (.Values.config.offline | default false) }}
+{{- fail "jira.sync.enabled downloads Red Hat Jira tickets; config.offline forbids it (import a copy instead)" }}
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+{{- fail "jira.sync.enabled keeps a copy that takes hours to build: set persistence.enabled: true" }}
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "jira.sync.enabled syncs from one pod: set replicaCount: 1" }}
+{{- end }}
+{{- end }}
 {{- if and (.Values.config.offline | default false) .Values.config.webEnabled }}
 {{- fail "config.offline locks web access off; unset config.webEnabled (the two contradict each other)" }}
 {{- end }}

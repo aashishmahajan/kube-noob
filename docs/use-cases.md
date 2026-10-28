@@ -81,6 +81,36 @@ kube-noob corpus known-issues --online
 The bundled index is dated (`kube-noob doctor` prints it, and every MCP result carries `knowledgeAsOf`);
 `corpus known-issues --online` refreshes it from the release notes on GitHub.
 
+### Has Red Hat seen this error before?
+
+The release notes list only a few hundred issues. Red Hat's public Jira holds every reported ticket, including the ones
+closed as Not a Bug, Won't Do or Duplicate, which often answer the question faster than a fix would. `corpus jira`
+keeps a local copy of every ticket in the OpenShift, ROSA, ACM and RHACS projects (OCPBUGS, ROX, HOSTEDCP and 25
+more; `jira-projects` lists them), whatever its status. After that, `known-issues`, `diagnose`, `debug` and the
+incident watch also say what became of each matching ticket:
+
+- fixed, in which release, and whether your version already has the fix ("updating to 4.21.3 or later fixes it");
+- open, with a fix merged or proposed;
+- closed as Not a Bug (expected behaviour or a configuration issue), Won't Do, Cannot Reproduce, Obsolete, or as a
+  duplicate of another ticket, which is then followed;
+- the workaround, cause or "why closed" sentence from the latest comments.
+
+```bash
+kube-noob corpus jira-projects --online
+kube-noob corpus jira --online
+kube-noob known-issues 'x509: certificate signed by unknown authority' --version 4.21.1
+kube-noob ticket OCPBUGS-12345 --version 4.21.1
+```
+
+The copy is read through Jira's REST API, never by scraping its web pages, at one request per second or slower (the
+site's robots.txt asks for that), with a request budget per run (`--max-requests`, default 600). Each later run
+fetches only what changed and resumes where a budget stopped it; a request returns up to 100 tickets, and OCPBUGS alone
+has keys past 87,000, so the first copy of the default set completes over several runs. Tickets are public but not
+licensed for redistribution: they stay in
+your data directory (`corpus/jira-*.jsonl` plus a search index in `jira/`), kube-noob never publishes them, and
+`--projects all` or `--projects OCPBUGS,ROX` choose other projects. In the cluster, `jira.sync.enabled` keeps the copy
+current from the service; offline clusters import a copy built elsewhere with `corpus import`.
+
 ### Why was this denied?
 
 `policy explain` reads a denial and explains it policy by policy: Kyverno, OPA Gatekeeper, ValidatingAdmissionPolicy,

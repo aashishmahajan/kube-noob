@@ -161,6 +161,31 @@ jobs:
           assert cfg['watch'] == {'enabled': True, 'intervalSeconds': 60, 'namespaces': ['shop', 'payments']}, cfg
           "
           wt --set replicaCount=1 | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if helm template kn deploy/helm/kube-noob $base --set jira.sync.enabled=true --set replicaCount=1 \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::jira.sync.enabled without persistence must fail to render"; exit 1
+          fi
+          jt() { helm template kn deploy/helm/kube-noob $base --set jira.sync.enabled=true \
+            --set persistence.enabled=true "$@"; }
+          if jt >/dev/null 2>&1; then
+            echo "::error title=chart::jira.sync.enabled with two replicas must fail to render"; exit 1
+          fi
+          if jt --set replicaCount=1 --set config.offline=true >/dev/null 2>&1; then
+            echo "::error title=chart::jira.sync.enabled under config.offline must fail to render"; exit 1
+          fi
+          jt --set replicaCount=1 --set "jira.sync.projects=OCPBUGS\,ROX" --show-only templates/configmap.yaml \
+            | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          want = {'syncEnabled': True, 'projects': 'OCPBUGS,ROX', 'intervalHours': 24, 'maxRequests': 600}
+          assert cfg['jira'] == want, cfg
+          assert Settings.model_validate(cfg).jira.sync_enabled
+          "
+          jt --set replicaCount=1 --show-only templates/networkpolicy.yaml | grep -q "cidr: 0.0.0.0/0"
+          jt --set replicaCount=1 --set egressFirewall.enabled=true --show-only templates/egressfirewall.yaml \
+            | grep -q "dnsName: redhat.atlassian.net"
+          jt --set replicaCount=1 | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"
@@ -262,6 +287,37 @@ jobs:
         run: |
           docker build -f Containerfile -t kube-noob:ci .
           kind load docker-image kube-noob:ci --name kn
+      - name: The image answers from a local Red Hat Jira copy (SQLite FTS5 present)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kn-tickets
+          python - <<'PY'
+          from pathlib import Path
+          from kube_noob.sources.corpus import write_shard
+
+          base = {"sourceId": "jira:OCPBUGS", "license": "public, not redistributable", "redistributable": False,
+                  "issueType": "Bug", "status": "Closed", "retrievedAt": "2026-10-28T00:00:00Z"}
+          recs = [{**base, "id": f"jira-OCPBUGS-{i}", "title": f"OCPBUGS-{i}: pod restarts {i}",
+                   "text": f"Pod restarts in namespace team{i}", "resolution": "Done", "fixVersions": ["4.20.0"]}
+                  for i in range(1, 80)]
+          recs.append({**base, "id": "jira-OCPBUGS-900", "title": "OCPBUGS-900: router cannot load its certificate",
+                       "text": "## Description\n\nhaproxy: unable to load default certificate file\n\n## Comments\n\n"
+                               "Comment (2026-07-01): This is expected behavior: the secret was malformed.",
+                       "resolution": "Not a Bug"})
+          write_shard(Path("/tmp/kn-tickets"), "jira-ocpbugs", recs)
+          PY
+          chmod -R a+rwX /tmp/kn-tickets
+          docker run --rm -e KUBE_NOOB_DATA_DIR=/data -v /tmp/kn-tickets:/data kube-noob:ci \
+            known-issues "router: unable to load default certificate file" --platform openshift --format json \
+            > /tmp/ki.json
+          python -c "
+          import json
+          k = json.load(open('/tmp/ki.json'))
+          top = k['matches'][0]
+          assert top['id'] == 'OCPBUGS-900' and top['verdict'] == 'not-a-bug' and top['exactError'], top
+          assert k['knowledge']['jiraTickets']['tickets'] == 80, k['knowledge']
+          print('::notice title=Image ticket index::' + top['status'])
+          "
       - name: Install chart with read-only cluster tools
         run: |
           kubectl create namespace kube-noob

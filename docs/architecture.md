@@ -29,7 +29,7 @@ flowchart LR
   subgraph Offline["Maintainer / CI (corpus-refresh)"]
     S1[Git docs with license provenance]
     S2[Release history from tags]
-    S3[Jira ROX jittered pull<br/>PII scrubbed]
+    S3[Red Hat Jira copy via REST API<br/>1 req/s, PII scrubbed, local only]
   end
   A & B & C & D --> T
   T --> P --> E & F & K
