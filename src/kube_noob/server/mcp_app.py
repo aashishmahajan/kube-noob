@@ -100,6 +100,63 @@ def _instructions(settings: Settings) -> str:
     )
 
 
+class CallFailed(Exception):
+    """A tool call that did not return: the message is safe to show the caller; status is the HTTP status the REST
+    routes answer with."""
+
+    def __init__(self, status: int, outcome: str, message: str) -> None:
+        super().__init__(message)
+        self.status, self.outcome, self.message = status, outcome, message
+
+
+def run_tool(spec: ToolSpec, kwargs: dict[str, Any], knowledge: str, via: str = "mcp") -> dict[str, Any]:
+    """Validate the arguments, run the tool, stamp knowledgeAsOf and sanitise the result; audit-log the call without
+    its content. Shared by the MCP tools and the REST routes, so both behave the same."""
+    # Anticipated failures (guards, bad input, disabled features) carry their actionable message; anything else stays
+    # an opaque crash whose details remain in the server log.
+    started = time.monotonic()
+    outcome = "ok"
+    try:
+        validated = spec.model.model_validate(kwargs)
+        result: dict[str, Any] = spec.fn(validated)
+        if isinstance(result, dict):
+            # Every answer says how current kube-noob's knowledge is, so the model can tell the user.
+            result.setdefault("knowledgeAsOf", knowledge)
+            # Text from outside (events, logs, tickets, memory, pages) is data: shapes that try to steer the calling
+            # model are neutralised and flagged before the result leaves the server.
+            result = sanitize.result(result)
+        return result
+    except ValidationError as exc:
+        outcome = "invalid-arguments"
+        raise CallFailed(400, outcome, f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from None
+    except (KubeNoobError, ValueError) as exc:
+        outcome = type(exc).__name__
+        raise CallFailed(400, outcome, str(exc)[:MAX_ERROR_CHARS]) from None
+    except KeyError as exc:  # unknown task / chunk / lesson ids
+        outcome = "not-found"
+        raise CallFailed(404, outcome, str(exc.args[0] if exc.args else exc)[:MAX_ERROR_CHARS]) from None
+    except Exception as exc:  # noqa: BLE001 - every unexpected failure becomes an opaque error
+        # Log the failure without its message (which can quote the caller's data); the stack shows where it failed.
+        outcome = "crash"
+        _audit.error(
+            "tool=%s crashed: %s\n%s",
+            TOOL_PREFIX + spec.name,
+            type(exc).__name__,
+            "".join(traceback.format_tb(exc.__traceback__)),
+        )
+        raise CallFailed(500, outcome, f"internal error ({type(exc).__name__}); see the server log") from None
+    finally:
+        # Audit trail without content: which tool, argument names and sizes, outcome, duration.
+        _audit.info(
+            "tool=%s via=%s args=%s outcome=%s ms=%d",
+            TOOL_PREFIX + spec.name,
+            via,
+            {k: len(v) if isinstance(v, str | list | dict) else type(v).__name__ for k, v in kwargs.items()},
+            outcome,
+            (time.monotonic() - started) * 1000,
+        )
+
+
 def _wrapper(spec: ToolSpec, knowledge: str) -> Any:
     """Build an async function whose signature mirrors the tool's Pydantic model (flat MCP arguments)."""
     model = spec.model
@@ -118,49 +175,10 @@ def _wrapper(spec: ToolSpec, knowledge: str) -> Any:
         annotations[arg] = ann
 
     async def tool(**kwargs: Any) -> dict[str, Any]:
-        # Anticipated failures (guards, bad input, disabled features) become ToolError so the calling model sees the
-        # actionable message; anything else stays an opaque crash whose details remain in the server log.
-        started = time.monotonic()
-        outcome = "ok"
         try:
-            validated = model.model_validate(kwargs)
-            result: dict[str, Any] = await anyio.to_thread.run_sync(spec.fn, validated)
-            if isinstance(result, dict):
-                # Every answer says how current kube-noob's knowledge is, so the model can tell the user.
-                result.setdefault("knowledgeAsOf", knowledge)
-                # Text from outside (events, logs, tickets, memory, pages) is data: shapes that try to steer the
-                # calling model are neutralised and flagged before the result leaves the server.
-                result = sanitize.result(result)
-        except ValidationError as exc:
-            outcome = "invalid-arguments"
-            raise ToolError(f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from exc
-        except (KubeNoobError, ValueError) as exc:
-            outcome = type(exc).__name__
-            raise ToolError(str(exc)[:MAX_ERROR_CHARS]) from exc
-        except KeyError as exc:  # unknown task / chunk / lesson ids
-            outcome = "not-found"
-            raise ToolError(str(exc.args[0] if exc.args else exc)[:MAX_ERROR_CHARS]) from exc
-        except Exception as exc:  # noqa: BLE001 - every unexpected failure becomes an opaque error
-            # Log the failure without its message (which can quote the caller's data) and hand the client an
-            # opaque error; the stack shows where it failed.
-            outcome = "crash"
-            _audit.error(
-                "tool=%s crashed: %s\n%s",
-                TOOL_PREFIX + spec.name,
-                type(exc).__name__,
-                "".join(traceback.format_tb(exc.__traceback__)),
-            )
-            raise ToolError(f"internal error ({type(exc).__name__}); see the server log") from None
-        finally:
-            # Audit trail without content: which tool, argument names and sizes, outcome, duration.
-            _audit.info(
-                "tool=%s args=%s outcome=%s ms=%d",
-                TOOL_PREFIX + spec.name,
-                {k: len(v) if isinstance(v, str | list | dict) else type(v).__name__ for k, v in kwargs.items()},
-                outcome,
-                (time.monotonic() - started) * 1000,
-            )
-        return result
+            return await anyio.to_thread.run_sync(run_tool, spec, kwargs, knowledge)
+        except CallFailed as exc:
+            raise ToolError(exc.message) from None
 
     tool.__name__ = TOOL_PREFIX + spec.name
     tool.__doc__ = spec.description
@@ -185,7 +203,9 @@ def _forbid_unknown_arguments(mcp: MCPServer, name: str) -> None:
     tool.parameters["additionalProperties"] = False
 
 
-def build_server(settings: Settings, *, shared: bool = False) -> MCPServer:
+def build_server(settings: Settings, *, shared: bool = False, rest: Any = None) -> MCPServer:
+    """``rest``: the HTTP server's TransportSecuritySettings; given, the REST routes (``kube_noob.server.rest``) are
+    added beside MCP with the same Host and Origin checks."""
     toolkit = Toolkit(settings, shared=shared)
     mcp = MCPServer(
         name="kube_noob_mcp",
@@ -318,6 +338,12 @@ def build_server(settings: Settings, *, shared: bool = False) -> MCPServer:
                 {"id": t["id"], "title": t["title"], "summary": t.get("summary", "")} for t in curriculum()["tracks"]
             ]
         }
+
+    if rest is not None:
+        from kube_noob.server import rest as rest_routes
+
+        specs = toolkit.specs()
+        rest_routes.register(mcp, specs, lambda spec, args: run_tool(spec, args, knowledge, "rest"), rest)
 
     @mcp.custom_route("/healthz", methods=["GET"])
     async def healthz(_: Request) -> Response:

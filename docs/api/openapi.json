@@ -1,0 +1,1185 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "kube-noob REST API",
+  "version": "1.0.0",
+  "description": "The kube-noob tools as JSON over HTTP, beside MCP. Bearer token as for MCP."
+ },
+ "components": {
+  "schemas": {
+   "AuditIn": {
+    "additionalProperties": false,
+    "properties": {
+     "manifests": {
+      "description": "One or more YAML documents (Kubernetes/OpenShift objects).",
+      "maxLength": 1000000,
+      "minLength": 1,
+      "title": "Manifests",
+      "type": "string"
+     },
+     "platform": {
+      "default": "kubernetes",
+      "description": "Target platform.",
+      "enum": [
+       "kubernetes",
+       "openshift",
+       "rosa-classic",
+       "rosa-hcp"
+      ],
+      "title": "Platform",
+      "type": "string"
+     },
+     "version": {
+      "anyOf": [
+       {
+        "maxLength": 16,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Platform version, e.g. '4.22' (OCP) or '1.35'.",
+      "title": "Version"
+     },
+     "exceptions": {
+      "anyOf": [
+       {
+        "maxLength": 1000000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "An exception list (YAML, apiVersion kube-noob.io/v1, kind ExceptionList): each entry names a rule, a scope, an owner, a reason and an expiry date. Active entries hide the findings they cover; expired and refused entries are reported and fail the gate.",
+      "title": "Exceptions"
+     },
+     "min_severity": {
+      "default": "low",
+      "description": "Hide findings below this severity.",
+      "enum": [
+       "info",
+       "low",
+       "medium",
+       "high",
+       "critical"
+      ],
+      "title": "Min Severity",
+      "type": "string"
+     },
+     "stages": {
+      "items": {
+       "enum": [
+        "validate",
+        "audit",
+        "calibrate",
+        "red-team"
+       ],
+       "type": "string"
+      },
+      "title": "Stages",
+      "type": "array"
+     }
+    },
+    "required": [
+     "manifests"
+    ],
+    "title": "AuditIn",
+    "type": "object"
+   },
+   "DiagnoseIn": {
+    "additionalProperties": false,
+    "properties": {
+     "text": {
+      "description": "Events, `describe` output, logs, CLI errors, status JSON or an Alertmanager webhook payload (its alerts are read as text; an `openshift_version` or `version` label gives the version).",
+      "maxLength": 400000,
+      "minLength": 3,
+      "title": "Text",
+      "type": "string"
+     },
+     "platform": {
+      "anyOf": [
+       {
+        "enum": [
+         "kubernetes",
+         "openshift",
+         "rosa-classic",
+         "rosa-hcp"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Platform"
+     },
+     "version": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The cluster's OpenShift version (4.20 or 4.20.8): leaves out reported issues already fixed there.",
+      "title": "Version"
+     },
+     "limit": {
+      "default": 5,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "DiagnoseIn",
+    "type": "object"
+   },
+   "EmptyIn": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "EmptyIn",
+    "type": "object"
+   },
+   "InsightIn": {
+    "additionalProperties": false,
+    "properties": {
+     "text": {
+      "description": "Anything pasted: events, describe output, logs, an Alertmanager payload, a policy denial, a ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.",
+      "maxLength": 400000,
+      "minLength": 3,
+      "title": "Text",
+      "type": "string"
+     },
+     "platform": {
+      "anyOf": [
+       {
+        "enum": [
+         "kubernetes",
+         "openshift",
+         "rosa-classic",
+         "rosa-hcp"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Platform"
+     },
+     "version": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Version"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "InsightIn",
+    "type": "object"
+   },
+   "KnownIssuesIn": {
+    "additionalProperties": false,
+    "properties": {
+     "text": {
+      "description": "An error message, events, logs or a symptom in words.",
+      "maxLength": 100000,
+      "minLength": 3,
+      "title": "Text",
+      "type": "string"
+     },
+     "platform": {
+      "anyOf": [
+       {
+        "enum": [
+         "kubernetes",
+         "openshift",
+         "rosa-classic",
+         "rosa-hcp"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Platform"
+     },
+     "version": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The cluster's OpenShift version (4.20 or 4.20.8): keeps only issues that can affect it.",
+      "title": "Version"
+     },
+     "limit": {
+      "default": 3,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "KnownIssuesIn",
+    "type": "object"
+   },
+   "MemoryMatchIn": {
+    "additionalProperties": false,
+    "properties": {
+     "text": {
+      "description": "An error, events, logs, a symptom in words or an Alertmanager webhook payload.",
+      "maxLength": 400000,
+      "minLength": 3,
+      "title": "Text",
+      "type": "string"
+     },
+     "version": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The cluster's OpenShift version: entries already fixed there are shown as retired.",
+      "title": "Version"
+     },
+     "platform": {
+      "anyOf": [
+       {
+        "enum": [
+         "kubernetes",
+         "openshift",
+         "rosa-classic",
+         "rosa-hcp"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Platform"
+     },
+     "operators": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "description": "Installed operators and their versions, name -> version.",
+      "maxProperties": 20,
+      "title": "Operators",
+      "type": "object"
+     },
+     "include_proposed": {
+      "default": false,
+      "description": "Also show entries not yet approved by a reviewer.",
+      "title": "Include Proposed",
+      "type": "boolean"
+     },
+     "limit": {
+      "default": 5,
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "MemoryMatchIn",
+    "type": "object"
+   },
+   "MustGatherIn": {
+    "additionalProperties": false,
+    "properties": {
+     "path": {
+      "description": "Absolute path of a must-gather directory or .tar, .tar.gz or .tgz archive on the machine the server runs on (under mustGather.allowedDir when it is set). Nothing is extracted or run; Secrets are never read.",
+      "maxLength": 4096,
+      "minLength": 2,
+      "pattern": "^[^\\x00]+$",
+      "title": "Path",
+      "type": "string"
+     },
+     "top": {
+      "default": 50,
+      "description": "How many findings to return, most severe first.",
+      "maximum": 500,
+      "minimum": 1,
+      "title": "Top",
+      "type": "integer"
+     },
+     "case_draft": {
+      "default": false,
+      "description": "Also return caseDraft: a support case draft with placeholders for what only you know.",
+      "title": "Case Draft",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "MustGatherIn",
+    "type": "object"
+   },
+   "NetpolCheckIn": {
+    "additionalProperties": false,
+    "properties": {
+     "source": {
+      "description": "Where the connection starts: namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod labels, or an IP address / CIDR outside the cluster.",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Source",
+      "type": "string"
+     },
+     "destination": {
+      "description": "Where it goes: namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod labels, or an IP address / CIDR outside the cluster.",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Destination",
+      "type": "string"
+     },
+     "port": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "description": "Destination port number (1-65535) or a named container port.",
+      "title": "Port"
+     },
+     "protocol": {
+      "default": "TCP",
+      "enum": [
+       "TCP",
+       "UDP",
+       "SCTP"
+      ],
+      "title": "Protocol",
+      "type": "string"
+     },
+     "platform": {
+      "anyOf": [
+       {
+        "enum": [
+         "kubernetes",
+         "openshift",
+         "rosa-classic",
+         "rosa-hcp"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Platform"
+     },
+     "manifests": {
+      "description": "The NetworkPolicies and the workloads they apply to (Deployments, Pods ...); add Namespace objects when policies select namespaces by label.",
+      "maxLength": 1000000,
+      "minLength": 1,
+      "title": "Manifests",
+      "type": "string"
+     },
+     "default_namespace": {
+      "default": "default",
+      "description": "For objects without one.",
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "title": "Default Namespace",
+      "type": "string"
+     }
+    },
+    "required": [
+     "source",
+     "destination",
+     "port",
+     "manifests"
+    ],
+    "title": "NetpolCheckIn",
+    "type": "object"
+   },
+   "Error": {
+    "type": "object",
+    "properties": {
+     "error": {
+      "type": "string"
+     },
+     "outcome": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "error"
+    ]
+   }
+  },
+  "securitySchemes": {
+   "bearer": {
+    "type": "http",
+    "scheme": "bearer"
+   }
+  }
+ },
+ "security": [
+  {
+   "bearer": []
+  }
+ ],
+ "paths": {
+  "/v1/insight": {
+   "post": {
+    "operationId": "post_insight",
+    "summary": "Paste anything: recognised, routed to every analyser, one answer",
+    "description": "Start here for anything the user pastes. Names what the input is (events, pod status, logs, an Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at once) and runs every analyser that applies: diagnosis with reported issues and team memory, the denial explainer, the audit, the documentation. Returns every finding with its source, read-only next steps and what was not analysed and why. Read-only, local.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/InsightIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/diagnose": {
+   "post": {
+    "operationId": "post_diagnose",
+    "summary": "Diagnose an error, events or logs: cause and read-only steps first",
+    "description": "Match pasted events / describe output / logs / CLI errors or an Alertmanager webhook payload against troubleshooting playbooks, ranked by matching patterns and by the signals the text carries (alert names, reasons); returns the signals, ranked root causes, read-only checks with names filled in, fixes, reported issues for the version and policy denials.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DiagnoseIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/audit": {
+   "post": {
+    "operationId": "post_audit_manifests",
+    "summary": "Audit manifests against the rules for a platform and version",
+    "description": "Full deterministic audit: security, network exposure, storage access modes, reliability and red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS policy names.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AuditIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/known-issues": {
+   "post": {
+    "operationId": "post_known_issues",
+    "summary": "Reported OpenShift bugs that match a text, with fix versions",
+    "description": "Match an error or symptom against the issues listed in the OpenShift release notes (known issues and issues fixed in each update) and, when this install keeps a local copy of Red Hat's public Jira, against those tickets too. Returns the issue id and link, what became of it (fixed and in which version, still open, closed as not a bug, won't fix or a duplicate), the workaround and Red Hat's remarks from the comments; with `version`, only issues that can affect that version.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/KnownIssuesIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/policy/reach": {
+   "post": {
+    "operationId": "post_check_network_policy",
+    "summary": "Can pod A reach pod B under these NetworkPolicies?",
+    "description": "Evaluate NetworkPolicies offline: can the source reach the destination on this port? Checks egress from the source and ingress to the destination, names the policy and rule that decide each, says why the other rules did not match, and proposes the smallest NetworkPolicy that would allow it.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/NetpolCheckIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/memory/match": {
+   "post": {
+    "operationId": "post_memory_match",
+    "summary": "Your team's approved memory entries for an error",
+    "description": "Approved entries from your team's memory repositories (memory.paths) for an error, symptom or Alertmanager payload: signals first, then distinctive words. Each entry says whether it is a fix, a runbook, something tried that did not work, or retired for the given version, with how often it was applied and resolved. Cite as [mem:MEM-<n>].",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/MemoryMatchIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/reports": {
+   "get": {
+    "operationId": "get_posture_report",
+    "summary": "The newest daily drift and policy report",
+    "description": "The newest daily report in this install's data folder: objects added, removed and changed since the previous snapshot (with the fields that changed), findings new and fixed, and open findings by namespace, owner and rule. Local data only.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "operationId": "post_posture_report",
+    "summary": "The newest daily drift and policy report",
+    "description": "The newest daily report in this install's data folder: objects added, removed and changed since the previous snapshot (with the fields that changed), findings new and fixed, and open findings by namespace, owner and rule. Local data only.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmptyIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/must-gather": {
+   "post": {
+    "operationId": "post_analyze_must_gather",
+    "summary": "What is wrong in a must-gather on the server's volume",
+    "description": "Open an OpenShift must-gather (or oc adm inspect output) safely and say what is wrong, most severe first: the cluster version and update, cluster operators, nodes, machine config pools, OLM operators, pods, warning events and etcd log hints. Each finding has its evidence file, its signals, read-only commands to confirm it, and the known OpenShift bugs and team memory entries that match it for the version the cluster runs. Nothing is extracted or run and Secrets are never read. Paths must be inside /srv/kube-noob/must-gather.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/MustGatherIn"
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

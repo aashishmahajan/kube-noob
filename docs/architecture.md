@@ -60,6 +60,12 @@ flowchart LR
   Pasted payloads are data too: an Alertmanager payload is read as JSON only (2 MB, 500 alerts, 64 labels, 2,000
   characters per value, control characters dropped), and only an OpenShift release label sets the version.
 - The HTTP transport authenticates with a bearer token (constant time) unless bound to loopback (sidecar).
+- REST routes (`kube_noob.server.rest`, `/v1/...`) sit beside MCP on the same app and run the same toolkit call
+  (`mcp_app.run_tool`: validation, sanitising, `knowledgeAsOf`, the content-free audit line, now with `via=rest`).
+  Trust boundary: the caller holding the token. They pass the bearer check and body limit first, then the MCP
+  transport's Host and Origin checks; a POST must be `application/json`, so a cross-site form cannot reach a tool.
+  Only the tools the shared server offers have routes. `docs/api/openapi.json` is generated from the tools' models
+  (`scripts/gen_openapi.py`) and a test keeps it equal to the code.
 - Outbound HTTP only through `kube_noob.net`: web purpose requires `webEnabled` and allowlisted HTTPS hosts on every
   hop, GET only; `web_fetch` refuses non-text content types before reading the body. LLM and in-cluster API clients
   are separate, explicit purposes.

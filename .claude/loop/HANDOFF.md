@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 (G1 and G2 done; SAST1 red-team fixes, G3 and G5 committed; CI 40693984760 covers SAST1+G3, then dispatch for G5).
+right now; STATE.md says what is done. Updated 2026-10-28 (SAST1, G1, G2, G3 done; G5 and I6 committed, CI next; owner's questions CSV eval in progress).
 
 ## Repository and branch
 
