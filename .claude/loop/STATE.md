@@ -22,6 +22,22 @@ Statuses: `todo`, `in-progress`, `done`, `blocked` (reason and the exact questio
 | 13 | T1 | Offline ticket importers (ServiceNow, Jira) | MEM2 | done | `memory import --from servicenow-json|servicenow-csv|jira-json|jira-csv -f` (`--format` stays the output format), 55 synthetic tickets per format in tests/fixtures/tickets (generate.py), PII and credential removal, skip reasons, rerun dedupe, dry run; tests/test_memory_import.py (23) |
 | 14 | T2 | `memory replay` harness (the 30% gate) | T1 | done | `memory replay --memory --tickets --from [--labels] [--as-of-ticket-date] [--approved-only] [--out]`; query = title + description only, self-matches excluded, imported entries dated at resolution; report.md + report.json; tests/test_memory_replay.py (8): 50 seed + 20 replay = 14/20 hits, useful 50% passes the gate |
 | 15 | V1 | Prompt-injection sanitiser | F1 | todo | |
+| 15a | J1 | Full anonymised Jira text: every comment, per-ticket pseudonyms (Commenter A...), 1 MB cap reported (requirements R1.1) | E4c | todo | owner answer 2026-10-28: full text with comments, anonymised |
+| 15b | J2 | `corpus jira-audit`: counts, comment share, key gaps, scrubber hits (R1.2) | J1 | todo | |
+| 15c | INS1 | `kubenoob_insight` / `kube-noob insight`: input kinds, routing to every analyser, merged answer, spec index (R2) | V1, J1 | todo | eval 300 labelled inputs, precision/recall >= 0.95 |
+| 15d | RT1 | Red-team phase 1 by a separate reviewer; fix findings as regression tests | 15, 15a-15c | todo | |
+| 15e | DB1 | Public `kube-noob-db` image (shareable data only), signed, chart init container by digest (R1.3) | J2 | todo | CI fails on any redistributable:false file |
+| 15f | DB2 | Private `kube-noob-db-jira` image built by the org workflow, optional key from a Secret, `jira.sync` toggle (R1.4, R1.5) | DB1 | todo | needs owner registry choice |
+| 15g | SEC1 | Red Hat CSAF/VEX advisory data in kube-noob-db, licence allowlist per source (R5.5) | DB1 | todo | Red Hat security data CC BY 4.0 verified |
+| 15h | POL1 | Generate VAP (CEL) and Kyverno policies from rules, with fixture tests per rule (R3.1, R3.6) | F3 | todo | |
+| 15i | POL2 | Posture scan with attack paths, read-only (R3.2) | F3 | todo | |
+| 15j | POL3 | Daily drift and policy report (R3.4); exceptions as code (R3.5); RHACS policy import (R3.7) | POL1, POL2 | todo | |
+| 15k | BLD1 | Build failure diagnosis (R4.1) and Containerfile/image audit (R4.2) | S1 | todo | |
+| 15l | BLD2 | CI gate (R4.3) and build/test analytics (R4.4) | BLD1, POL1 | todo | |
+| 15m | VUL1 | Scanner and SBOM input, VEX, reachability ranking, STRIDE threat model (R5.1-R5.4) | SEC1, POL2 | todo | KEV and ATT&CK terms to verify |
+| 15n | ADM1 | `kube-noob-admission` webhook, warn by default, enforce opt-in per rule, tier A (R3.3) | POL1 | todo | |
+| 15o | LT1 | Load-test tier L, one namespace, capped, approval per run (R6.3); metrics and stale-copy rule (R6.5) | F3 | todo | needs owner-approved load image |
+| 15p | RT2 | Red-team phases 2-5 by a separate reviewer; end-to-end validation in kind (and OpenShift when provided) | all above | todo | |
 | 16 | G1 | Must-gather safe ingest | S1 | todo | |
 | 17 | G2 | Must-gather analysers | G1, S3 | todo | |
 | 18 | G3 | Must-gather report and case draft; demo | G2, MEM4, V1 | todo | |
@@ -37,7 +53,7 @@ Statuses: `todo`, `in-progress`, `done`, `blocked` (reason and the exact questio
 | 28 | E3 | Kubernetes and RHACS known issues | S3 | todo | |
 | 29 | E4 | Customer-side Jira cache | S3 | done | Shipped on main in 0.5.0 before this loop: `corpus jira` full sync of 28 projects, FTS5 ticket index, verdicts in known-issues/diagnose/watch, `ticket` tool, chart `jira.sync`; live CI on 7,700 OCPBUGS tickets |
 | 29b | E4b | Jira matches filtered and ranked by the cluster's components and installed operators (from E2 inventory or a must-gather) | E4, E2, G2 | todo | remainder of E4 |
-| 29c | E4c | Jira main copy (owner request 2026-10-28): change tracking, open tickets first, `corpus jira-changes` + `kubenoob_ticket_changes`, `corpus jira-snapshot`, seed on serve start, chart `jira.seed`, daily incremental corpus-refresh | E4 | in-progress | tests/test_jira_main_copy.py (26), test_tickets.py updated (36), test_distribution cadence test; plugin ships ticket_changes without the Jira client; awaiting CI (chart guards for jira.seed run only in CI: helm not installable here) |
+| 29c | E4c | Jira main copy (owner request 2026-10-28): change tracking, open tickets first, `corpus jira-changes` + `kubenoob_ticket_changes`, `corpus jira-snapshot`, seed on serve start, chart `jira.seed`, daily incremental corpus-refresh | E4 | done | CI 40625618385 green on 4c64ab8 (chart jira.seed guards included); live corpus-refresh 40625621514 (scope jira, OCPBUGS+ROX, 300 requests): fetched 29,601, indexed 26,826, open-first 4,778 open OCPBUGS tickets in the first run, recall 43/50, generic errors 0, jira-main-copy-encrypted 27 MB uploaded; tests/test_jira_main_copy.py (26), test_tickets.py updated (36), test_distribution cadence test; plugin ships ticket_changes without the Jira client |
 | 30 | E5 | Customer Portal research doc | - | todo | |
 | 31 | I2 | SARIF, GitHub Action, pre-commit, Tekton | F1 | todo | |
 | 32 | I9 | runbooks.yaml, report and /metrics, lightspeed-config, diagnose --brief | MEM2 | todo | |
@@ -112,6 +128,10 @@ which ships tested and documented on its own.
 - Set the `CORPUS_PASSPHRASE` repository secret (without it the daily Jira main copy cannot be kept between runs),
   optionally `JIRA_EVERY_DAYS=2`, and build the private seed image from the decrypted snapshot (docs/use-cases.md,
   "One main copy for the whole organisation").
+- Requirements doc (https://claude.ai/artifact/WjUWqoNzVZkgruxo9CYGzu) open questions: an OpenShift 4.20/4.22 cluster for
+  CI, the private registry and key holder for kube-noob-db-jira, the approved load image for tier L, RHACS read access.
+- Plugin directory: the listing is in review (held: "Runs a pinned npx or uvx package", always reviewed); the portal
+  reviewed v0.2.3 while main is 0.5.0. Optional: Check for new commits, set up push updates (repo admin).
 - Approve version bumps, tags, releases and pull requests.
 
 ## Verification sources (append as facts are verified)
@@ -144,6 +164,8 @@ which ships tested and documented on its own.
 | etcd error strings (leader changed, no leader, database space exceeded, apply request took too long) | etcd-io/etcd api/v3rpc/rpctypes/error.go; server/etcdserver/txn/util.go | 2026-10-28 | data/signals.yaml aliases |
 | kubelet "pleg was last seen active" | kubernetes/kubernetes pkg/kubelet/pleg/generic.go | 2026-10-28 | data/signals.yaml aliases |
 | Jira JQL `statusCategory in ("To Do","In Progress")` finds open issues (categories To Do, In Progress, Done) | https://support.atlassian.com/jira/kb/how-to-search-using-statuscategory-statuscategorychangeddate-function-with-jql/ | 2026-10-28 | sources/jira.py OPEN_JQL |
+| Red Hat security data (CSAF, VEX, OSV, SBOM) is licensed CC BY 4.0: credit Red Hat and link the original | https://access.redhat.com/security/data | 2026-10-28 | requirements R1.3, R5.5 |
+| Plugin directory: "Runs a pinned npx or uvx package" (uv run --locked) is always held for a reviewer; scheduled check about every 6 hours | https://claude.com/docs/plugins/pre-submission-checklist ; https://claude.com/docs/plugins/submit | 2026-10-28 | owner report |
 
 ## Blocked and unverified
 
@@ -162,6 +184,7 @@ which ships tested and documented on its own.
 
 ## Iteration log (newest first; at most 10 lines per entry)
 
+- 2026-10-28 owner program: requirements doc written with the owner's answers (private org Jira db with full anonymised text; policy: VAP/Kyverno generation, posture scan, admission webhook, drift reports; build: diagnosis, Containerfile audit, CI gate, analytics; vulnerability and threat assessment; network judgement: passive + tier P + new tier L, no node capture). Queue rows 15a-15p added after V1. E4c done: CI 40625618385 green, live corpus-refresh 40625621514 green (numbers in the row). Plugin directory reviewed read-only in the portal: In review, held for content policy (pinned uv package), v0.2.3 reviewed while main is 0.5.0.
 - 2026-10-28 E4c (owner request: keep a main copy of Jira, sync daily or every 2 days, reconcile open tickets, nobody waits for a first sync): sync records status/resolution/fix-version changes per ticket to jira/changes.jsonl (fixed, not-a-bug, reopened, fix-version, opened...); a new copy runs an open-tickets pass (statusCategory To Do/In Progress) before the backfill; `corpus jira-changes` and MCP `ticket_changes` read it offline; `corpus jira-snapshot` packs shards+state+changes, `corpus import` validates checksums and baseUrl before copying and resumes forward-only; serve imports <dataDir>/seed/*.tgz once; chart jira.seed image|pvc; corpus-refresh daily (JIRA_EVERY_DAYS 1|2), restores the previous encrypted copy, step summary, uploads jira-main-copy-encrypted. Local proof: workflow steps run against a seeded copy (summary table rendered), encrypt/decrypt/import round trip, actionlint clean, audit of the seed init container has no findings.
   CLI (synthetic copy): `corpus jira-changes --since 2d` -> 'changes since ...: 1 fix-version, 1 fixed, 1 opened, 1 reopened' / 'OCPBUGS-103 fixed fix-proposed -> fixed (fix 4.22.1)' / 'open tickets: 2 (OCPBUGS 2 open)'; `corpus jira-snapshot` -> '6 tickets (OCPBUGS, ROX), 4 changes'; import -> stateProjects [OCPBUGS, ROX], changes 4. Live Jira from this container: refused by the egress proxy (redhat.atlassian.net not allowed), not retried; proven by dispatching corpus-refresh (scope jira) in CI. check.sh: 646 passed, 1 skipped, selftest 61/61.
 - 2026-10-28 T2: memory/replay.py replays tickets by opened date (Jira created / ServiceNow opened_at, now parsed), matching only what was known at open time; match() gained keep= to drop the entry the ticket became and, with --as-of-ticket-date, entries created on or after the ticket; imported entries are now created on their ticket's resolution date. Labels YAML (true/false or yes/no) give the useful-match rate against the 30% gate; without labels the gate is 'not measured'. Proof (test fixture): 50 seed tickets -> 50 entries; replay of 20 -> 'Hits | 14 of 20 (70%)', useful 10/20 = 50% PASSED; same tickets dated August with --as-of -> 0 hits. Next: V1.
