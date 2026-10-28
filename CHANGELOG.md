@@ -131,6 +131,9 @@
   prefixed and the bare name as one piece of evidence. A question that names AWS Security Hub gets no document. Golden
   set unchanged (72 of 96 in scope, 18 of 23 out of scope left unanswered). Train half: 4 answers moved (2 better, 1
   worse, 1 neither); test half, not tuned on: 10 moved, 6 better, 2 worse, 2 neither (independent grader).
+- Questions about Falco or NeuVector get no document (golden rhacs-019 and rhacs-020 had drawn the RHACS default
+  policies and the image document). Golden RHACS out of scope 4 of 4 left unanswered (was 2); community test half: 2
+  answers moved, both better (independent grader).
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

@@ -300,8 +300,7 @@
     Security / StackRox.'
   source: {}
   outOfScope: true
-  status: miss
-  gap: 'abstain: kn:stackrox#3 (RHACS default policies) should not have fired on a Falco rule question'
+  status: abstain
 - id: rhacs-020
   technology: rhacs
   kind: out-of-scope
@@ -310,5 +309,4 @@
     from Red Hat Advanced Cluster Security / StackRox.'
   source: {}
   outOfScope: true
-  status: miss
-  gap: 'abstain: kn:k8s-images#0 (image pull and tag guidance) should not have fired on a NeuVector question'
+  status: abstain

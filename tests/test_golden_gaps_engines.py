@@ -408,3 +408,14 @@ def test_an_rhacs_webhook_that_could_not_be_called_is_not_a_denial() -> None:
         'admission webhook "policyeval.stackrox.io" denied the request: The attempted operation violated 1 enforced'
     )
     assert [d for d in explain(denied)["denials"] if d["engine"] == "rhacs"]
+
+
+def test_other_container_security_products_get_no_documents(kit: tk.Toolkit) -> None:
+    # Golden rhacs-019 (Falco) and rhacs-020 (NeuVector) drew the debug-pods, RHACS default-policy and image documents.
+    # No bundled document names either product.
+    for text in (
+        "Write me a Falco rule that alerts when someone opens an interactive shell in a running container, with its "
+        "condition and output.",
+        "NeuVector admission control: how do I reject images pulled from registries we have not approved?",
+    ):
+        assert _top(kit, text) == [], text
