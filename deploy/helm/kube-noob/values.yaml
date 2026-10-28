@@ -81,6 +81,16 @@ watch:
   enabled: false
   intervalSeconds: 60
 
+posture:
+  report:
+    # Daily drift and policy report: one read-only snapshot a day (hashes and names, never values or Secrets),
+    # compared with yesterday's: objects added, removed and changed, findings new and fixed, open findings by
+    # namespace and owner. Kept on the PVC in <dataDir>/posture; the MCP tool posture_report returns the newest.
+    # Reads the release namespace and rbac.namespaces (every namespace with rbac.scope: cluster). Needs
+    # config.clusterEnabled, persistence.enabled and replicaCount 1.
+    enabled: false
+    keep: 14                 # snapshots (and their reports) kept, newest first
+
 jira:
   # Local copy of Red Hat's public Jira (redhat.atlassian.net) so answers can say "reported as OCPBUGS-12345: fixed in
   # 4.21.3" or "closed as Not a Bug". The sync reads tickets through Jira's REST API, at most one request per second

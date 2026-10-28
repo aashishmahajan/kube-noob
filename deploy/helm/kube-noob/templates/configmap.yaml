@@ -25,6 +25,16 @@ data:
         {{- range .Values.rbac.namespaces }}
         - {{ . | quote }}
         {{- end }}
+    posture:
+      reportEnabled: {{ .Values.posture.report.enabled }}
+      keep: {{ .Values.posture.report.keep }}
+      {{- if ne .Values.rbac.scope "cluster" }}
+      namespaces:
+        - {{ .Release.Namespace | quote }}
+        {{- range .Values.rbac.namespaces }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
     probe:
       enabled: {{ .Values.probe.enabled }}
     dryRun:

@@ -500,6 +500,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-above", type=int, default=None, help="exit 1 when a path scores above this (CI gate; max score 30)"
     )
 
+    def snap_source(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("-f", "--file", action="append", default=[], help="YAML file or directory; repeat for several")
+        sp.add_argument("--live", action="store_true", help="read the cluster (read-only, never Secrets)")
+        sp.add_argument(
+            "-n", "--namespace", dest="namespaces", action="append", default=[], help="with --live: only these; repeat"
+        )
+        sp.add_argument("--platform", choices=PLATFORMS)
+        sp.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
+        sp.add_argument("--exceptions", default=None, help="exception list: excepted findings are not counted open")
+
+    pss = posub.add_parser("snapshot", help="Record the objects' hashes and today's findings (no values) to a file")
+    snap_source(pss)
+    pss.add_argument("-o", "--output", required=True, help="the snapshot file (JSON)")
+    pdf = posub.add_parser("diff", help="What changed between two snapshots: objects, new and fixed findings, owners")
+    pdf.add_argument("old", help="the earlier snapshot")
+    pdf.add_argument("new", help="the later snapshot")
+    pdf.add_argument("--markdown", default=None, help="also write the report as Markdown here")
+    prp = posub.add_parser(
+        "report",
+        help="Snapshot now, compare with the newest snapshot kept, write the report (the daily job)",
+        description="Keeps snapshots and reports in --state-dir (default <dataDir>/posture), the newest --keep of "
+        "them. Example: kube-noob --cluster-enabled posture report --live",
+    )
+    snap_source(prp)
+    prp.add_argument("--state-dir", default=None, help="where snapshots and reports are kept")
+    prp.add_argument("--keep", type=int, default=None, help="snapshots to keep (default posture.keep, 14)")
+
     wt = sub.add_parser(
         "watch",
         help="Watch namespaces read-only: open, explain and remember incidents (needs cluster access)",
@@ -1221,6 +1248,13 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             )
         else:
             print("jira sync: off (the copy changes only when a newer seed is imported)", file=sys.stderr)
+        if s.posture.report_enabled:
+            if not s.cluster.enabled:
+                raise ConfigError("posture.reportEnabled reads the cluster: set cluster.enabled (read-only)")
+            from kube_noob.drift_schedule import start_background as start_report
+
+            rep = start_report(s)
+            print(f"posture report: first in {rep.first_delay:.0f} s, then every 24 h +/- 10%", file=sys.stderr)
         uvicorn.run(
             app,
             host=s.server.host,
@@ -1461,8 +1495,81 @@ def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     return 0
 
 
+def _snapshot_from_args(a: argparse.Namespace, s: Settings) -> dict[str, Any]:
+    from kube_noob import drift
+    from kube_noob.audit import exceptions as exc
+
+    rev = exc.review(_read(a.exceptions)) if a.exceptions else None
+    platform = a.platform or s.default_platform or "kubernetes"
+    if a.live:
+        if a.file:
+            raise ConfigError("pass -f manifests or --live, not both")
+        if not s.cluster.enabled:
+            raise ConfigError("--live needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
+        from kube_noob.debug.cluster import get_backend
+
+        objects, not_read = drift.collect_live(get_backend(s), a.namespaces or list(s.posture.namespaces))
+        for line in not_read[:5]:
+            print(f"not read: {line}", file=sys.stderr)
+        return drift.snapshot(objects, source="live", platform=platform, version=a.pversion, exceptions=rev)
+    if not a.file:
+        raise ConfigError("pass the manifests with -f (repeat for several), or --live with --cluster-enabled")
+    if a.namespaces:
+        raise ConfigError("-n works with --live; with -f every namespace in the files is recorded")
+    from kube_noob.yamlio import load_documents
+
+    docs = load_documents("\n---\n".join(_read(f) for f in a.file))
+    return drift.snapshot(
+        (d.data for d in docs), source="manifests", platform=platform, version=a.pversion, exceptions=rev
+    )
+
+
+def _print_drift(rep: dict[str, Any]) -> None:
+    from kube_noob import drift
+
+    _tprint(drift.markdown(rep))
+
+
+def _posture_drift(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    from kube_noob import drift
+    from kube_noob.audit.exceptions import ExceptionsError
+
+    try:
+        if a.posture_cmd == "diff":
+            rep = drift.diff(drift.load(Path(a.old)), drift.load(Path(a.new)))
+            if a.markdown:
+                Path(a.markdown).write_text(drift.markdown(rep), encoding="utf-8")
+            _print_drift(rep) if a.format == "text" else _emit(rep, fmt)
+            return 0
+        snap = _snapshot_from_args(a, s)
+        if a.posture_cmd == "snapshot":
+            out = Path(a.output)
+            out.write_text(json.dumps(snap, sort_keys=True), encoding="utf-8")
+            out.chmod(0o600)
+            summary = {"output": str(out), "objects": len(snap["objects"]), "findings": len(snap["findings"])}
+            if a.format == "text":
+                n_obj, n_find = summary["objects"], summary["findings"]
+                _tprint(f"wrote {out}: {n_obj} objects, {n_find} findings (hashes, no values)")
+            else:
+                _emit(summary, fmt)
+            return 0
+        state = Path(a.state_dir) if a.state_dir else s.data_dir / "posture"
+        rep, paths = drift.write_report(state, snap, a.keep or s.posture.keep)
+        if a.format == "text":
+            _print_drift(rep)
+            _tprint(f"\nwrote {paths['report']} and {paths['markdown']}")
+        else:
+            _emit({**rep, "files": {k: str(v) for k, v in paths.items()}}, fmt)
+        return 0
+    except (drift.DriftError, ExceptionsError) as exc:
+        raise ConfigError(str(exc)) from exc
+
+
 def _posture(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob import attack_paths as ap
+
+    if a.posture_cmd in {"snapshot", "diff", "report"}:
+        return _posture_drift(a, s, fmt)
 
     if not 1 <= a.top <= ap.MAX_PATHS:
         raise ConfigError(f"--top must be 1-{ap.MAX_PATHS}")

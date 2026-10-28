@@ -449,6 +449,26 @@
           }
         }
       }
+    },
+    "posture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "report": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "keep": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365
+            }
+          }
+        }
+      }
     }
   }
 }

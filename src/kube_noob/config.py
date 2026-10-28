@@ -190,6 +190,25 @@ class WatchSettings(_Base):
         return v
 
 
+class PostureSettings(_Base):
+    """Daily drift and policy report (``kube-noob serve`` with ``report_enabled``; ``kube-noob posture report``).
+
+    Read-only: one live snapshot a day (a random first delay, then every 24 h +/- 10%), diffed against the previous one
+    in ``<dataDir>/posture``; the newest ``keep`` snapshots and their reports are kept."""
+
+    report_enabled: bool = False
+    namespaces: list[str] = Field(default_factory=list, max_length=50)  # empty: every namespace the account can list
+    keep: int = Field(default=14, ge=1, le=365)
+
+    @field_validator("namespaces")
+    @classmethod
+    def _dns_names(cls, v: list[str]) -> list[str]:
+        bad = [n for n in v if not re.fullmatch(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?", n)]
+        if bad:
+            raise ValueError(f"posture.namespaces must be namespace names: {bad}")
+        return v
+
+
 class ProbeSettings(_Base):
     """Tier P: ephemeral debug containers or probe Jobs. Off by default; every probe needs an approval."""
 
@@ -290,6 +309,7 @@ class Settings(_Base):
     judge: JudgeSettings = Field(default_factory=JudgeSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     watch: WatchSettings = Field(default_factory=WatchSettings)
+    posture: PostureSettings = Field(default_factory=PostureSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     probe: ProbeSettings = Field(default_factory=ProbeSettings)

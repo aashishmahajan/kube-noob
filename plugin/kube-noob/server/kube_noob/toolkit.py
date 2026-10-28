@@ -906,6 +906,18 @@ class Toolkit:
         inv = attack_paths.collect_live(get_backend(self.settings), list(p.namespaces))
         return attack_paths.scan(inv, top=p.top)
 
+    def posture_report(self, p: EmptyIn) -> dict[str, Any]:
+        from kube_noob import drift
+
+        rep = drift.latest_report(self.settings.data_dir / "posture")
+        if rep is None:
+            return {
+                "report": None,
+                "message": "No drift report yet: kube-noob serve writes one a day with posture.reportEnabled, or run "
+                "kube-noob --cluster-enabled posture report --live",
+            }
+        return {"report": rep}
+
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
         inv = Inventory.from_yaml(p.manifests, p.default_namespace)
         cli = "oc" if p.platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
@@ -1336,6 +1348,15 @@ class Toolkit:
                 "dropped unread.",
                 PostureScanIn,
                 self.posture_scan,
+            ),
+            ToolSpec(
+                "posture_report",
+                "Latest drift and policy report",
+                "The newest daily report in this install's data folder: objects added, removed and changed since the "
+                "previous snapshot (with the fields that changed), findings new and fixed, and open findings by "
+                "namespace, owner and rule. Local data only.",
+                EmptyIn,
+                self.posture_report,
             ),
             ToolSpec(
                 "check_network_policy",

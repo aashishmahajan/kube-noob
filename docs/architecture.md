@@ -94,6 +94,7 @@ flowchart LR
   server mounts read-only; `serve` validates the whole archive and imports it only when it is newer than the copy
   it has. Trust boundary: the image registry and its signature, checked by the operator with `cosign verify`.
 - The attack-path scan (`posture scan`, tools `posture_scan` and `cluster_posture_scan`) reads RBAC objects (who may do what, no credentials) and the objects that expose and run pods; Secret objects in a bundle are dropped before analysis, and the live allowlist refuses Secrets. It reports paths and fixes and changes nothing.
+- Drift snapshots and reports (`kube_noob.drift`) are local files, owner-only, with hashes and names only: a snapshot cannot be turned back into configuration. The daily job reads through the same read-only allowlist.
 - `policy generate` (CLI and the read-only `policy_generate` tool) only writes YAML: it applies nothing, reads no
   cluster and fetches nothing. What the policies do is decided by the person who applies them; enforce mode refuses
   requests, so the default is audit. The CEL reads only the admitted object and the requester's name, never other

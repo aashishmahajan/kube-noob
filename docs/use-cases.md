@@ -371,6 +371,24 @@ kube-noob posture scan -f k8s/ --fail-above 17
 kube-noob --cluster-enabled posture scan --live -n shop -n payments
 ```
 
+### What changed since yesterday? The daily drift and policy report
+
+`posture snapshot` records every watched object (workloads, Services, Routes, Ingresses, NetworkPolicies, RBAC,
+SCCs, PDBs, HPAs, ConfigMaps, StorageClasses, claims and namespaces) as a hash of its desired state plus a short hash
+per field, and today's findings with each object's owner (its `owner` or `team` label, else its namespace's). No
+values are kept. `posture diff` compares two snapshots: objects added, removed and changed with the fields that
+changed, findings new and fixed, and open findings by namespace, owner and rule. Scaling, status, server-set
+metadata and the ReplicaSets and pods a controller makes are not drift. `posture report` does both in one step and
+keeps the newest snapshots and reports (JSON and Markdown) in a folder; `serve` with `posture.reportEnabled` (chart:
+`posture.report.enabled`) writes one a day at a random time, and the MCP tool `posture_report` returns the newest.
+Excepted findings (`--exceptions`) are not counted open.
+
+```bash
+kube-noob posture snapshot -f k8s/ -o monday.json
+kube-noob posture diff monday.json tuesday.json --markdown drift.md
+kube-noob --cluster-enabled posture report --live -n shop --exceptions kube-noob-exceptions.yaml
+```
+
 ### Accept a risk on purpose: exceptions as code
 
 An exception is a file entry, reviewed by pull request like the manifests: the rule, the objects it covers (a

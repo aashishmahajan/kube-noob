@@ -1,0 +1,133 @@
+# Drift fixture (requirements R3.4): tests/test_drift.py checks the exact report between day1.yaml and day2.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels: {owner: team-shop}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ops
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: shop}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: ops}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web, namespace: shop}
+spec:
+  selector: {app: web}
+  ports: [{port: 80, targetPort: 8080}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: web, namespace: shop}
+spec:
+  maxUnavailable: 1
+  selector: {matchLabels: {app: web}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: worker, namespace: shop}
+spec:
+  maxUnavailable: 1
+  selector: {matchLabels: {app: worker}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: shop
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints: [{maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: worker}}}]
+      containers:
+      - name: worker
+        image: quay.io/acme/worker@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {memory: 256Mi}
+        livenessProbe: {httpGet: {path: /live, port: 8080}}
+        readinessProbe: {httpGet: {path: /ready, port: 8080}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop
+  labels: {team: web-team}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints: [{maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web}}}]
+      containers:
+      - name: web
+        image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {memory: 256Mi}
+        livenessProbe: {httpGet: {path: /live, port: 8080}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: web-config, namespace: shop}
+data: {LOG_LEVEL: info}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent
+  namespace: ops
+spec:
+  selector: {matchLabels: {app: agent}}
+  template:
+    metadata: {labels: {app: agent}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: agent
+        image: quay.io/acme/agent@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {memory: 256Mi}
+        livenessProbe: {httpGet: {path: /live, port: 8080}}
+        readinessProbe: {httpGet: {path: /ready, port: 8080}}

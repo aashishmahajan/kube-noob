@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Daily drift and policy report: `kube-noob posture snapshot`, `posture diff` and `posture report`, `serve` with
+  `posture.reportEnabled` (one a day, jittered; chart `posture.report.enabled`, which needs cluster access,
+  persistence and one replica) and the MCP tool `posture_report`. Snapshots hold hashes and names, never values;
+  reports list objects added, removed and changed (with the changed fields), findings new and fixed, and open
+  findings by namespace, owner and rule. Two snapshots of a fixture cluster give the exact report written by hand.
 - Exceptions as code (`kube-noob.io/v1` `ExceptionList`): `kube-noob exceptions check`, `audit --exceptions` and
   `policy generate --exceptions` (MCP: `exceptions` on `audit_manifests` and `policy_generate`). Each entry names a
   rule, a scope, an owner, a reason and an expiry; expired, ownerless, unexplained, too-broad or far-future entries are

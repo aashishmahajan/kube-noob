@@ -4,6 +4,17 @@
 {{- if and .Values.watch.enabled (gt (int .Values.replicaCount) 1) }}
 {{- fail "watch.enabled keeps one incident ledger: set replicaCount: 1" }}
 {{- end }}
+{{- if .Values.posture.report.enabled }}
+{{- if not .Values.config.clusterEnabled }}
+{{- fail "posture.report.enabled reads the cluster: set config.clusterEnabled too (read-only)" }}
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+{{- fail "posture.report.enabled compares today with yesterday's snapshot: set persistence.enabled: true" }}
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "posture.report.enabled writes one report a day from one pod: set replicaCount: 1" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") (gt (int .Values.replicaCount) 1) }}
 {{- fail "persistence with a ReadWriteOnce volume attaches to one node: set replicaCount: 1 (or a ReadWriteMany accessMode)" }}
 {{- end }}
