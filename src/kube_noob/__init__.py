@@ -11,6 +11,6 @@ Web access is disabled by default (``webEnabled: false``); every answer is groun
 local knowledge base and corpus unless the operator explicitly opts in.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = ["__version__"]

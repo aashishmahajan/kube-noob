@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-10-28
 
 Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and what became of each ticket.
 

@@ -3,7 +3,7 @@
 Goal: a platform team deploys kube-noob once. Every developer and SRE then gets answers that are safe, cited and
 read-only first, about their own clusters and their own runbooks, so the platform team's ticket queue shrinks.
 kube-noob has no AI inside: Claude, OpenShift Lightspeed or any MCP client does the talking, and the CLI works with no
-model at all. Updated 2026-10-27, after 0.4.0.
+model at all. Updated 2026-10-28, after 0.5.0.
 
 ## Who it serves
 
@@ -33,14 +33,14 @@ model at all. Updated 2026-10-27, after 0.4.0.
 | Release writes the Homebrew formula; CI installs it the way users do (tap, `brew install kube-noob`) | Done | 0.2.3 |
 | Reported issues: errors matched to the OpenShift 4.20 to 4.22 release notes with link, fix version and workaround | Done | 0.3.0 |
 | Every answer states the knowledge date; live checks read the cluster version; web results marked external | Done | 0.3.0 |
-| Red Hat Jira copy: every ticket (any status) of the OpenShift, ROSA, ACM and RHACS projects, synced through the REST API at one request per second; known-issue answers say what became of the ticket (fixed in which release, open, not a bug, won't fix, duplicate) with the workaround from the comments | Done | Unreleased |
+| Red Hat Jira copy: every ticket (any status) of the OpenShift, ROSA, ACM and RHACS projects, synced through the REST API at one request per second; known-issue answers say what became of the ticket (fixed in which release, open, not a bug, won't fix, duplicate) with the workaround from the comments | Done | 0.5.0 |
 | Incident watch: always-on, read-only detection in the service or terminal; each incident explained once, with what changed before it and the fix the team confirmed for earlier occurrences | Done | 0.4.0 |
 | Audit findings name their NIST SP 800-53 Rev. 5 controls; `doctor` reports FIPS mode; FedRAMP High deployment guide | Done | 0.3.1 |
 | Policy debugging: Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, LimitRange and RBAC denials explained with the fix; NetworkPolicy reachability (offline or live, read-only) with the smallest allow policy | Done | 0.3.1 |
 | OpenShift Helm catalog (community) submission | Not started: needs the owner's fork and pull requests ([openshift-catalog.md](openshift-catalog.md)) | after 0.2.2 |
 | Admission under a real `restricted-v2` SCC in CI | At risk: needs an OpenShift cluster for CI | Next |
 
-## Now (0.5.0): lightweight wins that reuse what exists
+## Now (0.6.0): lightweight wins that reuse what exists
 
 Each reuses the existing rules, playbooks and counters. None needs new infrastructure or a model.
 
