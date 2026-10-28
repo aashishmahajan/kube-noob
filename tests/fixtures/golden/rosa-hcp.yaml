@@ -1,6 +1,7 @@
 # Golden questions: rosa-hcp. Original text written from the official documentation named in
 # each item's source (license of the source docs: see the source repository); graded against kube-noob by an
 # independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
+# Every item is asked with platform: rosa-hcp, as an OpenShift or ROSA user's kube-noob is configured.
 - id: rosa-001
   technology: rosa-hcp
   kind: error
@@ -14,8 +15,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshoot-hcp-install.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: ROSA HCP OCM5011 unavailable capacity in region -> not an IAM/VPC problem, retry or use another region'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - DBG-ROSA-OCM5011-CAPACITY
 - id: rosa-002
   technology: rosa-hcp
   kind: error
@@ -29,9 +32,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshoot-hcp-install.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: ROSA OCM5010 failed to tag subnets -> check AWS permissions and that private (and public if used) subnets
-    are tagged'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - DBG-ROSA-OCM5010-SUBNET-TAGS
 - id: rosa-003
   technology: rosa-hcp
   kind: error
@@ -46,8 +50,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-elb-service-role.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: iam:CreateServiceLinkedRole AccessDenied on first ROSA install -> create AWSServiceRoleForElasticLoadBalancing'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - DBG-ROSA-ELB-SERVICE-ROLE
 - id: rosa-004
   technology: rosa-hcp
   kind: error
@@ -61,8 +67,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-cluster-deletion.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: CLUSTERS-MGMT-400 sts_user_role not linked -> rosa create user-role and retry deletion'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - DBG-ROSA-USER-ROLE-UNLINKED
 - id: rosa-005
   technology: rosa-hcp
   kind: error
@@ -76,9 +84,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-expired-token.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: rosa ''Can''t get tokens'' / ''Can''t get access tokens'' -> expired offline token, rosa login --token or
-    --use-device-code'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - DBG-ROSA-EXPIRED-TOKEN
 - id: rosa-006
   technology: rosa-hcp
   kind: error
@@ -93,9 +102,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/resolve-ec2nodeclass-not-ready.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: auto node EC2NodeClass SubnetsReady=False -> add karpenter.sh/discovery tag from subnetSelectorTerms to
-    private subnets and security group'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - DBG-ROSA-KARPENTER-DISCOVERY-TAG
 - id: rosa-007
   technology: rosa-hcp
   kind: error
@@ -110,9 +120,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/resolve-iam-permissions-tagging.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: control-plane-operator role lacks ec2:CreateTags (auto node) -> aws iam put-role-policy, then tag the security
-    group'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - DBG-ROSA-KARPENTER-CREATETAGS
 - id: rosa-008
   technology: rosa-hcp
   kind: error
@@ -126,9 +137,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/storage-multi-attach-error.adoc'
   outOfScope: false
-  status: pass
-  expect:
-  - DBG-MULTIATTACH
+  platform: rosa-hcp
+  status: miss
+  gap: 'playbook: Multi-Attach after node loss, force-delete the old pod with --force --grace-period=0; RWX if supported'
 - id: rosa-009
   technology: rosa-hcp
   kind: howto
@@ -142,8 +153,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-installing.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: stuck ROSA install: rosa logs install --watch plus rosa verify quota for the cluster''s region'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - 'kn:rosa-troubleshooting#0'
 - id: rosa-010
   technology: rosa-hcp
   kind: howto
@@ -157,9 +170,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-upgrading-cli-control-plane.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: schedule ROSA HCP control plane upgrade with rosa upgrade cluster --schedule-date/--schedule-time (UTC), rosa
-    list upgrade'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - 'kn:rosa-hcp-lifecycle#2'
 - id: rosa-011
   technology: rosa-hcp
   kind: howto
@@ -174,8 +188,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-vpc-subnet-tagging.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: ROSA HCP custom VPC subnet tags kubernetes.io/role/elb and internal-elb (value 1) with aws ec2 create-tags'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - 'kn:rosa-hcp-lifecycle#1'
 - id: rosa-012
   technology: rosa-hcp
   kind: howto
@@ -190,8 +206,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-sts-creating-a-break-glass-cred-cli.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: rosa create break-glass-credential for external OIDC, 10 minutes to 24 hours, describe --kubeconfig'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - 'kn:rosa-hcp-lifecycle#3'
 - id: rosa-013
   technology: rosa-hcp
   kind: howto
@@ -205,9 +223,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-deleting-cluster.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: ROSA HCP post-deletion cleanup: rosa delete operator-roles then rosa delete oidc-provider, after cluster deletion
-    completes'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - 'kn:rosa-hcp-lifecycle#4'
 - id: rosa-014
   technology: rosa-hcp
   kind: concept
@@ -222,9 +241,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-classic-comparison.adoc'
   outOfScope: false
+  platform: rosa-hcp
   status: miss
-  gap: 'rank: kn:rosa-hcp#1 (HCP control plane in Red Hat account, PrivateLink, separate upgrades) exists but is not in the
-    top 3'
+  gap: 'rank: kn:rosa-hcp#1 (HCP architecture: Red Hat-owned control plane, PrivateLink, separate upgrades) missing from top3'
 - id: rosa-015
   technology: rosa-hcp
   kind: concept
@@ -238,8 +257,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-hcp-ready-no-console-access.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: ROSA HCP ''ready'' reflects only the hosted control plane; console pods need worker nodes (rosa describe machinepool)'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - 'kn:rosa-hcp-lifecycle#0'
 - id: rosa-016
   technology: rosa-hcp
   kind: concept
@@ -254,9 +275,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/rosa-troubleshooting-networking-nlb.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: ROSA HCP private NLB preserves client IP so pods co-located with router pods get dropped; reschedule or use internal
-    service networks'
+  platform: rosa-hcp
+  status: pass
+  expect:
+  - 'kn:rosa-troubleshooting#2'
 - id: rosa-017
   technology: rosa-hcp
   kind: out-of-scope
@@ -266,8 +288,9 @@
     not ROSA with hosted control planes.'
   source: {}
   outOfScope: true
+  platform: rosa-hcp
   status: miss
-  gap: 'abstain: doc: kn:rosa-efs#0 should not fire for an Amazon EKS access-entry question'
+  gap: 'abstain: kn:rosa-hcp-lifecycle#0 (ROSA console after ready) should not have fired on an EKS access question'
 - id: rosa-018
   technology: rosa-hcp
   kind: out-of-scope
@@ -277,6 +300,7 @@
     its own Azure CLI and provider registration, not ROSA.'
   source: {}
   outOfScope: true
+  platform: rosa-hcp
   status: abstain
 - id: rosa-019
   technology: rosa-hcp
@@ -287,8 +311,9 @@
     localhost for PostgreSQL), not a ROSA platform issue.'
   source: {}
   outOfScope: true
+  platform: rosa-hcp
   status: miss
-  gap: 'abstain: doc: kn:k8s-debug-pods#0 should not fire for application code connecting to localhost PostgreSQL'
+  gap: 'abstain: kn:k8s-debug-pods#0 should not have fired on an application-code localhost connection question'
 - id: rosa-020
   technology: rosa-hcp
   kind: out-of-scope
@@ -298,4 +323,5 @@
     AWS service rather than ROSA with hosted control planes.'
   source: {}
   outOfScope: true
+  platform: rosa-hcp
   status: abstain

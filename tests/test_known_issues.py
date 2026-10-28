@@ -134,7 +134,10 @@ def test_real_errors_match_the_reported_issue(issue_id: str, text: str) -> None:
     top = out["matches"][0]
     assert top["id"] == issue_id
     assert top["url"].startswith("https://redhat.atlassian.net/browse/") and "openshift-docs" in top["source"]
-    assert len(top["sharedTerms"]) >= ki.MIN_RARE_TERMS
+    # Three rare shared words, or two with a strong score: words the bundled docs explain ("serving", "cert") are
+    # not evidence of one bug.
+    shared = len(top["sharedTerms"])
+    assert shared >= ki.MIN_RARE_TERMS or (shared >= 2 and top["score"] >= ki.STRONG_SCORE), top
 
 
 @pytest.mark.parametrize("text", NEGATIVE)

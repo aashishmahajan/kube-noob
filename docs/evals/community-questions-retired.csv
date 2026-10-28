@@ -1,4 +1,5 @@
 id,change,date
+1455,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
 3286,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 3294,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 3475,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
@@ -17,6 +18,8 @@ id,change,date
 7659,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 7670,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 7683,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+8153,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+8194,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
 8283,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 8369,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
 8403,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
@@ -24,16 +27,46 @@ id,change,date
 8490,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 8558,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 10524,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
+13615,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13694,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13807,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13820,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13850,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13933,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13975,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14042,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14087,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14228,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14941,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14942,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14975,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+15070,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+15218,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+15273,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+18014,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
 18223,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 18610,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 18919,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 18994,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 19008,DBG-SCC matches a mangled security context constraint line (QA5),2026-10-28
+19091,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+19231,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+19380,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
 19397,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
+19488,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+19518,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+20936,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+20998,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+21195,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+21401,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+21490,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
 22068,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+22693,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
 22724,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
 23083,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 23099,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 23129,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 23143,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
 23144,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+24393,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+24401,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28

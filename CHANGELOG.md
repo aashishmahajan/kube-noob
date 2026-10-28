@@ -87,7 +87,10 @@
   community test half, which the changes were not built from, 36 answers moved: 4 better, 2 worse, 30 neither.
   The reported-issue matcher and the ticket correlation now call a word rare when it is in at most 2 sections of
   the bundled docs (`GENERAL_MAX_CHUNKS`, a count), not 2% of them: as a share, the new documents had made more words
-  rare and four rows that pointed at the right bug named an unrelated one.
+  rare and four rows that pointed at the right bug named an unrelated one. A count of documents was measured as well
+  (a document's title is indexed with every section, so long documents make their title words look common): it made
+  more words rare, and on the community test half 33 answers moved, 4 better and 24 worse (22 rows with no answer
+  named an unrelated bug), so the section count stays and those rows are retired.
   `helm repo list` is classified as a read-only step (`helm repo add`, `update` and `remove` stay changes).
 - `insight` findings show the cause and fix that fit the input, not the first of the playbook's list: each cause and
   fix is scored by the words it shares with the pasted text, each word weighted by how rare it is across all
@@ -102,6 +105,32 @@
   that are not Red Hat bug reports fell from 234 to 134; recall of the exact key in the top 3, when indexed, went from
   21 to 19 of 33 (two keys that were third). Checked on the test half, which the change was not tuned on: 52 top
   answers changed, all 52 earlier ones wrong, 12 better now (11 point at the clone's original), none worse.
+- Golden gaps closed for OpenShift, ROSA HCP, RHACS and the admission policy engines, drafted from the cited
+  official pages (openshift-docs 4.22 and rhacs-docs-main, the stackrox source, kubernetes/website, the Kyverno and
+  Gatekeeper sites) by agents that never saw the golden questions, then reviewed and verified line by line: 19 new
+  playbooks (OpenShift build image quota, CNI not ready, OLM OperatorGroup, image prune registry errors, CRI-O storage
+  wipe; ROSA OCM5011, OCM5010, ELB service-linked role, user-role not linked, expired rosa token, Karpenter discovery
+  tag and CreateTags; RHACS break glass, webhook failure policy, Scanner registry and CVE-data warnings, Collector to
+  Sensor, roxctl image check; ValidatingAdmissionPolicy denials), 14 new documents (OpenShift install and bootstrap,
+  ClusterOperator conditions and stuck updates, etcd quota, pod security label sync, service serving certificates;
+  ROSA HCP lifecycle and troubleshooting; RHACS enforcement, policy rules and scope, roxctl in CI, secured cluster
+  troubleshooting; ValidatingAdmissionPolicy, Kyverno, Gatekeeper), and new sections for Pod Security (server-side
+  dry run, enforce only on Pods) and SCCs (PSA and SCC together, `openshift.io/required-scc`, granting to the
+  ServiceAccount). The Kyverno, Gatekeeper, SCC and VAP explainers tell the policy owner the documented options
+  (PolicyException, `enforcementAction: dryrun`/`warn`, exemptions, `messageExpression`, `[Warn, Audit]`). An RHACS
+  webhook that could not be called (timeout) is no longer read as a policy denial; `oc adm prune` without
+  `--confirm` and `aws ... describe-/get-/list-` are read-only steps; a document can declare `worksWith` products it
+  applies to without naming them (roxctl runs in any CI system); short product names in the named-product gate
+  ("aro") must be whole words of a document, and Azure Red Hat OpenShift questions no longer get ROSA documents.
+  Golden in-scope answers: 7 of 96 at the baseline, 72 of 96 now (a fit; OpenShift and ROSA items are asked with
+  their platform). On the community test half, which none of these changes were built from: 62 answers moved, 8
+  better, 3 worse, 51 neither.
+- A prefixed name written bare matches: the tokenizer also keeps the hyphenated name after a slash
+  (`service.beta.openshift.io/serving-cert-secret-name` gives `serving-cert-secret-name`,
+  `openshift-operator-lifecycle-manager/catalog-operator` gives `catalog-operator`), and the bug matcher counts the
+  prefixed and the bare name as one piece of evidence. A question that names AWS Security Hub gets no document. Golden
+  set unchanged (72 of 96 in scope, 18 of 23 out of scope left unanswered). Train half: 4 answers moved (2 better, 1
+  worse, 1 neither); test half, not tuned on: 10 moved, 6 better, 2 worse, 2 neither (independent grader).
 - REST API beside MCP on the HTTP server (backlog I6): `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`,
   `/v1/known-issues`, `/v1/policy/reach`, `/v1/memory/match`, `/v1/must-gather` and `GET`/`POST /v1/reports`, JSON in
   and out, the same tools, validation, sanitising, `knowledgeAsOf` and content-free audit line as MCP (`via=rest` in

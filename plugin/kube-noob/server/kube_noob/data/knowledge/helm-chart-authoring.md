@@ -1,6 +1,6 @@
 ---
 id: helm-chart-authoring
-title: Writing Helm 3 charts - CRDs, hooks, library charts, whitespace and comments
+title: Writing Helm 3 charts
 tags: [helm, chart, crds, hooks, library, templates, whitespace]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28

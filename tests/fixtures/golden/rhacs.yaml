@@ -17,7 +17,9 @@
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/bypass-admission-controller-enforcement.adoc'
   outOfScope: false
   status: miss
-  gap: 'playbook: RHACS emergency bypass annotation admission.stackrox.io/break-glass for urgent deploys'
+  expect:
+  - DBG-STACKROX-ADMISSION
+  gap: 'rank: DBG-STACKROX-ADMISSION (has break-glass annotation and fixes) should outrank the one-line policy explainer'
 - id: rhacs-002
   technology: rhacs
   kind: howto
@@ -32,8 +34,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/configuring-output-format.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: roxctl deployment check -o junit with ROX_ENDPOINT and an API token in CI'
+  status: pass
+  expect:
+  - 'kn:rhacs-roxctl-ci#1'
 - id: rhacs-003
   technology: rhacs
   kind: error
@@ -48,8 +51,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/common-scanner-warning-messages.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: RHACS ''Failed to retrieve metadata from the registry'': Scanner network path and registry integration credentials'
+  status: pass
+  expect:
+  - DBG-RHACS-SCANNER-REGISTRY
 - id: rhacs-004
   technology: rhacs
   kind: concept
@@ -65,7 +69,8 @@
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-enforcement-about.adoc'
   outOfScope: false
   status: miss
-  gap: 'doc: RHACS hard enforcement (admission controller webhook) versus soft enforcement (Sensor scales pods down)'
+  gap: 'doc: hard enforcement = admission controller webhook rejects, soft = Sensor scales workload to zero (kn:rhacs-enforcement
+    section not retrieved)'
 - id: rhacs-005
   technology: rhacs
   kind: error
@@ -81,8 +86,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/admission-controller-failure-policy-changing.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: RHACS admission webhook timeout; set SecuredCluster admissionControl.failurePolicy to Ignore'
+  status: pass
+  expect:
+  - DBG-RHACS-WEBHOOK-FAILURE-POLICY
 - id: rhacs-006
   technology: rhacs
   kind: howto
@@ -97,7 +103,7 @@
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/configure-policy-scope.adoc'
   outOfScope: false
   status: miss
-  gap: 'doc: RHACS policy scope Excluded resources with an RE2 namespace regex such as test-.*'
+  gap: 'doc: RHACS policy scope Excluded resources, namespace entry as RE2 regex like test-.*'
 - id: rhacs-007
   technology: rhacs
   kind: error
@@ -111,9 +117,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/common-scanner-warning-messages.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: RHACS ''CVE DATA MAY BE INACCURATE / Stale OS CVE data'' means end-of-life base OS; rebuild on a supported
-    base'
+  status: pass
+  expect:
+  - DBG-RHACS-SCANNER-CVE-DATA
 - id: rhacs-008
   technology: rhacs
   kind: out-of-scope
@@ -138,9 +144,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/unable-to-connect-to-the-sensor.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: RHACS Collector cannot connect to Sensor - compare GRPC_SERVER env with the sensor Service and restart collector
-    pods'
+  status: pass
+  expect:
+  - DBG-RHACS-COLLECTOR-SENSOR
 - id: rhacs-010
   technology: rhacs
   kind: howto
@@ -155,9 +161,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-enforcement-hard.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: make a RHACS policy block: set deploy-time enforcement on the policy and enable cluster admission controller
-    enforcement'
+  status: pass
+  expect:
+  - 'kn:rhacs-enforcement#2'
 - id: rhacs-011
   technology: rhacs
   kind: concept
@@ -173,7 +179,7 @@
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-structure.adoc'
   outOfScope: false
   status: miss
-  gap: 'doc: RHACS custom policy logic: rules are ORed and criteria within a rule are ANDed'
+  gap: 'doc: policy rules are ORed and criteria within a rule ANDed (the logic chunk of kn:rhacs-policy-rules-scope)'
 - id: rhacs-012
   technology: rhacs
   kind: error
@@ -188,8 +194,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/delete-acs-global-resources.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: RHACS uninstall cleanup; no psp resource type because PodSecurityPolicy was removed in 1.25'
+  status: pass
+  expect:
+  - 'kn:rhacs-secured-cluster-troubleshooting#5'
 - id: rhacs-013
   technology: rhacs
   kind: out-of-scope
@@ -213,8 +220,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/roxctl-sensor-generate-options.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: roxctl sensor generate --admission-controller-enforcement=false'
+  status: pass
+  expect:
+  - 'kn:rhacs-enforcement#6'
 - id: rhacs-015
   technology: rhacs
   kind: error
@@ -229,8 +237,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/migrate-scope-collections.adoc'
   outOfScope: false
-  status: miss
-  gap: 'known-issue: Central Postgres migration converts only IN label selectors to collections; recreate the collection manually'
+  status: pass
+  expect:
+  - 'kn:rhacs-secured-cluster-troubleshooting#6'
 - id: rhacs-016
   technology: rhacs
   kind: concept
@@ -244,8 +253,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/acs-secured-cluster-services-overview.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: Scanner V4 role and a plain statement of what the admission controller does in a secured cluster'
+  status: pass
+  expect:
+  - 'kn:rhacs-secured-cluster-troubleshooting#1'
 - id: rhacs-017
   technology: rhacs
   kind: error
@@ -261,9 +271,9 @@
     commit: 69fc953f424bf243362dfaab47c4a1bad55fd83b
     url: 'https://github.com/stackrox/stackrox/blob/69fc953f424bf243362dfaab47c4a1bad55fd83b/pkg/defaults/policies/files/severity_important.json'
   outOfScope: false
-  status: miss
-  gap: 'playbook: roxctl image check fails the build on default ''Fixable Severity at least Important'' policy with build
-    enforcement'
+  status: pass
+  expect:
+  - DBG-RHACS-IMAGE-CHECK-FAILED
 - id: rhacs-018
   technology: rhacs
   kind: howto
@@ -278,8 +288,9 @@
     commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
     url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/checking-images.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: roxctl image check --force bypasses Central''s cache to re-fetch scan results'
+  status: pass
+  expect:
+  - 'kn:rhacs-roxctl-ci#4'
 - id: rhacs-019
   technology: rhacs
   kind: out-of-scope
@@ -290,7 +301,7 @@
   source: {}
   outOfScope: true
   status: miss
-  gap: 'abstain: kn:stackrox#3 and the pod-debug and Service docs should not fire for a Falco rule request'
+  gap: 'abstain: kn:stackrox#3 (RHACS default policies) should not have fired on a Falco rule question'
 - id: rhacs-020
   technology: rhacs
   kind: out-of-scope
@@ -300,4 +311,4 @@
   source: {}
   outOfScope: true
   status: miss
-  gap: 'abstain: kn:k8s-images#0 (generic image tag/pull doc) should not have fired for a NeuVector question'
+  gap: 'abstain: kn:k8s-images#0 (image pull and tag guidance) should not have fired on a NeuVector question'

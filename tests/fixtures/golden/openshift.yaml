@@ -2,6 +2,7 @@
 # each item's source (license of the source docs: see the source repository); graded against kube-noob by an
 # independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
 # ocp-020 (a kubeadm init question) was dropped: kubeadm is in scope for kube-noob, so it was not out of scope.
+# Every item is asked with platform: openshift, as an OpenShift or ROSA user's kube-noob is configured.
 - id: ocp-001
   technology: openshift
   kind: error
@@ -15,9 +16,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/builds-troubleshooting-access-resources.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: S2I/image push ''requested access to the resource is denied'' -> check project image quotas with oc describe
-    quota'
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-BUILD-IMAGE-QUOTA
 - id: ocp-002
   technology: openshift
   kind: error
@@ -32,9 +34,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/ipi-install-troubleshooting-runtime-network-not-ready.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: NetworkPluginNotReady / Missing CNI default network -> check Cluster Network Operator pods and network.config
-    cluster object'
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-OCP-CNI-NOT-READY
 - id: ocp-003
   technology: openshift
   kind: error
@@ -48,8 +51,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/olm-operatorgroups-troubleshooting.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: OLM InstallPlan ''more than one operator group(s) are managing this namespace'' -> keep exactly one OperatorGroup'
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-OLM-OPERATORGROUP
 - id: ocp-004
   technology: openshift
   kind: error
@@ -64,8 +69,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/etcd-increase-db-troubleshooting.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: etcd backendQuotaGiB (Tech Preview) accepts 8-32 GiB, increase only, with oc patch/describe commands'
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-etcd-db-size#3'
 - id: ocp-005
   technology: openshift
   kind: error
@@ -79,8 +86,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/pruning-images-troubleshooting.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: oc adm prune images ''server gave HTTP response to HTTPS client'' -> secure the registry or use --force-insecure'
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-PRUNE-REGISTRY
 - id: ocp-006
   technology: openshift
   kind: error
@@ -95,6 +104,7 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/lvms-troubleshooting-investigating-a-pvc-stuck-in-the-pending-state.adoc'
   outOfScope: false
+  platform: openshift
   status: pass
   expect:
   - DBG-PVC-PENDING
@@ -112,9 +122,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/cleaning-crio-storage.adoc'
   outOfScope: false
-  status: miss
-  gap: 'playbook: ''Failed to create pod sandbox'' / ''can''t stat lower layer'' -> CRI-O storage wipe (cordon, drain, crictl
-    rm, crio wipe -f, uncordon)'
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-CRIO-STORAGE
 - id: ocp-008
   technology: openshift
   kind: error
@@ -129,9 +140,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/nodes-pods-secrets-troubleshooting.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: service-ca serving-cert-generation-error: delete old secret and remove the error annotations with oc annotate
-    ...-'
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-service-serving-certs#1'
 - id: ocp-009
   technology: openshift
   kind: howto
@@ -146,8 +158,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/installation-approve-csrs.adoc'
   outOfScope: false
+  platform: openshift
   status: miss
-  gap: 'doc: UPI bare-metal new workers: approve pending client CSRs then kubelet-serving CSRs with oc adm certificate approve'
+  gap: 'doc: UPI CSR approval with oc get csr and oc adm certificate approve, client CSRs then serving CSRs'
 - id: ocp-010
   technology: openshift
   kind: howto
@@ -162,9 +175,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-psa-alert-eval.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: find PodSecurityViolation offenders via oc adm must-gather gather_audit_logs and the pod-security audit-violations
-    annotation'
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-pod-security-admission#2'
 - id: ocp-011
   technology: openshift
   kind: howto
@@ -179,9 +193,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-requiring.adoc'
   outOfScope: false
+  platform: openshift
   status: miss
-  gap: 'doc: openshift.io/required-scc annotation in the Deployment pod template and checking the openshift.io/scc annotation
-    on the pod'
+  gap: 'doc: complete required-scc section including SCC must exist and checking the pod''s openshift.io/scc annotation'
 - id: ocp-012
   technology: openshift
   kind: howto
@@ -196,8 +210,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/core-cluster-upgrade-ts-update-stuck.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: diagnosing a stalled cluster update with oc get clusterversion, oc get co and .status.history'
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-cluster-update-status#3'
 - id: ocp-013
   technology: openshift
   kind: howto
@@ -212,9 +228,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/gathering-bootstrap-diagnostic-data.adoc'
   outOfScope: false
+  platform: openshift
   status: miss
-  gap: 'doc: UPI bootstrap troubleshooting: journalctl -u bootkube.service on the bootstrap node, curl -I on the Ignition
-    URL, API DNS and load balancer 6443 check'
+  gap: 'doc: UPI bootstrap debugging with journalctl -u bootkube.service, Ignition curl -I check, api DNS and LB 6443'
 - id: ocp-014
   technology: openshift
   kind: concept
@@ -229,9 +245,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/determining-upgrade-viability-conditiontype.adoc'
   outOfScope: false
+  platform: openshift
   status: miss
-  gap: 'doc: ClusterOperator condition semantics (Available, Progressing, Degraded, Upgradeable) and that Degraded does not
-    mean workloads are down'
+  gap: 'doc: ClusterOperator Available/Progressing/Degraded/Upgradeable definitions and rank Degraded-does-not-mean-downtime
+    section first'
 - id: ocp-015
   technology: openshift
   kind: concept
@@ -245,8 +262,10 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/determining-where-installation-issues-occur.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: role of the bootstrap machine in an OpenShift install and when the installer removes it'
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-install-troubleshooting#0'
 - id: ocp-016
   technology: openshift
   kind: concept
@@ -261,9 +280,11 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-psa-synchronization.adoc'
   outOfScope: false
+  platform: openshift
   status: miss
-  gap: 'doc: OpenShift pod-security label synchronization controller derives warn/audit labels from the SCCs usable in the
-    namespace'
+  expect:
+  - 'kn:ocp-pod-security-admission#0'
+  gap: 'rank: kn:ocp-pod-security-admission#0 should outrank the DBG-PSA playbook'
 - id: ocp-017
   technology: openshift
   kind: out-of-scope
@@ -273,6 +294,7 @@
     not an OpenShift Container Platform troubleshooting issue.'
   source: {}
   outOfScope: true
+  platform: openshift
   status: abstain
 - id: ocp-018
   technology: openshift
@@ -283,6 +305,7 @@
     not OpenShift platform troubleshooting.'
   source: {}
   outOfScope: true
+  platform: openshift
   status: abstain
 - id: ocp-019
   technology: openshift
@@ -293,4 +316,5 @@
     not OpenShift Container Platform.'
   source: {}
   outOfScope: true
+  platform: openshift
   status: abstain

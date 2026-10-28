@@ -342,7 +342,10 @@ def _kyverno(text: str, platform: str | None) -> list[Denial]:
         d.fixes = fixes or [f"Change {resource or 'the object'} so it satisfies the rule the message describes."]
         d.approvals.append(
             f"If this workload really needs an exception, ask the owner of {policy or 'the policy'} for a Kyverno "
-            "PolicyException scoped to this workload only."
+            "PolicyException scoped to this workload only. PolicyExceptions are off by default: Kyverno must run with "
+            "enablePolicyException set to true and exceptionNamespace naming where exceptions may be used. The "
+            "exception names the policy in spec.policyRefs (name and kind) and matches the workload with a CEL "
+            "matchConditions expression; the PolicyReport then shows result: skip."
         )
         out.append(d)
     return out
@@ -394,8 +397,11 @@ def _gatekeeper(text: str, platform: str | None) -> list[Denial]:
         d.checks.append("kube-noob audit -f <manifest.yaml>")
         d.fixes = fixes or ["Change the object so it satisfies the constraint the message describes."]
         d.approvals.append(
-            f"If the namespace must be exempt, the owner of {constraint} can exclude it (spec.match.excludedNamespaces "
-            "or the Gatekeeper Config exemptions)."
+            f"The owner of {constraint} can roll it out without blocking: spec.enforcementAction: dryrun (violations "
+            "only in status.violations) or warn (admitted with a warning), instead of the default deny. To exempt a "
+            "namespace: spec.match.excludedNamespaces in the constraint, the Gatekeeper Config resource "
+            "(excludedNamespaces per process), or --exempt-namespace=<NAMESPACE NAME> plus the "
+            "admission.gatekeeper.sh/ignore namespace label (skips the webhook only; audit still reports it)."
         )
         out.append(d)
     return out
@@ -439,14 +445,21 @@ def _vap(text: str, platform: str | None) -> list[Denial]:
             if expr:
                 d.details["failedExpression"] = expr.group(1)
                 d.meaning += " The CEL expression evaluated to false for this object."
+                d.approvals.append(
+                    "The denial quotes the CEL expression because the validation has no message or messageExpression. "
+                    f"The owner of {m['policy']} can add spec.validations[i].messageExpression (CEL returning a "
+                    "string, for example 'object.spec.replicas must be no greater than ' + "
+                    "string(params.maxReplicas)) so the denial says what to change."
+                )
             d.checks = [
                 f"{kc} get validatingadmissionpolicy {m['policy']} -o yaml",
                 f"{kc} get validatingadmissionpolicybinding {m['binding']} -o yaml",
             ]
             d.fixes = fixes or ["Change the object so the policy's expression holds (see spec.validations)."]
             d.approvals.append(
-                f"If this object must be excluded, the owner of binding {m['binding']} can narrow its "
-                "matchResources or change validationActions."
+                f"If this object must be excluded, the owner of binding {m['binding']} can narrow its matchResources "
+                "(for example its namespaceSelector). To report instead of reject while workloads are fixed, the "
+                "binding can use validationActions: [Warn, Audit] (Deny and Warn cannot be combined)."
             )
             out.append(d)
     return out
@@ -743,9 +756,11 @@ def _scc(text: str, ns: str | None, sa: str | None) -> list[Denial]:
         d.checks.append("kube-noob audit --platform openshift -f <manifest.yaml>")
         d.fixes.append("`kube-noob fix --platform openshift -f <manifest.yaml>` removes the fixed IDs from a manifest.")
         d.approvals.append(
-            f"Only if the workload truly needs it: grant the least permissive SCC that fits (for example "
-            f"`oc adm policy add-scc-to-user nonroot-v2 -z {sa or '<serviceaccount>'} -n {_ns(ns)}`); never "
-            "privileged or anyuid for application workloads."
+            "Only if the workload truly needs it: grant the least permissive SCC that fits to its ServiceAccount "
+            "(pods of a Deployment or DaemonSet are admitted with the ServiceAccount's SCCs, not yours), for example "
+            f"`oc adm policy add-scc-to-user nonroot-v2 -z {sa or '<serviceaccount>'} -n {_ns(ns)}`. privileged is "
+            "for cluster administration components only, never application workloads. Never edit the default SCCs "
+            "(upgrades can reset them and platform pods can break); create your own SCC instead."
         )
         out.append(d)
     return out
@@ -798,6 +813,12 @@ def _rhacs(text: str, platform: str | None) -> list[Denial]:
             "it raises a violation and needs the security team's approval."
         )
         out.append(d)
+    if (
+        not out
+        and re.search(r"failed calling webhook \"[^\"\n]{0,60}stackrox\.io\"", text)
+        and not re.search(r"denied the request|violated \d+ enforced polic|Failed currently enforced policies", text)
+    ):
+        return []  # the webhook could not be called (timeout, unreachable): no policy was evaluated
     if not out:
         out.append(
             Denial(

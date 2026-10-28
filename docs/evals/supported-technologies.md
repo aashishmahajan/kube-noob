@@ -16,12 +16,12 @@ is exactly what it carries for that technology:
 
 | Technology | Playbooks | Knowledge documents | Reported issues | Rules and engines |
 |---|---|---|---|---|
-| Kubernetes (upstream, kubectl, kubeadm) | 41 that apply everywhere | 35 (incl. the Helm and RHACS docs), incl. pods, probes, DNS, Services, Ingress, storage, scheduling, RBAC, Pod Security, TLS, kubelet, etcd backup, kubeconfig exec, kubeadm first-day problems, Deployment rollouts | none (upstream Kubernetes bugs not indexed) | audit rules and strict schemas (Kubernetes 1.35), removed APIs, NetworkPolicy reachability, Pod Security and RBAC denial explainers |
-| OpenShift 4.x | 41 shared + 5 OpenShift-only (SCC, Route 503, ClusterOperator, arbitrary UID, EgressIP) | 8 OpenShift docs (SCC, Routes, operators, DeploymentConfig, EgressFirewall, EgressIP, arbitrary UID, overview) | 921 bugs from the 4.20-4.22 release notes | SCC, Route and EgressFirewall schemas; must-gather analysis; SCC denial explainer |
-| ROSA HCP and classic | shared + DBG-ROSA-HCP-NODES | 3 (ROSA HCP, EFS, egress zero) | HyperShift bugs within the OpenShift release notes | ROSA HCP self-test cases |
+| Kubernetes (upstream, kubectl, kubeadm) | 48 that apply everywhere | 42 (incl. the Helm, RHACS and policy-engine docs), incl. pods, probes, DNS, Services, Ingress, storage, scheduling, RBAC, Pod Security, TLS, kubelet, etcd backup, kubeconfig exec, kubeadm first-day problems, Deployment rollouts | none (upstream Kubernetes bugs not indexed) | audit rules and strict schemas (Kubernetes 1.35), removed APIs, NetworkPolicy reachability, Pod Security and RBAC denial explainers |
+| OpenShift 4.x | 48 shared + 10 OpenShift-only (SCC, Route 503, ClusterOperator, arbitrary UID, EgressIP, build image quota, CNI not ready, OLM OperatorGroup, image prune registry, CRI-O storage) | 13 OpenShift docs (SCC, Routes, operators, DeploymentConfig, EgressFirewall, EgressIP, arbitrary UID, install and bootstrap, ClusterOperator conditions and stuck updates, etcd quota, pod security label sync, service serving certificates, overview) | 921 bugs from the 4.20-4.22 release notes | SCC, Route and EgressFirewall schemas; must-gather analysis; SCC denial explainer |
+| ROSA HCP and classic | shared + 9 ROSA playbooks (HCP nodes, OCM5011 capacity, OCM5010 subnet tags, ELB service-linked role, user-role not linked, expired rosa token, Karpenter discovery tag and CreateTags) | 5 (ROSA HCP, EFS, egress zero, HCP lifecycle: console, subnet tags, upgrades, break glass, deletion; troubleshooting: install logs, quota, private NLB) | HyperShift bugs within the OpenShift release notes | ROSA HCP self-test cases |
 | Helm 3 | DBG-HELM-LOCK, DBG-HELM-OWNERSHIP, DBG-HELM-REPO-EXISTS, DBG-HELM-REMOVED-API, DBG-HELM-YAML, DBG-IMMUTABLE-SELECTOR | 5 (basics, troubleshooting, values and templates, CLI operations: `--set` syntax, OCI, rollback, three-way merge, paths; chart authoring: `crds/`, hooks, library charts, whitespace, comments) | none | chart audit and generation |
-| RHACS / StackRox | DBG-STACKROX-ADMISSION | 2 (RHACS overview, admission denials) | none (ROX bugs only through a Jira sync) | RHACS policy comparison, scanner-report and image reads |
-| Admission policy engines (Pod Security, VAP, Kyverno, Gatekeeper, SCC) | DBG-PSA, DBG-WEBHOOK, DBG-SCC | Pod Security, RBAC, SCC | none | denial explainers for each engine; generated VAP and Kyverno policies |
+| RHACS / StackRox | DBG-STACKROX-ADMISSION + 6 (break glass, webhook failure policy, Scanner registry and CVE data, Collector to Sensor, roxctl image check) | 6 (overview, admission denials, enforcement, policy rules and scope, roxctl in CI, secured cluster troubleshooting) | none (ROX bugs only through a Jira sync) | RHACS policy comparison, scanner-report and image reads |
+| Admission policy engines (Pod Security, VAP, Kyverno, Gatekeeper, SCC) | DBG-PSA, DBG-WEBHOOK, DBG-SCC, DBG-VAP | Pod Security, ValidatingAdmissionPolicy, Kyverno, Gatekeeper, RBAC, SCC, OpenShift pod security sync | none | denial explainers for each engine; generated VAP and Kyverno policies |
 | OpenShift Data Foundation, Ceph | storage playbooks (PVC pending, multi-attach, mount) | storage access modes | ODF bugs not indexed | none |
 
 ## How well it answers: measured per technology
@@ -85,29 +85,47 @@ was left unanswered gets an answer. Once a change is made to close a golden gap,
 well kube-noob generalises: it is kept as a regression test, and generalisation is measured on the community test
 half and on fresh questions.
 
-### After QA6: Kubernetes and Helm gaps closed (2026-10-28)
+### After QA6: gaps closed for every technology (2026-10-28)
 
-QA6 added the playbooks and documents the graders asked for in Kubernetes and Helm, each checked against the page
-they named (CHANGELOG). Golden results now:
+QA6 added the playbooks and documents the graders asked for, each checked against the page they named (CHANGELOG),
+first for Kubernetes and Helm, then for OpenShift, ROSA HCP, RHACS and the policy engines (drafted from the cited
+pages by separate agents that never saw the golden questions, then reviewed and verified before they went in).
+Golden results now, graded again by independent agents:
 
 | Technology | In scope: top finding answers | Out of scope left unanswered |
 |---|---|---|
 | Kubernetes | 13 of 16 (was 4) | 4 of 4 |
 | Helm 3 | 13 of 16 (was 1) | 4 of 4 (was 2) |
-| OpenShift | 1 of 16 | 3 of 3 |
-| ROSA HCP | 1 of 16 | 2 of 4 (was 1) |
-| RHACS | 0 of 16 | 2 of 4 |
-| Admission policy engines | 0 of 16 | 3 of 4 |
+| OpenShift | 11 of 16 (was 1) | 3 of 3 |
+| ROSA HCP | 14 of 16 (was 1) | 2 of 4 (was 1) |
+| RHACS | 12 of 16 (was 0) | 2 of 4 |
+| Admission policy engines | 9 of 16 (was 0) | 3 of 4 |
+| **All** | **72 of 96 (was 7)** | **18 of 23 (was 15)** |
+
+OpenShift and ROSA HCP items are now asked with their platform (`platform: openshift` or `rosa-hcp`), as kube-noob
+is configured on those clusters; without it, OpenShift-only content stays silent unless the question says OpenShift
+(G83), and OpenShift scores 5 of 16 instead of 11. The baseline above was measured without a platform.
 
 These golden items said what to add, so their rise is a fit to them, not evidence that kube-noob generalises; they
-stay as regression tests. The honest check is the community test half (1,793 answered rows, retired rows left out),
-which these changes were not built from: 36 top answers changed, and an independent grader comparing each before
-and after against the accepted answer found 4 better (an unreachable API server, `localhost:8080` meaning no
-kubeconfig, Helm OCI push), 2 worse and 30 no better or worse. One of the two worse is a reported-bug match that
-rested on the words "item", "items" and "visible": "item" now appears in three document sections, so it no longer
-counts as rare. Rarity in the bundled docs is now a count of sections (at most 2), not a share, so adding
-documents can never make more words rare; as a share it had made four community rows that pointed at the right
-bug name an unrelated one.
+stay as regression tests. The honest check is the community test half (1,788 answered rows, retired rows left out),
+which none of these changes were built from. An independent grader compared each changed answer with the accepted
+answer:
+
+| Change | Answers moved | Better | Worse | Neither |
+|---|---|---|---|---|
+| Kubernetes and Helm content | 36 | 4 | 2 | 30 |
+| Bug matcher counts each piece of evidence once | 52 | 12 | 0 | 40 |
+| OpenShift, ROSA HCP, RHACS and policy content | 62 | 8 | 3 | 51 |
+| Prefixed names match bare; AWS Security Hub gated | 10 | 6 | 2 | 2 |
+
+Most moved answers were wrong both before and after: real questions are dominated by Red Hat bug reports (the
+bundled release notes hold the key for few of them) and by products outside the box, which documentation content
+does not reach. The bug-matcher change helped most because it stopped weak matches to unrelated bugs, letting the
+answer point at the bug the report itself names. Rarity in the bundled docs is a count of sections (at most 2), not
+a share, so adding documents never makes more words rare; as a share it had made four rows that pointed at the
+right bug name an unrelated one. A count of documents was tried and measured worse (33 test-half answers moved: 4
+better, 24 worse, 5 neither; most rows with no answer started naming an unrelated bug), so it was not kept and those
+rows are retired.
 
 ## How these numbers move
 
@@ -116,7 +134,7 @@ bug name an unrelated one.
   [community-questions-retired.csv](community-questions-retired.csv) lists it with the change it informed, and
   `--split test` leaves it out (`retiredExcluded` in the summary). The QA5 changes below (the Helm values document,
   the image-pull playbook's local-image cause, the SCC wording) were chosen from the graders' notes on the table
-  above, so its 28 Helm rows and 5 image-pull and SCC rows are retired and the table is the before picture (QA6 retired 5 more: the rows whose regression led to count-based rarity).
+  above, so its 28 Helm rows and 5 image-pull and SCC rows are retired and the table is the before picture (QA6 retired 38 more: 5 rows whose regression led to count-based rarity and 33 that showed a count of documents was worse).
 - The golden set (`tests/fixtures/golden/`, run by `scripts/eval_golden.py` and `tests/test_golden.py`) is
   original text written from each technology's official documentation, so it lives in the repository and gates CI.
 - More answered questions per technology come from the owner (RHACS, Kyverno, Gatekeeper, ROSA HCP and Helm have

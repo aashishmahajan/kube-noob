@@ -150,6 +150,10 @@ def _classify_segment(seg: str) -> StepKind:
             # must-gather creates a namespace and a privileged pod; it changes the cluster.
             if nxt in {"top", "inspect"} or (nxt == "policy" and _ADM_POLICY_READ.search(seg)):
                 return "read"
+            if nxt == "prune" and not any(
+                t == "--confirm" or (t.startswith("--confirm=") and t.split("=", 1)[1].lower() != "false") for t in rest
+            ):
+                return "read"  # without --confirm, oc adm prune only lists what it would remove
             return "change"
         return "change"
     if tool == "helm":
@@ -158,6 +162,8 @@ def _classify_segment(seg: str) -> StepKind:
         return "read" if sub in _HELM_READ else "change"
     if tool == "rosa":
         return "read" if sub in _ROSA_READ else "change"
+    if tool == "aws":  # aws <service> <operation>: describe-*, get-* and list-* only read
+        return "read" if nxt.startswith(("describe-", "get-", "list-")) else "change"
     if tool == "kube-noob":
         return "read" if sub not in {"serve", "mcp", "corpus", "ask"} else "exec"
     if tool in _LOCAL_READ:

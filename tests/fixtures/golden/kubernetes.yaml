@@ -221,7 +221,7 @@
     url: 'https://kubernetes.io/docs/tasks/debug/debug-application/determine-reason-pod-failure/'
   outOfScope: false
   status: miss
-  gap: 'doc: terminationMessagePolicy FallbackToLogsOnError and reading containerStatuses termination message'
+  gap: 'doc: terminationMessagePolicy FallbackToLogsOnError and reading the termination message with kubectl'
 - id: k8s-014
   technology: kubernetes
   kind: concept

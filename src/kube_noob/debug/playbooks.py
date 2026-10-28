@@ -248,6 +248,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "The pod asks for something restricted-v2 forbids: fixed runAsUser/fsGroup outside the namespace range, "
             "privileged, hostPath, hostNetwork, added capabilities, allowPrivilegeEscalation: true.",
             "The ServiceAccount was never granted the more permissive SCC the workload genuinely needs.",
+            "Pods of a Deployment, DaemonSet or other workload are admitted with the SCCs their ServiceAccount may "
+            "use; an SCC granted to the user who created the workload does not count.",
+            "privileged: true in the pod spec does not select the privileged SCC by itself: admission takes the "
+            "highest-priority SCC with allowPrivilegedContainer: true that the requester or ServiceAccount may use.",
+            "The pod template sets openshift.io/required-scc to an SCC that does not exist, or that neither the "
+            "requester nor the ServiceAccount may use in the namespace.",
         ),
         (
             "oc get events -n {ns} --field-selector reason=FailedCreate",
@@ -260,10 +266,19 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Drop privileged/host settings; use a Service instead of hostPort; PVCs instead of hostPath.",
             "Only if truly required: oc adm policy add-scc-to-user nonroot-v2 -z {sa} -n {ns} (least permissive SCC "
             "that fits; never 'privileged' for app workloads).",
+            "Never edit the default SCCs (restricted-v2, privileged, anyuid, ...): it can break platform pods and "
+            "upgrades, and some upgrades reset them. Create your own SCC if none fits.",
+            "A cluster administration component that truly needs privileged containers: grant the SCC to its "
+            "ServiceAccount, not to a user (oc adm policy add-scc-to-user privileged -z {sa} -n {ns}); privileged is "
+            "the most relaxed SCC (host directories, host IPC and PID, any UID, any capability).",
+            "To pin the SCC, set openshift.io/required-scc in spec.template.metadata.annotations (never on a running "
+            "pod); the SCC must exist and the ServiceAccount must be allowed to use it.",
+            "A pod that an SCC admits can still be rejected by Pod Security Admission: OpenShift runs both checks "
+            "independently (see DBG-PSA).",
         ),
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
         related_rules=("KN-S001", "KN-S004", "KN-S009", "KN-S010"),
-        knowledge=("ocp-scc",),
+        knowledge=("ocp-scc", "ocp-pod-security-admission"),
         weight=1.3,
     ),
     Playbook(
@@ -273,6 +288,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Namespace enforces the baseline/restricted Pod Security Standard and the pod spec violates it "
             "(missing seccompProfile, capabilities not dropped, allowPrivilegeEscalation not false, runAsNonRoot).",
+            "The Deployment, Job or other workload was created with a 'would violate PodSecurity' warning (warn and "
+            "audit check pod templates), but enforce applies only to Pods, so every pod its controller creates is "
+            "rejected.",
+            "[OCP] The pod also has to pass its SCC; SCC admission and Pod Security Admission are independent.",
         ),
         (
             "oc get ns {ns} --show-labels   # pod-security.kubernetes.io/enforce",
@@ -281,6 +300,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Add the restricted securityContext: runAsNonRoot: true, allowPrivilegeEscalation: false, "
             "capabilities.drop: [ALL], seccompProfile.type: RuntimeDefault (`kube-noob fix` does this).",
+            "Before raising a namespace's enforce level, preview it without changing anything: kubectl label "
+            "--dry-run=server --overwrite ns --all pod-security.kubernetes.io/enforce=baseline (existing pods that "
+            "would violate come back as warnings).",
         ),
         related_rules=("KN-S002", "KN-S003", "KN-S006", "KN-S008"),
         knowledge=("k8s-pss",),
@@ -567,17 +589,72 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "A policy engine (RHACS/StackRox, Gatekeeper, Kyverno) rejected the object - the message names the policy.",
             "The webhook service is down/unreachable and failurePolicy is Fail, blocking all matching requests.",
+            "Kyverno: the API server cannot reach the Kyverno webhook on the worker nodes (TCP 9443 by default). A "
+            "private GKE cluster does not allow that traffic from the control plane until a firewall rule opens it; "
+            "on EKS a custom CNI such as Calico, an outdated VPC CNI plug-in, or a node security group without an "
+            "inbound rule for 9443 from the cluster security group has the same effect (failed calling webhook "
+            '"validate.kyverno.svc-fail": ... context deadline exceeded).',
+            "Kyverno: every Kyverno pod is down while policies matching Pods fail closed, so the API server times out "
+            "on those requests.",
         ),
         (
-            "oc get validatingwebhookconfigurations,mutatingwebhookconfigurations",
+            "oc get validatingwebhookconfigurations,mutatingwebhookconfigurations   # age should match its pods",
             "oc get validatingwebhookconfiguration <name> -o jsonpath='{{.webhooks[*].failurePolicy}}'",
+            "kubectl get pods -n kyverno   # Kyverno pods must be Running",
         ),
         (
             "Fix the manifest to satisfy the named policy (run `kube-noob audit` first - rules map to RHACS policies).",
             "If the webhook backend is down: restore it; do not delete the webhook configuration in production "
             "without the owning team.",
+            "[Kyverno, private GKE] Add a firewall rule that lets the control plane reach the worker nodes on the "
+            "Kyverno TCP port (9443 by default).",
+            "[Kyverno, EKS] Custom CNI (e.g. Calico): install Kyverno with the Helm option hostNetwork set to true. "
+            "VPC CNI: upgrade the plug-in to a version that supports the cluster's Kubernetes version. Own node "
+            "security group: allow inbound 9443 from the EKS cluster security group.",
+            "[Kyverno, every Kyverno pod down] Kyverno's documented recovery: kubectl delete "
+            "validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg and kubectl delete "
+            "mutatingwebhookconfiguration kyverno-resource-mutating-webhook-cfg (Kyverno recreates both when it is "
+            "back), then run the admission controller with 3 replicas.",
+            "[Kyverno] Exception for one workload (the policy owner decides): PolicyExceptions are off by default; "
+            "Kyverno must run with enablePolicyException set to true and exceptionNamespace naming where exceptions "
+            "may be used. A PolicyException (policies.kyverno.io) lists the policy in spec.policyRefs (name and kind) "
+            "and selects the workload with a CEL matchConditions expression; the PolicyReport then shows result: skip.",
+            "[Gatekeeper] Rolling out a constraint (the constraint owner decides): set spec.enforcementAction: dryrun "
+            "(violations only in the constraint's status.violations) or warn (admitted, the client sees a warning) "
+            "instead of the default deny.",
         ),
-        knowledge=("stackrox-admission",),
+        knowledge=("stackrox-admission", "kyverno-troubleshooting", "gatekeeper-enforcement"),
+    ),
+    Playbook(
+        # kubernetes/website ed70e31 content/en/docs/reference/access-authn-authz/validating-admission-policy.md
+        # (denial message, Validation actions, Message expression) and examples/validatingadmissionpolicy/.
+        "DBG-VAP",
+        "Request denied by a ValidatingAdmissionPolicy (a CEL validation is false)",
+        (r"ValidatingAdmissionPolicy '[^'\n]{1,253}' with binding '[^'\n]{1,253}' denied request",),
+        (
+            "One of the policy's spec.validations CEL expressions returned false for this object, and the binding in "
+            "the message has validationActions: [Deny]. 'failed expression: <expr>' quotes the expression itself "
+            "(the validation has no message or messageExpression); any other text is the policy's message.",
+            "Every matching (policy, binding, parameter) combination must pass, so a second binding or parameter "
+            "resource can deny what another allows.",
+        ),
+        (
+            "kubectl get validatingadmissionpolicy <policy> -o yaml   # spec.validations, failurePolicy, "
+            "status.typeChecking",
+            "kubectl get validatingadmissionpolicybinding <binding> -o yaml   # validationActions, matchResources, "
+            "paramRef",
+        ),
+        (
+            "Change the object so the expression holds (for object.spec.replicas <= 5, set spec.replicas to 5 or "
+            "fewer).",
+            "Policy owner: add spec.validations[i].messageExpression (CEL returning a string) so the denial says what "
+            "to change; it takes precedence over message, which remains the fallback.",
+            "Policy owner: if the object should not be covered, narrow the binding's matchResources (for example its "
+            "namespaceSelector); to report instead of reject, set the binding's validationActions to [Warn, Audit] "
+            "(Deny and Warn cannot be combined).",
+        ),
+        knowledge=("k8s-validating-admission-policy",),
+        weight=1.4,
     ),
     Playbook(
         "DBG-STACKROX-ADMISSION",
@@ -604,9 +681,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Remediate the manifest (kube-noob rules list the matching RHACS policy for each finding).",
             "If a justified exception is needed, add a scoped policy exclusion in Central - do not disable "
             "enforcement cluster-wide.",
+            "Emergency only: annotate the Deployment with admission.stackrox.io/break-glass: <ticket> to bypass the "
+            "admission controller (bypass must be enabled on the cluster; each bypass raises an 'Emergency Deployment "
+            "Annotation' violation). Redeploy without it afterwards.",
         ),
         related_rules=("KN-S001", "KN-S012", "KN-C004", "KN-S003"),
-        knowledge=("stackrox-admission",),
+        knowledge=("stackrox-admission", "rhacs-enforcement"),
         weight=1.4,
     ),
     Playbook(
@@ -979,7 +1059,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "support case rather than editing openshift-* namespaces.",
         ),
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
-        knowledge=("ocp-operators",),
+        knowledge=("ocp-operators", "ocp-cluster-update-status"),
     ),
     # Sources (checked 2026-10-28): etcd FAQ (disk latency is part of leader liveness; WAL fsync p99 < 10 ms,
     # backend commit p99 < 25 ms; CPU starvation) https://etcd.io/docs/v3.5/faq/ ; etcd maintenance guide (space
@@ -1383,6 +1463,598 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         knowledge=("helm-templates-values", "helm-chart-authoring"),
         weight=1.4,
+    ),
+    # openshift/openshift-docs modules/builds-troubleshooting-access-resources.adoc
+    Playbook(
+        "DBG-BUILD-IMAGE-QUOTA",
+        "OpenShift build fails: 'requested access to the resource is denied' (project image quota exceeded)",
+        (
+            # the message on a line that is not an image pull error (those belong to DBG-IMAGEPULL)
+            r"(?:^|\n)(?![^\n]{0,300}(?:pull access denied|Failed to pull image))[^\n]{0,300}?"
+            r"requested access to the resource is denied",
+        ),
+        (
+            "A build that fails with 'requested access to the resource is denied' has gone over one of the image "
+            "quotas set on its project.",
+        ),
+        ("oc describe quota   # in the build's project: the limits applied and the storage in use",),
+        (
+            "Check the project's current quota with `oc describe quota` and compare the storage in use with the "
+            "limits applied to find the image quota that was exceeded.",
+        ),
+        platforms=("openshift",),
+        weight=1.2,
+    ),
+    # openshift/openshift-docs modules/ipi-install-troubleshooting-runtime-network-not-ready.adoc
+    Playbook(
+        "DBG-OCP-CNI-NOT-READY",
+        "OpenShift: runtime network not ready (NetworkPluginNotReady, Missing CNI default network)",
+        (
+            r"Missing CNI default network",
+            r"NetworkReady=false reason:NetworkPluginNotReady",
+            r"runtime network not ready",
+        ),
+        (
+            "The networking components are missing: the Cluster Network Operator deploys them in response to a "
+            "special object the installation program creates (network.config.openshift.io named cluster). Check "
+            "that the object exists and that the network-operator pod runs (it can sit in ContainerCreating).",
+            "The operator starts very early in the install, once the control plane nodes are up and before the "
+            "bootstrap control plane is torn down, so the error can point to subtler installer problems: control "
+            "plane nodes that take a long time to come up, or trouble communicating with the apiserver.",
+        ),
+        (
+            "oc get all -n openshift-network-operator   # network-operator pod Running, or stuck in ContainerCreating?",
+            "kubectl get network.config.openshift.io cluster -oyaml   # [IPI bare metal: run on the provisioner "
+            "node] the object the installation program creates",
+            "kubectl get pods -n openshift-network-operator",
+            'kubectl logs -n openshift-network-operator -l "name=network-operator"   # with three or more control '
+            "plane nodes one operator wins the leader election and the others sleep",
+        ),
+        (
+            "network.config.openshift.io cluster does not exist: the installation program did not create it; run "
+            "openshift-install create manifests to find out why.",
+            "Read the network-operator logs; also look at slow control plane node bring-up and apiserver "
+            "communication, which this error can indicate.",
+        ),
+        platforms=("openshift",),
+        knowledge=("ocp-install-troubleshooting",),
+        weight=1.3,
+    ),
+    # openshift/openshift-docs modules/olm-operatorgroups-troubleshooting.adoc; check commands as written in
+    # modules/nw-metallb-installing-operator-cli.adoc (oc get operatorgroup / installplan -n <namespace>),
+    # modules/logging-operator-upgrading-all-ns.adoc (oc get operatorgroup <operator_group_name> -o yaml) and
+    # modules/lvms-uninstalling-logical-volume-manager-operator-using-openshift-cli.adoc (oc get csv -n <namespace>);
+    # OperatorGroup fields from modules/olm-operatorgroups-provided-apis-annotations.adoc and
+    # modules/olm-operatorgroups-target-namespace.adoc.
+    Playbook(
+        "DBG-OLM-OPERATORGROUP",
+        "OLM: InstallPlan blocked by the namespace's OperatorGroup (more than one, none, or unsupported)",
+        (
+            r"more than one operator group\(s\) are managing this namespace",
+            r"attenuated service account query failed",
+            r"UnsupportedOperatorGroup",
+            r"\b(?:multiple|two|several|more than one)\s{1,5}operator\s?groups?\b",
+        ),
+        (
+            "An InstallPlan's namespace must hold exactly one OperatorGroup. With two or more (count= in the message "
+            "is how many), the InstallPlan treats the OperatorGroup as invalid, does not generate the CSV and keeps "
+            "installing with this message.",
+            "The same happens when the namespace has no OperatorGroup at all, or when the OperatorGroup names a "
+            "service account (spec.serviceAccountName) that is wrong or does not exist.",
+            "UnsupportedOperatorGroup: the CSV's install modes do not support the OperatorGroup's target namespace "
+            "selection, so the CSV goes to a failed state.",
+        ),
+        (
+            "oc get operatorgroup -n {ns}   # exactly one should be listed",
+            "oc get operatorgroup <operator_group_name> -o yaml   # spec.targetNamespaces, spec.selector, "
+            "spec.serviceAccountName",
+            "oc get installplan -n {ns}",
+            "oc get csv -n {ns}",
+        ),
+        (
+            "Keep a single OperatorGroup in the namespace: remove the extra ones so the InstallPlan can generate the "
+            "CSV.",
+            "No OperatorGroup: create one. Wrong service account: point the OperatorGroup at a service account that "
+            "exists.",
+            "UnsupportedOperatorGroup: change the OperatorGroup's target namespace selection to one the CSV's install "
+            "modes support, or change the CSV's install modes; the failed CSV then goes back to pending.",
+        ),
+        platforms=("openshift",),
+        knowledge=("ocp-operators",),
+        weight=1.4,
+    ),
+    # openshift/openshift-docs modules/pruning-images-troubleshooting.adoc; --registry-url from
+    # modules/pruning-images-options.adoc and the preview without --confirm from
+    # modules/pruning-images-running-operation.adoc.
+    Playbook(
+        "DBG-PRUNE-REGISTRY",
+        "oc adm prune images cannot talk to the registry (HTTP response to HTTPS client, unknown authority)",
+        (
+            r"error communicating with registry: [^\n]{0,300}server gave HTTP response to HTTPS client",
+            r"error communicating with registry: [^\n]{0,300}malformed HTTP response",
+            r"error communicating with registry: [^\n]{0,300}x509: certificate signed by unknown authority",
+            r"\bprune images\b[^\n]{0,300}(?:HTTP response to HTTPS client|malformed HTTP response|"
+            r"certificate signed by unknown authority)",
+        ),
+        (
+            "server gave HTTP response to HTTPS client: the registry is not secured, but the prune client tries a "
+            "secure connection.",
+            "malformed HTTP response, or x509: certificate signed by unknown authority: the registry is secured with "
+            "a certificate signed by another certificate authority than the one the client verifies against. By "
+            "default the client uses the CA data in the user's configuration files, as it does for the control "
+            "plane API.",
+        ),
+        (
+            "oc adm prune images <image_prune_option_one> <image_prune_option_two>   # without --confirm it only "
+            "lists what would be removed",
+        ),
+        (
+            "Unsecured registry: secure the registry (recommended). Otherwise append --force-insecure to the "
+            "command, which is not recommended.",
+            "Registry signed by another CA: pass the right CA with --certificate-authority (adding --force-insecure "
+            "instead works around it but is not recommended).",
+            "When the cluster-internal registry URL cannot be resolved or reached, give a route that works with "
+            "--registry-url; an https:// or http:// prefix on the hostname forces that protocol.",
+        ),
+        platforms=("openshift",),
+        weight=1.4,
+    ),
+    # openshift/openshift-docs modules/cleaning-crio-storage.adoc
+    Playbook(
+        "DBG-CRIO-STORAGE",
+        "Node cannot create pod sandboxes or containers: wipe the CRI-O storage",
+        (
+            r"error recreating the missing symlinks",
+            r"can.t stat lower layer",
+            r"/var/lib/containers/storage/overlay/[^\s/]{1,200}/link: no such file or directory",
+            r"\bcrio wipe\b",
+        ),
+        (
+            "Overlay layer links in the node's CRI-O ephemeral storage are missing: 'Failed to create pod sandbox "
+            "... error recreating the missing symlinks' (the node cannot run any pod) or 'can't stat lower layer' "
+            "(no new container can be created on an otherwise working node).",
+            "Other signs that call for the same cleanup: the node is NotReady after a cluster upgrade or a reboot, "
+            "crio is not working properly, or oc debug node/<node_name> cannot start a debug shell.",
+        ),
+        ("oc get nodes   # NotReady after an upgrade or a reboot is one of the signs",),
+        (
+            "Wipe the node's CRI-O ephemeral storage as cluster-admin, in this order. 1) oc adm cordon <node_name> "
+            "so no workload lands on the node if it turns Ready (Status shows SchedulingDisabled).",
+            "2) oc adm drain <node_name> --ignore-daemonsets --delete-emptydir-data (terminationGracePeriodSeconds "
+            "defaults to 30 s; a pod set above 90 s might be SIGKILLed and fail to terminate).",
+            "3) On the node as root (ssh core@node1.example.com with your node's address, then sudo -i): "
+            "systemctl stop kubelet",
+            "4) Remove the pods outside the host network first, because removing them relies on the network plugin "
+            'pods, which are in the host network: for pod in $(crictl pods -q); do if [[ "$(crictl inspectp $pod | '
+            'jq -r .status.linux.namespaces.options.network)" != "NODE" ]]; then crictl rmp -f $pod; fi; done',
+            "5) Then all other pods: crictl rmp -fa",
+            "6) systemctl stop crio, then wipe the ephemeral storage: crio wipe -f",
+            "7) systemctl start crio, then systemctl start kubelet; oc get nodes shows the node Ready, "
+            "SchedulingDisabled when the cleanup worked.",
+            "8) oc adm uncordon <node_name>",
+        ),
+        platforms=("openshift",),
+        weight=1.4,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshoot-hcp-install.adoc (OCM5011 row); checks from
+        # modules/rosa-troubleshooting-installing.adoc and modules/rosa-hcp-deleting-cluster.adoc
+        # (rosa describe cluster).
+        "DBG-ROSA-OCM5011-CAPACITY",
+        "ROSA HCP install failed: no capacity in the selected AWS region (OCM5011)",
+        (
+            r"\bOCM5011\b",
+            r"unavailable capacity in the selected region",
+        ),
+        (
+            "Capacity was unavailable in the AWS region selected for the cluster. This is the capacity code: "
+            "credential problems are OCM5003/OCM5004, STS role problems OCM5007 and subnet problems "
+            "OCM5005/OCM5006/OCM5010.",
+        ),
+        (
+            "rosa logs install --cluster=<cluster_name>",
+            "rosa describe cluster --cluster=<cluster_name>   # Region: the region the install used",
+        ),
+        ("Retry the cluster installation, or install the cluster in another AWS region.",),
+        platforms=("rosa-hcp",),
+        knowledge=("rosa-troubleshooting",),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshoot-hcp-install.adoc (OCM5010 row) and
+        # modules/rosa-hcp-vpc-subnet-tagging.adoc (required subnet tags and commands).
+        "DBG-ROSA-OCM5010-SUBNET-TAGS",
+        "ROSA HCP install failed to tag subnets (OCM5010)",
+        (
+            r"\bOCM5010\b",
+            r"Failed to tag subnets for the cluster",
+        ),
+        (
+            "The AWS permissions used for the install, or the subnet configuration, are not correct.",
+            "The subnets lack the required tags: at least one private subnet needs kubernetes.io/role/internal-elb "
+            "and, where public subnets are used, one public subnet needs kubernetes.io/role/elb (value 1 or no "
+            "value).",
+        ),
+        (
+            "rosa describe cluster --cluster=<cluster_name>   # Subnets: the subnet IDs given to the cluster",
+            'aws ec2 describe-tags --filters "Name=resource-id,Values=<subnet_id>"   # repeat for each subnet',
+            "rosa logs install --cluster=<cluster_name>",
+        ),
+        (
+            "Tag the private subnets: aws ec2 create-tags --resources <private-subnet-id> --region <aws_region> "
+            "--tags Key=kubernetes.io/role/internal-elb,Value=1",
+            "Tag the public subnets, if the cluster uses them: aws ec2 create-tags --resources <public-subnet-id> "
+            "--region <aws_region> --tags Key=kubernetes.io/role/elb,Value=1",
+            "Confirm that the AWS permissions are correct as well.",
+        ),
+        platforms=("rosa-hcp",),
+        knowledge=("rosa-hcp-lifecycle",),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshooting-elb-service-role.adoc.
+        "DBG-ROSA-ELB-SERVICE-ROLE",
+        "ROSA install: AccessDenied on iam:CreateServiceLinkedRole for Elastic Load Balancing",
+        (
+            r"iam:CreateServiceLinkedRole[^\n]{0,200}elasticloadbalancing\.amazonaws\.com",
+            r"\bAWSServiceRoleForElasticLoadBalancing\b",
+            r"Error creating network Load Balancer: AccessDenied",
+        ),
+        (
+            "No load balancer was ever created in this AWS account, so the Elastic Load Balancing service-linked role "
+            "(AWSServiceRoleForElasticLoadBalancing) may not exist yet, and the installer role is not allowed to "
+            "create it.",
+        ),
+        ('aws iam get-role --role-name "AWSServiceRoleForElasticLoadBalancing"',),
+        (
+            "Create the role if it is missing (needed once per AWS account): aws iam get-role --role-name "
+            '"AWSServiceRoleForElasticLoadBalancing" || aws iam create-service-linked-role --aws-service-name '
+            '"elasticloadbalancing.amazonaws.com"',
+        ),
+        platforms=("rosa-classic", "rosa-hcp"),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshooting-cluster-deletion.adoc; rosa list user-role from
+        # modules/rosa-sts-ocm-and-user-role-troubleshooting.adoc; linking from
+        # modules/rosa-sts-user-role-creation.adoc.
+        "DBG-ROSA-USER-ROLE-UNLINKED",
+        "ROSA: cluster cannot be deleted, sts_user_role is not linked (CLUSTERS-MGMT-400)",
+        (
+            r"sts_user_role is not linked to your account",
+            r"requires sts_user_role to be linked",
+            r"not authorized to perform STS cluster operations",
+            r"CLUSTERS-MGMT-400: Failed to delete cluster",
+        ),
+        (
+            "Your user-role IAM role was unlinked from your Red Hat account or deleted. Your organization has a linked "
+            "ocm-role, so every user who runs STS cluster operations, deletion included, needs a linked user-role.",
+        ),
+        ("rosa list user-role   # LINKED: Yes or No",),
+        (
+            "rosa create user-role (in auto mode it creates the role and links it to your account; look for "
+            "'Successfully linked role ARN ... with account ...').",
+            "Then delete the cluster again: rosa delete cluster --cluster=<cluster_name> --watch, or Delete cluster "
+            "in OpenShift Cluster Manager.",
+        ),
+        platforms=("rosa-classic", "rosa-hcp"),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshooting-expired-token.adoc; login methods from
+        # modules/rosa-login.adoc, modules/rosa-login-offline-token.adoc, modules/rosa-login-sso-auth-code.adoc and
+        # modules/rosa-login-sso-device-code.adoc; rosa login, the token page and rosa whoami from
+        # modules/rosa-sts-setting-up-environment.adoc.
+        "DBG-ROSA-EXPIRED-TOKEN",
+        "rosa CLI: Can't get tokens (the offline access token expired)",
+        (
+            r"Can['’]t get (?:access )?tokens\s{0,3}[:.]",
+            r"\brosa\b[^\n]{0,80}\boffline (?:access )?token\b[^\n]{0,60}\b(?:expired|invalid)",
+        ),
+        (
+            "The api.openshift.com offline access token that rosa logged in with has expired: sso.redhat.com "
+            "invalidated it.",
+        ),
+        ("rosa whoami   # the AWS and Red Hat (OCM) accounts rosa uses",),
+        (
+            "Get a new offline access token from OpenShift Cluster Manager (https://console.redhat.com/openshift/"
+            "token/rosa; a new token is generated on every visit), run rosa login and paste it when asked, or pass "
+            "it with the --token option.",
+            "Or log in with Red Hat single sign-on instead of an offline token (rosa 1.2.36 or later; Red Hat "
+            "recommends it): rosa login --use-auth-code on a machine with a web browser, or rosa login "
+            "--use-device-code without one (approve the code from a second device that has a browser).",
+            "For automation, Red Hat recommends service accounts rather than offline tokens.",
+        ),
+        platforms=("rosa-classic", "rosa-hcp"),
+        weight=1.4,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/resolve-ec2nodeclass-not-ready.adoc (assembly
+        # support/troubleshooting/rosa-troubleshooting-autonode.adoc, Red Hat build of Karpenter).
+        "DBG-ROSA-KARPENTER-DISCOVERY-TAG",
+        "ROSA HCP Karpenter: EC2NodeClass SubnetsReady or SecurityGroupsReady is False (discovery tag missing)",
+        (
+            r"SubnetSelector did not match any Subnets",
+            r"SecurityGroupSelector did not match any SecurityGroups",
+            r"\b(?:Subnets|SecurityGroups)Ready\b[\s`'\"=:]{0,8}False\b",
+            r"\bec2nodeclass\b[^\n]{0,80}\bnot ready\b",
+        ),
+        (
+            "Karpenter finds subnets and security groups through a cluster-specific discovery tag, "
+            "karpenter.sh/discovery. SubnetsReady=False ('SubnetSelector did not match any Subnets'): the private "
+            "subnets of the VPC lack the tag.",
+            "SecurityGroupsReady=False ('SecurityGroupSelector did not match any SecurityGroups'): the default "
+            "security group lacks the tag.",
+            "The tag is present but its value differs from the EC2NodeClass spec: values are case-sensitive and must "
+            "match exactly.",
+        ),
+        (
+            'oc get ec2nodeclass/default -o json | jq .status.conditions   # entries with "status": "False"',
+            "oc get ec2nodeclass/default -o json | jq -r "
+            "'.spec.subnetSelectorTerms[0].tags[\"karpenter.sh/discovery\"]'   # the tag value to use",
+            'aws ec2 describe-subnets --filters "Name=vpc-id,Values=<vpc_id>" --query '
+            "'Subnets[?MapPublicIpOnLaunch==`false`].[SubnetId,Tags]' --output table   # the private subnets",
+            "aws ec2 describe-subnets --subnet-ids <subnet_id> --query "
+            "'Subnets[0].Tags[?Key==`karpenter.sh/discovery`].Value' --output text",
+            "aws ec2 describe-security-groups --group-ids <default_sg_id> --query "
+            "'SecurityGroups[0].Tags[?Key==`karpenter.sh/discovery`].Value' --output text",
+        ),
+        (
+            "Tag each private subnet that lacks it: aws ec2 create-tags --resources <subnet_id> --tags "
+            "Key=karpenter.sh/discovery,Value=<discovery_tag_value>",
+            "Tag the default security group if it lacks it: aws ec2 create-tags --resources <default_sg_id> --tags "
+            "Key=karpenter.sh/discovery,Value=<discovery_tag_value>",
+            "Wait 30 to 60 seconds for Karpenter to scan again, then check that Ready is True: oc get "
+            "ec2nodeclass/default -o json | jq '.status.conditions[] | select(.type==\"Ready\")'",
+            "If create-tags fails with an authorization error, give the control plane operator role ec2:CreateTags "
+            "first (DBG-ROSA-KARPENTER-CREATETAGS).",
+        ),
+        platforms=("rosa-hcp",),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/resolve-iam-permissions-tagging.adoc (assembly
+        # support/troubleshooting/rosa-troubleshooting-autonode.adoc, Red Hat build of Karpenter).
+        "DBG-ROSA-KARPENTER-CREATETAGS",
+        "ROSA HCP Karpenter: the control plane operator role lacks ec2:CreateTags",
+        (
+            r"\bCreateTags\b[\s\S]{0,600}?\bClient\.UnauthorizedOperation\b",
+            r"\bClient\.UnauthorizedOperation\b[\s\S]{0,600}?\bCreateTags\b",
+            r"control-plane-operator[^\n]{0,200}\bec2:CreateTags\b",
+            r"\bec2:CreateTags\b[^\n]{0,200}control-plane-operator",
+            r"\bkarpenter\b[^\n]{0,120}\bCreateTags\b",
+        ),
+        (
+            "Karpenter must tag AWS security groups with its discovery tag, but the control plane operator IAM role "
+            "(<cluster_prefix>-kube-system-control-plane-operator) has no ec2:CreateTags permission. CloudTrail shows "
+            "CreateTags events with error code Client.UnauthorizedOperation from a control-plane-operator identity.",
+        ),
+        (
+            "aws iam list-roles | grep kube-system-control-plane-operator",
+            "In the AWS CloudTrail console, search for event name CreateTags, error code Client.UnauthorizedOperation "
+            "and a user identity that contains control-plane-operator.",
+            "aws iam get-role-policy --role-name <cluster_prefix>-kube-system-control-plane-operator --policy-name "
+            "KarpenterCreateTags   # prints the policy once it is attached",
+        ),
+        (
+            'Save this policy as /tmp/create-tags-policy.json: {{"Version": "2012-10-17", "Statement": '
+            '[{{"Sid": "AllowCreateTags", "Effect": "Allow", "Action": ["ec2:CreateTags"], '
+            '"Resource": "*"}}]}}',
+            "Attach it to the role: aws iam put-role-policy --role-name "
+            "<cluster_prefix>-kube-system-control-plane-operator --policy-name KarpenterCreateTags --policy-document "
+            "file:///tmp/create-tags-policy.json",
+            "If the EC2NodeClass showed SecurityGroupsReady False, add the karpenter.sh/discovery tag to the default "
+            "security group now (DBG-ROSA-KARPENTER-DISCOVERY-TAG); with the permission in place the authorization "
+            "error does not return.",
+        ),
+        platforms=("rosa-hcp",),
+        weight=1.4,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/bypass-admission-controller-enforcement.adoc,
+        # modules/admission-controller-settings.adoc (admissionControl.bypass) and
+        # modules/roxctl-sensor-generate-options.adoc (--admission-controller-disable-bypass);
+        # stackrox/stackrox pkg/defaults/policies/files/admission_controller_annotation.json.
+        "DBG-RHACS-BREAK-GLASS",
+        "RHACS: emergency bypass of admission enforcement (admission.stackrox.io/break-glass)",
+        (
+            r"admission\.stackrox\.io/break-glass",
+            r"Emergency Deployment Annotation",
+            r"\b(?:rhacs|stackrox|acs)\b[^\n]{0,120}\bbreak[- ]?glass\b",
+            r"\bbreak[- ]?glass\b[^\n]{0,120}\b(?:rhacs|stackrox|acs)\b",
+        ),
+        (
+            "An urgent deployment is blocked by an enforced RHACS policy. The admission controller lets a Deployment "
+            "through when it carries the annotation admission.stackrox.io/break-glass, provided the secured cluster "
+            "allows bypass.",
+            "Each bypass is recorded as a violation of the 'Emergency Deployment Annotation' policy (high severity; "
+            "the docs call it 'StackRox Emergency Deployment Annotation'), with the deployment details.",
+            "Bypass is turned off on the cluster, so the annotation does not help: Operator admissionControl.bypass: "
+            "Disabled, Helm admissionControl.dynamic.disableBypass: true, a bundle generated with roxctl sensor "
+            "generate --admission-controller-disable-bypass, or the portal setting 'Admission controller bypass "
+            "annotation' not Enabled.",
+        ),
+        (
+            "oc get deployment <name> -n {ns} -o jsonpath='{{.metadata.annotations}}'   # annotation on the Deployment",
+            "Portal: Platform Configuration -> Clusters -> 'Admission controller bypass annotation' (Operator: "
+            "admissionControl.bypass in the SecuredCluster CR; Helm: admissionControl.dynamic.disableBypass)",
+        ),
+        (
+            "Emergency only: add to the Deployment's metadata.annotations "
+            '"admission.stackrox.io/break-glass": "<ticket or change reference>" (the value tells others why the '
+            "check was bypassed) and apply it.",
+            "After the emergency, redeploy without the annotation (the remediation of the Emergency Deployment "
+            "Annotation policy).",
+            "To allow bypass: Operator admissionControl.bypass: BreakGlassAnnotation (the default), Helm "
+            "admissionControl.dynamic.disableBypass: false, or the portal setting 'Admission controller bypass "
+            "annotation' set to Enabled.",
+        ),
+        knowledge=("rhacs-enforcement", "stackrox-admission"),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/admission-controller-failure-policy-changing.adoc,
+        # modules/understand-admission-controller-enforcement.adoc, modules/admission-controller-settings.adoc and
+        # modules/roxctl-sensor-generate-options.adoc; webhook names and the admission-control service from
+        # stackrox/stackrox image/templates/helm/stackrox-secured-cluster/templates/admission-controller.yaml.
+        "DBG-RHACS-WEBHOOK-FAILURE-POLICY",
+        "RHACS admission webhook error or timeout (failure policy Fail rejects the request)",
+        (
+            r"failed calling webhook \"(?:policyeval|k8sevents)\.stackrox\.io\"",
+            r"(?:policyeval|k8sevents)\.stackrox\.io[^\n]{0,200}(?:deadline exceeded|timeout|timed out)",
+            r"admissionControl\.failurePolicy",
+            r"--admission-controller-fail-on-error",
+        ),
+        (
+            "The RHACS validating webhook (policyeval.stackrox.io, or k8sevents.stackrox.io for exec and "
+            "port-forward) hit an error or a timeout, and the cluster's admission controller failure policy is Fail "
+            "(fail closed), so the API server rejects the request. The default, Ignore (fail open), admits it.",
+            "Admission enforcement adds latency to every evaluated API call; clients with short default API timeouts "
+            "(the docs name fabric8) can give up first.",
+            "The webhook timeout cannot be raised: admissionControl.timeoutSeconds and --admission-controller-timeout "
+            "are deprecated and ignored (RHACS uses a preset timeout).",
+        ),
+        (
+            "oc get validatingwebhookconfiguration stackrox -o jsonpath='{{.webhooks[*].failurePolicy}}'   "
+            "# Fail = fail closed, Ignore = fail open",
+            "oc get deployment admission-control -n stackrox   # the service the webhooks call",
+            "Portal: Platform Configuration -> Clusters -> 'Admission controller failure policy'",
+        ),
+        (
+            "Operator: in the SecuredCluster CR set spec.admissionControl.failurePolicy: Ignore (fail open).",
+            "Helm: set admissionControl.failurePolicy: Ignore in values-public.yaml, then run helm upgrade -n stackrox "
+            "stackrox-secured-cluster-services rhacs/secured-cluster-services --reuse-values "
+            "-f /config/yaml/values-public.yaml -f /config/yaml/values-private.yaml",
+            "Other install methods: portal Platform Configuration -> Clusters -> Secure a cluster -> Legacy "
+            "installation method -> Static configuration (requires deployment) -> Admission controller failure "
+            "policy: Fail open -> Next -> Finish, then redeploy the cluster. New roxctl bundles: "
+            "--admission-controller-fail-on-error=false (the default).",
+            "With fail open, a noncompliant deployment admitted after a timeout still meets RHACS's other deploy-stage "
+            "enforcement, such as scaling to zero replicas. Keep Fail where a CD tool is meant to own the enforcement.",
+        ),
+        knowledge=("rhacs-enforcement", "stackrox-admission"),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/common-scanner-warning-messages.adoc,
+        # modules/acs-secured-cluster-services-overview.adoc (who pulls images), modules/viewing-the-logs.adoc and
+        # modules/checking-image-scan-results.adoc.
+        "DBG-RHACS-SCANNER-REGISTRY",
+        "RHACS Scanner: Failed to retrieve metadata from the registry",
+        (r"Failed to retrieve metadata from the registry",),
+        (
+            "The registry is not reachable on the network, for example a firewall blocks docker.io. The Scanner V4 "
+            "Indexer pulls images itself; on OpenShift the Scanner-slim on each secured cluster scans images in the "
+            "integrated registry.",
+            "Authentication to the registry fails: the private registry or repository has no registry integration "
+            "with working credentials in RHACS.",
+        ),
+        ("oc logs -n stackrox <central_pod>   # the underlying registry error",),
+        (
+            "Let the scanner reach the registry through the firewall.",
+            "Create a registry integration with credentials for the private registry or repository (RHACS docs: "
+            "'Integrating with image registries').",
+            "Then scan again without Central's cache: roxctl image scan --image <image_name> --force",
+        ),
+        knowledge=("rhacs-secured-cluster-troubleshooting",),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/common-scanner-warning-messages.adoc.
+        "DBG-RHACS-SCANNER-CVE-DATA",
+        "RHACS Scanner: CVE DATA MAY BE INACCURATE (stale or missing OS CVE data)",
+        (
+            r"CVE DATA MAY BE INACCURATE",
+            r"Stale OS CVE data",
+            r"Unable to retrieve the OS CVE data",
+            r"only Language CVE data is available",
+            r"Failed to get the base OS information",
+            r"Image out of scope for Red\s?Hat Vulnerability Scanner Certification",
+        ),
+        (
+            "Stale OS CVE data: the image's base OS is end-of-life (Debian 8 and 9 are the examples given) and its "
+            "vendor no longer updates the vulnerability data.",
+            "Unable to retrieve the OS CVE data, only Language CVE data is available: Scanner does not officially "
+            "support the base OS, so OS-level packages get no CVE data.",
+            "Failed to get the base OS information: the image was scanned, but no base OS was found.",
+            "Image out of scope for Red Hat Vulnerability Scanner Certification: the image is old and outside the "
+            "certification scope.",
+        ),
+        ("Read the detail message shown with the CVE DATA MAY BE INACCURATE warning: it names one of the causes.",),
+        (
+            "Stale OS CVE data: the OS-level results stay stale while the image is built on the end-of-life release; "
+            "rebuild it on a base OS release that its vendor still updates.",
+            "Red Hat images out of certification scope: use a base image newer than June 2020.",
+        ),
+        knowledge=("rhacs-secured-cluster-troubleshooting",),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/unable-to-connect-to-the-sensor.adoc and
+        # modules/retrieving-the-logs-with-the-oc-or-kubectl-command.adoc.
+        "DBG-RHACS-COLLECTOR-SENSOR",
+        "RHACS Collector cannot connect to Sensor",
+        (
+            r"Unable to connect to Sensor at '[^'\n]{1,200}'",
+            r"Connected to Sensor\?\s{0,40}false",
+            r"\bcollector\b[^\n]{0,120}\b(?:cannot|can't|unable to|fails? to) (?:connect|reach)\b[^\n]{0,40}\bsensor\b",
+        ),
+        (
+            "Collector gets the kernel drivers and the CIDR blocks for network events from Sensor, so its startup "
+            "fails when it cannot reach Sensor.",
+            "Sensor did not start correctly (its pod is not Running with 1/1 READY).",
+            "The Sensor address in Collector's configuration (env GRPC_SERVER) does not match the sensor Service: "
+            "host name, namespace and port must all match.",
+        ),
+        (
+            "oc get pod <collector_pod_name> -n stackrox -o "
+            "jsonpath='{{.spec.containers[0].env[?(@.name==\"GRPC_SERVER\")].value}}'",
+            "oc get service sensor -n stackrox",
+            "oc get pods -n stackrox -l app=sensor   # must be Running, 1/1 READY",
+            "oc logs -n stackrox <collector_pod_name> collector   # add --previous for a restarting pod",
+        ),
+        (
+            "Sensor not running: find the reason in its pod events and logs and fix that first.",
+            "Endpoint mismatch: redeploy the secured cluster resources with the correct Sensor address.",
+            "Then restart Collector: oc delete pods -n stackrox -l app=collector, and check that the startup "
+            "diagnostics now report 'Connected to Sensor?' true.",
+        ),
+        knowledge=("rhacs-secured-cluster-troubleshooting",),
+        weight=1.6,
+    ),
+    Playbook(
+        # stackrox/stackrox pkg/defaults/policies/files/severity_important.json and cvss_7.json,
+        # roxctl/image/check/check.go, roxctl/deployment/check/check.go, roxctl/summaries/policy/policy_errors.go;
+        # openshift/openshift-docs modules/checking-images.adoc and modules/configure-policy-scope.adoc
+        # (Exclude images).
+        "DBG-RHACS-IMAGE-CHECK-FAILED",
+        "roxctl image check fails the build (failed policies found)",
+        (
+            r"Fixable Severity at least Important",
+            r"failed policies found: \d{1,6} policies violated that are failing the check",
+            r"Violated a policy with CI enforcement set",
+        ),
+        (
+            "The default policy 'Fixable Severity at least Important' is enabled with build enforcement "
+            "(FAIL_BUILD_ENFORCEMENT): any vulnerability rated Important or higher that already has a fixed version "
+            "makes roxctl image check exit non-zero.",
+            "Another violated policy has build-time enforcement (roxctl image check) or deploy-time enforcement "
+            "(roxctl deployment check); X in the BREAKS BUILD / BREAKS DEPLOY column marks it. With the deprecated "
+            "--json flag the error reads 'Violated a policy with CI enforcement set'.",
+        ),
+        (
+            "roxctl image check --image=<image_name>   # POLICY, SEVERITY, BREAKS BUILD, VIOLATION, REMEDIATION",
+            "roxctl image check --image=<image_name> --force   # re-pull metadata and scan results, skip the cache",
+            "roxctl deployment check --file=<yaml_filename>",
+        ),
+        (
+            "Update the affected packages to the fixed versions and rebuild (the policy's remediation), or agree a "
+            "mitigation with your security team.",
+            "For an accepted exception, add the image to the policy's Exclude images (it applies to Build-stage checks "
+            "only; cluster and namespace scope do not affect build-time policies).",
+        ),
+        knowledge=("rhacs-roxctl-ci",),
+        weight=1.6,
     ),
 )
 

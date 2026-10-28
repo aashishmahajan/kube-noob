@@ -1,6 +1,6 @@
 ---
 id: helm-templates-values
-title: Helm values, template scope and the Helm 3 commands
+title: Helm values and templates
 tags: [helm, templates, values, go-template, upgrade, uninstall, debugging]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28

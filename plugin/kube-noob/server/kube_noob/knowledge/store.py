@@ -131,6 +131,11 @@ def tokenize(text: str) -> list[str]:
             out.append(single)
         if any(ch in tok for ch in "-./"):
             out.extend(p for p in re.split(r"[-./]", tok) if p and p not in _STOP)
+        if "/" in tok:
+            # A prefixed name ("service.beta.openshift.io/serving-cert-secret-name") is often written bare.
+            name = tok.rsplit("/", 1)[1]
+            if "-" in name and name not in _STOP:
+                out.append(name)
     return out
 
 
@@ -391,6 +396,17 @@ def requires_groups(value: Any) -> list[list[str]]:
     return [[w.strip().lower() for w in g] for g in value]
 
 
+def works_with(value: Any) -> list[str]:
+    """A knowledge doc's ``worksWith`` front matter: named products (as the named-product gate in ``insight`` spells
+    them) that the doc applies to without naming them in its text, such as the CI systems a roxctl pipeline step runs
+    in. Malformed values raise."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(w, str) and w.strip() for w in value):
+        raise ValueError(f"worksWith must be a list of product names, got {value!r}")
+    return [w.strip().lower() for w in value]
+
+
 def builtin_chunks() -> list[Chunk]:
     out: list[Chunk] = []
     root = resources.files("kube_noob").joinpath("data", "knowledge")
@@ -419,6 +435,7 @@ def builtin_chunks() -> list[Chunk]:
                     "platforms": meta.get("platforms") or [],
                     "searchWeight": float(meta.get("searchWeight", 1.0)),
                     "requires": requires_groups(meta.get("requires")),
+                    "worksWith": works_with(meta.get("worksWith")),
                 },
             )
         )

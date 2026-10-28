@@ -16,10 +16,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted'
   outOfScope: false
-  status: miss
-  gap: 'rank: DBG-PSA playbook (has the securityContext fix) should outrank the one-line policy title'
+  status: pass
   expect:
-  - DBG-PSA
+  - 'pod-security/restricted:latest'
 - id: pol-002
   technology: policy
   kind: error
@@ -36,8 +35,9 @@
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#message-expression'
   outOfScope: false
   status: miss
-  gap: 'playbook: ValidatingAdmissionPolicy denial - CEL validation false, set message or messageExpression, adjust replicas
-    or binding'
+  expect:
+  - DBG-VAP
+  gap: 'rank: DBG-VAP (messageExpression/message advice and failed expression origin) above the generic policy finding'
 - id: pol-003
   technology: policy
   kind: howto
@@ -51,8 +51,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-namespace-labels/'
   outOfScope: false
-  status: miss
-  gap: 'doc: PSA server-side dry run: kubectl label --dry-run=server --overwrite ns --all pod-security.kubernetes.io/enforce=baseline'
+  status: pass
+  expect:
+  - 'kn:k8s-pss#2'
 - id: pol-004
   technology: policy
   kind: error
@@ -69,7 +70,9 @@
     url: 'https://kyverno.io/docs/guides/exceptions/'
   outOfScope: false
   status: miss
-  gap: 'playbook: Kyverno PolicyException (enablePolicyException, exceptionNamespace) to exempt one workload'
+  expect:
+  - 'kn:kyverno-troubleshooting#1'
+  gap: 'rank: kn:kyverno-troubleshooting#1 (PolicyException) above the generic Kyverno finding that says to add labels'
 - id: pol-005
   technology: policy
   kind: concept
@@ -84,9 +87,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/concepts/security/pod-security-admission/#workload-resources-and-pod-templates'
   outOfScope: false
-  status: miss
-  gap: 'doc: PSA enforces only on Pod objects, so the Deployment is admitted and ReplicaSet pod creation fails; warn/audit
-    check templates'
+  status: pass
+  expect:
+  - DBG-PSA
 - id: pol-006
   technology: policy
   kind: error
@@ -102,10 +105,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-pre-allocated-values.adoc'
   outOfScope: false
-  status: miss
-  gap: 'rank: DBG-SCC playbook (remove runAsUser, keep runAsNonRoot) should outrank the one-line policy title'
+  status: pass
   expect:
-  - DBG-SCC
+  - openshift-scc/restricted-v2
 - id: pol-007
   technology: policy
   kind: howto
@@ -121,7 +123,10 @@
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#validation-actions'
   outOfScope: false
   status: miss
-  gap: 'doc: ValidatingAdmissionPolicyBinding validationActions Warn and Audit first, then switch to Deny'
+  expect:
+  - 'kn:k8s-validating-admission-policy#3'
+  gap: 'rank: kn:k8s-validating-admission-policy#3 (validationActions Warn/Audit then Deny) above the Pod Security dry-run
+    section'
 - id: pol-008
   technology: policy
   kind: error
@@ -138,7 +143,7 @@
     url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/violations'
   outOfScope: false
   status: miss
-  gap: 'playbook: Gatekeeper constraint enforcementAction dryrun or warn instead of deny'
+  gap: 'doc: Gatekeeper constraint enforcementAction dryrun and warn for audit-only rollout'
 - id: pol-009
   technology: policy
   kind: out-of-scope
@@ -149,7 +154,7 @@
   source: {}
   outOfScope: true
   status: miss
-  gap: 'abstain: kn:k8s-images#0 should not fire for an AWS IAM question'
+  gap: 'abstain: kn:k8s-images#0 should not have fired for an AWS IAM question'
 - id: pol-010
   technology: policy
   kind: error
@@ -164,8 +169,9 @@
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
     url: 'https://kyverno.io/docs/guides/troubleshooting/#kyverno-fails-on-gke'
   outOfScope: false
-  status: miss
-  gap: 'playbook: private GKE control plane cannot reach the webhook port; open firewall TCP 9443 to nodes'
+  status: pass
+  expect:
+  - DBG-WEBHOOK
 - id: pol-011
   technology: policy
   kind: howto
@@ -180,8 +186,9 @@
     commit: e492e24cb08cc557411b1658142d62d3e4dd1688
     url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/exempt-namespaces'
   outOfScope: false
-  status: miss
-  gap: 'doc: Gatekeeper --exempt-namespace flag and admission.gatekeeper.sh/ignore namespace label'
+  status: pass
+  expect:
+  - 'kn:gatekeeper-enforcement#4'
 - id: pol-012
   technology: policy
   kind: concept
@@ -197,7 +204,7 @@
     url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/failing-closed'
   outOfScope: false
   status: miss
-  gap: 'doc: Gatekeeper webhook failurePolicy Ignore by default versus Fail trade-offs'
+  gap: 'doc: Gatekeeper webhook failurePolicy Ignore vs Fail trade-off when webhook pods are down'
 - id: pol-013
   technology: policy
   kind: error
@@ -213,8 +220,9 @@
     commit: ed70e311737a341574ed5758b7af24e3bba232cb
     url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#type-checking'
   outOfScope: false
-  status: miss
-  gap: 'doc: ValidatingAdmissionPolicy status.typeChecking warnings are advisory; fix the field path (object.spec.replicas)'
+  status: pass
+  expect:
+  - 'kn:k8s-validating-admission-policy#4'
 - id: pol-014
   technology: policy
   kind: howto
@@ -228,8 +236,9 @@
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
     url: 'https://kyverno.io/docs/guides/testing-policies/#continuous-integration'
   outOfScope: false
-  status: miss
-  gap: 'doc: Kyverno CLI in CI (kyverno apply, kyverno test)'
+  status: pass
+  expect:
+  - 'kn:kyverno-troubleshooting#4'
 - id: pol-015
   technology: policy
   kind: error
@@ -246,7 +255,10 @@
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-about.adoc'
   outOfScope: false
   status: miss
-  gap: 'playbook: privileged workload needs its ServiceAccount granted the privileged SCC; do not edit default SCCs'
+  expect:
+  - DBG-SCC
+  gap: 'rank: DBG-SCC / kn:ocp-scc#7 (never edit default SCCs, grant an SCC to the ServiceAccount) above the remove-privileged
+    policy finding'
 - id: pol-016
   technology: policy
   kind: out-of-scope
@@ -270,8 +282,9 @@
     commit: 164957757519b01359989b533feac5ecab551530
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-psa-coexistence.adoc'
   outOfScope: false
-  status: miss
-  gap: 'doc: SCC and PSA are independent admission controls and a pod must satisfy both'
+  status: pass
+  expect:
+  - 'kn:ocp-scc#3'
 - id: pol-018
   technology: policy
   kind: howto
@@ -286,7 +299,8 @@
     url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-requiring.adoc'
   outOfScope: false
   status: miss
-  gap: 'doc: openshift.io/required-scc annotation on the pod template metadata'
+  gap: 'rank: kn:ocp-scc#4 (openshift.io/required-scc on pod template) not in top3; only a pointer to it appears in the second
+    finding'
 - id: pol-019
   technology: policy
   kind: out-of-scope

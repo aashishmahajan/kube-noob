@@ -1,6 +1,6 @@
 ---
 id: helm-cli-operations
-title: Helm 3 CLI - --set syntax, OCI registries, repositories, removed APIs, rollback and where Helm keeps files
+title: Helm 3 CLI operations
 tags: [helm, set, oci, registry, repository, rollback, mapkubeapis, xdg]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28

@@ -19,7 +19,7 @@ MCP client calls it as tools; the CLI runs it with no AI at all. No network call
   removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles;
   scanner and SAST findings ranked by reachability (VEX, KEV); STRIDE threat models.
 - **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno) and webhook; CI gate.
-- **Debug**: 47 offline playbooks, read-only steps first; must-gathers triaged into a case draft; OpenShift bugs
+- **Debug**: 66 offline playbooks, read-only steps first; must-gathers triaged into a case draft; OpenShift bugs
   with fix versions; policy denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy
   reachability; cluster evidence (never Secrets); CI build failures.
 - **Learn**: 5 tracks, 16 lessons, graded exercises; your team's fixes as code.

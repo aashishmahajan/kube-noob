@@ -58,8 +58,8 @@ cases:
   - {id: dx-efs, category: rosa-hcp, kind: diagnose, text: "Normal ExternalProvisioning persistentvolume-controller waiting for a volume to be created, either by external provisioner \"efs.csi.aws.com\"", expect: DBG-PVC-PENDING}
   - {id: protocol-rosa-hcp, category: rosa-hcp, kind: protocol, example: blueprint.yaml, expect: ready}
   # RHACS / StackRox
-  - {id: acs-roxctl, category: rhacs, kind: search, query: "roxctl image check in CI pipeline", expect: [stackrox]}
-  - {id: acs-admission, category: rhacs, kind: search, query: "RHACS admission controller blocks deployment policy enforcement", expect: [stackrox-admission]}
+  - {id: acs-roxctl, category: rhacs, kind: search, query: "roxctl image check in CI pipeline", expect: [rhacs-roxctl-ci, stackrox]}
+  - {id: acs-admission, category: rhacs, kind: search, query: "RHACS admission controller blocks deployment policy enforcement", expect: [stackrox-admission, rhacs-enforcement]}
   - {id: acs-upgrade, category: rhacs, kind: search, query: "RHACS 4.11 to 5.0 upgrade", expect: [stackrox, version-history]}
   - {id: acs-privileged, category: rhacs, kind: search, query: "which RHACS policy flags privileged containers", expect: [stackrox, stackrox-admission]}
   - {id: dx-acs-admission, category: rhacs, kind: diagnose, text: "admission webhook \"policyeval.stackrox.io\" denied the request: The attempted operation violated 1 enforced policy", expect: DBG-STACKROX-ADMISSION}

@@ -36,7 +36,8 @@ MIN_RARE_TERMS = 3  # rare words shared with the issue text before it counts as 
 RARE_SHARE = 0.03  # a word in at most 3% of issues is rare
 MIN_SCORE = 20.0  # BM25 score floor, set from tests/test_known_issues.py
 GENERAL_MAX_CHUNKS = 2  # and in at most 2 sections of the bundled docs (a count: new documents never make more
-# words rare, which a share of sections would)
+# words rare, which a share of sections would; a count of documents was measured and made 22 test-half rows name
+# an unrelated bug)
 RELATIVE_FLOOR = 0.75  # further matches must score at least 75% of the best one
 STRONG_SCORE = 40.0  # a score this high with two rare shared words, or one and a clear lead, is a match
 DOMINANCE = 2.0  # "a clear lead": at least twice the next applicable issue's score
@@ -376,13 +377,14 @@ class Index:
 
 
 def _distinct(words: list[str]) -> list[str]:
-    """One word per base form and per compound: "item" and "items", or "openshift-etcd" and "etcd", are one piece of
-    evidence, not two."""
+    """One word per base form and per compound: "item" and "items", "openshift-etcd" and "etcd", or a prefixed name
+    and the bare name after its slash, are one piece of evidence, not two."""
     out: list[str] = []
     seen: set[str] = set()
     for w in sorted(words, key=lambda t: (-len(t), t)):  # compounds first, so their parts are recognised as seen
         forms = set(_forms(w))
         parts = {f for p in re.split(r"[-._/]", w) if p for f in _forms(p)} if re.search(r"[-._/]", w) else set()
+        parts |= {f for p in w.split("/")[1:] if p for f in _forms(p)}
         if forms & seen:
             continue
         seen |= forms | parts

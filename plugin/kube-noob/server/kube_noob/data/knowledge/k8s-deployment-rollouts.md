@@ -1,6 +1,6 @@
 ---
 id: k8s-deployment-rollouts
-title: Deployment rollouts - status, progress deadline, history and rollback
+title: Deployment rollouts
 tags: [kubernetes, deployment, rollout, rollback, revision, progress-deadline]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-28

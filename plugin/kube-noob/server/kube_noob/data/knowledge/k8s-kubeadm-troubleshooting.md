@@ -1,6 +1,6 @@
 ---
 id: k8s-kubeadm-troubleshooting
-title: kubeadm clusters - CoreDNS Pending, a kubeconfig from the old cluster, extra-args with several values
+title: kubeadm first-day problems
 tags: [kubernetes, kubeadm, coredns, cni, kubeconfig, x509, control-plane]
 platforms: [kubernetes]
 updated: 2026-10-28

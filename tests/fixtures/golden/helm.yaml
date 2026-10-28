@@ -117,7 +117,7 @@
     url: 'https://helm.sh/docs/v3/topics/advanced/'
   outOfScope: false
   status: miss
-  gap: 'doc: helm install/upgrade --take-ownership to adopt existing objects'
+  gap: 'doc: helm install/upgrade --take-ownership flag to adopt existing objects (with --dry-run check)'
 - id: helm-008
   technology: helm
   kind: error

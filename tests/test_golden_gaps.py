@@ -164,8 +164,21 @@ def test_other_products_that_share_helm_words_are_left_alone(kit: tk.Toolkit) ->
         "My Chart.js line chart in Vue does not update when the values array changes",
         "helmfile sync uses the wrong environment values file",
         "AWS Lambda in the ROSA account times out after 3 seconds; how do I raise the timeout?",
+        "az aro create fails with MissingSubscriptionRegistration; ROSA is the AWS version, what do I register?",
     ):
         assert _top(kit, text) == [], text
+
+
+def test_aws_security_hub_is_another_product() -> None:
+    # Measured on the train half: a question about the CIS benchmark version AWS Security Hub checks drew the RHACS
+    # release history (shared words: latest, release, version). No bundled document mentions Security Hub.
+    from kube_noob.insight import _DocFit
+    from kube_noob.knowledge.store import get_store
+
+    fit = _DocFit("Which CIS benchmark version does AWS Security Hub check?", None)
+    assert fit.tools == {"securityhub"}
+    chunk = get_store().get("kn:stackrox#4")
+    assert chunk is not None and not fit(chunk, {"latest", "release", "version"})
 
 
 def test_qa6_documents_are_well_formed() -> None:
@@ -184,7 +197,8 @@ def test_new_documents_do_not_make_more_words_rare_for_the_bug_matcher() -> None
     # The reported-issue matcher and the ticket correlation count a word as rare only if it appears in at most
     # GENERAL_MAX_CHUNKS sections of the bundled docs. A share of sections would drift as documents are added: words
     # in three sections became "rare" when QA6 added four documents, and four community rows that pointed at the
-    # right bug started naming an unrelated one.
+    # right bug started naming an unrelated one. A count of documents was measured too: it made more words rare and,
+    # on the community test half, 22 rows that had no answer named an unrelated bug.
     from kube_noob import known_issues as ki
     from kube_noob import tickets
     from kube_noob.knowledge.store import Chunk, KnowledgeStore
@@ -272,3 +286,38 @@ def test_the_bug_matcher_counts_each_word_once() -> None:
     assert _distinct(["openshift-etcd", "etcd", "leader"]) == ["leader", "openshift-etcd"]
     assert _distinct(["values.yaml", "values", "yaml"]) == ["values.yaml"]
     assert _distinct([]) == []
+    key = "service.beta.openshift.io/serving-cert-secret-name"
+    assert _distinct([key, "serving-cert-secret-name", "hotloop"]) == ["hotloop", key]
+
+
+def test_a_prefixed_name_also_counts_as_the_bare_name() -> None:
+    # People write an annotation or label without its prefix ("serving-cert-secret-name"); release notes and docs
+    # write it in full ("service.beta.openshift.io/serving-cert-secret-name"). The hyphenated name after the last
+    # slash is its own term, so both spellings share it.
+    from kube_noob.knowledge.store import tokenize
+
+    toks = tokenize("service.beta.openshift.io/serving-cert-secret-name: secret")
+    assert "service.beta.openshift.io/serving-cert-secret-name" in toks and "serving-cert-secret-name" in toks
+    assert "ubi-minimal" in tokenize("registry.access.redhat.com/ubi9/ubi-minimal")
+    assert "quay.io" not in tokenize("quay.io/org/img")  # only hyphenated names: a registry host is not one
+    assert tokenize("route.openshift.io/v1").count("v1") == 1
+
+
+def test_oc_adm_prune_without_confirm_is_a_preview() -> None:
+    # openshift-docs pruning-images-running-operation.adoc: nothing is deleted until --confirm is added.
+    from kube_noob.debug.steps import classify_step
+
+    assert classify_step("oc adm prune images --keep-tag-revisions=3") == "read"
+    assert classify_step("oc adm prune images --keep-tag-revisions=3 --confirm") == "change"
+    assert classify_step("oc adm prune deployments --confirm=true") == "change"
+    assert classify_step("oc adm prune builds --confirm=false") == "read"
+
+
+def test_aws_cli_reads_are_reads() -> None:
+    from kube_noob.debug.steps import classify_step
+
+    assert classify_step('aws iam get-role --role-name "AWSServiceRoleForElasticLoadBalancing"') == "read"
+    assert classify_step("aws ec2 describe-subnets --subnet-ids subnet-1") == "read"
+    assert classify_step("aws iam list-roles") == "read"
+    assert classify_step("aws ec2 create-tags --resources subnet-1 --tags Key=a,Value=1") == "change"
+    assert classify_step("aws iam put-role-policy --role-name r --policy-name p --policy-document file://x") == "change"
