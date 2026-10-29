@@ -51,6 +51,16 @@ See `src/kube_noob/sources/registry.py`. Sources with non-commercial (ramitsuran
 copyleft (ansible-collections/kubernetes.core, GPL-3.0) or no license (magnologan/awesome-k8s-security) terms are never
 redistributed; Red Hat Jira issue content is used for local retrieval and evaluation only.
 
+## Brand fonts (in the repository, not in the package)
+
+Unmodified web fonts from the upstream release archives, used by the video renders and the brand pages; sources and
+SHA-256 sums in `docs/brand/fonts/PROVENANCE.json`, licence texts next to the fonts.
+
+| Material | Upstream | License | Where |
+|---|---|---|---|
+| Inter 4.1 (`InterVariable.woff2`) | [rsms/inter](https://github.com/rsms/inter) release v4.1 | SIL Open Font License 1.1 | `docs/brand/fonts/` |
+| JetBrains Mono 2.304 (Regular, Medium, SemiBold `.woff2`) | [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) release v2.304 | SIL Open Font License 1.1 | `docs/brand/fonts/` |
+
 ## Used to make the demo videos (downloaded at render time, not bundled)
 
 | Material | Upstream | License | Used by |
@@ -66,20 +76,7 @@ Kubernetes and Helm are trademarks of The Linux Foundation. Red Hat, OpenShift, 
 StackRox are trademarks of Red Hat, Inc. AWS and ROSA-related names are trademarks of Amazon.com, Inc. or its
 affiliates. kube-noob is an independent project, not affiliated with or endorsed by these organizations.
 
-## Served by the website (kube-noob.com), not in the package
+## The website (kube-noob.com)
 
-Unmodified copies, served so the site loads nothing from other hosts. Licenses read from each package's metadata on
-2026-10-29. Source for every MPL-2.0 file: the upstream project linked here.
-
-| Material | Upstream | License | Where on the site |
-|---|---|---|---|
-| Pyodide 314.0.7 runtime (CPython 3.14 compiled to WebAssembly) | [pyodide/pyodide](https://github.com/pyodide/pyodide) | MPL-2.0 (Pyodide), PSF-2.0 (CPython) | `/pyodide/` |
-| Pyodide builds of pydantic, pydantic-core, annotated-types, typing-inspection, PyYAML, jsonschema, jsonschema-specifications, referencing, rpds-py, attrs, pyrsistent, six, anyio, h11, sniffio | the Pyodide 314.0.7 distribution | MIT (sniffio: MIT or Apache-2.0) | `/pyodide/` |
-| httpx, httpcore, idna | the Pyodide 314.0.7 distribution | BSD-3-Clause | `/pyodide/` |
-| certifi | the Pyodide 314.0.7 distribution | MPL-2.0 | `/pyodide/` |
-| typing-extensions | the Pyodide 314.0.7 distribution | PSF-2.0 | `/pyodide/` |
-| Anthropic TypeScript SDK 0.134.0 (bundled into `agent.js`) | [anthropics/anthropic-sdk-typescript](https://github.com/anthropics/anthropic-sdk-typescript) | MIT | `/assets/agent.js` |
-| mermaid 12.2.0 | [mermaid-js/mermaid](https://github.com/mermaid-js/mermaid) | MIT | `/assets/mermaid.min.js` |
-
-Build and test only (not served): esbuild 0.28.2 (MIT), Python-Markdown (BSD-3-Clause), Playwright 1.63.0
-(Apache-2.0).
+The website is built from this repository's releases by a separate site repository; its own third-party
+notices are published at https://kube-noob.com/notices/.

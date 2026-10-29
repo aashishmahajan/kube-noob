@@ -19,10 +19,55 @@ IMAGES = (
     "app:x:latest",
     "nginx:",
     "",
+    # ingress-nginx controller releases on either side of the fixed versions (KN-S024), and tags the rule cannot read
+    "registry.k8s.io/ingress-nginx/controller:v1.11.4@sha256:" + "c" * 64,
+    "registry.k8s.io/ingress-nginx/controller:v1.12.0",
+    "registry.k8s.io/ingress-nginx/controller-chroot:v1.13.8",
+    "registry.k8s.io/ingress-nginx/controller:v1.15.1@sha256:" + "d" * 64,
+    "registry.k8s.io/ingress-nginx/controller:latest",
+    "quay.io/mirror/ingress-nginx/controller:1.16.0",
+    "quay.io/acme/controller:v1.11.4",
 )
 CAPS_ADD = ([], ["NET_BIND_SERVICE"], ["net_bind_service"], ["CAP_NET_BIND_SERVICE"], ["SYS_ADMIN"], ["CHOWN"], ["ALL"])
 CAPS_DROP = (None, [], ["ALL"], ["all"], ["NET_RAW"], ["NET_RAW", "ALL"])
 SECCOMP = (None, "RuntimeDefault", "Localhost", "Unconfined")
+LOCALHOST_PROFILES = (None, "", "  ", "profiles/app.json")
+SYSCTLS = (
+    None,
+    None,
+    [],
+    [{"name": "net.core.somaxconn", "value": "1024"}],
+    [{"name": "kernel.shm_rmid_forced=1+kernel.core_pattern", "value": "1"}],
+    [{"name": "net.ipv4.ip_forward", "value": "1+0"}],
+    [{"name": "fs.x", "value": "a=b"}],
+    [{"name": "fs.y"}],
+)
+WORKDIRS = ("/app", "/proc/self/fd/7", "/proc", "/procs", " /proc/1 ", "/opt/proc")
+# subPath values on either side of KN-S025 (CVE-2023-3676): plain relative paths and shell or PowerShell syntax.
+SUBPATHS = (
+    None,
+    "logs",
+    "logs/app",
+    "plain-name_1.txt",
+    "logs$(Start-Process cmd)",
+    "a;b",
+    "x`y",
+    "it's",
+    'q"x',
+    "a|b",
+    "a&b",
+    "out>f",
+    "line\nbreak",
+    "data (old)",
+)
+VOLUMES = (
+    {"name": "v", "hostPath": {"path": "/var/log"}},
+    {"name": "v", "hostPath": {"path": "/var/run/docker.sock"}},
+    {"name": "v", "emptyDir": {}},
+    {"name": "v", "emptyDir": {}},
+    {"name": "v", "gitRepo": {"repository": "https://github.com/acme/app.git", "directory": ".git"}},
+    {"name": "v", "gitRepo": {"repository": "/srv/git/app"}},
+)
 ENV = (
     [],
     [{"name": "LOG_LEVEL", "value": "info"}],
@@ -68,6 +113,14 @@ def _sc(rng: random.Random, container: bool) -> dict[str, Any] | None:
     profile = rng.choice(SECCOMP)
     if profile is not None:
         sc["seccompProfile"] = {"type": profile}
+        if profile == "Localhost":
+            lp = rng.choice(LOCALHOST_PROFILES)
+            if lp is not None:
+                sc["seccompProfile"]["localhostProfile"] = lp
+    if not container:
+        sysctls = rng.choice(SYSCTLS)
+        if sysctls is not None:
+            sc["sysctls"] = copy.deepcopy(sysctls)
     if container:
         _set(sc, "privileged", _maybe(rng, rng.choice((True, False)), 0.3))
         _set(sc, "allowPrivilegeEscalation", _maybe(rng, rng.choice((True, False)), 0.7))
@@ -114,6 +167,7 @@ def _container(rng: random.Random, name: str, app: bool) -> dict[str, Any]:
         c["image"] = image
     _set(c, "securityContext", _sc(rng, True))
     _set(c, "resources", _resources(rng))
+    _set(c, "workingDir", _maybe(rng, rng.choice(WORKDIRS), 0.3))
     env = rng.choice(ENV)
     if env:
         c["env"] = copy.deepcopy(env)
@@ -122,6 +176,10 @@ def _container(rng: random.Random, name: str, app: bool) -> dict[str, Any]:
         c[rng.choice(("args", "command"))] = list(args)
     if rng.random() < 0.3:
         c["ports"] = [{"containerPort": 8080, **({"hostPort": rng.choice((0, 80))} if rng.random() < 0.5 else {})}]
+    if rng.random() < 0.35:
+        mount: dict[str, Any] = {"name": "v", "mountPath": "/data"}
+        _set(mount, "subPath", rng.choice(SUBPATHS))
+        c["volumeMounts"] = [mount]
     if app:
         _set(c, "readinessProbe", _probe(rng))
         _set(c, "livenessProbe", _probe(rng))
@@ -137,12 +195,8 @@ def pod_spec(rng: random.Random) -> dict[str, Any]:
         _set(spec, f, _maybe(rng, rng.choice((True, False)), 0.12))
     _set(spec, "automountServiceAccountToken", _maybe(rng, rng.choice((True, False)), 0.6))
     _set(spec, "terminationGracePeriodSeconds", _maybe(rng, rng.choice((0, 30)), 0.3))
-    if rng.random() < 0.3:
-        spec["volumes"] = [
-            {"name": "v", "hostPath": {"path": rng.choice(("/var/log", "/var/run/docker.sock"))}}
-            if rng.random() < 0.5
-            else {"name": "v", "emptyDir": {}}
-        ]
+    if rng.random() < 0.35:
+        spec["volumes"] = [copy.deepcopy(rng.choice(VOLUMES))]
     if rng.random() < 0.3:
         spec["topologySpreadConstraints"] = [
             {"maxSkew": 1, "topologyKey": "topology.kubernetes.io/zone", "whenUnsatisfiable": "ScheduleAnyway"}
@@ -210,6 +264,8 @@ def rbac(rng: random.Random, i: int) -> dict[str, Any]:
         ["pods/ephemeralcontainers"],
         ["persistentvolumes"],
         ["configmaps"],
+        ["controllerrevisions"],
+        ["statefulsets", "controllerrevisions"],
     )
     kind = rng.choice(("Role", "ClusterRole"))
     rules = []
@@ -229,12 +285,29 @@ def binding(rng: random.Random, i: int) -> dict[str, Any]:
     if kind == "RoleBinding":
         meta["namespace"] = "shop"
     role = rng.choice(("cluster-admin", "view", "edit"))
+    # KN-S028: subjects that are everyone of a kind, look-alikes, and the built-in bindings' label
+    subject = rng.choice(
+        (
+            {"kind": "ServiceAccount", "name": "web", "namespace": "shop"},
+            {"kind": "ServiceAccount", "name": "web", "namespace": "shop"},
+            {"kind": "Group", "name": "system:unauthenticated"},
+            {"kind": "Group", "name": "system:authenticated"},
+            {"kind": "Group", "name": "system:serviceaccounts"},
+            {"kind": "Group", "name": "system:serviceaccounts:shop"},
+            {"kind": "Group", "name": "system:authenticated:oauth"},
+            {"kind": "User", "name": "system:anonymous"},
+            {"kind": "Group", "name": "system:anonymous"},
+            {"kind": "User", "name": "system:authenticated"},
+        )
+    )
+    if rng.random() < 0.15:
+        meta["labels"] = {"kubernetes.io/bootstrapping": rng.choice(("rbac-defaults", "other"))}
     return {
         "apiVersion": "rbac.authorization.k8s.io/v1",
         "kind": kind,
         "metadata": meta,
         "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": role},
-        "subjects": [{"kind": "ServiceAccount", "name": "web", "namespace": "shop"}],
+        "subjects": [{"kind": "ServiceAccount", "name": "ci", "namespace": "shop"}, copy.deepcopy(subject)],
     }
 
 
@@ -244,6 +317,9 @@ def service(rng: random.Random, i: int) -> dict[str, Any]:
     ranges = rng.choice((None, [], ["203.0.113.0/24"], ["0.0.0.0/0"], [" ::/0 "]))
     if ranges is not None:
         spec["loadBalancerSourceRanges"] = ranges
+    ips = rng.choice((None, None, [], ["203.0.113.10"], ["203.0.113.10", "198.51.100.7"]))
+    if ips is not None:
+        spec["externalIPs"] = ips
     meta: dict[str, Any] = {"name": f"s{i}", "namespace": "shop"}
     ann = rng.choice(
         (
@@ -277,17 +353,134 @@ def route(rng: random.Random, i: int) -> dict[str, Any]:
     }
 
 
+INGRESS_ANNOTATIONS = (
+    None,
+    {},
+    {"nginx.ingress.kubernetes.io/configuration-snippet": "more_set_headers x;"},
+    {"nginx.ingress.kubernetes.io/auth-url": "http://auth.shop.svc/verify"},
+    {"nginx.ingress.kubernetes.io/rewrite-target": "/"},
+    {"nginx.ingress.kubernetes.io/ssl-redirect": "true"},
+    {"kubernetes.io/ingress.class": "nginx"},
+    {"kubernetes.io/ingress.class": " nginx "},
+    {"kubernetes.io/ingress.class": "haproxy"},
+    {"other": "x"},
+)
+
+
 def ingress(rng: random.Random, i: int) -> dict[str, Any]:
-    spec: dict[str, Any] = {"rules": [{"host": "web.example.com"}]}
+    rule: dict[str, Any] = {"host": "web.example.com"}
+    if rng.random() < 0.7:  # KN-N011: the path types, one or two paths
+        backend = {"service": {"name": "web", "port": {"number": 80}}}
+        rule["http"] = {
+            "paths": [
+                {
+                    "path": "/x",
+                    "pathType": rng.choice(("Prefix", "Exact", "ImplementationSpecific")),
+                    "backend": backend,
+                }
+                for _ in range(rng.choice((1, 2)))
+            ]
+        }
+    spec: dict[str, Any] = {"rules": [rule]}
     tls = rng.choice((None, [], [{"hosts": ["web.example.com"], "secretName": "t"}]))
     if tls is not None:
         spec["tls"] = tls
-    return {
-        "apiVersion": "networking.k8s.io/v1",
-        "kind": "Ingress",
-        "metadata": {"name": f"i{i}", "namespace": "shop"},
-        "spec": spec,
+    _set(spec, "ingressClassName", _maybe(rng, rng.choice(("nginx", "openshift-default", " nginx", "Nginx")), 0.5))
+    meta: dict[str, Any] = {"name": f"i{i}", "namespace": "shop"}
+    ann = rng.choice(INGRESS_ANNOTATIONS)
+    if ann is not None:
+        meta["annotations"] = dict(ann)
+    return {"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": meta, "spec": spec}
+
+
+def configmap(rng: random.Random, i: int) -> dict[str, Any]:
+    data = rng.choice(
+        (
+            None,
+            {},
+            {"allow-snippet-annotations": "true"},
+            {"allow-snippet-annotations": "false"},
+            {"allow-snippet-annotations": " True "},
+            {"annotations-risk-level": "Critical"},
+            {"annotations-risk-level": "High"},
+            {"strict-validate-path-type": "false"},
+            {"strict-validate-path-type": "true"},
+            {"use-forwarded-headers": "true"},
+            # KN-S026: credentials and their look-alikes
+            {"DB_PASSWORD": "hunter2"},
+            {"db_password": "$(DB_PASSWORD)"},
+            {"redis.password": "  "},
+            {"api-key": "<redacted>"},
+            {"client_secret": "abc123"},
+            {"tls-secret": "web-tls"},
+            {"token-ttl": "30m"},
+            {"GITHUB_TOKEN": "ghp_x"},
+            {"DATABASE_URL": "postgres://app:s3cr3t@db:5432/app"},
+            {"app.properties": "db.url=jdbc:x\ndb.password=hunter2\n"},
+            {"app.properties": "db.password=${DB_PASSWORD}\npassword.min-length=12\n"},
+            {"app.yaml": 'auth:\n  "token": "abc"\n'},
+            {"app.yaml": "auth:\n  token: ''\n"},
+            {"env": "export API_KEY=xyz\nLOG=1\n"},
+            {"key.pem": "-----BEGIN RSA PRIVATE KEY-----\nMII\n"},
+        )
+    )
+    doc: dict[str, Any] = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": f"cm{i}", "namespace": "ingress-nginx"},
     }
+    if data is not None:
+        doc["data"] = dict(data)
+    return doc
+
+
+def secret(rng: random.Random, i: int) -> dict[str, Any]:
+    """KN-S027: legacy ServiceAccount token Secrets among the other types (never with data)."""
+    doc: dict[str, Any] = {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": f"sec{i}", "namespace": "shop"}}
+    kind = rng.choice(
+        (
+            None,
+            "Opaque",
+            "kubernetes.io/service-account-token",
+            "kubernetes.io/service-account-token",
+            "kubernetes.io/dockerconfigjson",
+            "kubernetes.io/tls",
+            "kubernetes.io/basic-auth",
+        )
+    )
+    if kind is not None:
+        doc["type"] = kind
+    if kind == "kubernetes.io/service-account-token":
+        doc["metadata"]["annotations"] = {"kubernetes.io/service-account.name": "ci"}
+    return doc
+
+
+def persistent_volume(rng: random.Random, i: int) -> dict[str, Any]:
+    """KN-ST006: local paths and NFS/SMB CSI volume handles on either side of the signatures."""
+    spec: dict[str, Any] = {"capacity": {"storage": "1Gi"}, "accessModes": ["ReadWriteOnce"]}
+    if rng.random() < 0.5:
+        spec["local"] = {
+            "path": rng.choice(("/mnt/disks/ssd1", "C:\\data\\app", "/mnt/a;b", "/mnt/$(x)", "/mnt/it's", "/mnt/a b"))
+        }
+    else:
+        csi: dict[str, Any] = {
+            "driver": rng.choice(("nfs.csi.k8s.io", "smb.csi.k8s.io", "ebs.csi.aws.com")),
+            "volumeHandle": rng.choice(
+                (
+                    "srv/share#app#",
+                    "srv/share#legit/../../exports#",
+                    "srv/share#..#",
+                    "srv/share#a..b#",
+                    "vol-0123",
+                    "srv\\share#..\\x#",
+                )
+            ),
+        }
+        sub = rng.choice((None, "app", "../etc", "a/..", "a..b", "x/../y"))
+        if sub is not None:
+            csi["volumeAttributes"] = {"server": "srv", "subDir": sub}
+        spec["csi"] = csi
+    return {"apiVersion": "v1", "kind": "PersistentVolume", "metadata": {"name": f"pv{i}"}, "spec": spec}
 
 
 def netpol(rng: random.Random, i: int) -> dict[str, Any]:
@@ -418,7 +611,7 @@ def machine_config(rng: random.Random, i: int) -> dict[str, Any]:
 
 def corpus(seed: int, n: int, openshift: bool) -> list[dict[str, Any]]:
     rng = random.Random(seed)
-    makers = [rbac, binding, service, ingress, netpol, storage_class, pdb]
+    makers = [rbac, binding, service, ingress, netpol, storage_class, pdb, configmap, secret, persistent_volume]
     if openshift:
         makers += [route, egress_firewall, scc, machine_config]
     kinds = (*KINDS, "DeploymentConfig") if openshift else KINDS

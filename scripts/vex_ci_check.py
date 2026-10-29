@@ -5,7 +5,9 @@ Usage: python scripts/vex_ci_check.py OUTPUT_JSON SHARD_JSONL RAW_DOC_JSON
 OUTPUT_JSON is `kube-noob corpus advisories --format json`, SHARD_JSONL the shard it wrote, RAW_DOC_JSON one raw
 CSAF VEX document downloaded by the step (read only to explain a failure). Passes when statements were kept, none is
 malformed, at least one record names an OpenShift product, and the only fetch failures are documents over the size
-cap (reported and skipped by design: Red Hat's CVE-2023-44487 document is larger than 25 MB). Every result is
+cap (reported and skipped by design: Red Hat's CVE-2023-44487 document is larger than 25 MB). A CVE with no published
+document (HTTP 404) is reported, not failed: the step asks for several, so one that Red Hat withdraws or moves does
+not turn CI red while the others prove the format. Every result is
 printed as a GitHub annotation, because the runner's log host is not reachable from where the loop reads results.
 """
 

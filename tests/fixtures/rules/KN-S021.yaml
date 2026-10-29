@@ -1,0 +1,77 @@
+rule: KN-S021
+good: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        volumes: [{name: src, emptyDir: {}}]
+        initContainers:
+        - name: clone
+          image: quay.io/acme/git@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          args: [clone, --depth=1, "https://github.com/acme/app.git", /src]
+          volumeMounts: [{name: src, mountPath: /src}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          volumeMounts: [{name: src, mountPath: /src}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe: {httpGet: {path: /ready, port: 8080}}
+          livenessProbe: {httpGet: {path: /live, port: 8080}, periodSeconds: 10, failureThreshold: 3}
+bad: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        volumes:
+        - name: src
+          gitRepo: {repository: "https://github.com/acme/app.git", directory: ".git"}
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          volumeMounts: [{name: src, mountPath: /src}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe: {httpGet: {path: /ready, port: 8080}}
+          livenessProbe: {httpGet: {path: /live, port: 8080}, periodSeconds: 10, failureThreshold: 3}

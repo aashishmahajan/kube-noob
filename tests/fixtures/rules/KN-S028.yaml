@@ -1,0 +1,18 @@
+rule: KN-S028
+good: |
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: web-view
+    namespace: shop
+  roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+  subjects:
+  - {kind: ServiceAccount, name: web, namespace: shop}
+bad: |
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRoleBinding
+  metadata:
+    name: public-view
+  roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+  subjects:
+  - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: system:unauthenticated}

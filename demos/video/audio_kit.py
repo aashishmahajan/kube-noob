@@ -21,7 +21,14 @@ Usage:
       the length of each line to <dir>/narration.json (build_scenes.py holds each scene until its line is spoken)
   python audio_kit.py score <dir> <page> [--music-db -12]
       after capture_page.js: place the narration (if any) at the scene marks capture_page.js wrote, add the brand
-      music, and put the sound into <dir>/kube-noob-<page>.mp4
+      music, and put the sound into <dir>/kube-noob-<page>.mp4; with narration, also kube-noob-<page>.vtt
+      (captions), and for the walkthrough youtube-description.txt (its facts filled, chapters at the real times)
+  python audio_kit.py verify <file.mp4>... [--music-only]
+      check a finished video against the brand's sound spec (docs/brand/tokens.json): -16 LUFS within 0.5 LU (-20
+      for music alone), true peak at most -1.5 dBTP, audio as long as the picture; exits non-zero otherwise
+
+Loudness is normalised before encoding (measure; hold the true peaks down with an oversampled limiter if the gain
+needs it; one exact linear gain), and measured again on the finished file, which is refused if it is out of spec.
 
 Needs: python3 with numpy and kokoro-onnx (pip install kokoro-onnx numpy), or piper-tts for --engine piper, and
 ffmpeg on PATH.
@@ -48,6 +55,10 @@ from typing import Any
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import captions  # noqa: E402
+from loudness import normalize, streams, verify  # noqa: E402
+
 RATE = 48_000
 DEFAULT_MUSIC_DB = -12.0
 MUSIC_RMS = 0.12  # music.wav is stored at this loudness; --music-db scales it against the voice
@@ -66,18 +77,20 @@ PIPER_SPEAKER = 37
 CREDITS = {
     "kokoro": "Voice: Kokoro-82M (Apache-2.0) · Music: generated for kube-noob",
     "piper": "Voice: Piper, LibriTTS voice (CC BY 4.0) · Music: generated for kube-noob",
+    "silent": "No voice (layout check only) · Music: generated for kube-noob",
 }
+SILENT_CPS = 16.0  # characters a second the Kokoro voice speaks, for --engine silent
 
 # Words the voice models say wrongly, checked against the phonemes Kokoro produces.
 PRONOUNCE = [
     (r"\bkube-noob\b", "kube noob"),
-    (r"\bRHACS\b", "R H A C S"),
+    (r"\bRHACS\b", "RH ACS"),  # "R H A C S" says the A as "uh"
     (r"\bUID\b", "U I D"),
     (r"\boc\b", "O C"),
     (r"\bkubectl\b", "kube control"),
     (r"\bexit code 137\b", "exit code one thirty-seven"),
     (r"\b(\d)\.(\d\d)\b", r"\1 \2"),  # OpenShift 4.22 -> "four twenty-two"
-    (r"\b2 a\.m\.", "two a.m."),
+    (r"\b2 a\.m\.", "2 AM"),  # "a.m." keeps its periods as sentence breaks: "two A. M."
 ]
 
 
@@ -186,15 +199,25 @@ class Voice:
         self, engine: str = "kokoro", voice: str = DEFAULT_VOICE, speed: float = 1.0, speaker: int = PIPER_SPEAKER
     ) -> None:
         if engine not in CREDITS:
-            raise SystemExit(f"unknown voice engine {engine!r}: use kokoro or piper")
+            raise SystemExit(f"unknown voice engine {engine!r}: use kokoro or piper (or silent for layout checks)")
         self.engine, self.voice, self.speed, self.speaker = engine, voice, speed, speaker
         self.credit = CREDITS[engine]
-        self._say: Callable[[str], np.ndarray] = self._kokoro() if engine == "kokoro" else self._piper()
+        engines = {"kokoro": self._kokoro, "piper": self._piper, "silent": self._silent}
+        self._say: Callable[[str], np.ndarray] = engines[engine]()
 
     def say(self, text: str) -> np.ndarray:
         audio = self._say(speakable(text))
         peak = float(np.max(np.abs(audio))) or 1.0
         return audio / peak * VOICE_PEAK
+
+    def _silent(self) -> Callable[[str], np.ndarray]:
+        """No voice: silence as long as the voice would take (SILENT_CPS), so CI can check every scene's layout and
+        timing without downloading the voice model. Never for a published video."""
+
+        def say(text: str) -> np.ndarray:
+            return np.zeros(int(len(text) / (SILENT_CPS * self.speed) * RATE))
+
+        return say
 
     def _kokoro(self) -> Callable[[str], np.ndarray]:
         from kokoro_onnx import Kokoro
@@ -444,25 +467,29 @@ def mix(voice: np.ndarray, music: np.ndarray, music_db: float | None) -> np.ndar
 
 
 def write_stems(folder: Path, voice: np.ndarray, music: np.ndarray, music_db: float | None) -> Path:
-    """voice.wav and music.wav (the stems remix reads) and audio.wav (the mix)."""
+    """voice.wav and music.wav (the stems remix reads) and audio.wav (the mix, normalised to the brand loudness)."""
     folder.mkdir(parents=True, exist_ok=True)
     if voice.ndim == 1:
         voice = np.stack([voice, voice], axis=1)
     write_wav(folder / "voice.wav", voice)
     write_wav(folder / "music.wav", music)
     write_wav(folder / "audio.wav", mix(voice, music, music_db))
+    normalize(folder / "audio.wav", voiced=bool(np.any(np.abs(voice) > 0.01)))
     return folder / "audio.wav"
 
 
 def remix(folder: Path, music_db: float | None) -> Path:
-    audio = mix(read_wav(folder / "voice.wav"), read_wav(folder / "music.wav"), music_db)
-    write_wav(folder / "audio.wav", audio)
+    voice = read_wav(folder / "voice.wav")
+    write_wav(folder / "audio.wav", mix(voice, read_wav(folder / "music.wav"), music_db))
+    normalize(folder / "audio.wav", voiced=bool(np.any(np.abs(voice) > 0.01)))
     return folder / "audio.wav"
 
 
 def mux(video: Path, audio: Path, voiced: bool) -> None:
-    """Replace video's sound with audio (AAC 320k, EBU R128 loudness), copying the picture."""
-    lufs = -16 if voiced else -20  # music alone sits lower than speech
+    """Replace video's sound with audio (already normalised by write_stems/remix; AAC 320k), copying the picture, and
+    check the result against the brand's sound spec before it replaces the video. The output is cut to the picture's
+    own length, never shorter: -shortest drops the last frames to AAC's priming and fails verify()'s one-frame check."""
+    picture = streams(video).get("video") or duration(video)
     with tempfile.TemporaryDirectory(dir=video.parent) as tmp:
         out = Path(tmp) / video.name
         subprocess.run(
@@ -481,21 +508,21 @@ def mux(video: Path, audio: Path, voiced: bool) -> None:
                 "1:a",
                 "-c:v",
                 "copy",
-                "-af",
-                f"loudnorm=I={lufs}:TP=-1.5:LRA=11",
                 "-c:a",
                 "aac",
                 "-b:a",
                 "320k",
                 "-ar",
                 "48000",
-                "-shortest",
+                "-t",
+                f"{picture:.6f}",
                 "-movflags",
                 "+faststart",
                 str(out),
             ],
             check=True,
         )
+        verify(out, voiced)
         shutil.move(str(out), video)
 
 
@@ -517,8 +544,8 @@ DEFAULT_LEAD = 0.45
 NARRATION_TAIL = 0.8
 
 
-def walkthrough_lines() -> list[str]:
-    """The voice-over table in demos/youtube-walkthrough.md, one line per scene."""
+def walkthrough_lines(fill: bool = True) -> list[str]:
+    """The voice-over table in demos/youtube-walkthrough.md, one line per scene, its {facts} filled from the code."""
     text = (HERE.parent / "youtube-walkthrough.md").read_text(encoding="utf-8")
     section = text.split("## Voice-over for the rendered cut", 1)[1].split("\n## ", 1)[0]
     lines = [m.group(1).strip() for m in re.finditer(r"^\| \d+:\d\d \| (.+?) \|$", section, re.MULTILINE)]
@@ -526,7 +553,15 @@ def walkthrough_lines() -> list[str]:
         raise SystemExit(
             f"expected {len(WALKTHROUGH_IDS)} voice-over rows in youtube-walkthrough.md, found {len(lines)}"
         )
-    return lines
+    if not fill:
+        return lines
+    import facts  # demos/video/facts.py
+
+    f = facts.Facts()
+    try:
+        return [f.fill(line) for line in lines]
+    except facts.FactError as e:
+        raise SystemExit(f"youtube-walkthrough.md: {e}") from None
 
 
 def narrate(folder: Path, voice: Voice) -> dict[str, Any]:
@@ -548,7 +583,9 @@ def narrate(folder: Path, voice: Voice) -> dict[str, Any]:
 
 def score(folder: Path, page: str, music_db: float | None) -> Path:
     video = folder / f"kube-noob-{page}.mp4"
-    total = duration(video)
+    # The picture's own length: the container's can run a frame or two past it (the capture's last frame timing), and
+    # a sound track built to that would fail verify()'s one-frame check.
+    total = streams(video).get("video") or duration(video)
     n = int(total * RATE)
     voice = np.zeros((n, 2))
     marks_file = folder / f"{page}-marks.json"
@@ -569,6 +606,19 @@ def score(folder: Path, page: str, music_db: float | None) -> Path:
     music = business_bed(total, 0.0, end_sting=None if end_at is None else end_at + 0.2)
     audio = write_stems(folder, voice, music, music_db)
     mux(video, audio, voiced)
+    if narration.is_file():
+        text = dict(zip(WALKTHROUGH_IDS, walkthrough_lines(), strict=True))
+        cues = [
+            c
+            for scene_id, meta in lines.items()
+            for c in captions.cues(text[scene_id], marks[scene_id] + meta["lead"], meta["seconds"])
+        ]
+        captions.write(folder / f"kube-noob-{page}.vtt", cues, total)
+    if page == "walkthrough":
+        description = captions.youtube_description(
+            HERE.parent / "youtube-walkthrough.md", marks, total, WALKTHROUGH_IDS
+        )
+        (folder / "youtube-description.txt").write_text(description, encoding="utf-8")
     return video
 
 
@@ -589,7 +639,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("dir", type=Path)
     s.add_argument("page")
     s.add_argument("--music-db", type=parse_music_db, default=DEFAULT_MUSIC_DB)
+    v = sub.add_parser("verify")
+    v.add_argument("video", type=Path, nargs="+")
+    v.add_argument("--music-only", action="store_true", help="the video has no voice-over (target -20 LUFS)")
     a = ap.parse_args(argv)
+    if a.cmd == "verify":
+        for video in a.video:
+            print(json.dumps({"file": str(video), **verify(video, voiced=not a.music_only)}))
+        return 0
     if a.cmd == "remix":
         audio = remix(a.dir, a.music_db)
         if a.video:

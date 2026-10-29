@@ -1,0 +1,39 @@
+rule: KN-N009
+good: |
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: web
+    namespace: shop
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  spec:
+    ingressClassName: nginx
+    tls: [{hosts: [web.example.com], secretName: web-tls}]
+    rules:
+    - host: web.example.com
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend: {service: {name: web, port: {number: 80}}}
+bad: |
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: web
+    namespace: shop
+    annotations:
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        more_set_headers "X-Test: 1";
+      nginx.ingress.kubernetes.io/auth-url: "http://auth.shop.svc/verify"
+  spec:
+    ingressClassName: nginx
+    tls: [{hosts: [web.example.com], secretName: web-tls}]
+    rules:
+    - host: web.example.com
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend: {service: {name: web, port: {number: 80}}}

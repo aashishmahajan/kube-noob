@@ -39,14 +39,26 @@ import yaml
 from kube_noob import __version__
 from kube_noob.audit.exceptions import Checked
 from kube_noob.audit.rules import (
+    COMMAND_META,
+    CONFIGMAP_CREDENTIAL_KEY,
+    CONFIGMAP_CREDENTIAL_LINE,
     CREDENTIAL_FLAG_NAME,
+    CSI_SUBDIR_TRAVERSAL,
     EMBEDDED_CREDENTIAL,
     ESCALATION_VERBS,
+    EVERYONE_SUBJECTS,
+    INGRESS_NGINX_ANNOTATION_PREFIX,
+    INGRESS_NGINX_CLASS,
+    INGRESS_NGINX_CONFIGMAP_KEYS,
+    INGRESS_NGINX_RISKY_ANNOTATIONS,
     INTERNAL_LB_ANNOTATIONS,
+    PATH_TRAVERSAL,
+    RBAC_DEFAULTS_LABEL,
     RULES,
     SENSITIVE_ENV,
     WORKLOAD_RESOURCES,
     Rule,
+    ingress_nginx_vulnerable_tag_regex,
 )
 from kube_noob.catalog import OPENSHIFT_FAMILY, PROVISIONERS, ROSA_FAMILY, SOURCES, parse_minor
 
@@ -96,6 +108,9 @@ TARGETS: dict[str, Target] = {
         Target("Route", "route.openshift.io", "v1", "routes"),
         Target("Ingress", "networking.k8s.io", "v1", "ingresses"),
         Target("Service", "", "v1", "services"),
+        Target("ConfigMap", "", "v1", "configmaps"),
+        Target("Secret", "", "v1", "secrets"),
+        Target("PersistentVolume", "", "v1", "persistentvolumes", namespaced=False),
         Target("EgressFirewall", "k8s.ovn.org", "v1", "egressfirewalls"),
         Target("NetworkPolicy", "networking.k8s.io", "v1", "networkpolicies"),
         Target("StorageClass", "storage.k8s.io", "v1", "storageclasses", namespaced=False),
@@ -210,6 +225,7 @@ _S017 = " || ".join(
         f"{_any_of(_RESOURCES, WORKLOAD_RESOURCES)} && {_any_of(_VERBS, ('create', 'patch', 'update', '*'))}",
         f"'pods/ephemeralcontainers' in {_RESOURCES} && {_any_of(_VERBS, ('patch', 'update', '*'))}",
         f"'persistentvolumes' in {_RESOURCES} && {_any_of(_VERBS, ('create', '*'))}",
+        f"'controllerrevisions' in {_RESOURCES} && {_any_of(_VERBS, ('create', 'patch', 'update', '*'))}",
     )
 )
 _SCC_FLAGS = (
@@ -237,6 +253,69 @@ _EGRESS = "(has(object.spec) && has(object.spec.egress) ? object.spec.egress : [
 _EMPTY_SELECTOR = "(!has({s}.matchLabels) && !has({s}.matchExpressions))"
 _ZONAL = sorted(name for name, p in PROVISIONERS.items() if p.zonal)
 _REPLICAS = "(has(object.spec.replicas) ? object.spec.replicas : 1)"
+# CVE signatures (kube_noob.audit.rules KN-S021..S024, KN-N008..N010, KN-V019), the same tables as the audit.
+_SYSCTL_META = r"[+=]"
+_PROC_WORKDIR = r"^\s*/proc(/|\s*$)"
+_NGINX_IMAGE = (
+    r"^(?:[^@]*/)?ingress-nginx/controller(?:-chroot)?:v?" + ingress_nginx_vulnerable_tag_regex() + r"(?:@.*)?$"
+)
+_NGINX_CLASS = r"^\s*" + re.escape(INGRESS_NGINX_CLASS) + r"\s*$"
+_NGINX_RISKY = " || ".join(
+    f"'{INGRESS_NGINX_ANNOTATION_PREFIX}{a}' in object.metadata.annotations"
+    for a in sorted(INGRESS_NGINX_RISKY_ANNOTATIONS)
+)
+_NON_BLANK = _raw(r"\S")
+
+
+def _configmap_value(key: str, unsafe: str) -> str:
+    """CEL: the ConfigMap's ``key`` holds ``unsafe`` (whatever the case and the surrounding blanks)."""
+    pattern = r"(?i)^\s*" + re.escape(unsafe) + r"\s*$"
+    return f"('{key}' in object.data && string(object.data['{key}']).matches({_raw(pattern)}))"
+
+
+_NGINX_CONFIGMAP = " || ".join(
+    _configmap_value(k, unsafe) for k, (unsafe, _, _) in sorted(INGRESS_NGINX_CONFIGMAP_KEYS.items())
+)
+# Gap review 2026-10 (kube_noob.audit.rules KN-S025..S028, KN-N011, KN-ST006): the same tables as the audit.
+_CM_VALUE = "string(object.data[k])"
+# CEL charges 0.1 per character times a quarter of the pattern length for matches(); about 10 per character for the
+# three KN-S026 value patterns, so 16 values of 4 KiB (and their keys) stay near 700,000, under the API server's
+# 1,000,000 per expression (tests/test_gap_review.py computes it).
+_CM_MAX_KEYS = 16
+_CM_MAX_VALUE = 4096
+_CM_CREDENTIAL = (
+    f"(k.matches({_raw(CONFIGMAP_CREDENTIAL_KEY)}) && !{_CM_VALUE}.matches({_raw(_REFERENCE)})) || "
+    f"{_CM_VALUE}.matches({_raw(_EMBEDDED_SECRET)}) || {_CM_VALUE}.matches({_raw(CONFIGMAP_CREDENTIAL_LINE)})"
+)
+_EVERYONE = " || ".join(
+    f"(s.kind == '{kind}' && s.name in {_quoted(sorted(n for k, n in EVERYONE_SUBJECTS if k == kind))})"
+    for kind in sorted({k for k, _ in EVERYONE_SUBJECTS})
+)
+_RBAC_DEFAULTS = (
+    f"(has(object.metadata.labels) && '{RBAC_DEFAULTS_LABEL[0]}' in object.metadata.labels && "
+    f"object.metadata.labels['{RBAC_DEFAULTS_LABEL[0]}'] == '{RBAC_DEFAULTS_LABEL[1]}')"
+)
+_INGRESS_NGINX = (
+    f"((has(object.spec.ingressClassName) && string(object.spec.ingressClassName).matches({_raw(_NGINX_CLASS)})) || "
+    "(has(object.metadata.annotations) && (('kubernetes.io/ingress.class' in object.metadata.annotations && "
+    f"string(object.metadata.annotations['kubernetes.io/ingress.class']).matches({_raw(_NGINX_CLASS)})) || "
+    f"object.metadata.annotations.exists(k, k.startsWith('{INGRESS_NGINX_ANNOTATION_PREFIX}')))))"
+)
+_INGRESS_NO_CLASS = (
+    "(!has(object.spec.ingressClassName) && !(has(object.metadata.annotations) && "
+    "'kubernetes.io/ingress.class' in object.metadata.annotations))"
+)
+_IMPLEMENTATION_SPECIFIC = (
+    "(has(object.spec.rules) && object.spec.rules.exists(r, has(r.http) && has(r.http.paths) && "
+    "r.http.paths.exists(p, has(p.pathType) && p.pathType == 'ImplementationSpecific')))"
+)
+_CSI = "object.spec.csi"
+_CSI_TRAVERSAL = (
+    f"has({_CSI}) && has({_CSI}.driver) && {_CSI}.driver in {_quoted(sorted(CSI_SUBDIR_TRAVERSAL))} && "
+    f"((has({_CSI}.volumeHandle) && string({_CSI}.volumeHandle).matches({_raw(PATH_TRAVERSAL)})) || "
+    f"(has({_CSI}.volumeAttributes) && 'subDir' in {_CSI}.volumeAttributes && "
+    f"string({_CSI}.volumeAttributes['subDir']).matches({_raw(PATH_TRAVERSAL)})))"
+)
 
 
 @dataclass(frozen=True)
@@ -291,6 +370,10 @@ NOT_GENERATED: dict[str, str] = {
     "bundle",
     "KN-C013": "needs the Secrets of other namespaces, and kube-noob never reads Secrets; `kube-noob audit` checks the "
     "bundle",
+    "KN-N012": "needs the pods of the namespace (other objects, usually created after the policy); `kube-noob audit` "
+    "checks the bundle",
+    "KN-C014": "needs the HorizontalPodAutoscaler that scales the workload (another object); `kube-noob audit` checks "
+    "the bundle",
 }
 
 
@@ -307,6 +390,17 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
         "c.securityContext.seccompProfile.type : "
         "(has(variables.podSC.seccompProfile) && has(variables.podSC.seccompProfile.type) ? "
         "variables.podSC.seccompProfile.type : ''))"
+    )
+    # A Localhost profile whose localhostProfile is missing or blank (CVE-2023-2431), at whichever level sets the type.
+    empty_localhost = (
+        f"(({_sc('seccompProfile.type')} && c.securityContext.seccompProfile.type == 'Localhost' && "
+        "!(has(c.securityContext.seccompProfile.localhostProfile) && "
+        f"string(c.securityContext.seccompProfile.localhostProfile).matches({_NON_BLANK}))) || "
+        f"(!({_sc('seccompProfile.type')} && c.securityContext.seccompProfile.type != '') && "
+        "has(variables.podSC.seccompProfile) && has(variables.podSC.seccompProfile.type) && "
+        "variables.podSC.seccompProfile.type == 'Localhost' && "
+        "!(has(variables.podSC.seccompProfile.localhostProfile) && "
+        f"string(variables.podSC.seccompProfile.localhostProfile).matches({_NON_BLANK}))))"
     )
     image_ok = (
         "has(c.image) && c.image != '' && (c.image.matches(r'@sha256:[0-9a-f]{64}$') || "
@@ -376,7 +470,7 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
         Check(
             "KN-S008",
             _POD_KINDS,
-            (f"variables.containers.all(c, {seccomp} in ['RuntimeDefault', 'Localhost'])",),
+            (f"variables.containers.all(c, {seccomp} in ['RuntimeDefault', 'Localhost'] && !{empty_localhost})",),
             pod=True,
         ),
         Check(
@@ -455,6 +549,74 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
             pod=True,
         ),
         Check(
+            "KN-S021",
+            _POD_KINDS,
+            ("!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.gitRepo))",),
+            pod=True,
+        ),
+        Check(
+            "KN-S022",
+            _POD_KINDS,
+            (
+                "!has(variables.podSC.sysctls) || variables.podSC.sysctls.all(s, "
+                f"!((has(s.name) && string(s.name).matches({_raw(_SYSCTL_META)})) || "
+                f"(has(s.value) && string(s.value).matches({_raw(_SYSCTL_META)}))))",
+            ),
+            pod=True,
+        ),
+        Check(
+            "KN-S023",
+            _POD_KINDS,
+            (
+                "variables.containers.all(c, !has(c.workingDir) || "
+                f"!string(c.workingDir).matches({_raw(_PROC_WORKDIR)}))",
+            ),
+            pod=True,
+        ),
+        Check(
+            "KN-S024",
+            _POD_KINDS,
+            (f"variables.containers.all(c, !has(c.image) || !string(c.image).matches({_raw(_NGINX_IMAGE)}))",),
+            pod=True,
+        ),
+        Check(
+            "KN-S025",
+            _POD_KINDS,
+            (
+                "variables.containers.all(c, !has(c.volumeMounts) || c.volumeMounts.all(m, !has(m.subPath) || "
+                f"!string(m.subPath).matches({_raw(COMMAND_META)})))",
+            ),
+            pod=True,
+        ),
+        Check(
+            "KN-S026",
+            ("ConfigMap",),
+            (
+                f"!has(object.data) || object.data.size() > {_CM_MAX_KEYS} || "
+                f"object.data.exists(k, {_CM_VALUE}.size() > {_CM_MAX_VALUE}) || "
+                f"object.data.all(k, !({_CM_CREDENTIAL}))",
+            ),
+            coverage="partial",
+            limitation=f"a ConfigMap with more than {_CM_MAX_KEYS} keys or a value over {_CM_MAX_VALUE // 1024} KiB is "
+            "left to `kube-noob audit`: three regular expressions over every value would pass the API server's cost "
+            "limit for one CEL expression, and failurePolicy Fail would then refuse it",
+        ),
+        Check(
+            "KN-S027",
+            ("Secret",),
+            ("!(has(object.type) && object.type == 'kubernetes.io/service-account-token')",),
+            operations=("CREATE",),
+        ),
+        Check(
+            "KN-S028",
+            ("RoleBinding", "ClusterRoleBinding"),
+            (
+                f"{_RBAC_DEFAULTS} || !has(object.subjects) || "
+                f"!object.subjects.exists(s, has(s.kind) && has(s.name) && ({_EVERYONE}))",
+            ),
+            rbac_names=True,
+        ),
+        Check(
             "KN-N002",
             ("Route",),
             (
@@ -475,6 +637,18 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
             ),
         ),
         Check("KN-N005", ("Service",), ("!(has(object.spec.type) && object.spec.type == 'NodePort')",)),
+        Check("KN-N008", ("Service",), ("!has(object.spec.externalIPs) || object.spec.externalIPs.size() == 0",)),
+        Check("KN-N009", ("Ingress",), (f"!has(object.metadata.annotations) || !({_NGINX_RISKY})",)),
+        Check("KN-N010", ("ConfigMap",), (f"!has(object.data) || !({_NGINX_CONFIGMAP})",)),
+        Check(
+            "KN-N011",
+            ("Ingress",),
+            (
+                f"!{_IMPLEMENTATION_SPECIFIC} || !{_INGRESS_NGINX}"
+                if openshift
+                else f"!{_IMPLEMENTATION_SPECIFIC} || !({_INGRESS_NGINX} || {_INGRESS_NO_CLASS})",
+            ),
+        ),
         Check(
             "KN-N006",
             ("EgressFirewall",),
@@ -516,6 +690,15 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
                 "(has(object.parameters) && 'provisioningMode' in object.parameters && "
                 "object.parameters['provisioningMode'] != '' && 'fileSystemId' in object.parameters && "
                 "object.parameters['fileSystemId'] != '')",
+            ),
+        ),
+        Check(
+            "KN-ST006",
+            ("PersistentVolume",),
+            (
+                "!(has(object.spec.local) && has(object.spec.local.path) && "
+                f"string(object.spec.local.path).matches({_raw(COMMAND_META)}))",
+                f"!({_CSI_TRAVERSAL})",
             ),
         ),
         Check(
@@ -628,6 +811,20 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
             ),
         ),
         Check("KN-V017", ("MachineConfig", "MachineConfigPool"), ("false",)),
+        Check(
+            "KN-V019",
+            ("Ingress",),
+            (
+                "!has(object.metadata.annotations) || !object.metadata.annotations.exists(k, "
+                f"k.startsWith('{INGRESS_NGINX_ANNOTATION_PREFIX}'))",
+                "!(has(object.spec.ingressClassName) && "
+                f"string(object.spec.ingressClassName).matches({_raw(_NGINX_CLASS)}))",
+                "!has(object.metadata.annotations) || !('kubernetes.io/ingress.class' in object.metadata.annotations "
+                f"&& string(object.metadata.annotations['kubernetes.io/ingress.class']).matches({_raw(_NGINX_CLASS)}))",
+            ),
+            coverage="partial",
+            limitation="a workload that runs the ingress-nginx controller image is left to `kube-noob audit`",
+        ),
     ]
     out: dict[str, Check] = {}
     skipped: dict[str, str] = {}

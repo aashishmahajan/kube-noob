@@ -1,0 +1,229 @@
+name: videos
+
+# The demo videos of a release, rendered from its own code and attached to its GitHub release: 4K masters
+# (3840x2160, 30 fps) and 1080p web copies of the walkthrough and the three animated videos, WebVTT captions, poster
+# frames, the YouTube thumbnail and the YouTube description. Every number in them comes from the released code and
+# from the sidecar transcript its CI run recorded on a kind cluster (demos/video/facts.py); every file's sound is
+# measured against the brand spec before it is attached (demos/video/loudness.py). release.yml calls this after the
+# release exists; run it by hand to render (or re-render) the videos of an existing release.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      attach:
+        type: boolean
+        default: true
+      pipeline_ref:
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.6.1): its code is rendered and the files attached to its release"
+        required: true
+      attach:
+        description: "Attach the files to the release (off: workflow artifacts only)"
+        type: boolean
+        default: true
+      pipeline_ref:
+        description: "Commit whose demos/video renders them (default: the tag); kube-noob itself always comes from the tag"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: videos-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  transcript:
+    # The sidecar video shows a real session on a cluster that enforces Pod Security restricted: the transcript
+    # scripts/demo_sidecar_kind.sh recorded in the ci run of the tagged commit. The transcript attached to the release
+    # wins (a re-render after the ci artifact expired); otherwise the newest completed ci run of the commit whose
+    # sidecar step passed, whatever its other jobs did. Waits while a run is still going; fails when there is none.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Take the sidecar transcript of the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          file=transcript/sidecar-transcript-4.22.txt
+          sha="$(gh api "repos/${REPO}/commits/${TAG}" --jq .sha)"
+          if gh release download "$TAG" --repo "$REPO" -p sidecar-transcript-4.22.txt -D transcript 2>/dev/null; then
+            echo "::notice title=videos::sidecar transcript attached to ${TAG}"
+          else
+            run=""
+            for i in $(seq 1 100); do
+              runs="$(gh run list --repo "$REPO" --workflow ci.yml --commit "$sha" --limit 20 --json databaseId,status)"
+              for id in $(printf '%s' "$runs" | jq -r '.[] | select(.status == "completed") | .databaseId'); do
+                step="$(gh api "repos/${REPO}/actions/runs/${id}/jobs?per_page=100" --paginate --jq '.jobs[]
+                  | select(.name | startswith("e2e-kind (OpenShift 4.22")) | .steps[]
+                  | select(.name | startswith("Sidecar under Pod Security")) | .conclusion')"
+                kept="$(gh api "repos/${REPO}/actions/runs/${id}/artifacts" --jq '[.artifacts[]
+                  | select(.name == "sidecar-transcript-4.22" and (.expired | not))] | length')"
+                if [ "$step" = success ] && [ "$kept" -gt 0 ]; then run="$id"; break; fi
+              done
+              [ -n "$run" ] && break
+              going="$(printf '%s' "$runs" | jq '[.[] | select(.status != "completed")] | length')"
+              if [ "$going" = 0 ] && [ "$i" -gt 2 ]; then
+                echo "::error title=videos::no ci run of ${TAG} (${sha}) has a passed sidecar step and its transcript; the sidecar video needs it"
+                exit 1
+              fi
+              sleep 60
+            done
+            if [ -z "$run" ]; then echo "::error title=videos::ci for ${TAG} (${sha}) did not finish in time"; exit 1; fi
+            gh run download "$run" --repo "$REPO" -n sidecar-transcript-4.22 -D transcript
+            echo "::notice title=videos::sidecar transcript from ci run ${run} (${sha})"
+          fi
+          test -s "$file"
+          if ! grep -q "connected to kube_noob_mcp ${TAG#v} at" "$file"; then
+            echo "::error title=videos::the transcript is not of kube-noob ${TAG#v}: $(grep -o 'connected to kube_noob_mcp [^ ]*' "$file" || echo 'no MCP session')"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: transcript-for-videos
+          path: transcript/sidecar-transcript-4.22.txt
+          retention-days: 7
+
+  render:
+    # Every leg but the sidecar one renders without the transcript, so a ci problem costs one video, not four.
+    needs: transcript
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        video: [walkthrough, teaser, sidecar, mcp]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pipeline_ref || inputs.tag }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: kube-noob from the release tag, the voice, ffmpeg and Chromium (pinned)
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install ./product "numpy==2.5.3" "kokoro-onnx==0.6.1" "onnxruntime==1.29.0"
+          test "v$(python -c 'import kube_noob; print(kube_noob.__version__)')" = "$TAG"
+          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+          cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
+      - name: Voice model (Kokoro-82M, sha256-checked by audio_kit.py)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kube-noob-video
+          key: kokoro-model-files-v1.0-${{ hashFiles('demos/video/audio_kit.py') }}
+          restore-keys: kokoro-model-files-v1.0-
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: matrix.video == 'sidecar'
+        with:
+          name: transcript-for-videos
+          path: transcript
+      - name: Render the 4K master
+        env:
+          NODE_PATH: ${{ github.workspace }}/demos/video/node_modules
+          KN_SIDECAR_TRANSCRIPT: ${{ github.workspace }}/transcript/sidecar-transcript-4.22.txt
+          KN_PRODUCT_ROOT: ${{ github.workspace }}/product
+          VIDEO: ${{ matrix.video }}
+        run: |
+          set -euo pipefail
+          if [ "$VIDEO" = walkthrough ]; then
+            KN_VIDEO_SCALE=2 demos/video/render.sh out
+          else
+            KN_SCALE=2 demos/video/stage/build.sh out "$VIDEO"
+          fi
+      - name: Web copy, captions, poster; measure every file
+        env:
+          VIDEO: ${{ matrix.video }}
+        run: |
+          set -euo pipefail
+          src=out; [ "$VIDEO" = walkthrough ] || src="out/$VIDEO"
+          mkdir -p dist
+          cp "$src/kube-noob-$VIDEO.mp4" "dist/kube-noob-$VIDEO-4k.mp4"
+          ffmpeg -v error -y -i "$src/kube-noob-$VIDEO.mp4" -vf scale=1920:1080:flags=lanczos \
+            -c:v libx264 -preset slow -crf 18 -profile:v high -pix_fmt yuv420p \
+            -color_primaries bt709 -color_trc bt709 -colorspace bt709 -c:a copy -movflags +faststart \
+            "dist/kube-noob-$VIDEO-1080p.mp4"
+          ffmpeg -v error -y -ss 3 -i "dist/kube-noob-$VIDEO-1080p.mp4" -frames:v 1 -q:v 2 "dist/kube-noob-$VIDEO.jpg"
+          cp "$src/kube-noob-$VIDEO.vtt" dist/
+          if [ "$VIDEO" = walkthrough ]; then
+            cp out/youtube-thumbnail.jpg out/youtube-thumbnail.png out/youtube-description.txt dist/
+          fi
+          python demos/video/loudness.py --verify dist/*.mp4
+          for f in dist/*.mp4; do
+            ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$f" | sed "s|^|$f |"
+          done
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "dist/kube-noob-$VIDEO-4k.mp4")" = "3840,2160"
+          ls -l dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: video-${{ matrix.video }}
+          path: dist/
+          retention-days: 14
+
+  attach:
+    # Attaches every video that rendered, even when another leg failed, and then fails the run if one did.
+    needs: [transcript, render]
+    if: ${{ !cancelled() && inputs.attach }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: video-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.transcript.result == 'success'
+        with:
+          name: transcript-for-videos  # kept with the release, for re-renders after the ci artifact expires
+          path: transcript
+      - name: Attach the videos to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+          RENDER: ${{ needs.render.result }}
+          TRANSCRIPT: ${{ needs.transcript.result }}
+        run: |
+          set -euo pipefail
+          if ! ls dist/*.mp4 > /dev/null 2>&1; then echo "::error title=videos::no video rendered"; exit 1; fi
+          # only a transcript the sidecar video was rendered from: a release asset wins on every later re-render
+          if [ -f dist/kube-noob-sidecar-4k.mp4 ] && [ -f transcript/sidecar-transcript-4.22.txt ]; then
+            cp transcript/sidecar-transcript-4.22.txt dist/
+          fi
+          (cd dist && sha256sum -- * > SHA256SUMS-videos.txt)
+          gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+          echo "::notice title=videos::attached $(ls dist | wc -l) files to ${TAG}"
+          if [ "$RENDER" != success ] || [ "$TRANSCRIPT" != success ]; then
+            echo "::error title=videos::transcript ${TRANSCRIPT}, render ${RENDER}: attached the videos that rendered"
+            exit 1
+          fi

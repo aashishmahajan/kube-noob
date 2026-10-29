@@ -208,6 +208,322 @@ SOURCES: dict[str, Citation] = {
         "https://helm.sh/docs/chart_best_practices/",
         "Apache-2.0",
     ),
+    # CVE signatures. The Kubernetes CVE feed (kubernetes.io/docs/reference/issues-security/official-cve-feed/) is
+    # generated from the kubernetes/kubernetes issues labelled official-cve-feed; each entry below is one of those
+    # issues or a GitHub Security Advisory. They are cited by link and paraphrased: no advisory text is vendored.
+    "k8s-cve-2024-10220": Citation(
+        "k8s-cve-2024-10220",
+        "Kubernetes CVE feed: CVE-2024-10220 arbitrary command execution through gitRepo volumes",
+        "https://github.com/kubernetes/kubernetes/issues/128885",
+        "link only",
+    ),
+    "k8s-cve-2025-1767": Citation(
+        "k8s-cve-2025-1767",
+        "Kubernetes CVE feed: CVE-2025-1767 gitRepo volumes can access local git repositories",
+        "https://github.com/kubernetes/kubernetes/issues/130786",
+        "link only",
+    ),
+    "k8s-volumes-gitrepo": Citation(
+        "k8s-volumes-gitrepo",
+        "Kubernetes Volumes - gitRepo (deprecated since v1.11, last served by v1.35, replaced by an init container)",
+        "https://kubernetes.io/docs/concepts/storage/volumes/#gitrepo",
+        "CC-BY-4.0",
+    ),
+    "k8s-cve-2020-8554": Citation(
+        "k8s-cve-2020-8554",
+        "Kubernetes CVE feed: CVE-2020-8554 man in the middle using LoadBalancer or ExternalIPs (no patch)",
+        "https://github.com/kubernetes/kubernetes/issues/97076",
+        "link only",
+    ),
+    "k8s-admission-deny-external-ips": Citation(
+        "k8s-admission-deny-external-ips",
+        "Kubernetes Admission Controllers Reference - DenyServiceExternalIPs",
+        "https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#denyserviceexternalips",
+        "CC-BY-4.0",
+    ),
+    "k8s-cve-2023-2431": Citation(
+        "k8s-cve-2023-2431",
+        "Kubernetes CVE feed: CVE-2023-2431 bypass of seccomp profile enforcement (empty localhostProfile)",
+        "https://github.com/kubernetes/kubernetes/issues/118690",
+        "link only",
+    ),
+    "ghsa-cve-2022-0811": Citation(
+        "ghsa-cve-2022-0811",
+        "GitHub Security Advisory GHSA-6x2m-w449-qwx7: CVE-2022-0811 CRI-O container escape through sysctls "
+        "(cr8escape)",
+        "https://github.com/advisories/GHSA-6x2m-w449-qwx7",
+        "link only",
+    ),
+    "ghsa-cve-2024-21626": Citation(
+        "ghsa-cve-2024-21626",
+        "GitHub Security Advisory GHSA-xr7r-f8xq-vfvv: CVE-2024-21626 runc container breakout through a leaked "
+        "file descriptor and a working directory under /proc (Leaky Vessels)",
+        "https://github.com/advisories/GHSA-xr7r-f8xq-vfvv",
+        "link only",
+    ),
+    "ingress-nginx-annotations-risk": Citation(
+        "ingress-nginx-annotations-risk",
+        "ingress-nginx - Annotations risk (Critical and High risk annotations, annotations-risk-level)",
+        "https://github.com/kubernetes/ingress-nginx/blob/main/docs/user-guide/nginx-configuration/annotations-risk.md",
+        "Apache-2.0",
+    ),
+    "ingress-nginx-configmap": Citation(
+        "ingress-nginx-configmap",
+        "ingress-nginx - ConfigMap (allow-snippet-annotations, annotations-risk-level, strict-validate-path-type)",
+        "https://github.com/kubernetes/ingress-nginx/blob/main/docs/user-guide/nginx-configuration/configmap.md",
+        "Apache-2.0",
+    ),
+    "ingress-nginx-retired": Citation(
+        "ingress-nginx-retired",
+        "ingress-nginx README - retirement (best-effort maintenance until March 2026, no further releases; the "
+        "repository was archived on 2026-03-24; move to a Gateway API implementation)",
+        "https://github.com/kubernetes/ingress-nginx",
+        "Apache-2.0",
+    ),
+    "k8s-cve-2021-25742": Citation(
+        "k8s-cve-2021-25742",
+        "Kubernetes CVE feed: CVE-2021-25742 ingress-nginx custom snippets allow retrieval of every Secret",
+        "https://github.com/kubernetes/kubernetes/issues/126811",
+        "link only",
+    ),
+    "k8s-cve-2021-25745": Citation(
+        "k8s-cve-2021-25745",
+        "Kubernetes CVE feed: CVE-2021-25745 ingress-nginx path field reads the controller's ServiceAccount token",
+        "https://github.com/kubernetes/kubernetes/issues/126812",
+        "link only",
+    ),
+    "k8s-cve-2021-25746": Citation(
+        "k8s-cve-2021-25746",
+        "Kubernetes CVE feed: CVE-2021-25746 ingress-nginx directive injection via annotations",
+        "https://github.com/kubernetes/kubernetes/issues/126813",
+        "link only",
+    ),
+    "k8s-cve-2022-4886": Citation(
+        "k8s-cve-2022-4886",
+        "Kubernetes CVE feed: CVE-2022-4886 ingress-nginx path sanitization bypass (strict-validate-path-type)",
+        "https://github.com/kubernetes/kubernetes/issues/126815",
+        "link only",
+    ),
+    "k8s-cve-2023-5043": Citation(
+        "k8s-cve-2023-5043",
+        "Kubernetes CVE feed: CVE-2023-5043 ingress-nginx configuration-snippet injection",
+        "https://github.com/kubernetes/kubernetes/issues/126816",
+        "link only",
+    ),
+    "k8s-cve-2023-5044": Citation(
+        "k8s-cve-2023-5044",
+        "Kubernetes CVE feed: CVE-2023-5044 ingress-nginx permanent-redirect injection",
+        "https://github.com/kubernetes/kubernetes/issues/126817",
+        "link only",
+    ),
+    "k8s-cve-2024-7646": Citation(
+        "k8s-cve-2024-7646",
+        "Kubernetes CVE feed: CVE-2024-7646 ingress-nginx annotation validation bypass",
+        "https://github.com/kubernetes/kubernetes/issues/126744",
+        "link only",
+    ),
+    "k8s-cve-2025-1974": Citation(
+        "k8s-cve-2025-1974",
+        "Kubernetes CVE feed: CVE-2025-1974 ingress-nginx admission controller remote code execution",
+        "https://github.com/kubernetes/kubernetes/issues/131009",
+        "link only",
+    ),
+    "k8s-cve-2025-24514": Citation(
+        "k8s-cve-2025-24514",
+        "Kubernetes CVE feed: CVE-2025-24514 ingress-nginx auth-url annotation injection",
+        "https://github.com/kubernetes/kubernetes/issues/131006",
+        "link only",
+    ),
+    "k8s-cve-2025-1097": Citation(
+        "k8s-cve-2025-1097",
+        "Kubernetes CVE feed: CVE-2025-1097 ingress-nginx auth-tls-match-cn annotation injection",
+        "https://github.com/kubernetes/kubernetes/issues/131007",
+        "link only",
+    ),
+    "k8s-cve-2025-1098": Citation(
+        "k8s-cve-2025-1098",
+        "Kubernetes CVE feed: CVE-2025-1098 ingress-nginx mirror-target and mirror-host annotation injection",
+        "https://github.com/kubernetes/kubernetes/issues/131008",
+        "link only",
+    ),
+    "k8s-cve-2025-24513": Citation(
+        "k8s-cve-2025-24513",
+        "Kubernetes CVE feed: CVE-2025-24513 ingress-nginx auth secret file path traversal",
+        "https://github.com/kubernetes/kubernetes/issues/131005",
+        "link only",
+    ),
+    "k8s-cve-2025-15566": Citation(
+        "k8s-cve-2025-15566",
+        "Kubernetes CVE feed: CVE-2025-15566 ingress-nginx auth-proxy-set-headers annotation injection",
+        "https://github.com/kubernetes/kubernetes/issues/136789",
+        "link only",
+    ),
+    "k8s-cve-2026-1580": Citation(
+        "k8s-cve-2026-1580",
+        "Kubernetes CVE feed: CVE-2026-1580 ingress-nginx auth-method annotation injection",
+        "https://github.com/kubernetes/kubernetes/issues/136677",
+        "link only",
+    ),
+    "k8s-cve-2026-24512": Citation(
+        "k8s-cve-2026-24512",
+        "Kubernetes CVE feed: CVE-2026-24512 ingress-nginx configuration injection via ImplementationSpecific paths",
+        "https://github.com/kubernetes/kubernetes/issues/136678",
+        "link only",
+    ),
+    "k8s-cve-2026-24513": Citation(
+        "k8s-cve-2026-24513",
+        "Kubernetes CVE feed: CVE-2026-24513 ingress-nginx auth-url validation bypass",
+        "https://github.com/kubernetes/kubernetes/issues/136679",
+        "link only",
+    ),
+    "k8s-cve-2026-24514": Citation(
+        "k8s-cve-2026-24514",
+        "Kubernetes CVE feed: CVE-2026-24514 ingress-nginx validating admission controller denial of service",
+        "https://github.com/kubernetes/kubernetes/issues/136680",
+        "link only",
+    ),
+    "k8s-cve-2026-3288": Citation(
+        "k8s-cve-2026-3288",
+        "Kubernetes CVE feed: CVE-2026-3288 ingress-nginx rewrite-target annotation injection",
+        "https://github.com/kubernetes/kubernetes/issues/137560",
+        "link only",
+    ),
+    "k8s-cve-2026-4342": Citation(
+        "k8s-cve-2026-4342",
+        "Kubernetes CVE feed: CVE-2026-4342 ingress-nginx comment-based configuration injection",
+        "https://github.com/kubernetes/kubernetes/issues/137893",
+        "link only",
+    ),
+    # Gap review 2026-10 (docs/evals/gap-review-2026-10.md): feed issues, their fixes and advisories, by link.
+    "k8s-cve-2023-3676": Citation(
+        "k8s-cve-2023-3676",
+        "Kubernetes CVE feed: CVE-2023-3676 insufficient input sanitization on Windows nodes leads to privilege "
+        "escalation",
+        "https://github.com/kubernetes/kubernetes/issues/119339",
+        "link only",
+    ),
+    "k8s-fix-cve-2023-3676": Citation(
+        "k8s-fix-cve-2023-3676",
+        "kubernetes/kubernetes PR 120127, the CVE-2023-3676 fix: pass the path and subPath to PowerShell in "
+        "environment variables (pkg/volume/util/subpath/subpath_windows.go)",
+        "https://github.com/kubernetes/kubernetes/pull/120127",
+        "link only",
+    ),
+    "k8s-cve-2023-5528": Citation(
+        "k8s-cve-2023-5528",
+        "Kubernetes CVE feed: CVE-2023-5528 insufficient input sanitization in in-tree storage plugin leads to "
+        "privilege escalation on Windows nodes",
+        "https://github.com/kubernetes/kubernetes/issues/121879",
+        "link only",
+    ),
+    "k8s-cve-2026-3864": Citation(
+        "k8s-cve-2026-3864",
+        "Kubernetes CVE feed: CVE-2026-3864 CSI Driver for NFS path traversal via subDir",
+        "https://github.com/kubernetes/kubernetes/issues/137797",
+        "link only",
+    ),
+    "k8s-cve-2026-3865": Citation(
+        "k8s-cve-2026-3865",
+        "Kubernetes CVE feed: CVE-2026-3865 CSI Driver for SMB path traversal via subDir",
+        "https://github.com/kubernetes/kubernetes/issues/138319",
+        "link only",
+    ),
+    "k8s-cve-2026-2270": Citation(
+        "k8s-cve-2026-2270",
+        "Kubernetes CVE feed: CVE-2026-2270 StatefulSet and ControllerRevision write permissions allow "
+        "cross-namespace pod creation",
+        "https://github.com/kubernetes/kubernetes/issues/142097",
+        "link only",
+    ),
+    "k8s-rbac-bootstrap-policy": Citation(
+        "k8s-rbac-bootstrap-policy",
+        "kubernetes/kubernetes bootstrap RBAC policy (view reads ControllerRevisions; edit writes StatefulSets but not "
+        "ControllerRevisions)",
+        "https://github.com/kubernetes/kubernetes/blob/master/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go",
+        "Apache-2.0",
+    ),
+    "ghsa-cve-2025-53547": Citation(
+        "ghsa-cve-2025-53547",
+        "GitHub Security Advisory GHSA-557j-xg8c-q2mm: CVE-2025-53547 Helm chart dependency updating with malicious "
+        "Chart.yaml content and a symlinked Chart.lock",
+        "https://github.com/advisories/GHSA-557j-xg8c-q2mm",
+        "link only",
+    ),
+    "ghsa-cve-2024-25620": Citation(
+        "ghsa-cve-2024-25620",
+        "GitHub Security Advisory GHSA-v53g-5gjp-272r: CVE-2024-25620 Helm dependency management path traversal "
+        "(a relative path in a chart's name)",
+        "https://github.com/advisories/GHSA-v53g-5gjp-272r",
+        "link only",
+    ),
+    "ghsa-cve-2026-35206": Citation(
+        "ghsa-cve-2026-35206",
+        "GitHub Security Advisory GHSA-hr2v-4r36-88hr: CVE-2026-35206 Helm chart extraction output directory "
+        "collapse via a Chart.yaml name dot-segment",
+        "https://github.com/advisories/GHSA-hr2v-4r36-88hr",
+        "link only",
+    ),
+    "ghsa-cve-2023-25165": Citation(
+        "ghsa-cve-2023-25165",
+        "GitHub Security Advisory GHSA-pwcw-6f5g-gxf8: CVE-2023-25165 Helm getHostByName function information "
+        "disclosure",
+        "https://github.com/advisories/GHSA-pwcw-6f5g-gxf8",
+        "link only",
+    ),
+    "ghsa-cve-2025-32387": Citation(
+        "ghsa-cve-2025-32387",
+        "GitHub Security Advisory GHSA-5xqw-8hwv-wg92: CVE-2025-32387 Helm stack overflow on a specially crafted "
+        "JSON Schema",
+        "https://github.com/advisories/GHSA-5xqw-8hwv-wg92",
+        "link only",
+    ),
+    "k8s-configmap": Citation(
+        "k8s-configmap",
+        "Kubernetes ConfigMaps (a ConfigMap does not provide secrecy or encryption; use a Secret)",
+        "https://kubernetes.io/docs/concepts/configuration/configmap/",
+        "CC-BY-4.0",
+    ),
+    "k8s-secret-sa-token": Citation(
+        "k8s-secret-sa-token",
+        "Kubernetes Secrets - ServiceAccount token Secrets (legacy, long-lived credentials; use the TokenRequest API)",
+        "https://kubernetes.io/docs/concepts/configuration/secret/#serviceaccount-token-secrets",
+        "CC-BY-4.0",
+    ),
+    "k8s-rbac-subjects": Citation(
+        "k8s-rbac-subjects",
+        "Kubernetes RBAC - referring to subjects (system:authenticated, system:unauthenticated and "
+        "system:serviceaccounts groups)",
+        "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-subjects",
+        "CC-BY-4.0",
+    ),
+    "k8s-hpa-replicas": Citation(
+        "k8s-hpa-replicas",
+        "Horizontal Pod Autoscaling - Migrating Deployments and StatefulSets to horizontal autoscaling (remove "
+        "spec.replicas)",
+        "https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/"
+        "#migrating-deployments-and-statefulsets-to-horizontal-autoscaling",
+        "CC-BY-4.0",
+    ),
+    "helm-crds": Citation(
+        "helm-crds",
+        "Helm Chart Best Practices - Custom Resource Definitions (the crds/ directory; Helm does not upgrade or delete "
+        "CRDs)",
+        "https://helm.sh/docs/chart_best_practices/custom_resource_definitions/",
+        "Apache-2.0",
+    ),
+    "helm-dependencies": Citation(
+        "helm-dependencies",
+        "Helm Chart Best Practices - Dependencies (https:// repository URLs where possible)",
+        "https://helm.sh/docs/chart_best_practices/dependencies/",
+        "Apache-2.0",
+    ),
+    "helm-function-list": Citation(
+        "helm-function-list",
+        "Helm Template Function List (lookup returns an empty response under helm template; getHostByName needs "
+        "--enable-dns)",
+        "https://helm.sh/docs/chart_template_guide/function_list/",
+        "Apache-2.0",
+    ),
 }
 
 

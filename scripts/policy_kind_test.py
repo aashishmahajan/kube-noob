@@ -127,6 +127,19 @@ def check_audit_mode(kubectl: str, engine: str, tmp: Path) -> list[str]:
         run([kubectl, "delete", "-f", str(policy), "--wait=true", "--ignore-not-found"])
 
 
+def fixture_namespaces() -> set[str]:
+    """Every namespace a fixture's objects name (shop for most, ingress-nginx for the controller rules)."""
+    out: set[str] = set()
+    for path in FIXTURES.glob("*.yaml"):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for key in ("good", "bad"):
+            for doc in yaml.safe_load_all(str(data.get(key) or "")):
+                namespace = ((doc or {}).get("metadata") or {}).get("namespace")
+                if isinstance(namespace, str) and namespace:
+                    out.add(namespace)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", choices=["vap", "kyverno"], required=True)
@@ -138,7 +151,8 @@ def main() -> int:
         print(f"::error title=policy kind setup::{_escape(setup.stderr)}")
         return 1
     run([a.kubectl, "wait", "--for=condition=Established", "crd", "--all", "--timeout=60s"])
-    run([a.kubectl, "create", "namespace", "shop"])
+    for namespace in sorted(fixture_namespaces()):
+        run([a.kubectl, "create", "namespace", namespace])
     problems: list[str] = []
     checked: list[str] = []
     with tempfile.TemporaryDirectory() as d:

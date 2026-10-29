@@ -54,6 +54,7 @@ SKIPPED_RULES = frozenset(
         "KN-C006",
         "KN-V004",  # a fact about the cluster's operators, not one object
         "KN-V011",  # needs pods that are created after the Service
+        "KN-N012",  # needs pods that are created after the NetworkPolicy
         "KN-V012",
         "KN-V014",  # bundle properties
         "KN-V018",
@@ -61,7 +62,7 @@ SKIPPED_RULES = frozenset(
         "KN-C013",  # needs Secrets of other namespaces, which kube-noob never reads
     }
 )
-CROSS_OBJECT = frozenset({"KN-N001", "KN-C008", "KN-C009", "KN-ST001", "KN-ST002", "KN-C012"})
+CROSS_OBJECT = frozenset({"KN-N001", "KN-C008", "KN-C009", "KN-ST001", "KN-ST002", "KN-C012", "KN-C014"})
 CONTEXT_RESOURCES = ("poddisruptionbudgets", "networkpolicies", "persistentvolumeclaims", "horizontalpodautoscalers")
 CONTEXT_KINDS = {
     "poddisruptionbudgets": "PodDisruptionBudget",

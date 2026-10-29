@@ -79,6 +79,16 @@ TEMPLATES: dict[str, Template] = {
             "set automountServiceAccountToken: false where the pod does not call the API",
         ),
         Template(
+            "TM-S03",
+            "S",
+            "Anyone who can create a Service can intercept traffic to the Service's external IP (CVE-2020-8554, "
+            "unpatched by design)",
+            ("KN-N008",),
+            (),
+            "no spec.externalIPs (publish through a LoadBalancer Service, a Route or an Ingress) and the "
+            "DenyServiceExternalIPs admission controller",
+        ),
+        Template(
             "TM-T01",
             "T",
             "A different image can run under the same reference",
@@ -107,7 +117,7 @@ TEMPLATES: dict[str, Template] = {
             "TM-I01",
             "I",
             "Any pod in the cluster can connect to the data store",
-            ("KN-N001", "KN-N007"),
+            ("KN-N001", "KN-N007", "KN-N012"),
             ("T1046", "T1613"),
             "a NetworkPolicy that admits only the application's own tiers to the store's port",
         ),
@@ -115,7 +125,7 @@ TEMPLATES: dict[str, Template] = {
             "TM-I02",
             "I",
             "Credentials are written in the manifests, readable by anyone with the repository or the API",
-            ("KN-S013", "KN-S018"),
+            ("KN-S013", "KN-S018", "KN-S026"),
             ("T1552.001",),
             "move them to Secrets created outside Git (an external secrets operator or sealed secrets)",
         ),
@@ -155,9 +165,34 @@ TEMPLATES: dict[str, Template] = {
             "TM-E02",
             "E",
             "Code in the pod can escape to the node",
-            ("KN-S001", "KN-S002", "KN-S005", "KN-S009", "KN-S010", "KN-S019", "KN-S020"),
+            (
+                "KN-S001",
+                "KN-S002",
+                "KN-S005",
+                "KN-S009",
+                "KN-S010",
+                "KN-S019",
+                "KN-S020",
+                "KN-S021",
+                "KN-S022",
+                "KN-S023",
+                "KN-S025",
+            ),
             ("T1611", "T1068"),
-            "no privileged mode, host namespaces or hostPath; drop capabilities; allowPrivilegeEscalation: false",
+            "no privileged mode, host namespaces or hostPath; drop capabilities; allowPrivilegeEscalation: false; no "
+            "gitRepo volume, no '+' or '=' in a sysctl, no workingDir under /proc, no shell characters in a subPath "
+            "(published runtime breakouts)",
+        ),
+        Template(
+            "TM-E04",
+            "E",
+            "An Ingress annotation or path injects configuration into the ingress-nginx controller, which reads every "
+            "Secret in the cluster",
+            ("KN-N009", "KN-N011"),
+            ("T1190", "T1552.007"),
+            "no snippet or other Critical- or High-risk ingress-nginx annotation and no ImplementationSpecific path; a "
+            "fixed controller release with --enable-annotation-validation; a Gateway API implementation in place of "
+            "the retired ingress-nginx",
         ),
         Template(
             "TM-E03",
@@ -391,9 +426,16 @@ def model(
                 entry_points.setdefault(first, entry.exposure)
                 exposed.add(ref)
         for entry_ref in sorted(entry_points):
-            if entry_ref.split("/")[0] in {"Route", "Ingress"}:
+            entry_kind = entry_ref.split("/")[0]
+            if entry_kind in {"Route", "Ingress"}:
                 ev = _evidence(audit, [entry_ref], TEMPLATES["TM-S01"].rules)
                 threats.append(Threat(TEMPLATES["TM-S01"], Element("entry point", entry_ref), _status(ev), ev))
+            if entry_kind == "Ingress":
+                ev = _evidence(audit, [entry_ref], TEMPLATES["TM-E04"].rules)
+                threats.append(Threat(TEMPLATES["TM-E04"], Element("entry point", entry_ref), _status(ev), ev))
+            if entry_kind == "Service":
+                ev = _evidence(audit, [entry_ref], TEMPLATES["TM-S03"].rules)
+                threats.append(Threat(TEMPLATES["TM-S03"], Element("entry point", entry_ref), _status(ev), ev))
         stores = [ref for ref in refs if _is_store(objects[ref])]
         for ref in refs:
             threats.extend(

@@ -2,16 +2,139 @@
 
 ## Unreleased
 
-- kube-noob.com: a static site generated from the repository by `scripts/build_site.py` and deployed to GitHub Pages
-  by the `site` workflow (setup and DNS: `site/README.md`). Docs; references generated from the code (MCP tools and
-  their schemas, CLI, rules, playbooks, knowledge base, release-note issue index, Helm values); the product journey
-  from real `kube-noob demo` runs and the changelog; insights computed at build time; the three animated videos and
-  the release's terminal recordings.
-- Playground: kube-noob's real tools in the visitor's browser (Pyodide served by the site, offline lock on): audit,
-  diagnose, known issues, policy denials, NetworkPolicy reachability, and any read-only tool as JSON.
-- Ask: Claude with the visitor's own Anthropic key, sent only to `api.anthropic.com`, calling kube-noob's tools in the
-  browser through the official SDK's tool runner, with the server-side refusal fallback.
+- Gap review 2026-10 (G107, `docs/evals/gap-review-2026-10.md`: what kube-noob lacked against the Kubernetes CVE
+  feed, the Helm and Argo CD advisories, Helm's best practices, kube-score, Polaris, kube-linter, Checkov and the
+  Kyverno library, and what was left out and why). 69 -> 77 rules:
+  - KN-S025 a `subPath` with shell or PowerShell syntax (CVE-2023-3676, Windows kubelet, fixed in v1.24.17 to
+    v1.28.1); KN-ST006 a local PersistentVolume path with such characters (CVE-2023-5528) or a `../` in the
+    `volumeHandle` or `subDir` of an NFS or SMB CSI volume (CVE-2026-3864, csi-driver-nfs v4.13.1; CVE-2026-3865,
+    csi-driver-smb v1.20.1); KN-N011 an `ImplementationSpecific` path on ingress-nginx, which the CVE-2026-24512
+    advisory says to reject at admission (fixed in v1.13.7 and v1.14.3); KN-S017 also flags ControllerRevision
+    writes (CVE-2026-2270: with StatefulSet writes, pods in other namespaces; kube-controller-manager v1.34.12,
+    v1.35.9, v1.36.5, v1.37.1).
+  - KN-S026 credentials in a ConfigMap (a credential-named key, a URL password, a private key, an access key id or a
+    token, or a `password=` line in a config file value); KN-S027 a legacy ServiceAccount token Secret
+    (non-expiring); KN-S028 a binding to `system:unauthenticated`, `system:anonymous`, `system:authenticated` or
+    `system:serviceaccounts` (built-in bindings left alone); KN-N012 a NetworkPolicy whose podSelector selects no pod
+    of its namespace; KN-C014 an HPA target that also sets `spec.replicas` (every apply resets it; 0 deactivates the
+    HPA).
+  - Admission policies (VAP and Kyverno) for KN-S025 to KN-S028, KN-N011 and KN-ST006, equal to the audit on the
+    random corpus; NIST controls (new: AC-14, SI-10), the red team (RT-PRIVESC, RT-SECRET-LEAK, RT-EXPOSURE,
+    RT-RESOURCE-STARVATION) and the threat model (TM-E02, TM-E04, TM-I01, TM-I02) read the new rules.
+  - helm-audit: a symlinked `Chart.lock` (CVE-2025-53547), a chart or dependency name that is a path
+    (CVE-2024-25620, CVE-2026-35206), a `values.schema.json` over 10 MiB (CVE-2025-32387), `getHostByName`
+    (CVE-2023-25165), `lookup` (empty under `helm template`, so the audited render differs from the install), a
+    CustomResourceDefinition in `templates/` and a dependency over plain `http://`.
+  - The generated manifests and Helm charts leave `replicas` to the HPA when autoscaling is on (the chart uses the
+    `helm create` conditional), as the Kubernetes docs recommend; the `k8s-ex-ha-web` exercise now asks for the HPA's
+    `minReplicas` instead of `spec.replicas`, and the gate's good bundle drops `replicas` under its HPA. The admission
+    webhook warns on KN-C014 with lookups (never enforces it) and skips KN-N012 (it needs the namespace's pods).
+- kube-noob.com is built from this repository's releases by a separate site repository; this repository keeps only
+  the product. The site's own third-party notices are on the site (`/notices/`).
+- CVE signatures in the audit (G106): KN-S021 gitRepo volume (CVE-2024-10220, CVE-2025-1767; deprecated since 1.11,
+  off by default from 1.33, gone after 1.35: clone with an init container into an emptyDir), KN-N008 Service
+  externalIPs (CVE-2020-8554, no patch; DenyServiceExternalIPs), KN-N009 risky ingress-nginx annotations (the Critical
+  and High lists plus the annotations behind CVE-2021-25742, CVE-2023-5043/5044, CVE-2025-24514/1097/1098,
+  CVE-2025-15566, CVE-2026-1580, CVE-2026-24513 and CVE-2026-3288), KN-N010 a controller ConfigMap that enables
+  snippets, Critical-risk annotations or unvalidated paths, KN-S022 '+' or '=' in a pod sysctl (CVE-2022-0811,
+  cr8escape, CRI-O), KN-S023 workingDir under /proc and KN-B011 Containerfile WORKDIR under /proc (CVE-2024-21626,
+  Leaky Vessels, runc 1.1.12), KN-S024 an ingress-nginx controller image below the releases that fix CVE-2025-1974 and
+  the later advisories (critical when the validating webhook is on), KN-V019 the retired ingress-nginx (archived
+  2026-03-24; move to a Gateway API implementation), and KN-S008 now flags a Localhost seccomp profile with no file
+  (CVE-2023-2431). Each cites the Kubernetes CVE feed issue or the GitHub advisory, ships fixtures and an admission
+  policy, and feeds the red team (RT-PRIVESC, RT-EXPOSURE) and the threat model (TM-E02, TM-S03, TM-E04).
 - `demos/video/stage/build.sh` honours `KN_SCALE` (1 for 1920x1080, default 2 for 4K).
+- Videos in the brand: `docs/brand/tokens.json` and `docs/brand/BRAND.md` are the one source for the palette (the
+  icon's navy, blue and green), type, tagline and call to action. Inter 4.1 and JetBrains Mono 2.304 are bundled
+  (SHA-256 pinned) and injected under their own family names by `demos/video/brand.js`, so CI renders look like local
+  ones; a render stops if a brand font did not load. The walkthrough, its thumbnail and the three animated videos use
+  them, end on the brand end card with kube-noob.com, and say "Get it at kube-noob dot com" instead of "link below".
+- Animated videos: the mascot rests clear of the terminal, captions are never drawn under a window, and
+  `capture.js --check` fails a video whose frames break either rule. The walkthrough capture gets `--stills`; both
+  captures write an output file only when the encode succeeded, from JPEG quality 100 frames (51.8 dB PSNR against
+  lossless PNG frames after the CRF 16 encode, three times faster in 4K; `--frames png` for lossless).
+- Video numbers come from the code: `demos/video/facts.py` fills every count, score and line number in the scripts
+  when a video is built, and records the terminal lines (the CLI audit, Claude's audit and fix tool calls, the
+  sidecar session from the CI transcript). The published videos had drifted: 23 MCP tools and a 68 MiB peak in the
+  sidecar video (0.6.0: 41 tools, 92 MiB), findings at lines 21, 23, 24 in the Claude video (23, 25, 26), "sixty
+  rules" (61), "61 real questions" (63), "4 safe fixes" (5). `tests/test_video_facts.py` fails a script that types a
+  number, names a rule the audit does not find, or uses a fact that does not exist.
+- `videos.json` is checked against `demos/video/stage/videos.schema.json` before any voice is spoken.
+- Sound: every mix is normalised to the brand loudness before encoding (one linear gain, plus an oversampled
+  true-peak limiter only when the gain needs it; the single loudnorm pass had left the teaser at -17.6 LUFS), and
+  each finished video is measured (`demos/video/loudness.py`): -16 LUFS within 0.5 LU, true peak at most -1.5 dBTP,
+  audio as long as the picture, or the build fails.
+- Captions: every video gets a WebVTT file from its voice-over timings (two lines of 42 characters, timed to the
+  voice), for the website, YouTube and LinkedIn. The walkthrough render also writes `youtube-description.txt` with
+  its numbers filled and the chapters at the real scene times (the script's had drifted by up to 8 seconds); its end
+  card now lasts 12 seconds, long enough to be a YouTube chapter and carry an end screen.
+- Every release gets its videos (`.github/workflows/videos.yml`, called by `release.yml` after the release exists,
+  or run by hand for an existing tag): 4K masters and 1080p copies of the walkthrough and the three animated videos,
+  WebVTT captions, poster frames, the YouTube thumbnail and description, and `SHA256SUMS-videos.txt`, rendered from
+  the tag's own code with the sidecar transcript its CI run recorded, each file measured before it is attached.
+- CI checks the videos on every change in a few minutes (`videos` job): the scripts, every fact, the layout rules
+  on every frame and stills of every scene, with `--engine silent` (no voice model; the same timing). Playwright is
+  pinned in `demos/video/package-lock.json`.
+- `tests/test_guidance.py` checks rows G100 and later too (it matched only two-digit ids).
+- Brand review: the social preview, LinkedIn banner, post and profile images are rendered in the bundled fonts and
+  the brand colours (`docs/brand/render.js` through `brand.js`) and carry kube-noob.com; the banner no longer says
+  "cited" or "pipx install" and the post no longer says "60 audit rules" (61, and a static image now carries no
+  count). BRAND.md names the roadmap's headline under test ("The ground truth your AI SRE checks against"). The
+  README's trademark line names every product it mentions, and `tests/test_brand.py` checks its counts (rules,
+  playbooks, red-team scenarios, tracks and lessons, protocol steps) against the code.
+- Video red-team fixes:
+  - The walkthrough no longer says every finding carries an RHACS policy; only the findings of rules that map to one do.
+  - Captions cut a clause that is too long for one cue at the word nearest its middle and balance the two lines, so
+    no word is left alone on screen ("fixes." had flashed by for 0.4 s). Every cue stays on screen for at least
+    0.8 s, and the check no longer exempts short text.
+  - The sidecar memory limit is read from the container's cgroup (`memory.max`) instead of being typed in the
+    recording script, and facts.py refuses a transcript whose limit differs from the manifest's, or whose pod port
+    was not shown closed.
+  - The mascot's flame no longer covers the hyphen of "kube-noob" in the sidecar video, and `capture.js --check`
+    now fails any frame where a rocket or its flame covers a label.
+  - Terminal text, the memory gauge and the shapes in the animated videos use only brand tokens. The brand test also
+    refuses an rgb copy of a token. The DNS label no longer shows the kind-only port 53.
+  - Cut recordings say so on screen ("… 8 more lines", "… 12 medium and low findings…").
+  - `demos/ai-video-prompts.md` now says word for word what the rendered videos say, with a test that keeps it so.
+    The answer Claude gives in the MCP video is checked against the example and the audit.
+  - `audit.high` counts high findings only, as the CLI header does; `audit.critical` is a fact of its own.
+  - The release videos workflow (`videos.yml`):
+    - attaches every video that rendered and still fails the run when a leg did not;
+    - renders three of the four videos even without a sidecar transcript;
+    - takes the transcript from any ci run whose sidecar step passed, even when another job failed;
+    - attaches the transcript to the release, so a later re-render does not depend on a 90-day artifact;
+    - refuses a transcript of another version;
+    - reads the facts from the tag's checkout when `pipeline_ref` is set.
+  - The loudness normaliser keeps the whole true-peak headroom for the AAC encode.
+  - Second red-team pass:
+    - A word wider than a caption line is refused with the reason instead of crashing the wrapping.
+    - A short clause after a long one joins it, and a span too short to read is refused as such.
+    - Memory limits are read as Kubernetes quantities (0.5Gi, 1Ti).
+    - A critical finding shows as CRIT.
+    - Check marks and iso shapes use brand tokens.
+    - The release keeps a transcript only when the sidecar video rendered from it.
+    - Every ci run checks the fresh sidecar transcript with facts.py, including the version.
+- The KN-S022 fixture puts the cr8escape payload in the sysctl value, as the advisory describes; the API server
+  refused the old one (payload in the name) before admission, so the policy test on kind could not see the policy.
+  The policy test creates every namespace its fixtures name (ingress-nginx for the controller rules).
+
+- Video redesign (from a review of the published cuts: mostly empty terminals with small text, the same laptop shot
+  four times, and no visual payoff):
+  - The walkthrough puts the chapter's point in a rail beside a terminal sized to what it shows. The font is the
+    largest that fits (22 to 36 px at 1080p). The lines to look at light up once the output is printed: findings,
+    scores, verdicts and read-only steps. A slow push-in keeps every frame moving, and commands type fast, so no frame
+    holds an empty box. Chapter cards become big numbers with progress dots over the brand aurora.
+  - The MCP video gets a payoff scene, from the same audit the facts use. The example's YAML is shown with each finding
+    lighting its line and a ring counting to the score. Then the fix's diff appears, the fixed lines turn green, the
+    ring climbs to the score after the fixes, and the changes left for a person are named. The MCP terminal now uses
+    31 px type in a box as tall as its lines.
+  - The voice says "2 a.m." as "2 AM": Kokoro took the periods of "a.m." as sentence breaks ("two A. M.") and paused
+    twice. RHACS is "RH ACS", because "R H A C S" made the A sound like "uh". `tests/test_video_voice.py` fails any
+    spoken line that still has an abbreviation with periods or a lone spelled-out "A".
+  - The mux cuts the sound to the picture's own length instead of using `-shortest`. On the walkthrough, `-shortest`
+    dropped the last two frames (video 150.167 s against audio 150.233 s), and the loudness check refused the file.
+- `corpus-refresh`: a saved Jira copy that no longer decrypts (CORPUS_PASSPHRASE changed since it was saved) starts
+  a new copy with a warning instead of failing the daily run ("bad decrypt" on 2026-10-29).
 
 ## 0.6.0 - 2026-10-29
 

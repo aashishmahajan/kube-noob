@@ -1,0 +1,39 @@
+rule: KN-N011
+good: |
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    ingressClassName: nginx
+    tls:
+    - hosts: [web.example.com]
+      secretName: web-tls
+    rules:
+    - host: web.example.com
+      http:
+        paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service: {name: web, port: {number: 80}}
+bad: |
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    ingressClassName: nginx
+    tls:
+    - hosts: [web.example.com]
+      secretName: web-tls
+    rules:
+    - host: web.example.com
+      http:
+        paths:
+        - path: /api
+          pathType: ImplementationSpecific
+          backend:
+            service: {name: web, port: {number: 80}}

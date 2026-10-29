@@ -322,3 +322,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" dist/* demos/*.gif chart/*.tgz --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag
+
+  videos:
+    # The release's demo videos: 4K masters and 1080p copies with captions, rendered from this tag and attached to the
+    # release created above (videos.yml). Kept after the release so a render problem never holds back the release.
+    needs: github-release
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/videos.yml
+    with:
+      tag: ${{ github.ref_name }}

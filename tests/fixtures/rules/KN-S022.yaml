@@ -1,0 +1,63 @@
+rule: KN-S022
+good: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        securityContext:
+          sysctls:
+          - {name: net.ipv4.ip_unprivileged_port_start, value: "80"}
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe: {httpGet: {path: /ready, port: 8080}}
+          livenessProbe: {httpGet: {path: /live, port: 8080}, periodSeconds: 10, failureThreshold: 3}
+bad: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        securityContext:
+          sysctls:
+          - {name: kernel.shm_rmid_forced, value: "1+kernel.core_pattern=|/tmp/x #"}
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe: {httpGet: {path: /ready, port: 8080}}
+          livenessProbe: {httpGet: {path: /live, port: 8080}, periodSeconds: 10, failureThreshold: 3}

@@ -31,6 +31,7 @@ tracks:
         keyPoints:
           - Liveness checks only the process; readiness may check dependencies.
           - PDB maxUnavailable 1 with at least 2 replicas.
+          - With an HPA the manifest leaves spec.replicas out; the HPA's minReplicas sets the floor.
         exercises: [k8s-ex-ha-web]
       - id: k8s-104-storage
         title: Storage access modes
@@ -88,20 +89,22 @@ tracks:
         points: 20
         prompt: >-
           Produce manifests for 'shop-api' (namespace 'shop', image 'ghcr.io/acme/shop-api:2.3.1', port 8080) on
-          vanilla Kubernetes with 3 replicas spread across zones, a PodDisruptionBudget that still allows node drains,
-          an HPA (max 10) driven by CPU utilization, and a default-deny NetworkPolicy plus an allow rule for the
-          ingress controller namespace 'ingress-nginx'. Expose it with an Ingress on host shop.example.com with TLS.
+          vanilla Kubernetes with at least 3 replicas spread across zones, a PodDisruptionBudget that still allows node
+          drains, an HPA (min 3, max 10) driven by CPU utilization that owns the replica count, and a default-deny
+          NetworkPolicy plus an allow rule for the ingress controller namespace 'ingress-nginx'. Expose it with an
+          Ingress on host shop.example.com with TLS.
         hints:
           - PDB maxUnavailable 1, never minAvailable equal to replicas.
           - HPA utilization needs CPU requests on every container.
+          - With an HPA, leave spec.replicas out of the Deployment (every apply would reset it); minReplicas is the floor.
         checks:
           platform: kubernetes
           kinds: [Deployment, Service, Ingress, PodDisruptionBudget, HorizontalPodAutoscaler, NetworkPolicy]
           schemaValid: true
           maxSeverity: low
-          forbidRules: [KN-C009, KN-C010, KN-C012, KN-N003, KN-N001]
+          forbidRules: [KN-C009, KN-C010, KN-C012, KN-C014, KN-N003, KN-N001]
           assertions:
-            - {kind: Deployment, path: spec.replicas, gte: 3}
+            - {kind: HorizontalPodAutoscaler, path: spec.minReplicas, gte: 3}
             - {kind: Ingress, path: "spec.tls[0].hosts[0]", equals: shop.example.com}
         reference:
           name: shop-api

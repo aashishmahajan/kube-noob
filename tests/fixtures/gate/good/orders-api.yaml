@@ -24,7 +24,6 @@ metadata:
   annotations:
     kube-noob.io/generated-by: kube-noob 0.5.0
 spec:
-  replicas: 3
   revisionHistoryLimit: 5
   selector:
     matchLabels:

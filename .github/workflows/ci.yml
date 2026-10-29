@@ -57,6 +57,57 @@ jobs:
       - name: MCP stdio end-to-end under the offline lock (installed wheel)
         run: /tmp/wheelenv/bin/python -I scripts/e2e_mcp_offline.py /tmp/wheelenv/bin/kube-noob
 
+  videos:
+    # The demo videos on every change, in a few minutes and without the voice model (a silent voice with the same
+    # timing): videos.json against its schema with every number filled from this commit's code, the brand layout
+    # rules on every frame (capture.js --check), and stills of every scene, the walkthrough cards and the thumbnail
+    # uploaded to look at. The 4K masters are rendered for releases by videos.yml.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: kube-noob, ffmpeg and Chromium (pinned in demos/video/package-lock.json)
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip && pip install . "numpy==2.5.3" "pytest>=8.3"
+          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+          cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
+      - name: Video tests with ffmpeg (loudness, captions, facts, brand)
+        run: python -m pytest -q tests/test_video_loudness.py tests/test_video_captions.py tests/test_video_facts.py tests/test_brand.py tests/test_video_workflows.py tests/test_video_voice.py
+      - name: Video scripts, facts and layout rules on every frame, and stills (silent voice)
+        env:
+          NODE_PATH: ${{ github.workspace }}/demos/video/node_modules
+          KN_SIDECAR_TRANSCRIPT: ${{ github.workspace }}/tests/fixtures/video-sidecar-transcript.txt
+        run: |
+          set -euo pipefail
+          for v in teaser sidecar mcp; do
+            python demos/video/stage/voiceover.py "$v" "out/$v" --engine silent
+            node demos/video/stage/capture.js "out/$v" --check
+            stills="$(python -c "import json; t = json.load(open('out/$v/timeline.json')); print(','.join(str(round(s['start'] + s['dur'] * 0.8, 2)) for s in t['scenes']))")"
+            node demos/video/stage/capture.js "out/$v" --scale 1 --stills "$stills"
+          done
+          python demos/video/build_scenes.py walkthrough out/walkthrough
+          node demos/video/capture_page.js out/walkthrough walkthrough.html out/walkthrough/unused.mp4 --scale 1 --stills 2.5,20
+          cp demos/video/thumbnail.html out/walkthrough/ && node demos/video/thumbnail.js out/walkthrough
+          ls out/*/still-*.png | wc -l
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: video-stills
+          path: |
+            out/*/still-*.png
+            out/walkthrough/youtube-thumbnail.jpg
+          retention-days: 7
+          if-no-files-found: ignore
+
   plugin:
     # The Claude plugin runs the bundled server source with dependencies pinned by hash; prove it starts and answers.
     runs-on: ubuntu-latest
@@ -649,15 +700,19 @@ jobs:
           kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
           if tar -xzOf dist/kube-noob-db/kube-noob-db.tgz | grep -q PRIVATE; then
             echo "::error title=db::Jira text reached the public bundle"; exit 1; fi
-      - name: Live Red Hat VEX (three CVEs, one over the size cap) joins the bundle under CC BY 4.0
+      - name: Live Red Hat VEX (six CVEs, one over the size cap) joins the bundle under CC BY 4.0
+        # Several OpenShift CVEs, so one document Red Hat withdraws or moves (CVE-2024-21626 answered 404 on
+        # 2026-10-29) does not fail the check; it needs at least one published record that names OpenShift.
         env:
           KUBE_NOOB_DATA_DIR: /tmp/db-data
+          CVES: CVE-2023-44487,CVE-2024-3094,CVE-2024-21626,CVE-2024-7387,CVE-2024-45496,CVE-2022-0811
         run: |
           set -euo pipefail
-          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-21626,CVE-2024-3094 --format json \
+          kube-noob corpus advisories --online --cves "$CVES" --format json \
             > /tmp/vex.json 2> /tmp/vex.err || { echo "::error title=Red Hat VEX live::$(tr '\n' ' ' < /tmp/vex.err | cut -c1-1500)"; exit 1; }
-          curl -s --max-time 120 -o /tmp/vex-raw.json \
-            https://security.access.redhat.com/data/csaf/v2/vex/2024/cve-2024-21626.json || true
+          raw=$(curl -s --max-time 120 -o /tmp/vex-raw.json -w '%{http_code}' \
+            https://security.access.redhat.com/data/csaf/v2/vex/2024/cve-2024-7387.json || true)
+          echo "::notice title=VEX raw document::2024/cve-2024-7387.json HTTP ${raw}"
           python scripts/vex_ci_check.py /tmp/vex.json /tmp/db-data/corpus/redhat-vex.jsonl /tmp/vex-raw.json
           code=$(curl -s -o /dev/null -w '%{http_code}' https://security.access.redhat.com/data/csaf/v2/vex/archive_latest.txt)
           echo "::notice title=VEX archive pointer::archive_latest.txt HTTP $code"
@@ -803,6 +858,22 @@ jobs:
       - name: Publish the sidecar transcript as an annotation (source of the sidecar demo video)
         if: matrix.ocp == '4.22'
         run: echo "::notice title=sidecar transcript::$(sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g' /tmp/sidecar-transcript-4.22.txt)"
+      - name: The sidecar video's facts read from this transcript (limit as in the manifest, this version)
+        if: matrix.ocp == '4.22'
+        run: |
+          python - <<'PY'
+          import sys
+
+          sys.path.insert(0, "demos/video")
+          import facts
+          import kube_noob
+
+          f = facts.Facts("/tmp/sidecar-transcript-4.22.txt")
+          values = {k: f.get(f"sidecar.{k}") for k in ("version", "tools", "peak", "limit")}
+          print(f"::notice title=sidecar facts::{values}")
+          if values["version"] != kube_noob.__version__:
+              raise SystemExit(f"the transcript is of kube-noob {values['version']}, this commit is {kube_noob.__version__}")
+          PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

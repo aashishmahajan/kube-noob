@@ -7,6 +7,7 @@ reward refer to them), so never renumber; retire with ``deprecated=True`` instea
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
@@ -153,6 +154,235 @@ def rule(
 
 
 DNS1123_SUBDOMAIN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\Z")
+
+# =====================================================================================================
+# ingress-nginx (kubernetes/ingress-nginx): CVE signatures and retirement
+# =====================================================================================================
+# The project is retired: best-effort maintenance ended in March 2026 and the repository was archived on
+# 2026-03-24 (ingress-nginx-retired). Every fact below is from the Kubernetes CVE feed issue or the project
+# document named in the citation; the fixed versions are the releases those issues name.
+
+INGRESS_NGINX_ANNOTATION_PREFIX = "nginx.ingress.kubernetes.io/"
+INGRESS_NGINX_CLASS = "nginx"
+# docs/user-guide/nginx-configuration/annotations-risk.md: the annotations rated Critical and High.
+INGRESS_NGINX_CRITICAL_ANNOTATIONS = frozenset(
+    {"configuration-snippet", "auth-snippet", "modsecurity-snippet", "server-snippet", "stream-snippet"}
+)
+INGRESS_NGINX_HIGH_ANNOTATIONS = frozenset(
+    {
+        "server-alias",
+        "auth-tls-error-page",
+        "auth-tls-match-cn",
+        "auth-signin",
+        "auth-url",
+        "mirror-host",
+        "mirror-target",
+        "modsecurity-transaction-id",
+        "proxy-ssl-name",
+        "upstream-hash-by",
+    }
+)
+# Annotation -> the CVEs that used it, with the fix each feed issue names.
+INGRESS_NGINX_ANNOTATION_CVES: dict[str, tuple[tuple[str, str], ...]] = {
+    "configuration-snippet": (
+        ("CVE-2021-25742", "snippets read every Secret in the cluster; keep allow-snippet-annotations false"),
+        ("CVE-2023-5043", "configuration injection; mitigated by v1.9.0 with --enable-annotation-validation"),
+    ),
+    "auth-snippet": (("CVE-2021-25742", "snippets read every Secret in the cluster"),),
+    "modsecurity-snippet": (("CVE-2021-25742", "snippets read every Secret in the cluster"),),
+    "server-snippet": (("CVE-2021-25742", "snippets read every Secret in the cluster"),),
+    "stream-snippet": (("CVE-2021-25742", "snippets read every Secret in the cluster"),),
+    "auth-url": (
+        ("CVE-2025-24514", "configuration injection, fixed in v1.11.5 and v1.12.1"),
+        ("CVE-2026-24513", "validation bypass, fixed in v1.13.7 and v1.14.3"),
+    ),
+    "auth-tls-match-cn": (("CVE-2025-1097", "configuration injection, fixed in v1.11.5 and v1.12.1"),),
+    "mirror-target": (("CVE-2025-1098", "configuration injection, fixed in v1.11.5 and v1.12.1"),),
+    "mirror-host": (("CVE-2025-1098", "configuration injection, fixed in v1.11.5 and v1.12.1"),),
+    "permanent-redirect": (("CVE-2023-5044", "configuration injection, fixed in v1.9.0"),),
+    "auth-proxy-set-headers": (("CVE-2025-15566", "configuration injection, fixed in v1.12.5 and v1.13.1"),),
+    "auth-method": (("CVE-2026-1580", "configuration injection, fixed in v1.13.7 and v1.14.3"),),
+    "rewrite-target": (("CVE-2026-3288", "configuration injection, fixed in v1.13.8, v1.14.4 and v1.15.0"),),
+}
+# Every annotation KN-N009 flags (short name, without the prefix); kube_noob.generate.policies puts it into CEL.
+INGRESS_NGINX_RISKY_ANNOTATIONS = frozenset(
+    INGRESS_NGINX_CRITICAL_ANNOTATIONS | INGRESS_NGINX_HIGH_ANNOTATIONS | set(INGRESS_NGINX_ANNOTATION_CVES)
+)
+# ConfigMap keys that widen what an Ingress may ask of the controller (configmap.md gives the defaults).
+INGRESS_NGINX_CONFIGMAP_KEYS: dict[str, tuple[str, str, str]] = {
+    # key: (value that is unsafe, lower-cased; default; what it allows)
+    "allow-snippet-annotations": ("true", "false", "snippet annotations"),
+    "annotations-risk-level": ("critical", "High", "Critical-risk annotations (the snippets)"),
+    "strict-validate-path-type": ("false", "true", "unvalidated spec.rules[].http.paths[].path values"),
+}
+
+
+@dataclass(frozen=True)
+class ComponentAdvisory:
+    """CVEs of a component with the first fixed release of each affected minor (later minors are fixed too)."""
+
+    cves: tuple[str, ...]
+    fixed: tuple[str, ...]
+    summary: str
+    citations: tuple[str, ...]
+
+    def affects(self, version: tuple[int, int, int]) -> bool:
+        fixed = [_semver(f) for f in self.fixed]
+        same = [f[2] for f in fixed if f[:2] == version[:2]]
+        if same:
+            return version[2] < min(same)
+        return version[:2] < max(f[:2] for f in fixed)
+
+
+_SEMVER = re.compile(r"^v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})\Z")
+_INGRESS_NGINX_IMAGE = re.compile(r"(?:^|/)ingress-nginx/controller(?:-chroot)?\Z")
+
+
+def _semver(text: str) -> tuple[int, int, int]:
+    m = _SEMVER.match(text.strip())
+    if not m:
+        raise ValueError(f"not a version: {text!r}")
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+# Oldest first. CVE-2025-1974 (CVSS 9.8, unauthenticated, through the validating admission webhook) is the one that
+# makes the finding critical when the webhook is on (--validating-webhook).
+INGRESS_NGINX_ADVISORIES: tuple[ComponentAdvisory, ...] = (
+    ComponentAdvisory(
+        ("CVE-2021-25742",),
+        ("0.49.1", "1.0.1"),
+        "custom snippets read every Secret in the cluster (also set allow-snippet-annotations to false)",
+        ("k8s-cve-2021-25742",),
+    ),
+    ComponentAdvisory(
+        ("CVE-2021-25745", "CVE-2021-25746"),
+        ("1.2.0",),
+        "a spec.rules[].http.paths[].path that reads the controller's ServiceAccount token, and directive injection "
+        "through annotation values",
+        ("k8s-cve-2021-25745", "k8s-cve-2021-25746"),
+    ),
+    ComponentAdvisory(
+        ("CVE-2022-4886",),
+        ("1.8.0",),
+        "path sanitization bypass through spec.rules[].http.paths[].path",
+        ("k8s-cve-2022-4886",),
+    ),
+    ComponentAdvisory(
+        ("CVE-2023-5043", "CVE-2023-5044"),
+        ("1.9.0",),
+        "configuration injection through the configuration-snippet and permanent-redirect annotations",
+        ("k8s-cve-2023-5043", "k8s-cve-2023-5044"),
+    ),
+    ComponentAdvisory(
+        ("CVE-2024-7646",),
+        ("1.10.4", "1.11.2"),
+        "annotation validation bypass by anyone who can create an Ingress",
+        ("k8s-cve-2024-7646",),
+    ),
+    ComponentAdvisory(
+        ("CVE-2025-1974", "CVE-2025-24514", "CVE-2025-1097", "CVE-2025-1098", "CVE-2025-24513"),
+        ("1.11.5", "1.12.1"),
+        "unauthenticated code execution in the controller through the validating admission webhook "
+        "(CVE-2025-1974, CVSS 9.8), configuration injection through the auth-url, auth-tls-match-cn, "
+        "mirror-target and mirror-host annotations, and auth secret path traversal",
+        ("k8s-cve-2025-1974", "k8s-cve-2025-24514", "k8s-cve-2025-1097", "k8s-cve-2025-1098", "k8s-cve-2025-24513"),
+    ),
+    ComponentAdvisory(
+        ("CVE-2025-15566",),
+        ("1.12.5", "1.13.1"),
+        "configuration injection through the auth-proxy-set-headers annotation",
+        ("k8s-cve-2025-15566",),
+    ),
+    ComponentAdvisory(
+        ("CVE-2026-1580", "CVE-2026-24512", "CVE-2026-24513", "CVE-2026-24514"),
+        ("1.13.7", "1.14.3"),
+        "configuration injection through the auth-method annotation and ImplementationSpecific paths, auth-url "
+        "validation bypass, and a denial of service of the validating admission controller",
+        ("k8s-cve-2026-1580", "k8s-cve-2026-24512", "k8s-cve-2026-24513", "k8s-cve-2026-24514"),
+    ),
+    ComponentAdvisory(
+        ("CVE-2026-3288",),
+        ("1.13.8", "1.14.4", "1.15.0"),
+        "configuration injection through the rewrite-target annotation",
+        ("k8s-cve-2026-3288",),
+    ),
+    ComponentAdvisory(
+        ("CVE-2026-4342",),
+        ("1.13.9", "1.14.5", "1.15.1"),
+        "configuration injection through a combination of annotations",
+        ("k8s-cve-2026-4342",),
+    ),
+)
+_WEBHOOK_RCE = "CVE-2025-1974"
+
+
+def ingress_nginx_version(image: str) -> tuple[int, int, int] | None:
+    """The release an ingress-nginx controller image reference names, when its tag is a plain vX.Y.Z."""
+    ref = image.split("@", 1)[0]
+    last = ref.rsplit("/", 1)[-1]
+    name, _, tag = last.partition(":")
+    repo = ref[: len(ref) - len(last)] + name
+    if not _INGRESS_NGINX_IMAGE.search(repo):
+        return None
+    m = _SEMVER.match(tag)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def is_ingress_nginx_image(image: str) -> bool:
+    ref = image.split("@", 1)[0]
+    last = ref.rsplit("/", 1)[-1]
+    return bool(_INGRESS_NGINX_IMAGE.search(ref[: len(ref) - len(last)] + last.partition(":")[0]))
+
+
+def _lt(n: int) -> str:
+    """RE2 for a decimal integer from 0 to ``n - 1`` (no leading zeros)."""
+    if not 0 < n < 100:
+        raise ValueError(f"patch threshold out of range: {n}")
+    if n == 1:
+        return "0"
+    if n <= 10:
+        return f"[0-{n - 1}]"
+    tens, ones = divmod(n, 10)
+    parts = [r"\d"]
+    if tens >= 2:
+        parts.append(r"1\d" if tens == 2 else rf"[1-{tens - 1}]\d")
+    if ones:
+        parts.append(f"{tens}0" if ones == 1 else f"{tens}[0-{ones - 1}]")
+    return "(?:" + "|".join(parts) + ")"
+
+
+def ingress_nginx_vulnerable_tag_regex() -> str:
+    """RE2 (no anchors) for every ``X.Y.Z`` an advisory in INGRESS_NGINX_ADVISORIES affects: what KN-S024 flags."""
+    fixed = [_semver(f) for a in INGRESS_NGINX_ADVISORIES for f in a.fixed]
+    alternatives: list[str] = []
+    for major in sorted({f[0] for f in fixed}):
+        top = max(f[1] for f in fixed if f[0] == major)
+        thresholds: list[float] = []
+        for minor in range(top + 1):
+            t = 0.0
+            for a in INGRESS_NGINX_ADVISORIES:
+                own = [_semver(f) for f in a.fixed]
+                same = [f[2] for f in own if f[:2] == (major, minor)]
+                if same:
+                    t = max(t, float(min(same)))
+                elif (major, minor) < max(f[:2] for f in own):
+                    t = math.inf
+            thresholds.append(t)
+        whole = 0
+        while whole < len(thresholds) and thresholds[whole] == math.inf:
+            whole += 1
+        if whole == len(thresholds):
+            alternatives.append(rf"{major}\.\d+\.\d+")
+        elif whole:
+            alternatives.append(rf"{major}\.{_lt(whole)}\.\d+")
+        for minor in range(whole, len(thresholds)):
+            t = thresholds[minor]
+            if t == math.inf:
+                alternatives.append(rf"{major}\.{minor}\.\d+")
+            elif t > 0:
+                alternatives.append(rf"{major}\.{minor}\.{_lt(int(t))}")
+    return "(?:" + "|".join(alternatives) + ")"
+
 
 # =====================================================================================================
 # VALIDATE
@@ -564,6 +794,60 @@ def _v018(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             yield f
 
 
+_RETIRED = (
+    "the kubernetes/ingress-nginx project is retired: best-effort maintenance ended in March 2026, there are no "
+    "further releases or bug fixes, and the repository was archived on 2026-03-24."
+)
+
+
+@rule(
+    "KN-V019",
+    "Ingress targets the retired ingress-nginx",
+    Stage.VALIDATE,
+    "deprecation",
+    Severity.MEDIUM,
+    "Move to a Gateway API implementation (Gateway and HTTPRoute; on OpenShift 4.19+ the Ingress Operator manages "
+    "Gateway API) or to a maintained ingress controller, and drop the nginx.ingress.kubernetes.io annotations.",
+    "ingress-nginx stopped receiving releases and bug fixes when the project was archived on 2026-03-24, so every "
+    "later vulnerability stays unfixed; the project itself asks users to identify a Gateway API implementation.",
+    ("ingress-nginx-retired",),
+)
+def _v019(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Ingress"):
+        ann = get_path(d.data, ("metadata", "annotations"))
+        ann = ann if isinstance(ann, dict) else {}
+        nginx = sorted(str(k) for k in ann if str(k).startswith(INGRESS_NGINX_ANNOTATION_PREFIX))
+        if nginx:
+            more = ", ..." if len(nginx) > 1 else ""
+            yield r.finding(
+                d,
+                ("metadata", "annotations", nginx[0]),
+                f"Ingress carries {len(nginx)} ingress-nginx annotation(s) ({nginx[0]}{more}); " + _RETIRED,
+            )
+            continue
+        if str(get_path(d.data, ("spec", "ingressClassName")) or "").strip() == INGRESS_NGINX_CLASS:
+            path: PathT = ("spec", "ingressClassName")
+        elif str(ann.get("kubernetes.io/ingress.class", "")).strip() == INGRESS_NGINX_CLASS:
+            path = ("metadata", "annotations", "kubernetes.io/ingress.class")
+        else:
+            continue
+        yield r.finding(
+            d,
+            path,
+            f"Ingress names the ingress class '{INGRESS_NGINX_CLASS}' (ingress-nginx's class name); if ingress-nginx "
+            "serves it, " + _RETIRED,
+            severity=Severity.LOW,
+        )
+    for d, _pt, c in _containers(ctx):
+        image = c.container.get("image")
+        if isinstance(image, str) and is_ingress_nginx_image(image):
+            yield r.finding(
+                d,
+                (*c.path, "image"),
+                f"Container '{c.name}' runs the ingress-nginx controller image '{image}'; " + _RETIRED,
+            )
+
+
 # =====================================================================================================
 # AUDIT - security
 # =====================================================================================================
@@ -834,21 +1118,42 @@ def _s007(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     Severity.LOW,
     "Set securityContext.seccompProfile.type: RuntimeDefault at pod level.",
     "Pod Security 'restricted' requires RuntimeDefault or Localhost seccomp; Unconfined disables syscall "
-    "filtering. OpenShift restricted-v2 applies RuntimeDefault by default.",
-    ("k8s-pss", "ocp-scc"),
+    "filtering. OpenShift restricted-v2 applies RuntimeDefault by default. A Localhost profile must name its file: "
+    "an empty localhostProfile is the CVE-2023-2431 pattern, which kubelets before v1.24.14, v1.25.10, v1.26.5 and "
+    "v1.27.2 ran without any seccomp filter.",
+    ("k8s-pss", "ocp-scc", "k8s-cve-2023-2431"),
     ("Docker CIS 5.21: Ensure the default seccomp profile is not disabled",),
 )
 def _s008(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, pt in ctx.workloads():
-        pod_t = get_path(pt.spec, ("securityContext", "seccompProfile", "type"))
+        pod_profile = get_path(pt.spec, ("securityContext", "seccompProfile"))
+        pod_t = pod_profile.get("type") if isinstance(pod_profile, dict) else None
         for c in containers(pt):
-            ct = get_path(c.container, ("securityContext", "seccompProfile", "type"))
+            c_profile = get_path(c.container, ("securityContext", "seccompProfile"))
+            ct = c_profile.get("type") if isinstance(c_profile, dict) else None
             eff = ct or pod_t
+            profile = c_profile if ct else pod_profile
             if eff == "Unconfined":
                 yield r.finding(
                     d,
                     (*c.path, "securityContext", "seccompProfile"),
                     f"Container '{c.name}' runs with seccomp Unconfined.",
+                    severity=Severity.MEDIUM,
+                )
+            elif eff == "Localhost" and not (
+                isinstance(profile, dict)
+                and profile.get("localhostProfile") is not None
+                and str(profile.get("localhostProfile")).strip()
+            ):
+                yield r.finding(
+                    d,
+                    (*c.path, "securityContext", "seccompProfile")
+                    if ct
+                    else (*pt.path, "securityContext", "seccompProfile"),
+                    f"Container '{c.name}' uses seccomp type Localhost with an empty or missing localhostProfile: "
+                    "CVE-2023-2431 (kubelet, fixed in v1.24.14, v1.25.10, v1.26.5 and v1.27.2) ran such containers "
+                    "with no seccomp filter at all. Name the profile file (localhostProfile: profiles/app.json) or "
+                    "use RuntimeDefault.",
                     severity=Severity.MEDIUM,
                 )
             elif eff not in {"RuntimeDefault", "Localhost"}:
@@ -1101,20 +1406,50 @@ WORKLOAD_RESOURCES = frozenset(
 )
 
 
+WRITE_VERBS = frozenset({"create", "patch", "update", "*"})
+
+
+def _writes(rr: dict[str, Any], resource: str) -> bool:
+    return resource in {str(x) for x in rr.get("resources") or []} and bool(
+        {str(v) for v in rr.get("verbs") or []} & WRITE_VERBS
+    )
+
+
 @rule(
     "KN-S017",
     "RBAC privilege-escalation paths",
     Stage.AUDIT,
     "rbac",
     Severity.HIGH,
-    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy, pod exec, ephemeral containers and "
-    "workload creation unless essential; where they are, enforce Pod Security restricted in that namespace.",
-    "These permissions let a subject obtain more privileges than it was granted.",
-    ("k8s-rbac-good-practices",),
+    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy, pod exec, ephemeral containers, "
+    "ControllerRevision writes and workload creation unless essential; where they are, enforce Pod Security "
+    "restricted in that namespace, and run kube-controller-manager v1.34.12, v1.35.9, v1.36.5, v1.37.1 or later.",
+    "These permissions let a subject obtain more privileges than it was granted. Only the StatefulSet and DaemonSet "
+    "controllers need to write ControllerRevisions (the built-in edit and admin roles do not grant it): with write "
+    "access to StatefulSets too, CVE-2026-2270 (kube-controller-manager up to v1.34.11, v1.35.8, v1.36.4 and "
+    "v1.37.0) let a namespace user create pods in other namespaces.",
+    ("k8s-rbac-good-practices", "k8s-cve-2026-2270", "k8s-rbac-bootstrap-policy"),
 )
 def _s017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d in ctx.by_kind("Role", "ClusterRole"):
-        for i, rr in _rules_of(d):
+        role_rules = _rules_of(d)
+        writes_sts = any(_writes(x, "statefulsets") for _, x in role_rules)
+        for i, rr in role_rules:
+            if _writes(rr, "controllerrevisions"):
+                pair = (
+                    "this role also writes StatefulSets, the pair CVE-2026-2270 needs"
+                    if writes_sts
+                    else "with write access to StatefulSets from any role, this is CVE-2026-2270"
+                )
+                yield r.finding(
+                    d,
+                    ("rules", i, "resources"),
+                    f"Can write ControllerRevisions: {pair} (kube-controller-manager up to v1.34.11, v1.35.8, v1.36.4 "
+                    "and v1.37.0; fixed in v1.34.12, v1.35.9, v1.36.5 and v1.37.1), which lets a namespace user "
+                    "create pods in other namespaces. Only controllers need to write ControllerRevisions.",
+                    severity=Severity.HIGH if writes_sts else Severity.MEDIUM,
+                )
+        for i, rr in role_rules:
             verbs = {str(v) for v in rr.get("verbs") or []}
             resources = {str(x) for x in rr.get("resources") or []}
             if verbs & ESCALATION_VERBS:
@@ -1216,6 +1551,365 @@ def _s020(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, _pt, c in _containers(ctx):
         if get_path(c.container, ("securityContext", "procMount")) == "Unmasked":
             yield r.finding(d, (*c.path, "securityContext", "procMount"), f"Container '{c.name}' unmasks /proc.")
+
+
+@rule(
+    "KN-S021",
+    "gitRepo volume",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Clone with an init container into an emptyDir volume that the app container mounts (the replacement the "
+    "Kubernetes docs give), and remove the gitRepo volume.",
+    "gitRepo volumes are deprecated since Kubernetes 1.11, off by default from 1.33 (GitRepoVolumeDriver feature "
+    "gate) and gone after 1.35. CVE-2024-10220 (CVSS 8.1; kubelet, fixed in v1.28.12, v1.29.7, v1.30.3 and v1.31.0) "
+    "let a user who can create a pod run commands outside the container through a gitRepo volume, and "
+    "CVE-2025-1767 (every version, no fix) lets a pod read local git repositories on the node through one.",
+    ("k8s-cve-2024-10220", "k8s-cve-2025-1767", "k8s-volumes-gitrepo"),
+)
+def _s021(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    target = parse_minor(ctx.k8s_version)
+    for d, pt in ctx.workloads():
+        for i, v in enumerate(pt.spec.get("volumes") or []):
+            if not isinstance(v, dict) or "gitRepo" not in v:
+                continue
+            raw_git = v.get("gitRepo")
+            git: dict[str, Any] = raw_git if isinstance(raw_git, dict) else {}
+            repo = str(git.get("repository") or "")
+            local = (
+                f" Its repository '{repo}' is a path on the node: the CVE-2025-1767 pattern."
+                if repo.startswith("/")
+                else ""
+            )
+            if target >= (1, 36):
+                state = (
+                    f"Kubernetes {ctx.k8s_version} no longer has the gitRepo driver (last served by v1.35): the pod "
+                    "cannot start."
+                )
+            elif target >= (1, 33):
+                state = (
+                    f"On Kubernetes {ctx.k8s_version} the GitRepoVolumeDriver feature gate is off by default, so the "
+                    "pod does not start unless the cluster turned it on."
+                )
+            else:
+                state = "gitRepo is deprecated since Kubernetes 1.11 and disabled by default from 1.33."
+            yield r.finding(
+                d,
+                (*pt.path, "volumes", i, "gitRepo"),
+                f"Volume '{v.get('name')}' is a gitRepo volume: CVE-2024-10220 (kubelet, fixed in v1.28.12, v1.29.7, "
+                "v1.30.3 and v1.31.0) ran attacker-chosen commands on the node through gitRepo volumes, and "
+                f"CVE-2025-1767 (every version, no fix) reads local git repositories through them.{local} {state} "
+                "Clone with an init container into an emptyDir volume instead.",
+            )
+
+
+_SYSCTL_META = ("+", "=")
+
+
+@rule(
+    "KN-S022",
+    "Pod sysctl name or value contains '+' or '='",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Remove the sysctl, or write it as one plain name and one plain value (a sysctl never needs '+' or '=' in "
+    "either); on OpenShift keep to the safe sysctls or the ones a Tuned profile allows.",
+    "CVE-2022-0811 ('cr8escape', CRI-O 1.19 to 1.24.0, fixed in 1.19.6, 1.20.7, 1.21.6, 1.22.3, 1.23.2 and 1.24.0) "
+    "passed a sysctl whose value carried '+' to set kernel.core_pattern and escape the container with root on the "
+    "node; OpenShift's container runtime is CRI-O, and the GitHub advisory names an admission webhook that denies "
+    "pods with a '+' in a sysctl value as the mitigation.",
+    ("ghsa-cve-2022-0811",),
+)
+def _s022(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt in ctx.workloads():
+        sysctls = get_path(pt.spec, ("securityContext", "sysctls"))
+        for i, s in enumerate(sysctls if isinstance(sysctls, list) else []):
+            if not isinstance(s, dict):
+                continue
+            name, value = str(s.get("name", "")), str(s.get("value", ""))
+            if any(ch in name or ch in value for ch in _SYSCTL_META):
+                yield r.finding(
+                    d,
+                    (*pt.path, "securityContext", "sysctls", i),
+                    f"Pod sysctl '{name}' = '{value}' contains '+' or '=': the CVE-2022-0811 (cr8escape) pattern, "
+                    "which CRI-O before 1.19.6, 1.20.7, 1.21.6, 1.22.3, 1.23.2 and 1.24.0 turned into a container "
+                    "escape through kernel.core_pattern. Remove the sysctl or write one plain name and value.",
+                )
+
+
+_PROC_DIR = re.compile(r"^/proc(?:/|\Z)")
+
+
+@rule(
+    "KN-S023",
+    "Container workingDir under /proc",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Set workingDir to a directory that exists in the image (/app, /opt/app-root) or leave it unset, and run nodes "
+    "with runc 1.1.12 or later.",
+    "CVE-2024-21626 ('Leaky Vessels', CVSS 8.6; runc 1.0.0-rc93 to 1.1.11, fixed in 1.1.12) let a container whose "
+    "working directory was under /proc/self/fd/ start with a working directory in the host filesystem through a "
+    "leaked file descriptor: a container breakout to the host filesystem. The advisory's mitigation is to permit "
+    "only a process.cwd of / and to deny working directories under /proc.",
+    ("ghsa-cve-2024-21626",),
+)
+def _s023(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, _pt, c in _containers(ctx):
+        wd = c.container.get("workingDir")
+        if isinstance(wd, str) and _PROC_DIR.match(wd.strip()):
+            yield r.finding(
+                d,
+                (*c.path, "workingDir"),
+                f"Container '{c.name}' sets workingDir '{wd.strip()}' under /proc: the CVE-2024-21626 (Leaky Vessels) "
+                "pattern, which runc before 1.1.12 turned into a breakout to the node filesystem through a leaked "
+                "file descriptor. Use a directory inside the image.",
+            )
+
+
+@rule(
+    "KN-S024",
+    "ingress-nginx controller image below the fixed releases",
+    Stage.AUDIT,
+    "supply-chain",
+    Severity.HIGH,
+    "Run a release that fixes every advisory below (v1.13.9, v1.14.5, v1.15.1 or later), disable the validating "
+    "webhook (--validating-webhook) until the controller is at least v1.11.5 or v1.12.1, and plan the move to a "
+    "Gateway API implementation: the project is retired and fixes nothing found after its last release.",
+    "The controller image tag is a release; the Kubernetes CVE feed names the releases that fix each ingress-nginx "
+    "CVE. CVE-2025-1974 (CVSS 9.8, fixed in v1.11.5 and v1.12.1) gives anyone on the pod network code execution "
+    "in the controller through its validating admission webhook; the later fixes close configuration injection "
+    "through annotations and paths (CVE-2025-15566 in v1.12.5/v1.13.1; CVE-2026-1580, CVE-2026-24512, "
+    "CVE-2026-24513 and CVE-2026-24514 in v1.13.7/v1.14.3; CVE-2026-3288 in v1.13.8/v1.14.4/v1.15.0; CVE-2026-4342 "
+    "in v1.13.9/v1.14.5/v1.15.1).",
+    tuple(dict.fromkeys(c for a in INGRESS_NGINX_ADVISORIES for c in a.citations)) + ("ingress-nginx-retired",),
+)
+def _s024(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, _pt, c in _containers(ctx):
+        image = c.container.get("image")
+        if not isinstance(image, str):
+            continue
+        version = ingress_nginx_version(image)
+        if version is None:
+            continue
+        hits = [a for a in INGRESS_NGINX_ADVISORIES if a.affects(version)]
+        if not hits:
+            continue
+        args = c.container.get("args")
+        webhook = any(str(a).startswith("--validating-webhook") for a in (args if isinstance(args, list) else []))
+        rce = any(_WEBHOOK_RCE in a.cves for a in hits)
+        parts = [f"{', '.join(a.cves)}: {a.summary} (fixed in {', '.join('v' + f for f in a.fixed)})" for a in hits]
+        tag = "v{}.{}.{}".format(*version)
+        yield r.finding(
+            d,
+            (*c.path, "image"),
+            f"Container '{c.name}' runs ingress-nginx {tag}, which is affected by {len(hits)} published advisory(ies): "
+            + "; ".join(parts)
+            + "."
+            + (
+                " The validating webhook is on (--validating-webhook), so CVE-2025-1974 is reachable from the pod "
+                "network without credentials."
+                if webhook and rce
+                else ""
+            ),
+            severity=Severity.CRITICAL if webhook and rce else Severity.HIGH,
+        )
+
+
+# Characters a shell or PowerShell treats as syntax. A volume path (a subPath, a local PersistentVolume path) never
+# needs them; RE2 too (kube_noob.generate.policies puts it into CEL), with quotes and the backtick as \x escapes.
+COMMAND_META = r"[$;&|<>\x60\x27\x22\r\n]"
+_COMMAND_META = re.compile(COMMAND_META)
+
+
+def _meta_chars(value: str) -> str:
+    """The shell characters in ``value``, quoted: "the shell character(s) '$' ';'"."""
+    return "the shell character(s) " + " ".join(sorted({repr(ch) for ch in value if _COMMAND_META.match(ch)}))
+
+
+def _targets_windows(pt: PodTemplate) -> bool:
+    if str(get_path(pt.spec, ("os", "name")) or "").lower() == "windows":
+        return True
+    sel = pt.spec.get("nodeSelector")
+    if isinstance(sel, dict) and str(sel.get("kubernetes.io/os", "")).lower() == "windows":
+        return True
+    required = get_path(pt.spec, ("affinity", "nodeAffinity", "requiredDuringSchedulingIgnoredDuringExecution"))
+    terms = required.get("nodeSelectorTerms") if isinstance(required, dict) else None
+    for term in terms if isinstance(terms, list) else []:
+        exprs = term.get("matchExpressions") if isinstance(term, dict) else None
+        for e in exprs if isinstance(exprs, list) else []:
+            if isinstance(e, dict) and e.get("key") == "kubernetes.io/os" and "windows" in (e.get("values") or []):
+                return True
+    return False
+
+
+@rule(
+    "KN-S025",
+    "volumeMount subPath carries shell or PowerShell characters",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Use a plain relative path for subPath (letters, digits, '-', '_', '.', '/'), and run Windows nodes with kubelet "
+    "v1.24.17, v1.25.13, v1.26.8, v1.27.5, v1.28.1 or later.",
+    "CVE-2023-3676 (CVSS 8.8; kubelet up to v1.24.16, v1.25.12, v1.26.7, v1.27.4 and v1.28.0, fixed in v1.24.17, "
+    "v1.25.13, v1.26.8, v1.27.5 and v1.28.1): on Windows nodes kubelet put a pod's subPath into a PowerShell "
+    "command, so anyone who could create a pod ran commands as SYSTEM on the node. The fix passes the path in an "
+    "environment variable; the feed names pod create events with embedded PowerShell commands as the sign of "
+    "exploitation. A subPath is a path inside the volume and never needs these characters.",
+    ("k8s-cve-2023-3676", "k8s-fix-cve-2023-3676"),
+)
+def _s025(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt, c in _containers(ctx):
+        mounts = c.container.get("volumeMounts")
+        windows = _targets_windows(pt)
+        for i, m in enumerate(mounts if isinstance(mounts, list) else []):
+            sub = m.get("subPath") if isinstance(m, dict) else None
+            if not isinstance(sub, str) or not _COMMAND_META.search(sub):
+                continue
+            where = "a Windows node" if windows else "any Windows node it lands on"
+            yield r.finding(
+                d,
+                (*c.path, "volumeMounts", i, "subPath"),
+                f"Container '{c.name}' mounts '{m.get('name')}' with subPath {sub!r}, which carries "
+                f"{_meta_chars(sub)}: the CVE-2023-3676 pattern, where kubelet before v1.24.17, v1.25.13, v1.26.8, "
+                f"v1.27.5 and v1.28.1 ran the subPath through PowerShell as SYSTEM on {where}. Use a plain relative "
+                "path.",
+                severity=Severity.HIGH if windows else Severity.MEDIUM,
+            )
+
+
+# A ConfigMap key that names a credential (DB_PASSWORD, redis.password, api-key, client_secret, credentials), and a
+# line of a config file in a value that sets one (password=..., "token": "..."). A key that ends in plain "secret"
+# usually names a Secret, so it is left out. RE2 too: kube_noob.generate.policies puts both into CEL.
+CREDENTIAL_NAME = (
+    r"(?:password|passwd|token|api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|client[-_]?secret|"
+    r"credentials?)"
+)
+CONFIGMAP_CREDENTIAL_KEY = r"(?i)^(?:[a-z0-9]+[._-])*" + CREDENTIAL_NAME + r"$"
+CONFIGMAP_CREDENTIAL_LINE = (
+    r"(?im)^[ \t]*(?:export[ \t]+)?[\x22\x27]?[a-z0-9_.-]*" + CREDENTIAL_NAME + r"[\x22\x27]?[ \t]*[=:][ \t]*"
+    r"[\x22\x27]?[^\s$<{*#%\x22\x27-]"
+)
+_CM_KEY = re.compile(CONFIGMAP_CREDENTIAL_KEY[:-1] + r"\Z")
+_CM_LINE = re.compile(CONFIGMAP_CREDENTIAL_LINE)
+
+
+@rule(
+    "KN-S026",
+    "Credential stored in a ConfigMap",
+    Stage.AUDIT,
+    "secrets",
+    Severity.HIGH,
+    "Move the value into a Secret (created outside Git: an external secret store or Sealed Secrets) and mount or "
+    "reference it; in a Helm chart, render credentials into a Secret template, never into a ConfigMap.",
+    "A ConfigMap does not provide secrecy or encryption: it is not covered by encryption of Secrets at rest, and the "
+    "built-in view role reads ConfigMaps but not Secrets, so everyone with read access to the namespace reads the "
+    "credential. Flags a key that names a credential with a literal value, a URL with a password, a private key, an "
+    "access key id or a token in any value, and a password=... or token: ... line in a config file value.",
+    ("k8s-configmap", "k8s-secrets-good-practices", "k8s-rbac-bootstrap-policy"),
+)
+def _s026(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("ConfigMap"):
+        data = d.data.get("data") if isinstance(d.data, dict) else None
+        if not isinstance(data, dict):
+            continue
+        for key in sorted(data, key=str):
+            value = "" if data[key] is None else str(data[key])
+            if _CM_KEY.match(str(key)) and not _is_reference(value):
+                why = "names a credential and holds a literal value"
+            elif _EMBEDDED_SECRET.search(value):
+                why = "embeds a credential (a URL password, a private key, an access key id or a token)"
+            elif _CM_LINE.search(value):
+                why = "sets a credential on a line of the file it holds (password=..., token: ...)"
+            else:
+                continue
+            yield r.finding(
+                d,
+                ("data", str(key)),
+                f"ConfigMap key '{key}' {why}; a ConfigMap is not secret (readable with the view role, not "
+                "encrypted at rest). Move it to a Secret.",
+            )
+
+
+@rule(
+    "KN-S027",
+    "Legacy ServiceAccount token Secret",
+    Stage.AUDIT,
+    "secrets",
+    Severity.MEDIUM,
+    "Delete the Secret and get short-lived tokens instead: a projected serviceAccountToken volume in the pod, or the "
+    "TokenRequest API (kubectl create token) for a client outside the cluster.",
+    "A Secret of type kubernetes.io/service-account-token is a legacy mechanism that holds a long-lived, non-expiring "
+    "ServiceAccount token; the Kubernetes docs say to create one only when the TokenRequest API cannot be used and "
+    "the exposure of a non-expiring token in a readable API object is acceptable. Anyone who can read Secrets in the "
+    "namespace can act as that ServiceAccount until the Secret is deleted.",
+    ("k8s-secret-sa-token", "k8s-rbac-good-practices"),
+)
+def _s027(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Secret"):
+        if isinstance(d.data, dict) and d.data.get("type") == "kubernetes.io/service-account-token":
+            sa = get_path(d.data, ("metadata", "annotations", "kubernetes.io/service-account.name"))
+            yield r.finding(
+                d,
+                ("type",),
+                f"Secret is a legacy token Secret for ServiceAccount '{sa or '?'}': the token never expires and anyone "
+                "who can read Secrets in the namespace can use it. Use a projected serviceAccountToken volume or "
+                "kubectl create token.",
+            )
+
+
+# Subjects that are everyone of a kind, with what a binding to them means and the severity of a cluster-wide grant.
+_ANYONE = "anyone who can reach the API server"
+EVERYONE_SUBJECTS: dict[tuple[str, str], tuple[str, Severity]] = {
+    ("Group", "system:unauthenticated"): (f"every unauthenticated request, {_ANYONE}", Severity.CRITICAL),
+    ("User", "system:anonymous"): (f"anonymous requests, {_ANYONE}", Severity.CRITICAL),
+    ("Group", "system:authenticated"): ("every user and every ServiceAccount of every namespace", Severity.HIGH),
+    ("Group", "system:serviceaccounts"): ("every ServiceAccount of every namespace", Severity.HIGH),
+    ("Group", "system:authenticated:oauth"): ("every user who logs in through OpenShift OAuth", Severity.HIGH),
+}
+RBAC_DEFAULTS_LABEL = ("kubernetes.io/bootstrapping", "rbac-defaults")
+
+
+@rule(
+    "KN-S028",
+    "RBAC binding grants a role to everyone",
+    Stage.AUDIT,
+    "rbac",
+    Severity.HIGH,
+    "Bind the role to the ServiceAccounts, users or groups that need it, never to system:unauthenticated, "
+    "system:anonymous, system:authenticated or system:serviceaccounts.",
+    "The Kubernetes RBAC good practices ask to review bindings for the system:unauthenticated group and remove them, "
+    "as they give access to anyone who can contact the API server at a network level. system:authenticated is every "
+    "user and every ServiceAccount token in the cluster (a token stolen from any pod works), and "
+    "system:serviceaccounts every ServiceAccount of every namespace. The built-in bindings (system: names, label "
+    "kubernetes.io/bootstrapping: rbac-defaults) are left alone.",
+    ("k8s-rbac-good-practices", "k8s-rbac-subjects"),
+)
+def _s028(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    key, value = RBAC_DEFAULTS_LABEL
+    for d in ctx.by_kind("RoleBinding", "ClusterRoleBinding"):
+        labels = get_path(d.data, ("metadata", "labels"))
+        if d.name.startswith("system:") or (isinstance(labels, dict) and labels.get(key) == value):
+            continue
+        role = get_path(d.data, ("roleRef", "name"))
+        subjects = get_path(d.data, ("subjects",))
+        for i, s in enumerate(subjects if isinstance(subjects, list) else []):
+            if not isinstance(s, dict):
+                continue
+            hit = EVERYONE_SUBJECTS.get((str(s.get("kind")), str(s.get("name"))))
+            if hit is None:
+                continue
+            who, sev = hit
+            if d.kind == "RoleBinding":
+                sev = Severity(sev - 1)
+            scope = "in every namespace" if d.kind == "ClusterRoleBinding" else f"in namespace {ctx.ns(d)}"
+            yield r.finding(
+                d,
+                ("subjects", i),
+                f"{d.kind} grants {get_path(d.data, ('roleRef', 'kind')) or 'role'} '{role}' {scope} to "
+                f"{s.get('kind')} {s.get('name')}: {who}.",
+                severity=sev,
+            )
 
 
 # =====================================================================================================
@@ -1421,6 +2115,255 @@ def _n007(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                     )
 
 
+@rule(
+    "KN-N008",
+    "Service uses externalIPs",
+    Stage.AUDIT,
+    "network",
+    Severity.HIGH,
+    "Remove spec.externalIPs and publish the Service through a LoadBalancer Service, a Route or an Ingress; enable "
+    "the DenyServiceExternalIPs admission controller on the API server (on a managed platform, ask the provider).",
+    "CVE-2020-8554 (every Kubernetes version; the Kubernetes CVE feed says there is no patch, the flaw is in the "
+    "design): anyone who can create or update a Service can set externalIPs to any address and so intercept "
+    "cluster traffic meant for that address (man in the middle). The Kubernetes docs describe the feature as very "
+    "powerful (it allows network traffic interception), say most users do not need it, and recommend the "
+    "DenyServiceExternalIPs admission controller, which rejects all net-new use of the field.",
+    ("k8s-cve-2020-8554", "k8s-admission-deny-external-ips"),
+)
+def _n008(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Service"):
+        ips = get_path(d.data, ("spec", "externalIPs"))
+        if isinstance(ips, list) and ips:
+            yield r.finding(
+                d,
+                ("spec", "externalIPs"),
+                f"Service declares externalIPs {[str(x) for x in ips]}: CVE-2020-8554 (every version, no patch) lets "
+                "anyone who can create a Service intercept traffic to those addresses from inside the cluster. "
+                "Remove externalIPs and enable the DenyServiceExternalIPs admission controller.",
+            )
+
+
+def _annotation_cves(short: str) -> str:
+    return "; ".join(f"{cve} ({what})" for cve, what in INGRESS_NGINX_ANNOTATION_CVES.get(short, ()))
+
+
+@rule(
+    "KN-N009",
+    "Ingress uses a risky ingress-nginx annotation",
+    Stage.AUDIT,
+    "network",
+    Severity.HIGH,
+    "Remove the annotation (move the behaviour into the application or the controller's own configuration); if it "
+    "must stay, run a fixed controller release with --enable-annotation-validation, keep allow-snippet-annotations "
+    "false and annotations-risk-level at High or below in the controller ConfigMap, and plan the move to a Gateway "
+    "API implementation, since ingress-nginx is retired.",
+    "ingress-nginx turns some annotation values into nginx configuration. Its annotation risk list rates the five "
+    "snippet annotations Critical (raw configuration) and ten more High; these annotations carried the published "
+    "injection CVEs: CVE-2021-25742 (snippets read every Secret in the cluster), CVE-2021-25746 (directive "
+    "injection through annotation values), CVE-2023-5043 and CVE-2023-5044 (configuration-snippet, "
+    "permanent-redirect), CVE-2025-24514, CVE-2025-1097 and CVE-2025-1098 (auth-url, auth-tls-match-cn, "
+    "mirror-target and mirror-host), CVE-2025-15566 (auth-proxy-set-headers), CVE-2026-1580 (auth-method), "
+    "CVE-2026-24513 (auth-url) and CVE-2026-3288 (rewrite-target). Through the snippets, CVE-2021-25742 obtained "
+    "all Secrets in the cluster from an Ingress alone.",
+    (
+        "ingress-nginx-annotations-risk",
+        "k8s-cve-2021-25742",
+        "k8s-cve-2021-25746",
+        "k8s-cve-2023-5043",
+        "k8s-cve-2023-5044",
+        "k8s-cve-2025-24514",
+        "k8s-cve-2025-1097",
+        "k8s-cve-2025-1098",
+        "k8s-cve-2025-15566",
+        "k8s-cve-2026-1580",
+        "k8s-cve-2026-24513",
+        "k8s-cve-2026-3288",
+        "ingress-nginx-retired",
+    ),
+)
+def _n009(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Ingress"):
+        ann = get_path(d.data, ("metadata", "annotations"))
+        if not isinstance(ann, dict):
+            continue
+        for key in sorted(str(k) for k in ann):
+            if not key.startswith(INGRESS_NGINX_ANNOTATION_PREFIX):
+                continue
+            short = key[len(INGRESS_NGINX_ANNOTATION_PREFIX) :]
+            if short not in INGRESS_NGINX_RISKY_ANNOTATIONS:
+                continue
+            cves = _annotation_cves(short)
+            path = ("metadata", "annotations", key)
+            if short in INGRESS_NGINX_CRITICAL_ANNOTATIONS:
+                yield r.finding(
+                    d,
+                    path,
+                    f"Annotation {key} is a snippet, rated Critical risk by ingress-nginx because it injects raw nginx "
+                    f"configuration into the controller; {cves}. Remove it and keep allow-snippet-annotations "
+                    '"false" in the controller ConfigMap.',
+                )
+            elif short in INGRESS_NGINX_HIGH_ANNOTATIONS:
+                detail = cves or "CVE-2021-25746 (directive injection through annotation values, fixed in v1.2.0)"
+                yield r.finding(
+                    d,
+                    path,
+                    f"Annotation {key} is rated High risk by ingress-nginx (its value reaches the nginx "
+                    f"configuration); {detail}. Remove it or run a fixed controller with "
+                    "--enable-annotation-validation.",
+                    severity=Severity.MEDIUM,
+                )
+            else:
+                yield r.finding(
+                    d,
+                    path,
+                    f"Annotation {key} carried a published injection vulnerability: {cves}. Remove it or run a fixed "
+                    "controller with --enable-annotation-validation.",
+                    severity=Severity.MEDIUM,
+                )
+
+
+@rule(
+    "KN-N010",
+    "ingress-nginx ConfigMap widens what an Ingress may ask of the controller",
+    Stage.AUDIT,
+    "network",
+    Severity.HIGH,
+    'Set allow-snippet-annotations: "false" (the default), leave annotations-risk-level at High (the default) and '
+    'strict-validate-path-type: "true" (the default) in the ingress-nginx controller ConfigMap, or remove the keys.',
+    "The controller ConfigMap decides which annotations an Ingress may use. allow-snippet-annotations: true re-enables "
+    "the snippet annotations through which CVE-2021-25742 read every Secret in the cluster (the feed's fix is to set "
+    "it to false); annotations-risk-level: Critical accepts the Critical-risk annotations, which the default High "
+    "refuses; strict-validate-path-type: false drops the path validation added for CVE-2022-4886.",
+    (
+        "ingress-nginx-configmap",
+        "k8s-cve-2021-25742",
+        "k8s-cve-2023-5043",
+        "k8s-cve-2022-4886",
+        "ingress-nginx-annotations-risk",
+    ),
+)
+def _n010(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("ConfigMap"):
+        data = d.data.get("data") if isinstance(d.data, dict) else None
+        if not isinstance(data, dict):
+            continue
+        for key, (unsafe, default, allows) in INGRESS_NGINX_CONFIGMAP_KEYS.items():
+            value = data.get(key)
+            if value is None or str(value).strip().lower() != unsafe:
+                continue
+            cve = {
+                "allow-snippet-annotations": "CVE-2021-25742 (snippets read every Secret in the cluster)",
+                "annotations-risk-level": "CVE-2021-25742, CVE-2023-5043 (snippet injection)",
+                "strict-validate-path-type": "CVE-2022-4886 (path sanitization bypass)",
+            }[key]
+            yield r.finding(
+                d,
+                ("data", key),
+                f"ConfigMap sets {key}: {str(value).strip()!r} (default {default}), which lets every Ingress use "
+                f"{allows}; {cve}. Set it back to the default.",
+                severity=Severity.HIGH if key != "strict-validate-path-type" else Severity.MEDIUM,
+            )
+
+
+def ingress_targets_nginx(d: Document) -> bool:
+    """The Ingress names ingress-nginx: class 'nginx' (field or annotation) or an nginx.ingress.kubernetes.io/ key."""
+    ann = get_path(d.data, ("metadata", "annotations"))
+    ann = ann if isinstance(ann, dict) else {}
+    spec = get_path(d.data, ("spec",))
+    cls = spec.get("ingressClassName") if isinstance(spec, dict) else None
+    return (
+        (cls is not None and str(cls).strip() == INGRESS_NGINX_CLASS)
+        or str(ann.get("kubernetes.io/ingress.class", "")).strip() == INGRESS_NGINX_CLASS
+        or any(str(k).startswith(INGRESS_NGINX_ANNOTATION_PREFIX) for k in ann)
+    )
+
+
+def ingress_names_no_class(d: Document) -> bool:
+    ann = get_path(d.data, ("metadata", "annotations"))
+    spec = get_path(d.data, ("spec",))
+    return not (isinstance(spec, dict) and "ingressClassName" in spec) and not (
+        isinstance(ann, dict) and "kubernetes.io/ingress.class" in ann
+    )
+
+
+@rule(
+    "KN-N011",
+    "Ingress path type ImplementationSpecific on ingress-nginx",
+    Stage.AUDIT,
+    "network",
+    Severity.HIGH,
+    "Use pathType Prefix or Exact (ingress-nginx validates those paths when strict-validate-path-type is true, the "
+    "default), and run ingress-nginx v1.13.7, v1.14.3 or later; a regular-expression path (use-regex) can only be "
+    "ImplementationSpecific, so upgrade before keeping one. Plan the move to a Gateway API implementation.",
+    "CVE-2026-24512 (ingress-nginx before v1.13.7 and v1.14.3): a rules.http.paths.path value injected nginx "
+    "configuration into the controller, which can read every Secret in the cluster. Before upgrading, the advisory's "
+    "mitigation is a validating admission controller that rejects Ingress resources with the ImplementationSpecific "
+    "path type, the one path type whose paths ingress-nginx does not validate. An Ingress that names no class is "
+    "served by the cluster's default IngressClass, which may be ingress-nginx (not on OpenShift, whose router serves "
+    "it).",
+    ("k8s-cve-2026-24512", "ingress-nginx-configmap", "ingress-nginx-retired"),
+)
+def _n011(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Ingress"):
+        if ingress_targets_nginx(d):
+            sev, who = Severity.HIGH, "ingress-nginx serves this Ingress"
+        elif ingress_names_no_class(d) and not ctx.is_openshift:
+            sev = Severity.LOW
+            who = (
+                "the Ingress names no class, so the cluster's default IngressClass serves it (if that is ingress-nginx)"
+            )
+        else:
+            continue
+        for i, rule_ in enumerate(get_path(d.data, ("spec", "rules")) or []):
+            paths = get_path(rule_, ("http", "paths")) if isinstance(rule_, dict) else None
+            for j, p in enumerate(paths if isinstance(paths, list) else []):
+                if isinstance(p, dict) and p.get("pathType") == "ImplementationSpecific":
+                    yield r.finding(
+                        d,
+                        ("spec", "rules", i, "http", "paths", j, "pathType"),
+                        f"Path {p.get('path', '')!r} has pathType ImplementationSpecific and {who}: CVE-2026-24512 "
+                        "(fixed in v1.13.7 and v1.14.3) injected nginx configuration through such paths, and the "
+                        "advisory's mitigation is to reject the ImplementationSpecific path type at admission. Use "
+                        "Prefix or Exact.",
+                        severity=sev,
+                    )
+
+
+def _selects_something(selector: dict[str, Any]) -> bool:
+    return bool(selector.get("matchLabels") or selector.get("matchExpressions"))
+
+
+@rule(
+    "KN-N012",
+    "NetworkPolicy selects no pod in this bundle",
+    Stage.AUDIT,
+    "network",
+    Severity.MEDIUM,
+    "Make spec.podSelector match the pod template labels of the workloads the policy is for (or use podSelector: {} "
+    "for every pod in the namespace).",
+    "A NetworkPolicy applies only to the pods its podSelector selects. One that selects none of the namespace's pods "
+    "(often a label typo) protects nothing, while the namespace still looks covered (KN-N001 passes): the pods it "
+    "was written for accept traffic from every pod.",
+    ("k8s-networkpolicy",),
+)
+def _n012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    by_ns: dict[str, list[dict[str, str]]] = {}
+    for d, pt in ctx.workloads():
+        by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
+    for d in ctx.by_kind("NetworkPolicy"):
+        sel = get_path(d.data, ("spec", "podSelector"))
+        pods = by_ns.get(ctx.ns(d))
+        if not isinstance(sel, dict) or not _selects_something(sel) or not pods:
+            continue
+        if not any(selector_matches(sel, labels) for labels in pods):
+            yield r.finding(
+                d,
+                ("spec", "podSelector"),
+                f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
+                f"namespace {ctx.ns(d)}: this policy protects nothing.",
+            )
+
+
 # =====================================================================================================
 # AUDIT - storage
 # =====================================================================================================
@@ -1610,6 +2553,65 @@ def _st005(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, path, spec in _pvc_like(ctx):
         if not get_path(spec, ("resources", "requests", "storage")):
             yield r.finding(d, (*path, "resources"), "spec.resources.requests.storage is missing.")
+
+
+# A '..' path segment ('/', '\' and '#', the NFS and SMB volumeHandle separator, delimit segments). RE2 too.
+PATH_TRAVERSAL = r"(^|[/\\#])\.\.([/\\#]|$)"
+_PATH_TRAVERSAL = re.compile(PATH_TRAVERSAL[:-2] + r"\Z)")
+# CSI drivers whose subDir traversal deleted directories outside the share: driver -> (CVE, project, fixed release).
+CSI_SUBDIR_TRAVERSAL: dict[str, tuple[str, str, str]] = {
+    "nfs.csi.k8s.io": ("CVE-2026-3864", "CSI Driver for NFS", "v4.13.1"),
+    "smb.csi.k8s.io": ("CVE-2026-3865", "CSI Driver for SMB", "v1.20.1"),
+}
+
+
+@rule(
+    "KN-ST006",
+    "PersistentVolume path carries command or traversal characters",
+    Stage.AUDIT,
+    "storage",
+    Severity.HIGH,
+    "Use a plain absolute local path, and a volumeHandle and subDir without '..' segments; run Windows nodes with "
+    "kubelet v1.25.16, v1.26.11, v1.27.8, v1.28.4 or later, csi-driver-nfs v4.13.1 or later and csi-driver-smb "
+    "v1.20.1 or later; let only cluster administrators create PersistentVolumes.",
+    "CVE-2023-5528 (CVSS 7.2; kubelet from v1.8.0, fixed in v1.25.16, v1.26.11, v1.27.8 and v1.28.4): on Windows "
+    "nodes the in-tree storage plugin ran a local PersistentVolume path as part of a command, so a user who could "
+    "create pods and PersistentVolumes got admin rights on the node; the feed names PersistentVolume create events "
+    "with local path fields containing special characters as the sign of exploitation. CVE-2026-3864 (csi-driver-nfs "
+    "before v4.13.1) and CVE-2026-3865 (csi-driver-smb before v1.20.1): a '../' in the subDir of a volume identifier "
+    "made the driver delete directories outside the share; the advisories say to look for traversal sequences in the "
+    "volumeHandle of PersistentVolumes using these drivers.",
+    ("k8s-cve-2023-5528", "k8s-cve-2026-3864", "k8s-cve-2026-3865"),
+)
+def _st006(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("PersistentVolume"):
+        local = get_path(d.data, ("spec", "local", "path"))
+        if isinstance(local, str) and _COMMAND_META.search(local):
+            yield r.finding(
+                d,
+                ("spec", "local", "path"),
+                f"Local path {local!r} carries {_meta_chars(local)}: the CVE-2023-5528 pattern, where kubelet on "
+                "Windows nodes (before v1.25.16, v1.26.11, v1.27.8 and v1.28.4) ran the path as part of a command "
+                "with admin rights on the node. Use a plain path.",
+            )
+        csi = get_path(d.data, ("spec", "csi"))
+        hit = CSI_SUBDIR_TRAVERSAL.get(str(csi.get("driver"))) if isinstance(csi, dict) else None
+        if hit is None or not isinstance(csi, dict):
+            continue
+        cve, project, fixed = hit
+        attrs = csi.get("volumeAttributes")
+        fields: list[tuple[PathT, object]] = [(("spec", "csi", "volumeHandle"), csi.get("volumeHandle"))]
+        if isinstance(attrs, dict):
+            fields.append((("spec", "csi", "volumeAttributes", "subDir"), attrs.get("subDir")))
+        for path, value in fields:
+            if isinstance(value, str) and _PATH_TRAVERSAL.search(value):
+                yield r.finding(
+                    d,
+                    path,
+                    f"{path[-1]} {value!r} of the {csi.get('driver')} volume has a '..' segment: {cve} ({project} "
+                    f"before {fixed}) deleted directories outside the share through such a subDir. Remove the "
+                    "traversal and upgrade the driver.",
+                )
 
 
 # =====================================================================================================
@@ -1928,6 +2930,51 @@ def _c013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         yield from check(d, pt.path, _pull_secret_names(pt.spec))
     for sa in ctx.by_kind("ServiceAccount"):
         yield from check(sa, (), _pull_secret_names(sa.data))
+
+
+@rule(
+    "KN-C014",
+    "Workload scaled by an HPA also sets spec.replicas",
+    Stage.CALIBRATE,
+    "availability",
+    Severity.MEDIUM,
+    "Remove spec.replicas from the manifest of a workload a HorizontalPodAutoscaler scales (in a Helm chart: "
+    "{{- if not .Values.autoscaling.enabled }} replicas: ... {{- end }}); set the floor with the HPA's minReplicas.",
+    "The Kubernetes docs recommend removing spec.replicas when an HPA is enabled: otherwise every kubectl apply (or "
+    "GitOps sync) of the manifest scales the workload back to that number, which may not be desired and causes "
+    "thrashing or flapping while the HPA is active, for example down to 2 replicas in the middle of a traffic peak. "
+    "A target whose replica count is 0 deactivates an HPA whose minReplicas is above 0.",
+    ("k8s-hpa-replicas",),
+)
+def _c014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for h in ctx.by_kind("HorizontalPodAutoscaler"):
+        ref = get_path(h.data, ("spec", "scaleTargetRef"))
+        if not isinstance(ref, dict):
+            continue
+        for d in ctx.by_kind(*REPLICATED_KINDS):
+            if d.name != ref.get("name") or d.kind != ref.get("kind") or ctx.ns(d) != ctx.ns(h):
+                continue
+            spec = d.data.get("spec") if isinstance(d.data, dict) else None
+            if not isinstance(spec, dict) or "replicas" not in spec:
+                continue
+            count = spec["replicas"]
+            low = get_path(h.data, ("spec", "minReplicas"))
+            low = low if isinstance(low, int) else 1
+            if count == 0 and low > 0:
+                yield r.finding(
+                    d,
+                    ("spec", "replicas"),
+                    f"{d.ref()} sets replicas: 0 and {h.ref()} (minReplicas {low}) scales it: a target at 0 replicas "
+                    "deactivates the HPA until someone scales it by hand. Remove spec.replicas.",
+                    severity=Severity.HIGH,
+                )
+            else:
+                yield r.finding(
+                    d,
+                    ("spec", "replicas"),
+                    f"{d.ref()} sets replicas: {count} and {h.ref()} scales it: every apply or GitOps sync of this "
+                    f"manifest resets the count to {count} and fights the HPA. Remove spec.replicas.",
+                )
 
 
 def run_rules(ctx: AuditContext, stages: set[Stage] | None = None) -> list[Finding]:

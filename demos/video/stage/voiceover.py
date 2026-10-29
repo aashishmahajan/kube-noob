@@ -2,12 +2,16 @@
 """Voice-over, music and timing for one animated video in videos.json, made locally and for free.
 
 Usage: python voiceover.py <teaser|sidecar|mcp> <out-dir> [--engine kokoro|piper] [--voice af_heart] [--speed 1.0]
-                           [--speaker N] [--music-db -12]
+                           [--speaker N] [--music-db -12] [--sidecar <transcript.txt>]
 
-Writes <out-dir>/timeline.json (scene start times and lengths, read by stage.html), the stems voice.wav and
-music.wav, and audio.wav (48 kHz stereo: the voice-over over the kube-noob brand music, plus a few sound effects).
-The voice and the music come from ../audio_kit.py: Kokoro-82M (Apache-2.0) with the af_heart voice by default,
-downloaded once from GitHub and hash-checked. To change only the music level later, without rendering the picture
+videos.json is checked against videos.schema.json first, and every number and terminal recording in it is filled from
+the code (../facts.py); the sidecar video needs the transcript recorded in CI (--sidecar or KN_SIDECAR_TRANSCRIPT).
+
+Writes <out-dir>/timeline.json (scene start times and lengths, read by stage.html), kube-noob-<video>.vtt (captions
+from the voice-over timings), the stems voice.wav and music.wav, and audio.wav (48 kHz stereo: the voice-over over
+the kube-noob brand music, plus a few sound effects, normalised to the brand loudness). The voice and the music
+come from ../audio_kit.py: Kokoro-82M (Apache-2.0) with the af_heart voice by default, downloaded once from GitHub
+and hash-checked. To change only the music level later, without rendering the picture
 again:
   python demos/video/audio_kit.py remix <out-dir> --music-db -18 --video <out-dir>/kube-noob-<video>.mp4
 Needs: python3 with numpy and kokoro-onnx (or piper-tts for --engine piper), and ffmpeg on PATH.
@@ -26,6 +30,9 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import audio_kit as ak  # noqa: E402
+import captions  # noqa: E402
+import facts as vfacts  # noqa: E402
+from video_script import load  # noqa: E402
 
 RATE = ak.RATE
 VO_LEAD = 0.45
@@ -98,9 +105,10 @@ def blip(total: float, at: float) -> np.ndarray:
 # ---------------------------------------------------------------- timeline
 
 
-def build(video: str, out: Path, voice: ak.Voice, music_db: float | None) -> dict[str, Any]:
-    spec = json.loads((HERE / "videos.json").read_text(encoding="utf-8"))
-    v = spec["videos"][video]
+def build(
+    video: str, out: Path, voice: ak.Voice, music_db: float | None, facts: vfacts.Facts | None = None
+) -> dict[str, Any]:
+    v = load(video, facts or vfacts.Facts())
     scenes = [dict(s) for s in v["scenes"]]
     clips = iter([voice.say(s.get("say") or s["vo"]) for s in scenes if s.get("vo")])
     t = 0.0
@@ -149,18 +157,19 @@ def build(video: str, out: Path, voice: ak.Voice, music_db: float | None) -> dic
     foreground = np.stack([speech, speech], axis=1) * 0.92 + fx
     ak.write_stems(out, foreground, music, music_db)
 
-    end = dict(spec["end"])
-    end["credit"] = f"Apache-2.0 · {voice.credit}"
     timeline = {
         "video": video,
         "title": v["title"],
         "cta": v["cta"],
-        "end": end,
+        "credit": f"kube-noob is open source (Apache-2.0) · {voice.credit}",
         "fps": FPS,
         "duration": total,
         "scenes": scenes,
     }
     (out / "timeline.json").write_text(json.dumps(timeline, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Captions from the same timings: the written line (vo), shown while the voice speaks it.
+    cues = [c for s in scenes if s.get("vo") for c in captions.cues(s["vo"], s["start"] + s["voStart"], s["voDur"])]
+    captions.write(out / f"kube-noob-{video}.vtt", cues, total)
     return timeline
 
 
@@ -178,8 +187,15 @@ def main() -> int:
         default=ak.DEFAULT_MUSIC_DB,
         help="music level against the voice in dB (default -12), or off",
     )
+    ap.add_argument(
+        "--sidecar",
+        type=Path,
+        help="the sidecar transcript recorded in CI (scripts/demo_sidecar_kind.sh); default $KN_SIDECAR_TRANSCRIPT",
+    )
     a = ap.parse_args()
-    tl = build(a.video, a.out, ak.Voice(a.engine, a.voice, a.speed, a.speaker), a.music_db)
+    facts = vfacts.Facts(a.sidecar)
+    load(a.video, facts)  # every fact and the schema are checked before the voice model loads
+    tl = build(a.video, a.out, ak.Voice(a.engine, a.voice, a.speed, a.speaker), a.music_db, facts)
     print(f"{a.video}: {tl['duration']:.1f} s, {len(tl['scenes'])} scenes -> {a.out}/timeline.json, audio.wav")
     return 0
 
