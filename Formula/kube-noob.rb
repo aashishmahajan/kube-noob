@@ -2,15 +2,15 @@
 class KubeNoob < Formula
   desc "Kubernetes, OpenShift, ROSA HCP, Helm and RHACS audit, debugging and learning tools"
   homepage "https://github.com/aashishmahajan/kube-noob"
-  url "https://files.pythonhosted.org/packages/5e/8d/bae6c2530b8c3419bdf5a4fcf10f561e1e7827b2fc7ef02cdf2d8b5972fc/kube_noob-0.4.0.tar.gz"
-  sha256 "81c42da1b97757081fb83a4357986d36d7b926b74a836ed0c7be0badb6c88ba5"
+  url "https://files.pythonhosted.org/packages/b1/0a/9220de2d9c6062019b5680d9e55e5db74f0947ed9bed4069a1c0fb2331ec/kube_noob-0.5.0.tar.gz"
+  sha256 "9185accffe2ef8a17459b44465b38e7a05bcdc857ccf9f5b7a387bd9bc2e3378"
   license "Apache-2.0"
 
   depends_on "python@3.13"
 
   resource "kube-noob" do
-    url "https://files.pythonhosted.org/packages/5e/ad/f3ae66f591e0315f9f46635cdf6a497027704a0cea8d980ba84ac26cd750/kube_noob-0.4.0-py3-none-any.whl"
-    sha256 "f65b42a06a61664d02aaba00b50a3719ebc14d526074fe150d567536f9ed848a"
+    url "https://files.pythonhosted.org/packages/90/02/b1af966b084f2ab6be9d05838970dadf7cceda59c966ee2fc2ac3abef896/kube_noob-0.5.0-py3-none-any.whl"
+    sha256 "2e8f1741ed492627fa02db320b5e173ae5737479103e53a746d03d20a68d5940"
   end
 
   resource "annotated-types" do
