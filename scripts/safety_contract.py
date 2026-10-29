@@ -61,7 +61,7 @@ LOCAL_STATE_WRITERS: dict[str, str] = {
     "read-only on a shared server",
 }
 
-# Settings that switch one extra thing on, to find which tools each one adds. ``{d}`` is a scratch directory.
+# Settings that switch one extra thing on, to find which tools each one adds. Each takes a scratch directory.
 SWITCHES: dict[str, Callable[[str], dict[str, Any]]] = {
     "cluster.enabled": lambda d: {"cluster": {"enabled": True}},
     "mustGather.allowedDir": lambda d: {"mustGather": {"allowedDir": d}},
@@ -86,7 +86,7 @@ def _merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# -- MCP tools--------------------------------------------------------------------------------------------------------
+# -- MCP tools -------------------------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -189,7 +189,7 @@ def _tier_codes() -> set[str]:
     return {t.code for t in tiers.TIERS}
 
 
-# -- the live cluster backend-----------------------------------------------------------------------------------------
+# -- the live cluster backend ----------------------------------------------------------------------------------------
 
 # What each kubectl subcommand the backend might use asks of the API server. A subcommand missing here is "unreviewed":
 # it counts as a violation until someone decides what it does and adds it.
@@ -340,12 +340,9 @@ def cluster_violations(access: ClusterAccess) -> list[str]:
     return problems
 
 
-# -- the Helm chart's RBAC--------------------------------------------------------------------------------------------
+# -- the Helm chart's RBAC -------------------------------------------------------------------------------------------
 
 RBAC_TEMPLATES = ("admission.yaml", "rbac-tiers.yaml", "rbac.yaml")
-# A chart value that switches a tier whose Settings key differs from the chart's: not derivable, so it is stated here
-# and the tests check it against ``kube_noob.tiers``.
-READ_TIER_VALUES = {"config.clusterEnabled": "R", "admission.enabled": "A", "admission.lookups": "A"}
 
 
 class ContractViolation(RuntimeError):
@@ -838,7 +835,7 @@ def chart_violations(rules: Sequence[ChartRule], values: dict[str, Any], configm
     return problems
 
 
-# -- what is off by default-------------------------------------------------------------------------------------------
+# -- what is off by default ------------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -927,7 +924,7 @@ def default_violations(settings: Any | None = None) -> list[str]:
     return problems
 
 
-# -- subprocesses-----------------------------------------------------------------------------------------------------
+# -- subprocesses ----------------------------------------------------------------------------------------------------
 
 # The files that start a program, and the program each starts. A new call site in any other file fails the build until a
 # person reviews it and adds it here, so "what the package runs" cannot grow unnoticed.
@@ -1090,7 +1087,7 @@ def dynamic_execution(root: Path = ROOT) -> list[str]:
     )
 
 
-# -- prompt-injection handling----------------------------------------------------------------------------------------
+# -- prompt-injection handling ---------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -1220,7 +1217,7 @@ def sanitizer(source: str | None = None) -> SanitizerInfo:
     return SanitizerInfo(kinds, tuple(probes), limits, flag, problems)
 
 
-# -- the document-----------------------------------------------------------------------------------------------------
+# -- the document ----------------------------------------------------------------------------------------------------
 
 
 def _cell(text: str) -> str:
@@ -1266,7 +1263,7 @@ def violations() -> list[str]:
     return problems
 
 
-# -- the document's sections: each returns its lines, and render() joins them-----------------------------------------
+# -- the document's sections: each returns its lines, and render() joins them ----------------------------------------
 
 _INVARIANTS = (
     (
