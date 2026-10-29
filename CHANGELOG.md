@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- PRIVACY.md said the website had no backend and that the maintainers receive nothing. Its contact, feedback and
+  student-license forms send what you type to a Google Apps Script web app the maintainer runs, which stores it in a
+  private Google Sheet. The website section now says what each form keeps, what it is used for and how to have it
+  deleted, next to the Bring your own AI page and the Playground.
 - Code scanning findings from the 0.7 merge (G109): the videos workflow ran whatever `pipeline_ref` or `tag` a dispatch
   named, in the default branch's cache scope (CodeQL: cache poisoning via execution of untrusted code, and checkout of
   untrusted code). A new `verify` job resolves the tag (`vX.Y.Z`, an existing tag) and the pipeline to commits, refuses
