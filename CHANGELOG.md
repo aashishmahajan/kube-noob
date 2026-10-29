@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Ceph health codes on Rook-Ceph and OpenShift Data Foundation (G111): `diagnose`, `insight` and `kube-noob signals` read
+  `ceph health detail`, `ceph status` and `ceph health` (text or JSON) and a CephCluster's status, and explain each of
+  135 codes (121 entries) with its meaning, likely causes, the fix in words and read-only steps: `oc` and
+  `openshift-storage` on ODF, `kubectl` and `rook-ceph` on Rook, Ceph commands in the Rook toolbox marked as needing
+  approval. Codes whose usual fix can lose data (unfound objects, inconsistent or incomplete placement groups, lost
+  monitor quorum, full OSDs, damaged CephFS metadata...) say to stop and involve storage support, and no catalogue
+  step, fix or note names a command that can lose data.
+- 69 Rook and ODF Prometheus alerts map to the codes they watch, including ODF alerts whose text only says to contact
+  support (CephMonQuorumAtRisk, CephMonQuorumLost, CephDataRecoveryTakingTooLong, CephPGRepairTakingTooLong): each
+  now comes with the evidence to collect first. Every code and alert cites the Ceph doc section, source lines and
+  rule line it was checked against (ceph/ceph eb3b634b, rook/rook 61a8fea1, ocs-operator 731e93be);
+  `scripts/verify_ceph_catalogue.py` re-checks them.
 - Red team of the Agent Skill and the workflow fix: the plugin offered `code_report`, whose module imports the
   Containerfile parser the plugin leaves out, so every call failed; the SAST assessment now stays out of the plugin
   and the skill with that parser, and a test imports every bundled module. Skill: pasted text goes through

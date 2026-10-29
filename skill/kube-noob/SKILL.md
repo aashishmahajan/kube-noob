@@ -51,7 +51,7 @@ user confirms) in its data folder, `KUBE_NOOB_DATA_DIR` or else `~/.local/share/
 
 | The user has | Run |
 |---|---|
-| Anything pasted (events, describe, logs, an alert, a denial, a ticket, a question) | `insight` with `--text-file text=...` and, if known, `"platform"` (`kubernetes`, `openshift`, `rosa-hcp`) and `"version"` |
+| Anything pasted (events, describe, logs, an alert, a denial, a ticket, `ceph health detail`, a question) | `insight` with `--text-file text=...` and, if known, `"platform"` (`kubernetes`, `openshift`, `rosa-hcp`) and `"version"` |
 | Manifests or `helm template` output to review | `audit_manifests` (`manifests`), then `fix_manifests` for the safe fixes |
 | "Is this a known OpenShift bug?" | `known_issues` with the error text and the cluster version |
 | "What could go wrong updating OpenShift from X to Y?" | `upgrade_risks` with `current` and `target` (x.y.z) |

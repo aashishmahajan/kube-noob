@@ -395,6 +395,21 @@ kube-noob incidents show inc-3fa94c0e12
 kube-noob incidents confirm inc-3fa94c0e12 --cause "memory limit cut to 128Mi" --fix "restored the 256Mi limit"
 ```
 
+### What does this Ceph health code mean? Rook-Ceph and OpenShift Data Foundation
+
+Paste `ceph health detail`, `ceph status` (text or `-f json`), a CephCluster's status or a firing Rook or ODF alert
+into `kube-noob insight`. Each health code gets what it means, the likely causes, the fix in words and the read-only
+steps that confirm it: the CephCluster status first (no shell needed), then the Ceph commands to run in the Rook
+toolbox, which need approval because they execute in a container. On ODF the steps use `oc` and `openshift-storage`;
+on Rook they use `kubectl` and `rook-ceph`. When the usual fix can lose data (unfound objects, inconsistent placement
+groups, lost monitor quorum, full OSDs), the answer says to stop and involve storage support, and kube-noob never
+offers the destructive command. ODF alerts that only say "contact support" come with the evidence to collect first.
+
+```bash
+oc get cephcluster -n openshift-storage -o jsonpath='{.status.ceph.details}' | kube-noob insight -f -
+kube-noob insight -f ceph-health-detail.txt --platform openshift
+```
+
 ## Platform admin: run it inside the cluster, locked down
 
 ```bash
