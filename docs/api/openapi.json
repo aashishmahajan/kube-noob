@@ -445,6 +445,72 @@
     "title": "NetpolCheckIn",
     "type": "object"
    },
+   "PolicyMigrateCheckIn": {
+    "additionalProperties": false,
+    "properties": {
+     "policies": {
+      "description": "One or more legacy Kyverno policies (YAML): kyverno.io ClusterPolicy, Policy, ClusterCleanupPolicy, CleanupPolicy or PolicyException. Other documents are listed and skipped; Secrets are not read.",
+      "maxLength": 1000000,
+      "minLength": 1,
+      "title": "Policies",
+      "type": "string"
+     },
+     "drafts": {
+      "default": true,
+      "description": "Include a draft CEL policy for each rule whose fields all map directly, and a kyverno test fixture skeleton per policy (good and bad resources run against the legacy rule and the draft).",
+      "title": "Drafts",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "policies"
+    ],
+    "title": "PolicyMigrateCheckIn",
+    "type": "object"
+   },
+   "UpgradeRisksIn": {
+    "additionalProperties": false,
+    "properties": {
+     "current": {
+      "description": "The OpenShift version the cluster runs, x.y.z, e.g. 4.20.3.",
+      "maxLength": 20,
+      "title": "Current",
+      "type": "string"
+     },
+     "target": {
+      "description": "The version to update to, x.y.z, e.g. 4.21.4.",
+      "maxLength": 20,
+      "title": "Target",
+      "type": "string"
+     },
+     "arch": {
+      "anyOf": [
+       {
+        "enum": [
+         "amd64",
+         "arm64",
+         "multi",
+         "ppc64le",
+         "s390x"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The release architecture (multi for a multi-architecture payload). Without it, every architecture is checked and a risk declared for some of them only says which.",
+      "title": "Arch"
+     }
+    },
+    "required": [
+     "current",
+     "target"
+    ],
+    "title": "UpgradeRisksIn",
+    "type": "object"
+   },
    "Error": {
     "type": "object",
     "properties": {
@@ -793,6 +859,86 @@
     }
    }
   },
+  "/v1/upgrade-risks": {
+   "post": {
+    "operationId": "post_upgrade_risks",
+    "summary": "Risks Red Hat declares for an OpenShift update, offline",
+    "description": "Before updating OpenShift from one x.y.z version to another: the risks Red Hat declares for that update in the public update graph (conditional updates, as an OpenShift Update Service serves them), from a bundled snapshot, offline. Each risk has its name, message, link, the version that fixes it and a verdict: applies (declared for every cluster), check (one fact decides it, with the read-only command or must-gather file that shows it) or cannot evaluate offline (its PromQL, as written). Whether the update is in your channel is not checked.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UpgradeRisksIn"
+       }
+      }
+     }
+    }
+   }
+  },
   "/v1/policy/reach": {
    "post": {
     "operationId": "post_check_network_policy",
@@ -867,6 +1013,86 @@
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/NetpolCheckIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/policy/migrate-check": {
+   "post": {
+    "operationId": "post_policy_migrate_check",
+    "summary": "Lint legacy Kyverno policies for the CEL types: drafts and kyverno test skeletons, never applied",
+    "description": "Kyverno 1.20 removes the kyverno.io ClusterPolicy, Policy, CleanupPolicy and legacy PolicyException. Lint them rule by rule against the policies.kyverno.io types: direct, inverted (a deny or a negated pattern: the CEL validation must state what is allowed), manual (JMESPath, API calls, anchors, strategic merge patches) or blocked (no documented CEL equivalent), each with the field path, the target kind, the reason and the Kyverno documentation section (pinned commit). Rules that map directly get a draft CEL policy and a kyverno test fixture skeleton to prove it. Nothing is applied or rewritten.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PolicyMigrateCheckIn"
        }
       }
      }

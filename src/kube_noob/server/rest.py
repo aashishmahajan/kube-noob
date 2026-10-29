@@ -39,7 +39,13 @@ ROUTES: tuple[Route, ...] = (
     Route("/v1/diagnose", "diagnose", summary="Diagnose an error, events or logs: cause and read-only steps first"),
     Route("/v1/audit", "audit_manifests", summary="Audit manifests against the rules for a platform and version"),
     Route("/v1/known-issues", "known_issues", summary="Reported OpenShift bugs that match a text, with fix versions"),
+    Route("/v1/upgrade-risks", "upgrade_risks", summary="Risks Red Hat declares for an OpenShift update, offline"),
     Route("/v1/policy/reach", "check_network_policy", summary="Can pod A reach pod B under these NetworkPolicies?"),
+    Route(
+        "/v1/policy/migrate-check",
+        "policy_migrate_check",
+        summary="Lint legacy Kyverno policies for the CEL types: drafts and kyverno test skeletons, never applied",
+    ),
     Route("/v1/memory/match", "memory_match", summary="Your team's approved memory entries for an error"),
     Route("/v1/reports", "posture_report", ("GET", "POST"), summary="The newest daily drift and policy report"),
     Route("/v1/must-gather", "analyze_must_gather", summary="What is wrong in a must-gather on the server's volume"),

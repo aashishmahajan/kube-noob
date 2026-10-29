@@ -230,12 +230,12 @@ Every call that starts a program in the shipped package (`src/kube_noob`, the co
 | File | Function | Call | argv as written |
 |---|---|---|---|
 | `kube_noob/debug/backends.py` | `KubectlBackend._run` | `subprocess.run` | `[self.binary, *args, '--request-timeout', f'{int(self.timeout)}s'] + ['--context', self.context]` |
-| `kube_noob/generate/helm.py` | `render_chart` | `subprocess.run` | `[helm, 'template', release, str(chart), '--namespace', namespace] + ['--values', vf]` |
+| `kube_noob/generate/helm_render.py` | `render_chart` | `subprocess.run` | `[helm, 'template', release, str(chart), '--namespace', namespace] + ['--values', vf]` |
 | `kube_noob/sources/advisories.py` | `from_archive` | `subprocess.Popen` | `['zstd', '-dc', '--', str(path)]` |
 | `kube_noob/sources/git_ingest.py` | `_git` | `subprocess.run` | `[git, *args]` |
 
 - `kube_noob/debug/backends.py` runs `kubectl`, `oc`
-- `kube_noob/generate/helm.py` runs `helm`
+- `kube_noob/generate/helm_render.py` runs `helm`
 - `kube_noob/sources/advisories.py` runs `zstd`
 - `kube_noob/sources/git_ingest.py` runs `git`
 

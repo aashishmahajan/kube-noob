@@ -3,7 +3,7 @@
 Validate the arguments against the tool's model, call it, stamp ``knowledgeAsOf`` and neutralise text shaped like
 instructions to a model (``kube_noob.sanitize``). The MCP server, its REST routes and the Agent Skill runner
 (``skill/kube-noob/scripts/kn.py``) all call this, so a tool answers the same everywhere. It imports neither the MCP
-SDK nor the HTTP stack, so the skill runs with pydantic, PyYAML, jsonschema and httpx only.
+SDK nor the HTTP stack, so the skill runs with pydantic, PyYAML and jsonschema only.
 """
 
 from __future__ import annotations

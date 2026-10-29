@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """kube-noob as an Agent Skill: run one kube-noob tool and print its JSON result.
 
-    python3 -I kn.py check                     Python version and the four libraries the skill needs
+    python3 -I kn.py check                     Python version and the three libraries the skill needs
     python3 -I kn.py tools                     every tool, with what it does
     python3 -I kn.py schema TOOL               the tool's arguments, as a JSON schema
     python3 -I kn.py TOOL [ARGS] [--text-file FIELD=PATH ...]
@@ -31,7 +31,6 @@ NEEDED = (
     ("pydantic", "pydantic==2.14.1"),
     ("yaml", "PyYAML==6.0.3"),
     ("jsonschema", "jsonschema==4.26.0"),
-    ("httpx", "httpx==0.28.1"),
 )
 # Settings the skill always runs with: these override the config file and the KUBE_NOOB_* variables.
 OFFLINE = {

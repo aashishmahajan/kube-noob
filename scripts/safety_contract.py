@@ -930,7 +930,7 @@ def default_violations(settings: Any | None = None) -> list[str]:
 # person reviews it and adds it here, so "what the package runs" cannot grow unnoticed.
 KNOWN_PROGRAMS: dict[str, tuple[str, ...]] = {
     "kube_noob/debug/backends.py": ("kubectl", "oc"),
-    "kube_noob/generate/helm.py": ("helm",),
+    "kube_noob/generate/helm_render.py": ("helm",),
     "kube_noob/sources/advisories.py": ("zstd",),
     "kube_noob/sources/git_ingest.py": ("git",),
 }

@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-29 late (PR #6 merged: Agent Skill G108, CodeQL fixes G109; PR #7 open: red-team fixes, UPG1 G110, CEPH1 G111, safety contract G112-G113, scorecard G114, POL4 G115, 32 golden questions graded blind).
+right now; STATE.md says what is done. Updated 2026-10-29 late (PR #6 merged: Agent Skill G108, CodeQL fixes G109; PR #7 merged (main 62b8c0b, CI and CodeQL green): red-team fixes, UPG1 G110, CEPH1 G111, safety contract G112-G113, scorecard G114, POL4 G115, 32 golden questions graded blind).
 
 ## Repository and branch
 
@@ -19,7 +19,7 @@ right now; STATE.md says what is done. Updated 2026-10-29 late (PR #6 merged: Ag
 
 ## Done in this stretch
 
-- 2026-10-29 late: PR #6 merged to main (4bd8903; CI, CodeQL, brew green; CodeQL "no new alerts"). PR #7 holds
+- 2026-10-29 late: PR #6 merged to main (4bd8903; CI, CodeQL, brew green; CodeQL "no new alerts"). PR #7 (merged as 62b8c0b) held
   the red-team fixes (seven findings, tests first), UPG1, CEPH1, SAFE1, TRUST1, POL4 and the blind-graded golden
   questions; each agent's notes were folded into CHANGELOG, guidance (G110-G115) and use-cases and removed.
   Next: insight should reach `upgrade_risks` and `policy_migrate_check` (golden upg-004/005 and pcel-* misses name

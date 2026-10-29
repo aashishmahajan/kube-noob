@@ -1837,7 +1837,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return 0
 
     if a.cmd == "helm-audit":
-        from kube_noob.generate.helm import audit_chart
+        from kube_noob.generate.helm_render import audit_chart
 
         chart_report, lint = audit_chart(a.chart, a.platform, a.pversion, a.values, a.namespace)
         d = chart_report.as_dict()

@@ -122,7 +122,12 @@ def test_icon_is_small_and_carries_no_shell_like_text() -> None:
 def test_manifest_uses_only_fields_the_plugin_reference_defines() -> None:
     manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
     known = {"name", "version", "description", "author", "homepage", "repository", "license", "keywords", "icon"}
-    assert set(manifest) <= known, set(manifest) - known
+    # The directory's listing fields (plugin manifest reference, "Directory listing fields"): https URLs, plugin.json
+    # only; Claude Code ignores them at load time.
+    listing = {"documentationUrl", "supportUrl", "privacyPolicyUrl", "termsOfServiceUrl"}
+    assert set(manifest) <= known | listing, set(manifest) - known - listing
+    assert all(manifest[k].startswith("https://") for k in listing & set(manifest))
+    assert manifest["privacyPolicyUrl"].endswith("/PRIVACY.md")
     assert (PLUGIN / manifest["icon"]).is_file()
     assert manifest["homepage"].startswith("https://github.com/aashishmahajan/kube-noob")
     assert (ROOT / "PRIVACY.md").is_file()
@@ -193,3 +198,53 @@ def test_the_plugin_ships_build_log_diagnosis_but_not_the_image_audit() -> None:
     mods = _sync().plugin_modules(ROOT)
     assert "kube_noob.build.logs" in mods
     assert not {"kube_noob.build.containerfile", "kube_noob.build.image", "kube_noob.build.oci"} & mods
+
+
+# Offered only when the user turns on cluster access or team memory; the plugin skills may name them for that case.
+_CONDITIONAL_TOOLS = {"cluster_check_traffic", "cluster_debug_workload", "memory_propose", "memory_match"}
+_PLUGIN_TOOLS = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from kube_noob import toolkit
+from kube_noob.config import load_settings
+print(json.dumps(sorted(s.name for s in toolkit.Toolkit(load_settings()).specs())))
+"""
+
+
+def test_plugin_skills_name_only_tools_the_plugin_offers() -> None:
+    """The E2E review found the openshift-platform skill sending Claude to two tools the plugin leaves out."""
+    import re
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, "-I", "-c", _PLUGIN_TOOLS, str(PLUGIN / "server")],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert res.returncode == 0, res.stderr[-2000:]
+    offered = set(json.loads(res.stdout.strip().splitlines()[-1])) | _CONDITIONAL_TOOLS
+    for skill in sorted((PLUGIN / "skills").glob("*/SKILL.md")):
+        named = set(re.findall(r"kubenoob_([a-z][a-z_]*[a-z])", skill.read_text(encoding="utf-8")))
+        assert named <= offered, (skill.parent.name, sorted(named - offered))
+
+
+def test_the_plugin_bundle_can_neither_connect_nor_start_a_program() -> None:
+    """No bundled module imports an HTTP client, sockets or subprocess: the plugin makes no network calls of its own
+    and starts no program (the directory review reads the bundle; Helm rendering and web_fetch stay in the CLI)."""
+    import ast
+
+    banned = {"subprocess", "socket", "httpx", "httpcore", "requests", "urllib.request", "http.client", "aiohttp"}
+    found: list[str] = []
+    for path in sorted((PLUGIN / "server").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+            found += [f"{path.relative_to(PLUGIN)}: {n}" for n in names if n in banned or n.split(".")[0] in banned]
+    assert found == []

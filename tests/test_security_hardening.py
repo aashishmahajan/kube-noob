@@ -16,6 +16,7 @@ import httpx
 import pytest
 
 import kube_noob
+import kube_noob.net as net_mod
 from kube_noob import toolkit as tk
 from kube_noob.config import load_settings
 from kube_noob.debug import cluster
@@ -103,7 +104,7 @@ def test_yaml_depth_and_duplicate_keys() -> None:
 def test_web_fetch_stops_at_max_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     s = load_settings(overrides={"webEnabled": True, "web": {"maxBytes": 1000}})
     kit = tk.Toolkit(s)
-    real = tk.http_client
+    real = net_mod.http_client
     served = {"bytes": 0}
 
     def stream() -> Any:
@@ -117,7 +118,7 @@ def test_web_fetch_stops_at_max_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return real(settings, purpose, transport=httpx.MockTransport(handler))
 
-    monkeypatch.setattr(tk, "http_client", fake)
+    monkeypatch.setattr(net_mod, "http_client", fake)
     out = kit.web_fetch(tk.WebFetchIn(url="https://kubernetes.io/big"))
     assert out["truncated"] is True and len(out["text"]) <= 1000 and served["bytes"] < 100_000
 

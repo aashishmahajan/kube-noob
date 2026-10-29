@@ -4,7 +4,9 @@
 manifests become templates whose tunables (image, replicas, resources, host) come from values.yaml, with a
 values.schema.json so `helm install` rejects bad values before rendering.
 
-``audit_chart`` renders a chart with the `helm` binary (if available) and runs the full audit on the output.
+``lint_chart_metadata`` checks a chart's files against the Helm advisories and best practices. Rendering a chart with
+the `helm` binary and auditing the output lives in ``kube_noob.generate.helm_render`` (the CLI's helm-audit and the
+gate; the Claude plugin never starts another program).
 """
 
 from __future__ import annotations
@@ -12,16 +14,11 @@ from __future__ import annotations
 import copy
 import json
 import re
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from kube_noob.audit.engine import analyze
-from kube_noob.audit.model import Report
 from kube_noob.errors import KubeNoobError
 from kube_noob.generate.blueprint import Blueprint
 from kube_noob.generate.manifests import generate
@@ -207,37 +204,6 @@ def generate_chart(bp: Blueprint, out_dir: str | Path, chart_version: str = "0.1
     }
 
 
-def helm_binary() -> str | None:
-    return shutil.which("helm")
-
-
-def render_chart(
-    chart_dir: str | Path,
-    values_files: list[str] | None = None,
-    namespace: str = "default",
-    release: str = "release",
-    timeout: float = 60.0,
-) -> str:
-    helm = helm_binary()
-    if helm is None:
-        raise KubeNoobError(
-            "The `helm` binary is not on PATH; install Helm 3.8+ to render charts "
-            "(https://helm.sh/docs/intro/install/)."
-        )
-    chart = Path(chart_dir)
-    if not (chart / "Chart.yaml").is_file():
-        raise KubeNoobError(f"{chart} is not a chart directory (no Chart.yaml)")
-    args = [helm, "template", release, str(chart), "--namespace", namespace]
-    for vf in values_files or []:
-        args += ["--values", vf]
-    with tempfile.TemporaryDirectory() as home:
-        env = {"HELM_CACHE_HOME": home, "HELM_CONFIG_HOME": home, "HELM_DATA_HOME": home, "PATH": "/usr/bin:/bin"}
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=env, check=False)
-    if proc.returncode != 0:
-        raise KubeNoobError(f"helm template failed: {proc.stderr.strip()[:2000]}")
-    return proc.stdout
-
-
 _LOCK_FILES = ("Chart.lock", "requirements.lock")
 # A chart name that is a path: a separator, or '.'/'..' (CVE-2024-25620, CVE-2026-35206).
 _PATH_NAME = re.compile(r"[/\\]|^\.{1,2}\Z")
@@ -361,14 +327,3 @@ def lint_chart_metadata(chart_dir: str | Path) -> list[str]:
     if not (chart / "values.schema.json").is_file():
         issues.append("No values.schema.json; add one so invalid values fail at install time.")
     return issues
-
-
-def audit_chart(
-    chart_dir: str | Path,
-    platform: str = "kubernetes",
-    version: str | None = None,
-    values_files: list[str] | None = None,
-    namespace: str = "default",
-) -> tuple[Report, list[str]]:
-    rendered = render_chart(chart_dir, values_files, namespace)
-    return analyze(rendered, platform=platform, version=version), lint_chart_metadata(chart_dir)
