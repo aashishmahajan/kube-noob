@@ -97,6 +97,8 @@ which ships tested and documented on its own.
 - Run the headline test: "No AI inside. Works with yours." versus "The ground truth your AI SRE checks against",
   a week apart, compare click-through to the repository.
 - Submit the OpenShift Helm catalog pull requests (`docs/openshift-catalog.md`).
+- kube-noob.com (`site/README.md`): set Settings > Pages > Source to GitHub Actions, verify the domain (TXT record),
+  add the A, AAAA and `www` CNAME records at the registrar, set the custom domain and enforce HTTPS.
 - Approve version bumps, tags, releases and pull requests.
 
 ## Verification sources (append as facts are verified)

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- kube-noob.com: a static site generated from the repository by `scripts/build_site.py` and deployed to GitHub Pages
+  by the `site` workflow (setup and DNS: `site/README.md`). Docs; references generated from the code (MCP tools and
+  their schemas, CLI, rules, playbooks, knowledge base, release-note issue index, Helm values); the product journey
+  from real `kube-noob demo` runs and the changelog; insights computed at build time; the three animated videos and
+  the release's terminal recordings.
+- Playground: kube-noob's real tools in the visitor's browser (Pyodide served by the site, offline lock on): audit,
+  diagnose, known issues, policy denials, NetworkPolicy reachability, and any read-only tool as JSON.
+- Ask: Claude with the visitor's own Anthropic key, sent only to `api.anthropic.com`, calling kube-noob's tools in the
+  browser through the official SDK's tool runner, with the server-side refusal fallback.
+- `demos/video/stage/build.sh` honours `KN_SCALE` (1 for 1920x1080, default 2 for 4K).
+
 ## 0.5.0 - 2026-10-28
 
 Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and what became of each ticket.

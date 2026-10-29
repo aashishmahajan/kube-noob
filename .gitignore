@@ -15,3 +15,6 @@ build/
 /corpus-out/
 /out/
 *.local.yaml
+/_site/
+site/node_modules/
+/.cache/

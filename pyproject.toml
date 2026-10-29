@@ -55,6 +55,7 @@ dev = [
   "build>=1.2",
   "pip-audit>=2.7",
   "uv>=0.11",
+  "markdown>=3.11,<4",
 ]
 
 [project.scripts]
