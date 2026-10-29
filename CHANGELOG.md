@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Code scanning findings from the 0.7 merge (G109): the videos workflow ran whatever `pipeline_ref` or `tag` a dispatch
+  named, in the default branch's cache scope (CodeQL: cache poisoning via execution of untrusted code, and checkout of
+  untrusted code). A new `verify` job resolves the tag (`vX.Y.Z`, an existing tag) and the pipeline to commits, refuses
+  any commit not on the default branch, and every later job checks out those commits. The Homebrew workflow's
+  free-text `ref` input is now a `default_branch` switch. The kind posture test logs how many kubectl calls asked for
+  Secrets, never their arguments; the must-gather reader compares the `node-role.kubernetes.io` label domain whole;
+  two tests check a URL as a whole token instead of a substring.
 - kube-noob as an Agent Skill (G108): `skill/kube-noob/SKILL.md` and `scripts/kn.py` run the plugin's tools as one
   command each, JSON out, so kube-noob also works where a local MCP server cannot run (chat on claude.ai, the
   Claude API's code execution) and where a plugin's install-time dependency resolution is not wanted. It needs Python

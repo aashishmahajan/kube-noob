@@ -80,9 +80,10 @@ def main() -> int:
     verbs = sorted({c[0] for c in calls if c})
     if set(verbs) - {"get", "version"}:
         problems.append(f"kubectl calls other than reads: {verbs}")
-    secret_calls = [c for c in calls if any("secret" in str(a).lower() for a in c[:2])]
-    if secret_calls:
-        problems.append(f"Secrets were requested: {secret_calls[:3]}")
+    # Count the calls that named the Secret resource; the log never prints their arguments.
+    forbidden = sum(1 for c in calls if any("secret" in str(a).lower() for a in c[:2]))
+    if forbidden:
+        problems.append(f"{forbidden} kubectl calls asked for Secrets")
     if "hunter2" in res.stdout:
         problems.append("the planted Secret value reached the output")
     for p in problems:

@@ -297,7 +297,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/brew.yml
     with:
-      ref: main
+      default_branch: true
 
   github-release:
     needs: [publish-pypi, image, demos, chart]

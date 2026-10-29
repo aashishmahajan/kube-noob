@@ -570,8 +570,11 @@ def _nodes(objs: dict[tuple[str, str], _Obj], out: list[Finding], cluster: dict[
     for (_, name), obj in sorted(objs.items()):
         doc = obj.doc
         labels = _d(_d(doc.get("metadata")).get("labels"))
+        # node-role.kubernetes.io/<role> label keys: the prefix is a label domain, compared whole
         roles = sorted(
-            k.split("/", 1)[1] for k in labels if isinstance(k, str) and k.startswith("node-role.kubernetes.io/")
+            role
+            for prefix, sep, role in (k.partition("/") for k in labels if isinstance(k, str))
+            if sep and prefix == "node-role.kubernetes.io"
         )
         control = "control-plane" in roles or "master" in roles
         conds = _conditions(_d(doc.get("status")))

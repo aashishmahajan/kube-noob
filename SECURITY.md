@@ -49,6 +49,10 @@ open no connection (a test runs them with both refused).
 | Egress on OpenShift | Chart NetworkPolicy allows DNS only by default; optional OVN-Kubernetes EgressFirewall allows only the API server and allowlisted HTTPS domains, then denies all. |
 | Homebrew | The formula installs the release wheel and wheels-only dependencies pinned by hash from the release's `requirements.lock`. |
 
+Workflows run only reviewed code with write-capable tokens or caches: no checkout takes a ref typed into a workflow
+input, and the videos workflow renders only a release tag and a pipeline commit that are on the default branch.
+CodeQL (`security-extended`, Python and Actions) runs on every pull request and on main.
+
 ## Capability tiers
 
 kube-noob reads by default and changes nothing. Everything else is a tier, off by default; every action in a tier
