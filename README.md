@@ -66,7 +66,7 @@ Desktop app: **Customize > Plugins > Add > Add marketplace**, `aashishmahajan/ku
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.6.0", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.7.0", "kube-noob", "mcp"]}}}
 ```
 
 ## Run on OpenShift
