@@ -107,6 +107,8 @@ class CallFailed(Exception):
     routes answer with."""
 
     def __init__(self, status: int, outcome: str, message: str) -> None:
+        # The message can quote the caller's text (an unknown id, a rejected value): cleaned like any result.
+        message = sanitize.clean(message, "error")[0]
         super().__init__(message)
         self.status, self.outcome, self.message = status, outcome, message
 

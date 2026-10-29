@@ -65,24 +65,37 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s inherit_errexit
-          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+          release='^v[0-9]+\.[0-9]+\.[0-9]+$'
+          if ! [[ "$TAG" =~ $release ]]; then
             echo "::error title=videos::tag must be a release tag like v0.6.0"
             exit 1
           fi
-          if [ -n "$PIPELINE" ] && ! printf '%s' "$PIPELINE" | grep -Eq '^([0-9a-f]{7,40}|v[0-9]+\.[0-9]+\.[0-9]+|main)$'; then
-            echo "::error title=videos::pipeline_ref must be a commit, a release tag or main"
-            exit 1
-          fi
           default="$(gh api "repos/${REPO}" --jq .default_branch)"
+          # The default branch as a commit, from the branches API: a tag that shares its name cannot stand in for it.
+          default_sha="$(gh api "repos/${REPO}/branches/${default}" --jq .commit.sha)"
           if [ "$(gh api "repos/${REPO}/git/ref/tags/${TAG}" --jq .ref 2>/dev/null)" != "refs/tags/${TAG}" ]; then
             echo "::error title=videos::there is no tag ${TAG}"
             exit 1
           fi
+          # Every name is qualified before it is resolved: refs/tags/ for a release, heads/ for the default branch.
+          pipeline_ref="refs/tags/${TAG}"
+          if [ -n "$PIPELINE" ]; then
+            if [[ "$PIPELINE" =~ ^[0-9a-f]{40}$ ]]; then
+              pipeline_ref="$PIPELINE"
+            elif [[ "$PIPELINE" =~ $release ]]; then
+              pipeline_ref="refs/tags/${PIPELINE}"
+            elif [ "$PIPELINE" = main ] || [ "$PIPELINE" = "$default" ]; then
+              pipeline_ref="heads/${default}"
+            else
+              echo "::error title=videos::pipeline_ref must be a full commit SHA, a release tag or ${default}"
+              exit 1
+            fi
+          fi
           on_default() {
             local sha status
             sha="$(gh api "repos/${REPO}/commits/$1" --jq .sha)"
-            printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'
-            status="$(gh api "repos/${REPO}/compare/${sha}...${default}" --jq .status)"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+            status="$(gh api "repos/${REPO}/compare/${sha}...${default_sha}" --jq .status)"
             if [ "$status" != ahead ] && [ "$status" != identical ]; then
               echo "::error title=videos::$1 (${sha}) is not on ${default}: only merged code renders the videos" >&2
               return 1
@@ -90,8 +103,7 @@ jobs:
             printf '%s' "$sha"
           }
           product="$(on_default "refs/tags/${TAG}")"
-          pipeline="$product"
-          if [ -n "$PIPELINE" ]; then pipeline="$(on_default "$PIPELINE")"; fi
+          pipeline="$(on_default "$pipeline_ref")"
           echo "product=${product}" >> "$GITHUB_OUTPUT"
           echo "pipeline=${pipeline}" >> "$GITHUB_OUTPUT"
           echo "::notice title=videos::${TAG} is ${product}; rendered with the pipeline at ${pipeline}"

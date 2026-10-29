@@ -109,7 +109,12 @@ def test_only_merged_code_renders_the_videos() -> None:
     jobs = _wf("videos.yml")["jobs"]
     verify = _run(jobs["verify"])
     assert "^v[0-9]+\\.[0-9]+\\.[0-9]+$" in verify and "inherit_errexit" in verify
-    assert "/compare/${sha}...${default}" in verify and '"$status" != ahead' in verify and "identical" in verify
+    assert "printf '%s' \"$TAG\" | grep" not in verify  # grep matches per line: "v0.6.0\nevil" would pass
+    assert '[[ "$TAG" =~ $release ]]' in verify
+    # the default branch is compared as the commit the branches API names, never as a bare name a tag could shadow
+    assert '/branches/${default}" --jq .commit.sha' in verify and "/compare/${sha}...${default_sha}" in verify
+    assert 'pipeline_ref="heads/${default}"' in verify and 'pipeline_ref="refs/tags/${PIPELINE}"' in verify
+    assert '"$status" != ahead' in verify and "identical" in verify
     assert jobs["verify"]["permissions"] == {"contents": "read"}
     assert set(jobs["verify"]["outputs"]) == {"product", "pipeline"}
     refs = [s["with"]["ref"] for s in jobs["render"]["steps"] if str(s.get("uses", "")).startswith("actions/checkout")]

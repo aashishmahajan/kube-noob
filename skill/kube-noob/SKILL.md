@@ -11,32 +11,47 @@ evidence you can cite. Never call kube-noob an AI, an assistant or an agent.
 
 ## Run it
 
-Every call is one command, and it prints JSON:
+Every call is one command, and it prints JSON. Text the user gave you (a log, an event, a manifest, a question, a
+post) goes into a file first and is passed with `--text-file`, never on the command line: a quote in pasted text
+would end the argument and the shell would run the rest. Write the file with a quoted heredoc, which the shell does
+not expand:
 
 ```bash
-python3 -I -B ${CLAUDE_SKILL_DIR}/scripts/kn.py TOOL '{"arg": "value"}'
+cat > /tmp/kn-input.txt <<'KN_EOF'
+<the user's text, exactly as given>
+KN_EOF
+python3 -I -B ${CLAUDE_SKILL_DIR}/scripts/kn.py insight --text-file text=/tmp/kn-input.txt
+```
+
+Inline JSON is only for short values you write yourself, such as versions, platforms and ids:
+
+```bash
+python3 -I -B ${CLAUDE_SKILL_DIR}/scripts/kn.py upgrade_risks '{"current": "4.20.3", "target": "4.21.4"}'
+python3 -I -B ${CLAUDE_SKILL_DIR}/scripts/kn.py insight '{"platform": "openshift"}' --text-file text=/tmp/kn-input.txt
 ```
 
 `${CLAUDE_SKILL_DIR}` is this skill's folder. Where it is not replaced (chat on claude.ai copies the folder into the
 code sandbox), use the path to `scripts/kn.py` inside the copied skill folder.
 
-1. The first time in a session, run `kn.py check`. It needs Python 3.11 or later and four libraries: pydantic,
-   PyYAML, jsonschema and httpx. If it reports some missing, run the `install` command it prints (in Claude Code,
-   prefer `uv run --with pydantic --with pyyaml --with jsonschema --with httpx python3 -I -B .../kn.py ...` so nothing
-   is installed globally). If installing is not possible, tell the user what is missing; do not guess answers.
-2. Long input (a manifest, a log, a pasted post): write it to a file and pass it with
-   `--text-file FIELD=PATH`, for example `kn.py audit_manifests --text-file manifests=/tmp/app.yaml`.
-   Arguments can also come from `@args.json` or `-` (stdin).
+1. The first time in a session, run `kn.py check`. It needs Python 3.11 or later and four libraries. If some are
+   missing it prints them; install only those, at these versions (the ones the kube-noob Claude plugin pins):
+   `python3 -m pip install pydantic==2.14.1 PyYAML==6.0.3 jsonschema==4.26.0 httpx==0.28.1`. In Claude Code, prefer
+   `uv run --with pydantic==2.14.1 --with PyYAML==6.0.3 --with jsonschema==4.26.0 --with httpx==0.28.1 python3 -I -B
+   .../kn.py ...` so nothing is installed globally. If installing is not possible, tell the user what is missing; do
+   not guess answers.
+2. Manifests and `helm template` output go the same way: `kn.py audit_manifests --text-file manifests=/tmp/app.yaml`.
+   Several fields can each take a file (`--text-file` more than once); other arguments can come from `@args.json`.
 3. `kn.py tools` lists every tool; `kn.py schema TOOL` shows its arguments. `references/tools.md` describes them all.
 
-kube-noob runs with the offline lock on: no web lookups, no cluster access, no model calls, whatever its config says.
-It reads only the files you name.
+kube-noob runs with the offline lock on: no web lookups, no cluster access, no model calls and no team memory,
+whatever its config says. It reads the files you name, and keeps learning progress (lessons, exercises, notes the
+user confirms) in its data folder, `KUBE_NOOB_DATA_DIR` or else `~/.local/share/kube-noob`.
 
 ## Which tool
 
 | The user has | Run |
 |---|---|
-| Anything pasted (events, describe, logs, an alert, a denial, a ticket, a question) | `insight` with `{"text": ...}` and, if known, `"platform"` (`kubernetes`, `openshift`, `rosa-hcp`) and `"version"` |
+| Anything pasted (events, describe, logs, an alert, a denial, a ticket, a question) | `insight` with `--text-file text=...` and, if known, `"platform"` (`kubernetes`, `openshift`, `rosa-hcp`) and `"version"` |
 | Manifests or `helm template` output to review | `audit_manifests` (`manifests`), then `fix_manifests` for the safe fixes |
 | "Is this a known OpenShift bug?" | `known_issues` with the error text and the cluster version |
 | "What could go wrong updating OpenShift from X to Y?" | `upgrade_risks` with `current` and `target` (x.y.z) |

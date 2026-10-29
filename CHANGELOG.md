@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Red team of the Agent Skill and the workflow fix: the plugin offered `code_report`, whose module imports the
+  Containerfile parser the plugin leaves out, so every call failed; the SAST assessment now stays out of the plugin
+  and the skill with that parser, and a test imports every bundled module. Skill: pasted text goes through
+  `--text-file` from a quoted heredoc, never the command line (a quote in a log line ended the JSON argument and the
+  shell ran the rest); the 5 MiB cap holds for pipes and devices; a bad config or an internal failure answers JSON;
+  team memory is forced off; installs pin the plugin's locked versions. MCP and REST error messages are cleaned like
+  results (an unknown id could carry instructions). The videos workflow compares with the default branch's commit
+  from the branches API and qualifies every ref, so a tag named like the branch cannot stand in for it, and matches
+  inputs with `[[ =~ ]]` instead of a per-line grep.
 - Update risks before an OpenShift update, offline (G110): `kube-noob upgrade-risks --from 4.20.3 --to 4.21.4` (and the
   `upgrade_risks` MCP tool) lists the risks Red Hat declares for that update in the public update graph
   (openshift/cincinnati-graph-data, 356 risks for targets 4.18.0 to 4.22.17, commit 7572174a, 2026-10-29), as a

@@ -48,19 +48,6 @@ Clarify requirements. Check a (partial) generator blueprint and return blocking 
 
 - `blueprint`* (object): Partial blueprint; missing/invalid fields become questions.
 
-## code_report
-
-Assess SAST findings: where the code ships and who runs it. Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has no analysis engine of its own): one finding per file, line and CWE across tools, suppressed and fixed results excluded with the reason, lint kept apart. With Containerfiles, each file is followed into the images that ship it (copied or built; tests and tools are not shipped); with manifests, findings rank by exposure and privileges with the attack path. With scanner reports and dependency files, each language-package vulnerability points at the file and line to change. Local only.
-
-- `containerfiles` (array): Containerfiles, to know which images ship each file.
-- `dependency_files` (object): Dependency files by repository path (requirements.txt, package.json, package-lock.json, pom.xml, go.mod, ...), to find the line that declares a vulnerable package.
-- `include_quality` (boolean): Also list lint and quality results (never ranked).
-- `manifests` (null/string): YAML that runs the images: ranks by exposure and privileges.
-- `reports` (array): Trivy or Grype JSON or a CycloneDX report of an image: each language-package vulnerability points at the dependency file and line that declares it.
-- `sarif` (array): SARIF 2.1.0 as JSON text from Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL (any SARIF producer works). The same file, line and CWE from several tools become one finding.
-- `source_roots` (array): Absolute directories the scanners ran in (the CI checkout), so absolute paths map to the repository.
-- `top` (integer): How many ranked findings to return.
-
 ## config_status
 
 Show configuration. Effective configuration (webEnabled, cluster access, model), version and knowledge stats.

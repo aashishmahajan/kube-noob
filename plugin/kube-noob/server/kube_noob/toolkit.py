@@ -1828,18 +1828,6 @@ class Toolkit:
                 self.vuln_report,
             ),
             ToolSpec(
-                "code_report",
-                "Assess SAST findings: where the code ships and who runs it",
-                "Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has no "
-                "analysis engine of its own): one finding per file, line and CWE across tools, suppressed and fixed "
-                "results excluded with the reason, lint kept apart. With Containerfiles, each file is followed into "
-                "the images that ship it (copied or built; tests and tools are not shipped); with manifests, findings "
-                "rank by exposure and privileges with the attack path. With scanner reports and dependency files, "
-                "each language-package vulnerability points at the file and line to change. Local only.",
-                CodeReportIn,
-                self.code_report,
-            ),
-            ToolSpec(
                 "threat_model",
                 "STRIDE threat model of an application",
                 "From manifests: entry points, trust boundaries, data stores and identities, and per element the "
@@ -2030,6 +2018,22 @@ class Toolkit:
                     open_world=True,
                 ),
             ]
+        if _has_module("kube_noob.code.ship"):  # not in the Claude plugin: it follows code into Containerfiles
+            s.append(
+                ToolSpec(
+                    "code_report",
+                    "Assess SAST findings: where the code ships and who runs it",
+                    "Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has "
+                    "no analysis engine of its own): one finding per file, line and CWE across tools, suppressed and "
+                    "fixed results excluded with the reason, lint kept apart. With Containerfiles, each file is "
+                    "followed into the images that ship it (copied or built; tests and tools are not shipped); with "
+                    "manifests, findings rank by exposure and privileges with the attack path. With scanner reports "
+                    "and dependency files, each language-package vulnerability points at the file and line to change. "
+                    "Local only.",
+                    CodeReportIn,
+                    self.code_report,
+                )
+            )
         if importlib.util.find_spec("kube_noob.build.containerfile") is not None:  # not in the Claude plugin
             s.append(
                 ToolSpec(
