@@ -156,8 +156,9 @@ which ships tested and documented on its own.
 - Run the headline test: "No AI inside. Works with yours." versus "The ground truth your AI SRE checks against",
   a week apart, compare click-through to the repository.
 - Submit the OpenShift Helm catalog pull requests (`docs/openshift-catalog.md`).
-- kube-noob.com (`site/README.md`): set Settings > Pages > Source to GitHub Actions, verify the domain (TXT record),
-  add the A, AAAA and `www` CNAME records at the registrar, set the custom domain and enforce HTTPS.
+- kube-noob.com (source in the private kube-noob-site repository, setup in its README): add the deploy key and the
+  `DEPLOY_KEY` secret, enable Pages on kube-noob-www (branch main), verify the domain (TXT record), add the A, AAAA and
+  `www` CNAME records at Network Solutions, set the custom domain and enforce HTTPS.
 - `CORPUS_PASSPHRASE` repository secret: set by the owner on 2026-10-28 (a random passphrase; keep the local file in a
   password manager). Still open: optionally `JIRA_EVERY_DAYS=2`, and build the private seed image from the decrypted
   snapshot (docs/use-cases.md, "One main copy for the whole organisation").

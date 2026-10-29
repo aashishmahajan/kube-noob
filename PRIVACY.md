@@ -74,11 +74,12 @@ and not stored, except words you choose to put in a confirmed note or a learner 
 
 ## The website (kube-noob.com)
 
-A static site on GitHub Pages, built from this repository. It has no server of its own, no analytics, no cookies and
+A static site on GitHub Pages, built from this repository's releases. It has no backend, no analytics, no cookies and
 loads nothing from other hosts; GitHub Pages, which serves it, keeps its own access logs under GitHub's privacy
-statement. The Playground runs kube-noob's tools in your browser: what you paste stays on your device. The Ask page
-sends your Anthropic API key and your messages from your browser straight to `api.anthropic.com`, under Anthropic's
-terms for your key; the key is kept in memory, or in the tab's session storage only if you tick the box.
+statement. The Playground runs kube-noob's tools in your browser: what you paste stays on your device. The "Bring
+your own AI" page sends your Anthropic API key and your messages from your browser straight to `api.anthropic.com`,
+under Anthropic's terms for your key; the key is kept in memory, or in the tab's session storage only if you tick the
+box.
 
 ## Children
 

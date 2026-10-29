@@ -66,20 +66,7 @@ Kubernetes and Helm are trademarks of The Linux Foundation. Red Hat, OpenShift, 
 StackRox are trademarks of Red Hat, Inc. AWS and ROSA-related names are trademarks of Amazon.com, Inc. or its
 affiliates. kube-noob is an independent project, not affiliated with or endorsed by these organizations.
 
-## Served by the website (kube-noob.com), not in the package
+## The website (kube-noob.com)
 
-Unmodified copies, served so the site loads nothing from other hosts. Licenses read from each package's metadata on
-2026-10-29. Source for every MPL-2.0 file: the upstream project linked here.
-
-| Material | Upstream | License | Where on the site |
-|---|---|---|---|
-| Pyodide 314.0.7 runtime (CPython 3.14 compiled to WebAssembly) | [pyodide/pyodide](https://github.com/pyodide/pyodide) | MPL-2.0 (Pyodide), PSF-2.0 (CPython) | `/pyodide/` |
-| Pyodide builds of pydantic, pydantic-core, annotated-types, typing-inspection, PyYAML, jsonschema, jsonschema-specifications, referencing, rpds-py, attrs, pyrsistent, six, anyio, h11, sniffio | the Pyodide 314.0.7 distribution | MIT (sniffio: MIT or Apache-2.0) | `/pyodide/` |
-| httpx, httpcore, idna | the Pyodide 314.0.7 distribution | BSD-3-Clause | `/pyodide/` |
-| certifi | the Pyodide 314.0.7 distribution | MPL-2.0 | `/pyodide/` |
-| typing-extensions | the Pyodide 314.0.7 distribution | PSF-2.0 | `/pyodide/` |
-| Anthropic TypeScript SDK 0.134.0 (bundled into `agent.js`) | [anthropics/anthropic-sdk-typescript](https://github.com/anthropics/anthropic-sdk-typescript) | MIT | `/assets/agent.js` |
-| mermaid 12.2.0 | [mermaid-js/mermaid](https://github.com/mermaid-js/mermaid) | MIT | `/assets/mermaid.min.js` |
-
-Build and test only (not served): esbuild 0.28.2 (MIT), Python-Markdown (BSD-3-Clause), Playwright 1.63.0
-(Apache-2.0).
+The website is built from this repository's releases by a separate site repository; its own third-party
+notices are published at https://kube-noob.com/notices/.
