@@ -13,7 +13,7 @@ What kube-noob answers, what it leaves unanswered and where it is weak, measured
 
 | What | Result | Command |
 |---|---|---|
-| Golden questions in scope answered right | 89 of 124 | `python scripts/eval_golden.py` |
+| Golden questions in scope answered right | 97 of 124 | `python scripts/eval_golden.py` |
 | Golden questions out of scope left unanswered | 24 of 27 | `python scripts/eval_golden.py` |
 | Held-out triage questions that name the labelled cause | 80 of 114 | `python scripts/eval_triage.py` |
 | Training triage questions that name the labelled cause | 136 of 171 | `python scripts/eval_triage.py --dir tests/fixtures/triage-train` |
@@ -29,7 +29,7 @@ The community-question numbers are quoted in the last section; their command nee
 
 ## Where it is weak
 
-- Golden questions: 89 of 124 in-scope questions are answered right, and this is the set the gaps were closed on. By technology, weakest first: storage 0 of 12; OpenShift 13 of 24; Admission policy engines 14 of 24; Kubernetes 15 of 16; RHACS 15 of 16; Helm 3 16 of 16; ROSA HCP 16 of 16. 35 in-scope questions get no right answer; each is listed below with what it needs.
+- Golden questions: 97 of 124 in-scope questions are answered right, and this is the set the gaps were closed on. By technology, weakest first: OpenShift 13 of 24; Admission policy engines 14 of 24; storage 8 of 12; Kubernetes 15 of 16; RHACS 15 of 16; Helm 3 16 of 16; ROSA HCP 16 of 16. 27 in-scope questions get no right answer; each is listed below with what it needs.
 - Out of scope: 24 of 27 questions about another product are left unanswered. 3 got an answer anyway (`rosa-017`, `pcel-009`, `stor-014`); each is listed below with what should have kept it silent.
 - Cause choice: on questions the patterns were not tuned on, the answer names the labelled cause for 80 of 114 (70%); on the set they were tuned on, for 136 of 171 (80%). The held-out number is the one to quote. Held-out by kind of input: pasted 48 of 57, typed 32 of 57. The right playbook is among the findings for 94 of 114 and first for 85 of 114.
 - Neither set measures how well kube-noob generalises to real posts: the golden questions shaped the content, and the triage questions were written from the playbooks' own root causes. The community tables in the last section do.
@@ -58,8 +58,8 @@ What is bundled for each technology is listed in [supported-technologies.md](eva
 | ROSA HCP | 16 | 16 (100%) | 16 | 0 | 4 | 3 |
 | RHACS | 16 | 15 (94%) | 15 | 1 | 4 | 4 |
 | Admission policy engines | 24 | 14 (58%) | 14 | 10 | 5 | 4 |
-| storage | 12 | 0 (0%) | 0 | 12 | 2 | 1 |
-| **All** | **124** | **89 (72%)** | **89** | **35** | **27** | **24** |
+| storage | 12 | 8 (67%) | 7 | 4 | 2 | 1 |
+| **All** | **124** | **97 (78%)** | **96** | **27** | **27** | **24** |
 
 ### Golden questions kube-noob does not answer
 
@@ -69,37 +69,29 @@ What is bundled for each technology is listed in [supported-technologies.md](eva
 | `ocp-009` | OpenShift | We added UPI bare-metal workers. They are not listed by oc get nodes yet, and oc logs against the new ones... | doc: UPI worker join: oc get csr, oc adm certificate approve client CSRs first, then serving CSRs | `kn:ocp-install-troubleshooting#6`, `kn:k8s-node-kubelet#2`, `kn:k8s-tls-x509#1` |
 | `ocp-013` | OpenShift | UPI install on bare metal and the bootstrap never finishes. How do I collect logs from the bootstrap node a... | doc: collect bootstrap logs via ssh core, journalctl -b -f -u bootkube.service and podman logs | `kn:ocp-install-troubleshooting#1`, `kn:openshift#2`, `kn:k8s-kubectl-output#7` |
 | `ocp-014` | OpenShift | What is the difference between Available, Progressing, Degraded and Upgradeable on a ClusterOperator, and d... | doc: ClusterOperator condition types Available, Progressing, Degraded and Upgradeable defined side by side | `kn:ocp-cluster-update-status#1`, `DBG-CLUSTEROPERATOR`, `kn:ocp-operators#0` |
-| `upg-001` | OpenShift | oc adm upgrade --include-not-recommended on my 4.15 cluster lists 4.16.15 under "Supported but not recommen... | no gap recorded | `kn:ocp-cluster-update-status#2` |
-| `upg-002` | OpenShift | In oc get clusterversion version -o json some target versions are under .status.availableUpdates and others... | no gap recorded | `kn:ocp-cluster-update-status#3` |
-| `upg-003` | OpenShift | oc adm upgrade on my 4.15.33 cluster only shows "Recommended updates", but I know 4.16.15 has been released... | no gap recorded | none |
-| `upg-004` | OpenShift | jq on my ClusterVersion shows a conditionalUpdates entry with a condition {"type": "Recommended", "status":... | no gap recorded | `kn:ocp-cluster-update-status#3` |
-| `upg-005` | OpenShift | Red Hat marks 4.14.22 as not recommended for my cluster because of a known issue. We read the linked bug an... | no gap recorded | none |
-| `upg-006` | OpenShift | oc adm upgrade recommend prints "Failed to check for at least some preconditions: no token is currently in... | no gap recorded | none |
-| `upg-007` | OpenShift | We run a local OpenShift Update Service for a disconnected cluster. The release images are mirrored, but OS... | no gap recorded | none |
-| `upg-008` | OpenShift | A file in cincinnati-graph-data/blocked-edges has to, from, url, name and message plus a matchingRules list... | no gap recorded | none |
+| `upg-001` | OpenShift | oc adm upgrade --include-not-recommended on my 4.15 cluster lists 4.16.15 under "Supported but not recommen... | doc: conditional updates (Recommended Unknown, EvaluationFailed) and how to judge an update risk | `kn:ocp-cluster-update-status#2` |
+| `upg-002` | OpenShift | In oc get clusterversion version -o json some target versions are under .status.availableUpdates and others... | doc: availableUpdates versus conditionalUpdates and how the CVO decides | `kn:ocp-cluster-update-status#3` |
+| `upg-003` | OpenShift | oc adm upgrade on my 4.15.33 cluster only shows "Recommended updates", but I know 4.16.15 has been released... | doc: oc adm upgrade --include-not-recommended and --allow-not-recommended | none |
+| `upg-004` | OpenShift | jq on my ClusterVersion shows a conditionalUpdates entry with a condition {"type": "Recommended", "status":... | insight does not route a two-version update question to upgrade_risks | `kn:ocp-cluster-update-status#3` |
+| `upg-005` | OpenShift | Red Hat marks 4.14.22 as not recommended for my cluster because of a known issue. We read the linked bug an... | insight does not route a two-version update question to upgrade_risks | none |
+| `upg-006` | OpenShift | oc adm upgrade recommend prints "Failed to check for at least some preconditions: no token is currently in... | doc: oc adm upgrade recommend error without a token | none |
+| `upg-007` | OpenShift | We run a local OpenShift Update Service for a disconnected cluster. The release images are mirrored, but OS... | doc: OpenShift Update Service graph data for disconnected clusters | none |
+| `upg-008` | OpenShift | A file in cincinnati-graph-data/blocked-edges has to, from, url, name and message plus a matchingRules list... | doc: how update risks are declared (blocked edges, matchingRules) | none |
 | `rhacs-006` | RHACS | How do I stop one RHACS deploy-time policy from firing in every namespace whose name starts with test-? | rank: kn:rhacs-policy-rules-scope#3 exclusion doc should outrank the roxctl deployment check doc | `kn:rhacs-roxctl-ci#3`, `kn:rhacs-enforcement#0`, `kn:rhacs-policy-rules-scope#4` |
-| `pcel-001` | Admission policy engines | After upgrading Kyverno to 1.19, every time I apply a ClusterPolicy I get: "Warning: kyverno.io/v1 ClusterP... | no gap recorded | `kn:kyverno-troubleshooting#1` |
-| `pcel-002` | Admission policy engines | I have a ClusterPolicy generate rule that clones a registry secret into every new namespace, with synchroni... | no gap recorded | `kn:k8s-images#0` |
-| `pcel-003` | Admission policy engines | My ClusterPolicy has validationFailureAction: Enforce, a failureActionOverrides block that keeps one namesp... | no gap recorded | `kn:kyverno-troubleshooting#1` |
-| `pcel-004` | Admission policy engines | My old ClusterPolicy has a context entry that reads the allowed-registry ConfigMap in kube-system and anoth... | no gap recorded | `kn:kyverno-troubleshooting#1` |
-| `pcel-005` | Admission policy engines | I am converting a ClusterPolicy mutate rule that uses patchStrategicMerge, a second rule with patchesJson69... | no gap recorded | none |
-| `pcel-006` | Admission policy engines | My ClusterPolicy verifyImages rule uses imageReferences, skipImageReferences, a cosign attestor, mutateDige... | no gap recorded | none |
-| `pcel-007` | Admission policy engines | We run a ClusterCleanupPolicy that deletes completed Jobs every night, using schedule, match, exclude and a... | no gap recorded | `kn:kyverno-troubleshooting#3` |
-| `pcel-008` | Admission policy engines | After replacing a ClusterPolicy with a ValidatingPolicy, my old kyverno.io PolicyException (exceptions: pol... | no gap recorded | `kn:kyverno-troubleshooting#1` |
+| `pcel-001` | Admission policy engines | After upgrading Kyverno to 1.19, every time I apply a ClusterPolicy I get: "Warning: kyverno.io/v1 ClusterP... | doc: Kyverno 1.19 deprecation of ClusterPolicy and the legacy-policy metrics | `kn:kyverno-troubleshooting#1` |
+| `pcel-002` | Admission policy engines | I have a ClusterPolicy generate rule that clones a registry secret into every new namespace, with synchroni... | doc: Kyverno CEL migration of verifyImages | `kn:k8s-images#0` |
+| `pcel-003` | Admission policy engines | My ClusterPolicy has validationFailureAction: Enforce, a failureActionOverrides block that keeps one namesp... | doc: validationFailureAction to validationActions mapping | `kn:kyverno-troubleshooting#1` |
+| `pcel-004` | Admission policy engines | My old ClusterPolicy has a context entry that reads the allowed-registry ConfigMap in kube-system and anoth... | doc: CEL context lookups (resource.Get, resource.List, globalContext.Get) | `kn:kyverno-troubleshooting#1` |
+| `pcel-005` | Admission policy engines | I am converting a ClusterPolicy mutate rule that uses patchStrategicMerge, a second rule with patchesJson69... | doc: Kyverno CEL migration of generate rules | none |
+| `pcel-006` | Admission policy engines | My ClusterPolicy verifyImages rule uses imageReferences, skipImageReferences, a cosign attestor, mutateDige... | doc: Kyverno CEL migration of mutate rules | none |
+| `pcel-007` | Admission policy engines | We run a ClusterCleanupPolicy that deletes completed Jobs every night, using schedule, match, exclude and a... | doc: CleanupPolicy to DeletingPolicy migration | `kn:kyverno-troubleshooting#3` |
+| `pcel-008` | Admission policy engines | After replacing a ClusterPolicy with a ValidatingPolicy, my old kyverno.io PolicyException (exceptions: pol... | doc: legacy PolicyException versus the policies.kyverno.io form (ruleNames has no equivalent) | `kn:kyverno-troubleshooting#1` |
 | `pol-008` | Admission policy engines | Creating a namespace fails with: Error from server ([ns-needs-owner] you must provide labels: {"owner"}): a... | doc: Gatekeeper constraint spec.enforcementAction dryrun or warn instead of deny | `gatekeeper/ns-needs-owner`, `DBG-WEBHOOK`, `kn:gatekeeper-constraints-usage#4` |
 | `pol-012` | Admission policy engines | If all Gatekeeper webhook pods go down, do constraints still block bad resources by default? What is the tr... | doc: Gatekeeper webhook failurePolicy Ignore by default versus Fail trade-offs | `kn:gatekeeper-enforcement#3`, `kn:gatekeeper-constraints-usage#5` |
-| `stor-001` | storage | From the toolbox on our ODF cluster, ceph health detail shows "[WRN] OSD_DOWN: 1 osds down" followed by "os... | no gap recorded | `OSD_DOWN`, `kn:ocp-egressip#1` |
-| `stor-002` | storage | ceph status on our Rook-Ceph cluster says "HEALTH_WARN 1/3 mons down, quorum a,c" (MON_DOWN). Is the cluste... | no gap recorded | `MON_DOWN` |
-| `stor-003` | storage | After a node reboot ceph status shows "Reduced data availability: 24 pgs inactive, 24 pgs peering" and "Deg... | no gap recorded | none |
-| `stor-004` | storage | We just got "HEALTH_WARN 1 nearfull osd(s)" (OSD_NEARFULL) and writes still work. How is that different fro... | no gap recorded | `OSD_BACKFILLFULL`, `OSD_FULL`, `OSD_NEARFULL` |
-| `stor-005` | storage | Our applications suddenly cannot write to Ceph and ceph health detail says "[ERR] OSD_FULL: 1 full osd(s)".... | no gap recorded | `OSD_FULL` |
-| `stor-006` | storage | ceph health detail shows "[WRN] POOL_NEAR_FULL: 1 pools nearfull" for our replicapool, but ceph df shows lo... | no gap recorded | `POOL_NEAR_FULL` |
-| `stor-007` | storage | After we rebuilt a worker node, ceph status shows "HEALTH_WARN clock skew detected on mon.b" (MON_CLOCK_SKE... | no gap recorded | `MON_CLOCK_SKEW` |
-| `stor-008` | storage | ceph status on our Rook cluster shows "HEALTH_WARN 2 daemons have recently crashed" (RECENT_CRASH). How do... | no gap recorded | `RECENT_CRASH` |
-| `stor-009` | storage | ceph health detail shows "[ERR] OSD_SCRUB_ERRORS: 2 scrub errors" and "[ERR] PG_DAMAGED: Possible data dama... | no gap recorded | `OSD_SCRUB_ERRORS`, `PG_DAMAGED` |
-| `stor-010` | storage | Our CephFS clients hang and ceph health detail shows "MDS_SLOW_REQUEST 1 MDSs report slow requests: mds.myf... | no gap recorded | `MDS_SLOW_REQUEST`, `DBG-ETCD` |
-| `stor-011` | storage | I need to run ceph status and ceph osd status on our Rook-Ceph cluster but there is no Ceph CLI on the node... | no gap recorded | `kn:k8s-node-kubelet#0` |
-| `stor-012` | storage | Three OSDs on different nodes of our Rook cluster keep flapping, and a colleague wants to purge all three a... | no gap recorded | `kn:k8s-node-kubelet#2` |
+| `stor-003` | storage | After a node reboot ceph status shows "Reduced data availability: 24 pgs inactive, 24 pgs peering" and "Deg... | Ceph status prose ('pgs inactive', 'pgs peering') is not read as PG_AVAILABILITY or PG_DEGRADED | none |
+| `stor-010` | storage | Our CephFS clients hang and ceph health detail shows "MDS_SLOW_REQUEST 1 MDSs report slow requests: mds.myf... | MDS_SLOW_REQUEST lacks the admin-socket ops dump step; an etcd playbook ranks second | `MDS_SLOW_REQUEST`, `DBG-ETCD` |
+| `stor-011` | storage | I need to run ceph status and ceph osd status on our Rook-Ceph cluster but there is no Ceph CLI on the node... | doc: the Rook toolbox (rook-ceph-tools) and how to run ceph commands | `kn:k8s-node-kubelet#0` |
+| `stor-012` | storage | Three OSDs on different nodes of our Rook cluster keep flapping, and a colleague wants to purge all three a... | doc: purging OSDs one at a time (osd-purge safety checks) | `kn:k8s-node-kubelet#2` |
 
 ### Out-of-scope questions that got an answer
 

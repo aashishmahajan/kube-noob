@@ -1,107 +1,162 @@
 # Golden questions: policy (policy-cel). Original text written from the official documentation named in
-# each item's source (license of the source docs: see the source repository). Added 2026-10-29 as misses: graded
-# against kube-noob by an independent agent before any is promoted to pass or abstain.
+# each item's source (license of the source docs: see the source repository). Added 2026-10-29 as misses; graded blind on 2026-10-29
+# (one grader, kube-noob's top three findings against the reference): items whose top finding gave the answer are
+# pass, out-of-scope items left unanswered are abstain, the rest stay misses with the gap named.
 - id: pcel-001
   technology: policy
   kind: error
-  question: 'After upgrading Kyverno to 1.19, every time I apply a ClusterPolicy I get: "Warning: kyverno.io/v1 ClusterPolicy is deprecated and will be removed in a future release; migrate to ValidatingPolicy, MutatingPolicy, GeneratingPolicy or ImageValidatingPolicy (policies.kyverno.io)". Does this break anything today, and how do I find which legacy policies are still in the cluster before the next upgrade?'
-  answer: 'It is a deprecation notice, not a failure: ClusterPolicy, Policy, CleanupPolicy and the old kyverno.io PolicyException are deprecated as of Kyverno 1.19 and are planned for removal in 1.20, so they need to be converted before that upgrade. To find what is left, use the kyverno_legacy_policies_total gauge (it drops back to 0 once every legacy policy is migrated or deleted, so alerting on sum(kyverno_legacy_policies_total) > 0 works) and look for LegacyPolicyPresent warning events with kubectl get events -n <kyverno-namespace> --field-selector reason=LegacyPolicyPresent. The kyverno_deprecated_api_requests_total counter only counts requests that create or update legacy policies, so it will not list ones that merely sit in the cluster.'
+  question: 'After upgrading Kyverno to 1.19, every time I apply a ClusterPolicy I get: "Warning: kyverno.io/v1 ClusterPolicy
+    is deprecated and will be removed in a future release; migrate to ValidatingPolicy, MutatingPolicy, GeneratingPolicy or
+    ImageValidatingPolicy (policies.kyverno.io)". Does this break anything today, and how do I find which legacy policies
+    are still in the cluster before the next upgrade?'
+  answer: 'It is a deprecation notice, not a failure: ClusterPolicy, Policy, CleanupPolicy and the old kyverno.io PolicyException
+    are deprecated as of Kyverno 1.19 and are planned for removal in 1.20, so they need to be converted before that upgrade.
+    To find what is left, use the kyverno_legacy_policies_total gauge (it drops back to 0 once every legacy policy is migrated
+    or deleted, so alerting on sum(kyverno_legacy_policies_total) > 0 works) and look for LegacyPolicyPresent warning events
+    with kubectl get events -n <kyverno-namespace> --field-selector reason=LegacyPolicyPresent. The kyverno_deprecated_api_requests_total
+    counter only counts requests that create or update legacy policies, so it will not list ones that merely sit in the cluster.'
   source:
     repo: kyverno/website
     path: src/content/docs/docs/guides/migration-to-cel.md
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/guides/migration-to-cel/#detecting-legacy-policy-usage'
+    url: https://kyverno.io/docs/guides/migration-to-cel/#detecting-legacy-policy-usage
   outOfScope: false
   status: miss
+  gap: 'doc: Kyverno 1.19 deprecation of ClusterPolicy and the legacy-policy metrics'
 - id: pcel-002
   technology: policy
   kind: howto
-  question: 'I have a ClusterPolicy generate rule that clones a registry secret into every new namespace, with synchronize: true, generateExisting: true and orphanDownstreamOnPolicyDelete: true. How do those settings and the clone block map to a GeneratingPolicy?'
-  answer: 'The three behaviour switches move under spec.evaluation of the GeneratingPolicy and keep their names there: synchronize, generateExisting and orphanDownstreamOnPolicyDelete. The fields that described the generated resource in the old rule (apiVersion, kind, name, namespace, data, clone, cloneList and foreach) no longer exist as separate settings; they are all written as CEL expressions inside the policy. The guide points to the GeneratingPolicy documentation for how those expressions are written.'
+  question: 'I have a ClusterPolicy generate rule that clones a registry secret into every new namespace, with synchronize:
+    true, generateExisting: true and orphanDownstreamOnPolicyDelete: true. How do those settings and the clone block map to
+    a GeneratingPolicy?'
+  answer: 'The three behaviour switches move under spec.evaluation of the GeneratingPolicy and keep their names there: synchronize,
+    generateExisting and orphanDownstreamOnPolicyDelete. The fields that described the generated resource in the old rule
+    (apiVersion, kind, name, namespace, data, clone, cloneList and foreach) no longer exist as separate settings; they are
+    all written as CEL expressions inside the policy. The guide points to the GeneratingPolicy documentation for how those
+    expressions are written.'
   source:
     repo: kyverno/website
     path: src/content/docs/docs/guides/migration-to-cel.md
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/guides/migration-to-cel/#generate-rule'
+    url: https://kyverno.io/docs/guides/migration-to-cel/#generate-rule
   outOfScope: false
   status: miss
+  gap: 'doc: Kyverno CEL migration of verifyImages'
 - id: pcel-003
   technology: policy
   kind: howto
-  question: 'My ClusterPolicy has validationFailureAction: Enforce, a failureActionOverrides block that keeps one namespace in Audit, and another policy with emitWarning turned on. How do I express these in a ValidatingPolicy?'
-  answer: 'In a ValidatingPolicy the failure behaviour is set with spec.validationActions: the migration guide''s example turns Enforce into validationActions: [Deny], and emitWarning corresponds to the Warn action in that same field. failureActionOverrides (like allowExistingViolations) has no equivalent field, so the guide says to use policy exceptions for those per-namespace or legacy-resource carve-outs. The lowercase enforce/audit spellings in the old field already produce a deprecation warning in 1.19.'
+  question: 'My ClusterPolicy has validationFailureAction: Enforce, a failureActionOverrides block that keeps one namespace
+    in Audit, and another policy with emitWarning turned on. How do I express these in a ValidatingPolicy?'
+  answer: 'In a ValidatingPolicy the failure behaviour is set with spec.validationActions: the migration guide''s example
+    turns Enforce into validationActions: [Deny], and emitWarning corresponds to the Warn action in that same field. failureActionOverrides
+    (like allowExistingViolations) has no equivalent field, so the guide says to use policy exceptions for those per-namespace
+    or legacy-resource carve-outs. The lowercase enforce/audit spellings in the old field already produce a deprecation warning
+    in 1.19.'
   source:
     repo: kyverno/website
     path: src/content/docs/docs/guides/migration-to-cel.md
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/guides/migration-to-cel/#policy-settings'
+    url: https://kyverno.io/docs/guides/migration-to-cel/#policy-settings
   outOfScope: false
   status: miss
+  gap: 'doc: validationFailureAction to validationActions mapping'
 - id: pcel-004
   technology: policy
   kind: howto
-  question: 'My old ClusterPolicy has a context entry that reads the allowed-registry ConfigMap in kube-system and another that lists Deployments with an apiCall, both processed with JMESPath. How do I do the same lookups in a ValidatingPolicy, and can several policies share one cached result?'
-  answer: 'Declare named entries under spec.variables and call the Kyverno resource library: resource.Get("v1", "configmaps", "kube-system", "allowed-registry") returns the ConfigMap (read values such as .data["registry"] from it), and resource.List("apps/v1", "deployments", object.metadata.namespace).items returns a list you can filter with CEL macros like exists() or map(). Calls to external endpoints use http.Get() or http.Post(). To cache a result and share it between policies, define a GlobalContextEntry (kyverno.io/v2) and read it with globalContext.Get("<entry-name>", "").'
+  question: My old ClusterPolicy has a context entry that reads the allowed-registry ConfigMap in kube-system and another
+    that lists Deployments with an apiCall, both processed with JMESPath. How do I do the same lookups in a ValidatingPolicy,
+    and can several policies share one cached result?
+  answer: 'Declare named entries under spec.variables and call the Kyverno resource library: resource.Get("v1", "configmaps",
+    "kube-system", "allowed-registry") returns the ConfigMap (read values such as .data["registry"] from it), and resource.List("apps/v1",
+    "deployments", object.metadata.namespace).items returns a list you can filter with CEL macros like exists() or map().
+    Calls to external endpoints use http.Get() or http.Post(). To cache a result and share it between policies, define a GlobalContextEntry
+    (kyverno.io/v2) and read it with globalContext.Get("<entry-name>", "").'
   source:
     repo: kyverno/website
     path: src/content/docs/docs/policy-types/cel-libraries.mdx
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/policy-types/cel-libraries/#resource-library'
+    url: https://kyverno.io/docs/policy-types/cel-libraries/#resource-library
   outOfScope: false
   status: miss
+  gap: 'doc: CEL context lookups (resource.Get, resource.List, globalContext.Get)'
 - id: pcel-005
   technology: policy
   kind: howto
-  question: 'I am converting a ClusterPolicy mutate rule that uses patchStrategicMerge, a second rule with patchesJson6902, and a third with mutateExisting plus targets. What are the MutatingPolicy equivalents?'
-  answer: 'patchStrategicMerge is not supported and has to be rewritten as patchType: ApplyConfiguration or patchType: JSONPatch, while patchesJson6902 maps directly to patchType: JSONPatch. mutateExisting becomes spec.evaluation.mutateExisting.enabled, and the old targets list is expressed with spec.matchConstraints or spec.targetMatchConstraints. Loops written with foreach are replaced by CEL comprehensions such as all(), exists() or exists_one().'
+  question: I am converting a ClusterPolicy mutate rule that uses patchStrategicMerge, a second rule with patchesJson6902,
+    and a third with mutateExisting plus targets. What are the MutatingPolicy equivalents?
+  answer: 'patchStrategicMerge is not supported and has to be rewritten as patchType: ApplyConfiguration or patchType: JSONPatch,
+    while patchesJson6902 maps directly to patchType: JSONPatch. mutateExisting becomes spec.evaluation.mutateExisting.enabled,
+    and the old targets list is expressed with spec.matchConstraints or spec.targetMatchConstraints. Loops written with foreach
+    are replaced by CEL comprehensions such as all(), exists() or exists_one().'
   source:
     repo: kyverno/website
     path: src/content/docs/docs/guides/migration-to-cel.md
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/guides/migration-to-cel/#mutate-rule'
+    url: https://kyverno.io/docs/guides/migration-to-cel/#mutate-rule
   outOfScope: false
   status: miss
+  gap: 'doc: Kyverno CEL migration of generate rules'
 - id: pcel-006
   technology: policy
   kind: howto
-  question: 'My ClusterPolicy verifyImages rule uses imageReferences, skipImageReferences, a cosign attestor, mutateDigest, verifyDigest, required and imageRegistryCredentials. Where do these go in an ImageValidatingPolicy?'
-  answer: 'imageReferences becomes spec.matchImageReferences (skipImageReferences also goes there, expressed with CEL), and attestors move to spec.attestors with the signing type given by a cosign or notary entry under each attestor. mutateDigest, verifyDigest and required move under spec.validationConfigurations, registry credentials become spec.credentials, and attestations are split between spec.attestations and spec.validations. Custom image extractors are replaced by spec.images.'
+  question: My ClusterPolicy verifyImages rule uses imageReferences, skipImageReferences, a cosign attestor, mutateDigest,
+    verifyDigest, required and imageRegistryCredentials. Where do these go in an ImageValidatingPolicy?
+  answer: imageReferences becomes spec.matchImageReferences (skipImageReferences also goes there, expressed with CEL), and
+    attestors move to spec.attestors with the signing type given by a cosign or notary entry under each attestor. mutateDigest,
+    verifyDigest and required move under spec.validationConfigurations, registry credentials become spec.credentials, and
+    attestations are split between spec.attestations and spec.validations. Custom image extractors are replaced by spec.images.
   source:
     repo: kyverno/website
     path: src/content/docs/docs/guides/migration-to-cel.md
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/guides/migration-to-cel/#verify-images-rule'
+    url: https://kyverno.io/docs/guides/migration-to-cel/#verify-images-rule
   outOfScope: false
   status: miss
+  gap: 'doc: Kyverno CEL migration of mutate rules'
 - id: pcel-007
   technology: policy
   kind: howto
-  question: 'We run a ClusterCleanupPolicy that deletes completed Jobs every night, using schedule, match, exclude and a context lookup. Kyverno says the legacy cleanup kinds go away in 1.20. How do I convert it to a DeletingPolicy?'
-  answer: 'Create a policies.kyverno.io DeletingPolicy: schedule and deletionPropagationPolicy keep the same field names, match becomes spec.matchConstraints plus spec.matchConditions for finer filtering, exclude becomes spec.matchConstraints.excludeResourceRules, and context becomes spec.variables. The legacy cleanup policies are deprecated in 1.19 and slated for removal in 1.20, so convert them before upgrading.'
+  question: We run a ClusterCleanupPolicy that deletes completed Jobs every night, using schedule, match, exclude and a context
+    lookup. Kyverno says the legacy cleanup kinds go away in 1.20. How do I convert it to a DeletingPolicy?
+  answer: 'Create a policies.kyverno.io DeletingPolicy: schedule and deletionPropagationPolicy keep the same field names,
+    match becomes spec.matchConstraints plus spec.matchConditions for finer filtering, exclude becomes spec.matchConstraints.excludeResourceRules,
+    and context becomes spec.variables. The legacy cleanup policies are deprecated in 1.19 and slated for removal in 1.20,
+    so convert them before upgrading.'
   source:
     repo: kyverno/website
     path: src/content/docs/docs/guides/migration-to-cel.md
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/guides/migration-to-cel/#cleanuppolicy'
+    url: https://kyverno.io/docs/guides/migration-to-cel/#cleanuppolicy
   outOfScope: false
   status: miss
+  gap: 'doc: CleanupPolicy to DeletingPolicy migration'
 - id: pcel-008
   technology: policy
   kind: error
-  question: 'After replacing a ClusterPolicy with a ValidatingPolicy, my old kyverno.io PolicyException (exceptions: policyName: disallow-host-namespaces, ruleNames: [host-namespaces], plus a match on the pod name) no longer exempts the pod. How do I rewrite the exception?'
-  answer: 'The legacy kyverno.io PolicyException has to be replaced by a policies.kyverno.io PolicyException, which is the one that works with the CEL policy types. Reference the policy under spec.policyRefs with its name and kind (for example kind: ValidatingPolicy); there is no ruleNames equivalent because CEL policies do not have named rules; and turn the old match, conditions and podSecurity into CEL spec.matchConditions such as object.metadata.name.startsWith(''important-tool''). The legacy exception kind is itself deprecated in 1.19 and removed in 1.20.'
+  question: 'After replacing a ClusterPolicy with a ValidatingPolicy, my old kyverno.io PolicyException (exceptions: policyName:
+    disallow-host-namespaces, ruleNames: [host-namespaces], plus a match on the pod name) no longer exempts the pod. How do
+    I rewrite the exception?'
+  answer: 'The legacy kyverno.io PolicyException has to be replaced by a policies.kyverno.io PolicyException, which is the
+    one that works with the CEL policy types. Reference the policy under spec.policyRefs with its name and kind (for example
+    kind: ValidatingPolicy); there is no ruleNames equivalent because CEL policies do not have named rules; and turn the old
+    match, conditions and podSecurity into CEL spec.matchConditions such as object.metadata.name.startsWith(''important-tool'').
+    The legacy exception kind is itself deprecated in 1.19 and removed in 1.20.'
   source:
     repo: kyverno/website
     path: src/content/docs/docs/guides/migration-to-cel.md
     commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
-    url: 'https://kyverno.io/docs/guides/migration-to-cel/#policyexception'
+    url: https://kyverno.io/docs/guides/migration-to-cel/#policyexception
   outOfScope: false
   status: miss
+  gap: 'doc: legacy PolicyException versus the policies.kyverno.io form (ruleNames has no equivalent)'
 - id: pcel-009
   technology: policy
   kind: out-of-scope
-  question: 'I want to write my own Kyverno-style admission controller in Go with controller-runtime that reconciles custom policy CRDs and serves a validating webhook. What project layout and reconciler structure should I use?'
-  answer: 'This is a software-development question about authoring a new controller in Go, not a question about troubleshooting or migrating Kyverno policies, so it is outside what this tool covers. The Kubebuilder and controller-runtime documentation are the right places for it.'
+  question: I want to write my own Kyverno-style admission controller in Go with controller-runtime that reconciles custom
+    policy CRDs and serves a validating webhook. What project layout and reconciler structure should I use?
+  answer: This is a software-development question about authoring a new controller in Go, not a question about troubleshooting
+    or migrating Kyverno policies, so it is outside what this tool covers. The Kubebuilder and controller-runtime documentation
+    are the right places for it.
   source: {}
   outOfScope: true
   status: miss

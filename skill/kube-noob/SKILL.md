@@ -56,6 +56,7 @@ user confirms) in its data folder, `KUBE_NOOB_DATA_DIR` or else `~/.local/share/
 | "Is this a known OpenShift bug?" | `known_issues` with the error text and the cluster version |
 | "What could go wrong updating OpenShift from X to Y?" | `upgrade_risks` with `current` and `target` (x.y.z) |
 | A denied request (Pod Security, SCC, Kyverno, Gatekeeper, VAP, RHACS, quota, RBAC) | `explain_denial` |
+| Legacy Kyverno policies to move to the CEL types (Kyverno 1.20 removes them) | `policy_migrate_check` with `--text-file policies=...` |
 | "Can pod A reach pod B?" | `check_network_policy` |
 | A design or review request | `run_protocol` (Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team) |
 | A how-to or concept question | `search_knowledge`, then `get_knowledge` for the cited chunk |

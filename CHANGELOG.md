@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `kube-noob policy migrate-check` (G115; and the read-only MCP tool `policy_migrate_check`): lints legacy Kyverno policies
+  (kyverno.io ClusterPolicy, Policy, ClusterCleanupPolicy, CleanupPolicy, PolicyException; removed in Kyverno 1.20)
+  rule by rule against the CEL policy types. Each finding is direct, inverted, manual or blocked, with the field
+  path, target kind, reason and the Kyverno documentation section at a pinned commit. Rules that map directly get a
+  draft CEL policy and a `kyverno test` skeleton that runs the legacy rule and the draft on the same good and bad
+  resources. `--fail-on manual|blocked` gates CI; `-o DIR` writes the drafts and fixtures. Nothing is applied or
+  rewritten.
+- Measured on kyverno/policies' own migration record (462 legacy samples): no rule called blocked in any of the 172
+  that upstream converted, target kind right in 462/462, and draft scope within upstream's in 94/94
+  (`scripts/eval_kyverno_migrate.py`).
 - Safety contract (G112, G113): `docs/safety-contract.md` is generated from the code by `scripts/safety_contract.py`. It lists every
   MCP tool with `read_only`, `open_world` and tier, the verbs and resources the cluster backend can use (read from its
   syntax tree), every rule of the Helm chart's RBAC with the values that render it, what is off by default, every

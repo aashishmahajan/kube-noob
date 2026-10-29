@@ -663,6 +663,25 @@ kube-noob vuln threat -f k8s/ --platform openshift --version 4.20
 kube-noob vuln threat -f k8s/ -r trivy.json --format json
 ```
 
+### Move off legacy Kyverno policies before 1.20
+
+Kyverno 1.19 deprecated ClusterPolicy, Policy, the cleanup
+policies and the legacy PolicyException, and 1.20 removes them. `kube-noob policy migrate-check -f policies/` reads
+your policies and says, rule by rule, what moves to the CEL types and how. A rule is `direct` when a
+`validationFailureAction: Enforce` becomes `validationActions: [Deny]` or a label pattern becomes a CEL check. It is
+`inverted` when a `deny` must be rewritten as the allowed case. It is `manual` for JMESPath, API lookups, anchors or
+strategic merge patches, and `blocked` when Kyverno documents no CEL equivalent, such as `sum()` or manifest
+validation. Each finding points at the line and the Kyverno documentation section. With `-o migration/` it writes a
+draft CEL policy for each rule that maps directly, plus a `kyverno test` skeleton that runs the old rule and the draft
+on the same good and bad resources; run `kyverno test migration/` and keep a draft only when both pass. In CI,
+`--fail-on blocked` stops a pipeline that still depends on something CEL cannot do. Nothing is applied: kube-noob
+lints, your Kyverno CLI proves.
+
+```bash
+kube-noob policy migrate-check -f policies/
+kube-noob policy migrate-check -f policies/ -o migration/ --fail-on blocked
+```
+
 ### What changed since yesterday? The daily drift and policy report
 
 `posture snapshot` records every watched object (workloads, Services, Routes, Ingresses, NetworkPolicies, RBAC,

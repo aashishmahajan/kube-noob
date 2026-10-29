@@ -241,6 +241,13 @@ Turn audit rules into admission policies. Generate ValidatingAdmissionPolicy (wi
 - `rules` (array): Rule ids such as KN-S001 (default: every rule).
 - `version` (null/string): OpenShift (4.20) or Kubernetes (1.33)
 
+## policy_migrate_check
+
+Check legacy Kyverno policies for their CEL form. Kyverno 1.20 removes the kyverno.io ClusterPolicy, Policy, CleanupPolicy and legacy PolicyException. Lint them rule by rule against the policies.kyverno.io types: direct, inverted (a deny or a negated pattern: the CEL validation must state what is allowed), manual (JMESPath, API calls, anchors, strategic merge patches) or blocked (no documented CEL equivalent), each with the field path, the target kind, the reason and the Kyverno documentation section (pinned commit). Rules that map directly get a draft CEL policy and a kyverno test fixture skeleton to prove it. Nothing is applied or rewritten.
+
+- `drafts` (boolean): Include a draft CEL policy for each rule whose fields all map directly, and a kyverno test fixture skeleton per policy (good and bad resources run against the legacy rule and the draft).
+- `policies`* (string): One or more legacy Kyverno policies (YAML): kyverno.io ClusterPolicy, Policy, ClusterCleanupPolicy, CleanupPolicy or PolicyException. Other documents are listed and skipped; Secrets are not read.
+
 ## posture_report
 
 Latest drift and policy report. The newest daily report in this install's data folder: objects added, removed and changed since the previous snapshot (with the fields that changed), findings new and fixed, and open findings by namespace, owner and rule. Local data only.
