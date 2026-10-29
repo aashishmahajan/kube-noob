@@ -1406,20 +1406,50 @@ WORKLOAD_RESOURCES = frozenset(
 )
 
 
+WRITE_VERBS = frozenset({"create", "patch", "update", "*"})
+
+
+def _writes(rr: dict[str, Any], resource: str) -> bool:
+    return resource in {str(x) for x in rr.get("resources") or []} and bool(
+        {str(v) for v in rr.get("verbs") or []} & WRITE_VERBS
+    )
+
+
 @rule(
     "KN-S017",
     "RBAC privilege-escalation paths",
     Stage.AUDIT,
     "rbac",
     Severity.HIGH,
-    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy, pod exec, ephemeral containers and "
-    "workload creation unless essential; where they are, enforce Pod Security restricted in that namespace.",
-    "These permissions let a subject obtain more privileges than it was granted.",
-    ("k8s-rbac-good-practices",),
+    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy, pod exec, ephemeral containers, "
+    "ControllerRevision writes and workload creation unless essential; where they are, enforce Pod Security "
+    "restricted in that namespace, and run kube-controller-manager v1.34.12, v1.35.9, v1.36.5, v1.37.1 or later.",
+    "These permissions let a subject obtain more privileges than it was granted. Only the StatefulSet and DaemonSet "
+    "controllers need to write ControllerRevisions (the built-in edit and admin roles do not grant it): with write "
+    "access to StatefulSets too, CVE-2026-2270 (kube-controller-manager up to v1.34.11, v1.35.8, v1.36.4 and "
+    "v1.37.0) let a namespace user create pods in other namespaces.",
+    ("k8s-rbac-good-practices", "k8s-cve-2026-2270", "k8s-rbac-bootstrap-policy"),
 )
 def _s017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d in ctx.by_kind("Role", "ClusterRole"):
-        for i, rr in _rules_of(d):
+        role_rules = _rules_of(d)
+        writes_sts = any(_writes(x, "statefulsets") for _, x in role_rules)
+        for i, rr in role_rules:
+            if _writes(rr, "controllerrevisions"):
+                pair = (
+                    "this role also writes StatefulSets, the pair CVE-2026-2270 needs"
+                    if writes_sts
+                    else "with write access to StatefulSets from any role, this is CVE-2026-2270"
+                )
+                yield r.finding(
+                    d,
+                    ("rules", i, "resources"),
+                    f"Can write ControllerRevisions: {pair} (kube-controller-manager up to v1.34.11, v1.35.8, v1.36.4 "
+                    "and v1.37.0; fixed in v1.34.12, v1.35.9, v1.36.5 and v1.37.1), which lets a namespace user "
+                    "create pods in other namespaces. Only controllers need to write ControllerRevisions.",
+                    severity=Severity.HIGH if writes_sts else Severity.MEDIUM,
+                )
+        for i, rr in role_rules:
             verbs = {str(v) for v in rr.get("verbs") or []}
             resources = {str(x) for x in rr.get("resources") or []}
             if verbs & ESCALATION_VERBS:
@@ -1684,6 +1714,202 @@ def _s024(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             ),
             severity=Severity.CRITICAL if webhook and rce else Severity.HIGH,
         )
+
+
+# Characters a shell or PowerShell treats as syntax. A volume path (a subPath, a local PersistentVolume path) never
+# needs them; RE2 too (kube_noob.generate.policies puts it into CEL), with quotes and the backtick as \x escapes.
+COMMAND_META = r"[$;&|<>\x60\x27\x22\r\n]"
+_COMMAND_META = re.compile(COMMAND_META)
+
+
+def _meta_chars(value: str) -> str:
+    """The shell characters in ``value``, quoted: "the shell character(s) '$' ';'"."""
+    return "the shell character(s) " + " ".join(sorted({repr(ch) for ch in value if _COMMAND_META.match(ch)}))
+
+
+def _targets_windows(pt: PodTemplate) -> bool:
+    if str(get_path(pt.spec, ("os", "name")) or "").lower() == "windows":
+        return True
+    sel = pt.spec.get("nodeSelector")
+    if isinstance(sel, dict) and str(sel.get("kubernetes.io/os", "")).lower() == "windows":
+        return True
+    required = get_path(pt.spec, ("affinity", "nodeAffinity", "requiredDuringSchedulingIgnoredDuringExecution"))
+    terms = required.get("nodeSelectorTerms") if isinstance(required, dict) else None
+    for term in terms if isinstance(terms, list) else []:
+        exprs = term.get("matchExpressions") if isinstance(term, dict) else None
+        for e in exprs if isinstance(exprs, list) else []:
+            if isinstance(e, dict) and e.get("key") == "kubernetes.io/os" and "windows" in (e.get("values") or []):
+                return True
+    return False
+
+
+@rule(
+    "KN-S025",
+    "volumeMount subPath carries shell or PowerShell characters",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Use a plain relative path for subPath (letters, digits, '-', '_', '.', '/'), and run Windows nodes with kubelet "
+    "v1.24.17, v1.25.13, v1.26.8, v1.27.5, v1.28.1 or later.",
+    "CVE-2023-3676 (CVSS 8.8; kubelet up to v1.24.16, v1.25.12, v1.26.7, v1.27.4 and v1.28.0, fixed in v1.24.17, "
+    "v1.25.13, v1.26.8, v1.27.5 and v1.28.1): on Windows nodes kubelet put a pod's subPath into a PowerShell "
+    "command, so anyone who could create a pod ran commands as SYSTEM on the node. The fix passes the path in an "
+    "environment variable; the feed names pod create events with embedded PowerShell commands as the sign of "
+    "exploitation. A subPath is a path inside the volume and never needs these characters.",
+    ("k8s-cve-2023-3676", "k8s-fix-cve-2023-3676"),
+)
+def _s025(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt, c in _containers(ctx):
+        mounts = c.container.get("volumeMounts")
+        windows = _targets_windows(pt)
+        for i, m in enumerate(mounts if isinstance(mounts, list) else []):
+            sub = m.get("subPath") if isinstance(m, dict) else None
+            if not isinstance(sub, str) or not _COMMAND_META.search(sub):
+                continue
+            where = "a Windows node" if windows else "any Windows node it lands on"
+            yield r.finding(
+                d,
+                (*c.path, "volumeMounts", i, "subPath"),
+                f"Container '{c.name}' mounts '{m.get('name')}' with subPath {sub!r}, which carries "
+                f"{_meta_chars(sub)}: the CVE-2023-3676 pattern, where kubelet before v1.24.17, v1.25.13, v1.26.8, "
+                f"v1.27.5 and v1.28.1 ran the subPath through PowerShell as SYSTEM on {where}. Use a plain relative "
+                "path.",
+                severity=Severity.HIGH if windows else Severity.MEDIUM,
+            )
+
+
+# A ConfigMap key that names a credential (DB_PASSWORD, redis.password, api-key, client_secret, credentials), and a
+# line of a config file in a value that sets one (password=..., "token": "..."). A key that ends in plain "secret"
+# usually names a Secret, so it is left out. RE2 too: kube_noob.generate.policies puts both into CEL.
+CREDENTIAL_NAME = (
+    r"(?:password|passwd|token|api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|client[-_]?secret|"
+    r"credentials?)"
+)
+CONFIGMAP_CREDENTIAL_KEY = r"(?i)^(?:[a-z0-9]+[._-])*" + CREDENTIAL_NAME + r"$"
+CONFIGMAP_CREDENTIAL_LINE = (
+    r"(?im)^[ \t]*(?:export[ \t]+)?[\x22\x27]?[a-z0-9_.-]*" + CREDENTIAL_NAME + r"[\x22\x27]?[ \t]*[=:][ \t]*"
+    r"[\x22\x27]?[^\s$<{*#%\x22\x27-]"
+)
+_CM_KEY = re.compile(CONFIGMAP_CREDENTIAL_KEY[:-1] + r"\Z")
+_CM_LINE = re.compile(CONFIGMAP_CREDENTIAL_LINE)
+
+
+@rule(
+    "KN-S026",
+    "Credential stored in a ConfigMap",
+    Stage.AUDIT,
+    "secrets",
+    Severity.HIGH,
+    "Move the value into a Secret (created outside Git: an external secret store or Sealed Secrets) and mount or "
+    "reference it; in a Helm chart, render credentials into a Secret template, never into a ConfigMap.",
+    "A ConfigMap does not provide secrecy or encryption: it is not covered by encryption of Secrets at rest, and the "
+    "built-in view role reads ConfigMaps but not Secrets, so everyone with read access to the namespace reads the "
+    "credential. Flags a key that names a credential with a literal value, a URL with a password, a private key, an "
+    "access key id or a token in any value, and a password=... or token: ... line in a config file value.",
+    ("k8s-configmap", "k8s-secrets-good-practices", "k8s-rbac-bootstrap-policy"),
+)
+def _s026(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("ConfigMap"):
+        data = d.data.get("data") if isinstance(d.data, dict) else None
+        if not isinstance(data, dict):
+            continue
+        for key in sorted(data, key=str):
+            value = "" if data[key] is None else str(data[key])
+            if _CM_KEY.match(str(key)) and not _is_reference(value):
+                why = "names a credential and holds a literal value"
+            elif _EMBEDDED_SECRET.search(value):
+                why = "embeds a credential (a URL password, a private key, an access key id or a token)"
+            elif _CM_LINE.search(value):
+                why = "sets a credential on a line of the file it holds (password=..., token: ...)"
+            else:
+                continue
+            yield r.finding(
+                d,
+                ("data", str(key)),
+                f"ConfigMap key '{key}' {why}; a ConfigMap is not secret (readable with the view role, not "
+                "encrypted at rest). Move it to a Secret.",
+            )
+
+
+@rule(
+    "KN-S027",
+    "Legacy ServiceAccount token Secret",
+    Stage.AUDIT,
+    "secrets",
+    Severity.MEDIUM,
+    "Delete the Secret and get short-lived tokens instead: a projected serviceAccountToken volume in the pod, or the "
+    "TokenRequest API (kubectl create token) for a client outside the cluster.",
+    "A Secret of type kubernetes.io/service-account-token is a legacy mechanism that holds a long-lived, non-expiring "
+    "ServiceAccount token; the Kubernetes docs say to create one only when the TokenRequest API cannot be used and "
+    "the exposure of a non-expiring token in a readable API object is acceptable. Anyone who can read Secrets in the "
+    "namespace can act as that ServiceAccount until the Secret is deleted.",
+    ("k8s-secret-sa-token", "k8s-rbac-good-practices"),
+)
+def _s027(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Secret"):
+        if isinstance(d.data, dict) and d.data.get("type") == "kubernetes.io/service-account-token":
+            sa = get_path(d.data, ("metadata", "annotations", "kubernetes.io/service-account.name"))
+            yield r.finding(
+                d,
+                ("type",),
+                f"Secret is a legacy token Secret for ServiceAccount '{sa or '?'}': the token never expires and anyone "
+                "who can read Secrets in the namespace can use it. Use a projected serviceAccountToken volume or "
+                "kubectl create token.",
+            )
+
+
+# Subjects that are everyone of a kind, with what a binding to them means and the severity of a cluster-wide grant.
+_ANYONE = "anyone who can reach the API server"
+EVERYONE_SUBJECTS: dict[tuple[str, str], tuple[str, Severity]] = {
+    ("Group", "system:unauthenticated"): (f"every unauthenticated request, {_ANYONE}", Severity.CRITICAL),
+    ("User", "system:anonymous"): (f"anonymous requests, {_ANYONE}", Severity.CRITICAL),
+    ("Group", "system:authenticated"): ("every user and every ServiceAccount of every namespace", Severity.HIGH),
+    ("Group", "system:serviceaccounts"): ("every ServiceAccount of every namespace", Severity.HIGH),
+    ("Group", "system:authenticated:oauth"): ("every user who logs in through OpenShift OAuth", Severity.HIGH),
+}
+RBAC_DEFAULTS_LABEL = ("kubernetes.io/bootstrapping", "rbac-defaults")
+
+
+@rule(
+    "KN-S028",
+    "RBAC binding grants a role to everyone",
+    Stage.AUDIT,
+    "rbac",
+    Severity.HIGH,
+    "Bind the role to the ServiceAccounts, users or groups that need it, never to system:unauthenticated, "
+    "system:anonymous, system:authenticated or system:serviceaccounts.",
+    "The Kubernetes RBAC good practices ask to review bindings for the system:unauthenticated group and remove them, "
+    "as they give access to anyone who can contact the API server at a network level. system:authenticated is every "
+    "user and every ServiceAccount token in the cluster (a token stolen from any pod works), and "
+    "system:serviceaccounts every ServiceAccount of every namespace. The built-in bindings (system: names, label "
+    "kubernetes.io/bootstrapping: rbac-defaults) are left alone.",
+    ("k8s-rbac-good-practices", "k8s-rbac-subjects"),
+)
+def _s028(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    key, value = RBAC_DEFAULTS_LABEL
+    for d in ctx.by_kind("RoleBinding", "ClusterRoleBinding"):
+        labels = get_path(d.data, ("metadata", "labels"))
+        if d.name.startswith("system:") or (isinstance(labels, dict) and labels.get(key) == value):
+            continue
+        role = get_path(d.data, ("roleRef", "name"))
+        subjects = get_path(d.data, ("subjects",))
+        for i, s in enumerate(subjects if isinstance(subjects, list) else []):
+            if not isinstance(s, dict):
+                continue
+            hit = EVERYONE_SUBJECTS.get((str(s.get("kind")), str(s.get("name"))))
+            if hit is None:
+                continue
+            who, sev = hit
+            if d.kind == "RoleBinding":
+                sev = Severity(sev - 1)
+            scope = "in every namespace" if d.kind == "ClusterRoleBinding" else f"in namespace {ctx.ns(d)}"
+            yield r.finding(
+                d,
+                ("subjects", i),
+                f"{d.kind} grants {get_path(d.data, ('roleRef', 'kind')) or 'role'} '{role}' {scope} to "
+                f"{s.get('kind')} {s.get('name')}: {who}.",
+                severity=sev,
+            )
 
 
 # =====================================================================================================
@@ -2039,6 +2265,105 @@ def _n010(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             )
 
 
+def ingress_targets_nginx(d: Document) -> bool:
+    """The Ingress names ingress-nginx: class 'nginx' (field or annotation) or an nginx.ingress.kubernetes.io/ key."""
+    ann = get_path(d.data, ("metadata", "annotations"))
+    ann = ann if isinstance(ann, dict) else {}
+    spec = get_path(d.data, ("spec",))
+    cls = spec.get("ingressClassName") if isinstance(spec, dict) else None
+    return (
+        (cls is not None and str(cls).strip() == INGRESS_NGINX_CLASS)
+        or str(ann.get("kubernetes.io/ingress.class", "")).strip() == INGRESS_NGINX_CLASS
+        or any(str(k).startswith(INGRESS_NGINX_ANNOTATION_PREFIX) for k in ann)
+    )
+
+
+def ingress_names_no_class(d: Document) -> bool:
+    ann = get_path(d.data, ("metadata", "annotations"))
+    spec = get_path(d.data, ("spec",))
+    return not (isinstance(spec, dict) and "ingressClassName" in spec) and not (
+        isinstance(ann, dict) and "kubernetes.io/ingress.class" in ann
+    )
+
+
+@rule(
+    "KN-N011",
+    "Ingress path type ImplementationSpecific on ingress-nginx",
+    Stage.AUDIT,
+    "network",
+    Severity.HIGH,
+    "Use pathType Prefix or Exact (ingress-nginx validates those paths when strict-validate-path-type is true, the "
+    "default), and run ingress-nginx v1.13.7, v1.14.3 or later; a regular-expression path (use-regex) can only be "
+    "ImplementationSpecific, so upgrade before keeping one. Plan the move to a Gateway API implementation.",
+    "CVE-2026-24512 (ingress-nginx before v1.13.7 and v1.14.3): a rules.http.paths.path value injected nginx "
+    "configuration into the controller, which can read every Secret in the cluster. Before upgrading, the advisory's "
+    "mitigation is a validating admission controller that rejects Ingress resources with the ImplementationSpecific "
+    "path type, the one path type whose paths ingress-nginx does not validate. An Ingress that names no class is "
+    "served by the cluster's default IngressClass, which may be ingress-nginx (not on OpenShift, whose router serves "
+    "it).",
+    ("k8s-cve-2026-24512", "ingress-nginx-configmap", "ingress-nginx-retired"),
+)
+def _n011(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Ingress"):
+        if ingress_targets_nginx(d):
+            sev, who = Severity.HIGH, "ingress-nginx serves this Ingress"
+        elif ingress_names_no_class(d) and not ctx.is_openshift:
+            sev = Severity.LOW
+            who = (
+                "the Ingress names no class, so the cluster's default IngressClass serves it (if that is ingress-nginx)"
+            )
+        else:
+            continue
+        for i, rule_ in enumerate(get_path(d.data, ("spec", "rules")) or []):
+            paths = get_path(rule_, ("http", "paths")) if isinstance(rule_, dict) else None
+            for j, p in enumerate(paths if isinstance(paths, list) else []):
+                if isinstance(p, dict) and p.get("pathType") == "ImplementationSpecific":
+                    yield r.finding(
+                        d,
+                        ("spec", "rules", i, "http", "paths", j, "pathType"),
+                        f"Path {p.get('path', '')!r} has pathType ImplementationSpecific and {who}: CVE-2026-24512 "
+                        "(fixed in v1.13.7 and v1.14.3) injected nginx configuration through such paths, and the "
+                        "advisory's mitigation is to reject the ImplementationSpecific path type at admission. Use "
+                        "Prefix or Exact.",
+                        severity=sev,
+                    )
+
+
+def _selects_something(selector: dict[str, Any]) -> bool:
+    return bool(selector.get("matchLabels") or selector.get("matchExpressions"))
+
+
+@rule(
+    "KN-N012",
+    "NetworkPolicy selects no pod in this bundle",
+    Stage.AUDIT,
+    "network",
+    Severity.MEDIUM,
+    "Make spec.podSelector match the pod template labels of the workloads the policy is for (or use podSelector: {} "
+    "for every pod in the namespace).",
+    "A NetworkPolicy applies only to the pods its podSelector selects. One that selects none of the namespace's pods "
+    "(often a label typo) protects nothing, while the namespace still looks covered (KN-N001 passes): the pods it "
+    "was written for accept traffic from every pod.",
+    ("k8s-networkpolicy",),
+)
+def _n012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    by_ns: dict[str, list[dict[str, str]]] = {}
+    for d, pt in ctx.workloads():
+        by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
+    for d in ctx.by_kind("NetworkPolicy"):
+        sel = get_path(d.data, ("spec", "podSelector"))
+        pods = by_ns.get(ctx.ns(d))
+        if not isinstance(sel, dict) or not _selects_something(sel) or not pods:
+            continue
+        if not any(selector_matches(sel, labels) for labels in pods):
+            yield r.finding(
+                d,
+                ("spec", "podSelector"),
+                f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
+                f"namespace {ctx.ns(d)}: this policy protects nothing.",
+            )
+
+
 # =====================================================================================================
 # AUDIT - storage
 # =====================================================================================================
@@ -2228,6 +2553,65 @@ def _st005(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, path, spec in _pvc_like(ctx):
         if not get_path(spec, ("resources", "requests", "storage")):
             yield r.finding(d, (*path, "resources"), "spec.resources.requests.storage is missing.")
+
+
+# A '..' path segment ('/', '\' and '#', the NFS and SMB volumeHandle separator, delimit segments). RE2 too.
+PATH_TRAVERSAL = r"(^|[/\\#])\.\.([/\\#]|$)"
+_PATH_TRAVERSAL = re.compile(PATH_TRAVERSAL[:-2] + r"\Z)")
+# CSI drivers whose subDir traversal deleted directories outside the share: driver -> (CVE, project, fixed release).
+CSI_SUBDIR_TRAVERSAL: dict[str, tuple[str, str, str]] = {
+    "nfs.csi.k8s.io": ("CVE-2026-3864", "CSI Driver for NFS", "v4.13.1"),
+    "smb.csi.k8s.io": ("CVE-2026-3865", "CSI Driver for SMB", "v1.20.1"),
+}
+
+
+@rule(
+    "KN-ST006",
+    "PersistentVolume path carries command or traversal characters",
+    Stage.AUDIT,
+    "storage",
+    Severity.HIGH,
+    "Use a plain absolute local path, and a volumeHandle and subDir without '..' segments; run Windows nodes with "
+    "kubelet v1.25.16, v1.26.11, v1.27.8, v1.28.4 or later, csi-driver-nfs v4.13.1 or later and csi-driver-smb "
+    "v1.20.1 or later; let only cluster administrators create PersistentVolumes.",
+    "CVE-2023-5528 (CVSS 7.2; kubelet from v1.8.0, fixed in v1.25.16, v1.26.11, v1.27.8 and v1.28.4): on Windows "
+    "nodes the in-tree storage plugin ran a local PersistentVolume path as part of a command, so a user who could "
+    "create pods and PersistentVolumes got admin rights on the node; the feed names PersistentVolume create events "
+    "with local path fields containing special characters as the sign of exploitation. CVE-2026-3864 (csi-driver-nfs "
+    "before v4.13.1) and CVE-2026-3865 (csi-driver-smb before v1.20.1): a '../' in the subDir of a volume identifier "
+    "made the driver delete directories outside the share; the advisories say to look for traversal sequences in the "
+    "volumeHandle of PersistentVolumes using these drivers.",
+    ("k8s-cve-2023-5528", "k8s-cve-2026-3864", "k8s-cve-2026-3865"),
+)
+def _st006(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("PersistentVolume"):
+        local = get_path(d.data, ("spec", "local", "path"))
+        if isinstance(local, str) and _COMMAND_META.search(local):
+            yield r.finding(
+                d,
+                ("spec", "local", "path"),
+                f"Local path {local!r} carries {_meta_chars(local)}: the CVE-2023-5528 pattern, where kubelet on "
+                "Windows nodes (before v1.25.16, v1.26.11, v1.27.8 and v1.28.4) ran the path as part of a command "
+                "with admin rights on the node. Use a plain path.",
+            )
+        csi = get_path(d.data, ("spec", "csi"))
+        hit = CSI_SUBDIR_TRAVERSAL.get(str(csi.get("driver"))) if isinstance(csi, dict) else None
+        if hit is None or not isinstance(csi, dict):
+            continue
+        cve, project, fixed = hit
+        attrs = csi.get("volumeAttributes")
+        fields: list[tuple[PathT, object]] = [(("spec", "csi", "volumeHandle"), csi.get("volumeHandle"))]
+        if isinstance(attrs, dict):
+            fields.append((("spec", "csi", "volumeAttributes", "subDir"), attrs.get("subDir")))
+        for path, value in fields:
+            if isinstance(value, str) and _PATH_TRAVERSAL.search(value):
+                yield r.finding(
+                    d,
+                    path,
+                    f"{path[-1]} {value!r} of the {csi.get('driver')} volume has a '..' segment: {cve} ({project} "
+                    f"before {fixed}) deleted directories outside the share through such a subDir. Remove the "
+                    "traversal and upgrade the driver.",
+                )
 
 
 # =====================================================================================================
@@ -2546,6 +2930,51 @@ def _c013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         yield from check(d, pt.path, _pull_secret_names(pt.spec))
     for sa in ctx.by_kind("ServiceAccount"):
         yield from check(sa, (), _pull_secret_names(sa.data))
+
+
+@rule(
+    "KN-C014",
+    "Workload scaled by an HPA also sets spec.replicas",
+    Stage.CALIBRATE,
+    "availability",
+    Severity.MEDIUM,
+    "Remove spec.replicas from the manifest of a workload a HorizontalPodAutoscaler scales (in a Helm chart: "
+    "{{- if not .Values.autoscaling.enabled }} replicas: ... {{- end }}); set the floor with the HPA's minReplicas.",
+    "The Kubernetes docs recommend removing spec.replicas when an HPA is enabled: otherwise every kubectl apply (or "
+    "GitOps sync) of the manifest scales the workload back to that number, which may not be desired and causes "
+    "thrashing or flapping while the HPA is active, for example down to 2 replicas in the middle of a traffic peak. "
+    "A target whose replica count is 0 deactivates an HPA whose minReplicas is above 0.",
+    ("k8s-hpa-replicas",),
+)
+def _c014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for h in ctx.by_kind("HorizontalPodAutoscaler"):
+        ref = get_path(h.data, ("spec", "scaleTargetRef"))
+        if not isinstance(ref, dict):
+            continue
+        for d in ctx.by_kind(*REPLICATED_KINDS):
+            if d.name != ref.get("name") or d.kind != ref.get("kind") or ctx.ns(d) != ctx.ns(h):
+                continue
+            spec = d.data.get("spec") if isinstance(d.data, dict) else None
+            if not isinstance(spec, dict) or "replicas" not in spec:
+                continue
+            count = spec["replicas"]
+            low = get_path(h.data, ("spec", "minReplicas"))
+            low = low if isinstance(low, int) else 1
+            if count == 0 and low > 0:
+                yield r.finding(
+                    d,
+                    ("spec", "replicas"),
+                    f"{d.ref()} sets replicas: 0 and {h.ref()} (minReplicas {low}) scales it: a target at 0 replicas "
+                    "deactivates the HPA until someone scales it by hand. Remove spec.replicas.",
+                    severity=Severity.HIGH,
+                )
+            else:
+                yield r.finding(
+                    d,
+                    ("spec", "replicas"),
+                    f"{d.ref()} sets replicas: {count} and {h.ref()} scales it: every apply or GitOps sync of this "
+                    f"manifest resets the count to {count} and fights the HPA. Remove spec.replicas.",
+                )
 
 
 def run_rules(ctx: AuditContext, stages: set[Stage] | None = None) -> list[Finding]:

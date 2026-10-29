@@ -1,5 +1,5 @@
 {
- "_review": "Reviewed by hand 2026-10-28 against tests/fixtures/vuln/shop.yaml: each status follows from a planted weakness (Route without TLS, privileged web, mutable api tag, api reads Secrets, db password in env, db single replica, no NetworkPolicy, web without PDB) or its absence. 2026-10-29: TM-E02 lists the admission policies of the CVE-signature rules KN-S021 (gitRepo), KN-S022 (sysctl '+'/'=') and KN-S023 (workingDir under /proc) as further mitigations; no status changed.",
+ "_review": "Reviewed by hand 2026-10-28 against tests/fixtures/vuln/shop.yaml: each status follows from a planted weakness (Route without TLS, privileged web, mutable api tag, api reads Secrets, db password in env, db single replica, no NetworkPolicy, web without PDB) or its absence. 2026-10-29: TM-E02 lists the admission policies of the CVE-signature rules KN-S021 (gitRepo), KN-S022 (sysctl '+'/'=') and KN-S023 (workingDir under /proc) as further mitigations; no status changed. 2026-10-29 (gap review, G107): TM-E02 also lists the KN-S025 policy (subPath shell syntax) and TM-I02 the KN-S026 policy (credentials in a ConfigMap); no status changed.",
  "application": "shop/shop",
  "counts": {
   "open": 12,
@@ -137,7 +137,8 @@
     "T1552.001"
    ],
    "policies": [
-    "kube-noob-kn-s013"
+    "kube-noob-kn-s013",
+    "kube-noob-kn-s026"
    ]
   },
   {
@@ -251,7 +252,8 @@
     "kube-noob-kn-s020",
     "kube-noob-kn-s021",
     "kube-noob-kn-s022",
-    "kube-noob-kn-s023"
+    "kube-noob-kn-s023",
+    "kube-noob-kn-s025"
    ]
   },
   {
@@ -275,7 +277,8 @@
     "kube-noob-kn-s020",
     "kube-noob-kn-s021",
     "kube-noob-kn-s022",
-    "kube-noob-kn-s023"
+    "kube-noob-kn-s023",
+    "kube-noob-kn-s025"
    ]
   },
   {
@@ -296,7 +299,8 @@
     "kube-noob-kn-s020",
     "kube-noob-kn-s021",
     "kube-noob-kn-s022",
-    "kube-noob-kn-s023"
+    "kube-noob-kn-s023",
+    "kube-noob-kn-s025"
    ]
   }
  ]

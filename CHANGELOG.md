@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Gap review 2026-10 (G107, `docs/evals/gap-review-2026-10.md`: what kube-noob lacked against the Kubernetes CVE
+  feed, the Helm and Argo CD advisories, Helm's best practices, kube-score, Polaris, kube-linter, Checkov and the
+  Kyverno library, and what was left out and why). 69 -> 77 rules:
+  - KN-S025 a `subPath` with shell or PowerShell syntax (CVE-2023-3676, Windows kubelet, fixed in v1.24.17 to
+    v1.28.1); KN-ST006 a local PersistentVolume path with such characters (CVE-2023-5528) or a `../` in the
+    `volumeHandle` or `subDir` of an NFS or SMB CSI volume (CVE-2026-3864, csi-driver-nfs v4.13.1; CVE-2026-3865,
+    csi-driver-smb v1.20.1); KN-N011 an `ImplementationSpecific` path on ingress-nginx, which the CVE-2026-24512
+    advisory says to reject at admission (fixed in v1.13.7 and v1.14.3); KN-S017 also flags ControllerRevision
+    writes (CVE-2026-2270: with StatefulSet writes, pods in other namespaces; kube-controller-manager v1.34.12,
+    v1.35.9, v1.36.5, v1.37.1).
+  - KN-S026 credentials in a ConfigMap (a credential-named key, a URL password, a private key, an access key id or a
+    token, or a `password=` line in a config file value); KN-S027 a legacy ServiceAccount token Secret
+    (non-expiring); KN-S028 a binding to `system:unauthenticated`, `system:anonymous`, `system:authenticated` or
+    `system:serviceaccounts` (built-in bindings left alone); KN-N012 a NetworkPolicy whose podSelector selects no pod
+    of its namespace; KN-C014 an HPA target that also sets `spec.replicas` (every apply resets it; 0 deactivates the
+    HPA).
+  - Admission policies (VAP and Kyverno) for KN-S025 to KN-S028, KN-N011 and KN-ST006, equal to the audit on the
+    random corpus; NIST controls (new: AC-14, SI-10), the red team (RT-PRIVESC, RT-SECRET-LEAK, RT-EXPOSURE,
+    RT-RESOURCE-STARVATION) and the threat model (TM-E02, TM-E04, TM-I01, TM-I02) read the new rules.
+  - helm-audit: a symlinked `Chart.lock` (CVE-2025-53547), a chart or dependency name that is a path
+    (CVE-2024-25620, CVE-2026-35206), a `values.schema.json` over 10 MiB (CVE-2025-32387), `getHostByName`
+    (CVE-2023-25165), `lookup` (empty under `helm template`, so the audited render differs from the install), a
+    CustomResourceDefinition in `templates/` and a dependency over plain `http://`.
+  - The generated manifests and Helm charts leave `replicas` to the HPA when autoscaling is on (the chart uses the
+    `helm create` conditional), as the Kubernetes docs recommend; the `k8s-ex-ha-web` exercise now asks for the HPA's
+    `minReplicas` instead of `spec.replicas`, and the gate's good bundle drops `replicas` under its HPA. The admission
+    webhook warns on KN-C014 with lookups (never enforces it) and skips KN-N012 (it needs the namespace's pods).
 - kube-noob.com is built from this repository's releases by a separate site repository; this repository keeps only
   the product. The site's own third-party notices are on the site (`/notices/`).
 - CVE signatures in the audit (G106): KN-S021 gitRepo volume (CVE-2024-10220, CVE-2025-1767; deprecated since 1.11,

@@ -117,7 +117,7 @@ TEMPLATES: dict[str, Template] = {
             "TM-I01",
             "I",
             "Any pod in the cluster can connect to the data store",
-            ("KN-N001", "KN-N007"),
+            ("KN-N001", "KN-N007", "KN-N012"),
             ("T1046", "T1613"),
             "a NetworkPolicy that admits only the application's own tiers to the store's port",
         ),
@@ -125,7 +125,7 @@ TEMPLATES: dict[str, Template] = {
             "TM-I02",
             "I",
             "Credentials are written in the manifests, readable by anyone with the repository or the API",
-            ("KN-S013", "KN-S018"),
+            ("KN-S013", "KN-S018", "KN-S026"),
             ("T1552.001",),
             "move them to Secrets created outside Git (an external secrets operator or sealed secrets)",
         ),
@@ -176,20 +176,23 @@ TEMPLATES: dict[str, Template] = {
                 "KN-S021",
                 "KN-S022",
                 "KN-S023",
+                "KN-S025",
             ),
             ("T1611", "T1068"),
             "no privileged mode, host namespaces or hostPath; drop capabilities; allowPrivilegeEscalation: false; no "
-            "gitRepo volume, no '+' or '=' in a sysctl, no workingDir under /proc (published runtime breakouts)",
+            "gitRepo volume, no '+' or '=' in a sysctl, no workingDir under /proc, no shell characters in a subPath "
+            "(published runtime breakouts)",
         ),
         Template(
             "TM-E04",
             "E",
-            "An Ingress annotation injects configuration into the ingress-nginx controller, which reads every "
+            "An Ingress annotation or path injects configuration into the ingress-nginx controller, which reads every "
             "Secret in the cluster",
-            ("KN-N009",),
+            ("KN-N009", "KN-N011"),
             ("T1190", "T1552.007"),
-            "no snippet or other Critical- or High-risk ingress-nginx annotation; a fixed controller release with "
-            "--enable-annotation-validation; a Gateway API implementation in place of the retired ingress-nginx",
+            "no snippet or other Critical- or High-risk ingress-nginx annotation and no ImplementationSpecific path; a "
+            "fixed controller release with --enable-annotation-validation; a Gateway API implementation in place of "
+            "the retired ingress-nginx",
         ),
         Template(
             "TM-E03",

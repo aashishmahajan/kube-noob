@@ -52,7 +52,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 69 audit rules and their controls
+## The 77 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -69,6 +69,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-C011 | terminationGracePeriodSeconds is 0 | CP-10 |
 | KN-C012 | HPA cannot compute CPU utilization | SC-6 |
 | KN-C013 | Pull secret exists only in another namespace | CM-6 |
+| KN-C014 | Workload scaled by an HPA also sets spec.replicas | CM-6, SC-6 |
 | KN-N001 | Namespace has workloads but no NetworkPolicy | SC-7, SC-7(5), AC-4 |
 | KN-N002 | Route without TLS | SC-8, SC-8(1) |
 | KN-N003 | Ingress without TLS | SC-8, SC-8(1) |
@@ -79,6 +80,8 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-N008 | Service uses externalIPs | SC-7, SC-8, AC-4 |
 | KN-N009 | Ingress uses a risky ingress-nginx annotation | CM-7, SI-2, SC-7 |
 | KN-N010 | ingress-nginx ConfigMap widens what an Ingress may ask of the controller | CM-6, CM-7, SI-2 |
+| KN-N011 | Ingress path type ImplementationSpecific on ingress-nginx | SI-2, SI-10, CM-7 |
+| KN-N012 | NetworkPolicy selects no pod in this bundle | SC-7, SC-7(5), AC-4 |
 | KN-S001 | Privileged container | AC-6, CM-7, SC-39 |
 | KN-S002 | Privilege escalation not disabled | AC-6, AC-6(10), CM-7 |
 | KN-S003 | Container may run as root | AC-6, CM-6 |
@@ -103,11 +106,16 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S022 | Pod sysctl name or value contains '+' or '=' | SI-2, SC-39, CM-7 |
 | KN-S023 | Container workingDir under /proc | SI-2, SC-39 |
 | KN-S024 | ingress-nginx controller image below the fixed releases | SI-2, SA-22 |
+| KN-S025 | volumeMount subPath carries shell or PowerShell characters | SI-2, SI-10, SC-39 |
+| KN-S026 | Credential stored in a ConfigMap | IA-5(7), SC-28 |
+| KN-S027 | Legacy ServiceAccount token Secret | IA-5, AC-6 |
+| KN-S028 | RBAC binding grants a role to everyone | AC-14, AC-3, AC-6 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |
 | KN-ST004 | EFS StorageClass is missing required parameters | CM-6 |
 | KN-ST005 | PVC has no storage request | CM-6, SC-6 |
+| KN-ST006 | PersistentVolume path carries command or traversal characters | SI-2, SI-10, AC-6 |
 | KN-V001 | Object is missing apiVersion, kind or metadata.name | CM-3(2), CM-6 |
 | KN-V002 | apiVersion does not serve this kind | CM-3(2), CM-6 |
 | KN-V003 | OpenShift-only API used on a non-OpenShift target | CM-3(2), CM-6 |
@@ -134,8 +142,9 @@ Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/
 | AC-4 | Information Flow Enforcement |
 | AC-5 | Separation of Duties |
 | AC-6 | Least Privilege |
-| AC-6(10) | Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions |
 | AC-6(5) | Least Privilege | Privileged Accounts |
+| AC-6(10) | Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions |
+| AC-14 | Permitted Actions Without Identification or Authentication |
 | CM-2 | Baseline Configuration |
 | CM-3(2) | Configuration Change Control | Testing, Validation, and Documentation of Changes |
 | CM-6 | Configuration Settings |
@@ -155,6 +164,7 @@ Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/
 | SC-39 | Process Isolation |
 | SI-2 | Flaw Remediation |
 | SI-7 | Software, Firmware, and Information Integrity |
+| SI-10 | Information Input Validation |
 
 ## Sources
 
