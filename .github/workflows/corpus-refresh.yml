@@ -104,8 +104,14 @@ jobs:
             echo "::notice title=Jira main copy::no previous main copy: starting a new one (open tickets first)"
             exit 0
           fi
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in previous/jira-snapshot.tgz.enc \
-            -out previous/jira-snapshot.tgz -pass env:CORPUS_PASSPHRASE
+          # A copy encrypted under an earlier CORPUS_PASSPHRASE can never be read again: failing every day would not
+          # change that, so the run starts a new copy (saved under the current secret) and says why.
+          if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in previous/jira-snapshot.tgz.enc \
+            -out previous/jira-snapshot.tgz -pass env:CORPUS_PASSPHRASE 2> decrypt.err; then
+            echo "::warning title=Jira main copy::the copy from run $id does not decrypt with the current CORPUS_PASSPHRASE (was the secret changed?): starting a new one. $(head -c 200 decrypt.err | tr '\n' ' ')"
+            rm -f previous/jira-snapshot.tgz previous/jira-snapshot.tgz.enc
+            exit 0
+          fi
           kube-noob corpus import previous/jira-snapshot.tgz --format json | tee import-summary.json
           rm -f previous/jira-snapshot.tgz
       - name: Red Hat Jira copy (paced, budgeted)

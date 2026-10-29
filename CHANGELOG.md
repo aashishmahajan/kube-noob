@@ -91,6 +91,9 @@
   refused the old one (payload in the name) before admission, so the policy test on kind could not see the policy.
   The policy test creates every namespace its fixtures name (ingress-nginx for the controller rules).
 
+- `corpus-refresh`: a saved Jira copy that no longer decrypts (CORPUS_PASSPHRASE changed since it was saved) starts
+  a new copy with a warning instead of failing the daily run ("bad decrypt" on 2026-10-29).
+
 ## 0.6.0 - 2026-10-29
 
 - New documents for the weakest technologies in the owner's by-technology file, written from each project's own
