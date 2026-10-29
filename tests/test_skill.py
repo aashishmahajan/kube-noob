@@ -1,7 +1,7 @@
 """kube-noob as an Agent Skill: one folder (SKILL.md, scripts/kn.py, the bundled server source and a tool reference)
 that runs the same tools as the MCP server, offline, where no MCP server can run (claude.ai chat, the Claude API's code
 execution container) or where the user prefers a skill. The skill must not import the MCP SDK or the HTTP stack, so it
-needs only pydantic, PyYAML, jsonschema and httpx, which those environments provide."""
+needs only pydantic, PyYAML and jsonschema, which those environments provide."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def test_tools_run_offline_without_the_mcp_sdk(built: Path) -> None:
         "    try: runpy.run_path(sys.argv0, run_name='__main__')\n"
         "    except SystemExit: pass\n"
         "print(json.dumps(sorted(m for m in sys.modules if m.split('.')[0] in "
-        "{'mcp','mcp_types','starlette','uvicorn','anyio','sse_starlette','anthropic','openai'})))"
+        "{'mcp','mcp_types','starlette','uvicorn','anyio','sse_starlette','anthropic','openai','httpx','httpcore'})))"
     ).replace("sys.argv0", repr(str(built / "scripts" / "kn.py")))
     res = subprocess.run([sys.executable, "-I", "-c", probe], check=False, capture_output=True, text=True, timeout=120)
     assert res.returncode == 0, res.stderr
@@ -343,7 +343,7 @@ def test_the_install_hint_pins_the_plugin_lock_versions(built: Path) -> None:
     lock = (ROOT / "plugin" / "kube-noob" / "uv.lock").read_text(encoding="utf-8")
     kn = (built / "scripts" / "kn.py").read_text(encoding="utf-8")
     body = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-    for name, pip in (("pydantic", "pydantic"), ("pyyaml", "PyYAML"), ("jsonschema", "jsonschema"), ("httpx", "httpx")):
+    for name, pip in (("pydantic", "pydantic"), ("pyyaml", "PyYAML"), ("jsonschema", "jsonschema")):
         version = re.search(rf'^name = "{name}"\nversion = "([^"]+)"', lock, re.M)
         assert version, name
         assert f"{pip}=={version.group(1)}" in kn and f"{pip}=={version.group(1)}" in body, name

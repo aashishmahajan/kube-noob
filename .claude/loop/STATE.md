@@ -323,6 +323,13 @@ which ships tested and documented on its own.
 - CI (GitHub Actions) has helm, kind and docker: chart, image and cluster behaviour is proven there.
 
 ## Iteration log (newest first; at most 10 lines per entry)
+- 2026-10-29 E2E (Fable review of PR #7's head, G116): `kube-noob insight -f examples/events-crashloop.txt` ->
+  `kubectl describe pod orders-api-7c4b9d6f5-x2lqp -n shop` (was `orders-api-7c4b9d6f5-`, NotFound, on every surface).
+  Plugin skill named two tools the plugin omits; plugin bundle imported httpx (net) and subprocess (helm render):
+  both left out, test pins no network or process imports; `claude plugin validate plugin/kube-noob` and `.` pass with
+  nothing to report after adding documentationUrl, supportUrl, privacyPolicyUrl. Chart kubeVersion >=1.33.0-0.
+  REST /v1/upgrade-risks and /v1/policy/migrate-check. check.sh 1808 passed, 1 skipped, selftest 63/63.
+  Not done: chart-verifier in CI (needs a pinned tool), skill-only plugin folder, Artifact Hub, operator.
 - 2026-10-29 CodeQL (G109): PR #5's code scanning review flagged videos.yml (cache poisoning via execution of untrusted
   code x2, untrusted checkout: `inputs.pipeline_ref || inputs.tag` executed in a dispatched run) and two test URL
   substrings; PR #4's clear-text logging and node-role prefix were still open. verify job against the live API:

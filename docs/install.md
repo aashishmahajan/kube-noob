@@ -37,7 +37,7 @@ The same tools as the MCP server, as an [Agent Skill](https://claude.com/docs/sk
 `SKILL.md`, a runner (`scripts/kn.py`, one tool per call, JSON out) and the readable server source the Claude plugin
 ships. Use it where no MCP server runs: chat on claude.ai (the plugin's local MCP server runs in Claude Code and
 Cowork only) and the Claude API's code execution. It runs with the offline lock on and needs Python 3.11 or later
-with pydantic, PyYAML, jsonschema and httpx; `kn.py check` says which are missing.
+with pydantic, PyYAML and jsonschema; `kn.py check` says which are missing.
 
 | Where | Install |
 |---|---|

@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 
+import kube_noob.net as net_mod
 from kube_noob import toolkit as tk
 from kube_noob.agent.providers import build_provider
 from kube_noob.cli import main
@@ -16,7 +17,7 @@ from kube_noob.config import load_settings
 from kube_noob.errors import ProviderError, WebContentRejectedError, WebDisabledError
 from kube_noob.net import Purpose, http_client
 
-_REAL_HTTP_CLIENT = tk.http_client
+_REAL_HTTP_CLIENT = net_mod.http_client
 
 
 def test_lock_beats_web_enabled_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,7 +82,7 @@ def _fetch(
 
         return real(settings, purpose, transport=httpx.MockTransport(handler))
 
-    monkeypatch.setattr(tk, "http_client", fake)
+    monkeypatch.setattr(net_mod, "http_client", fake)
     return kit.web_fetch(tk.WebFetchIn(url="https://kubernetes.io/docs/x"))
 
 

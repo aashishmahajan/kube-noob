@@ -41,7 +41,6 @@ from kube_noob.knowledge_status import status as knowledge_status
 from kube_noob.known_issues import match as known_issue_match
 from kube_noob.learn.memory import LearningStore
 from kube_noob.learn.tutor import Tutor
-from kube_noob.net import Purpose, http_client
 from kube_noob.signals import alertmanager, for_text, playbooks_for
 from kube_noob.upgrade_risks import parse_version
 from kube_noob.upgrade_risks import risks as upgrade_risk_match
@@ -1535,6 +1534,9 @@ class Toolkit:
         import re
         import zlib
 
+        # Imported here: the Claude plugin leaves the network module out, so it never offers web_fetch.
+        from kube_noob.net import Purpose, http_client
+
         limit = self.settings.web.max_bytes
         chunks: list[bytes] = []
         size = 0
@@ -2120,7 +2122,7 @@ class Toolkit:
                     open_world=True,
                 )
             )
-        if self.settings.web_enabled:
+        if self.settings.web_enabled and _has_module("kube_noob.net"):  # the Claude plugin has no network module
             s.append(
                 ToolSpec(
                     "web_fetch",

@@ -67,6 +67,13 @@ BODIES: dict[str, dict[str, Any]] = {
     "/v1/diagnose": {"text": "0/3 nodes are available: 3 Insufficient memory."},
     "/v1/audit": {"manifests": DEPLOY, "platform": "openshift", "version": "4.20"},
     "/v1/known-issues": {"text": "etcd leader changed frequently", "platform": "openshift", "version": "4.20.3"},
+    "/v1/upgrade-risks": {"current": "4.20.3", "target": "4.21.4"},
+    "/v1/policy/migrate-check": {
+        "policies": "apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: require-team\nspec:\n"
+        "  validationFailureAction: Enforce\n  rules:\n  - name: team\n    match:\n      any:\n      - resources:\n"
+        "          kinds: [Pod]\n    validate:\n      message: team label\n      pattern:\n        metadata:\n"
+        '          labels:\n            team: "?*"\n'
+    },
     "/v1/policy/reach": {"manifests": DEPLOY, "source": "shop/web", "destination": "shop/db", "port": 5432},
     "/v1/memory/match": {"text": "web crash-loops when the database is down"},
     "/v1/reports": {},

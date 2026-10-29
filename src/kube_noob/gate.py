@@ -72,7 +72,7 @@ def _in_chart_templates(path: Path, parent: Path) -> bool:
 
 def render(charts: list[str], values: list[str], namespace: str) -> list[Source]:
     """``helm template`` each chart (the helm binary must be on PATH)."""
-    from kube_noob.generate.helm import render_chart
+    from kube_noob.generate.helm_render import render_chart
 
     out = []
     for chart in charts:

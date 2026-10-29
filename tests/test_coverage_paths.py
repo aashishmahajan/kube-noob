@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 
+import kube_noob.net as net_mod
 from kube_noob import toolkit as tk
 from kube_noob.agent import providers
 from kube_noob.cli import main
@@ -85,7 +86,7 @@ def test_toolkit_all_offline_tools(tmp_path: Path) -> None:
 def test_toolkit_web_fetch_strips_html(monkeypatch: pytest.MonkeyPatch) -> None:
     s = load_settings(overrides={"webEnabled": True})
     kit = tk.Toolkit(s)
-    real = tk.http_client
+    real = net_mod.http_client
 
     def fake(settings: Any, purpose: Any, **kw: Any) -> httpx.Client:
         def handler(req: httpx.Request) -> httpx.Response:
@@ -94,7 +95,7 @@ def test_toolkit_web_fetch_strips_html(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return real(settings, purpose, transport=httpx.MockTransport(handler))
 
-    monkeypatch.setattr(tk, "http_client", fake)
+    monkeypatch.setattr(net_mod, "http_client", fake)
     out = kit.web_fetch(tk.WebFetchIn(url="https://kubernetes.io/docs/"))
     assert "Hello & welcome" in out["text"] and "evil" not in out["text"]
 

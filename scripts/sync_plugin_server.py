@@ -57,6 +57,12 @@ GUARDED_IMPORTS = frozenset(
         "kube_noob.code.assess",
         "kube_noob.code.ship",
         "kube_noob.code.builds",
+        # Rendering a chart runs the `helm` binary: the CLI's helm-audit and the gate do; the plugin never does.
+        "kube_noob.generate.helm_render",
+        # The plugin makes no network calls of its own: no web_fetch, so no HTTP client module; and it serves stdio
+        # only, so no REST routes.
+        "kube_noob.net",
+        "kube_noob.server.rest",
         "kube_noob.sources.advisories",
         "kube_noob.host_fips",
         # Must-gather analysis reads paths on the user's machine: the CLI and the stdio server offer it; the Claude

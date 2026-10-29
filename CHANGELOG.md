@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Plugin and catalog readiness (independent review against the directory's and the OpenShift Helm charts
+  repository's requirements): the Claude plugin no longer ships the HTTP client, the REST routes or Helm rendering
+  (`kube_noob.generate.helm_render`, the only `subprocess` call), so nothing in it can open a connection or start a
+  program; `web_fetch` is offered only where the network module ships. The Agent Skill drops `httpx` from what it
+  needs. `plugin.json` carries the directory listing links (documentation, support, privacy policy) and says the
+  plugin makes no network calls of its own while uv installs its pinned dependencies once; `claude plugin validate`
+  passes with nothing to report. The chart's `kubeVersion` is `>=1.33.0-0` (OpenShift 4.20), as its README says.
+- End-to-end review fixes: every crash-looping `describe` lost the end of its pod name (the kubelet's "in pod
+  NAME_NAMESPACE" line cut it at the last hyphen), so the first read-only step was `kubectl describe pod
+  orders-api-7c4b9d6f5-` and failed; names are now whole, and a test runs every shipped example. The plugin's
+  OpenShift skill pointed Claude at the Containerfile audit and SAST report, which the plugin does not ship; it now
+  gives the CLI commands, and a test checks every tool a plugin skill names. REST gains `/v1/upgrade-risks` and
+  `/v1/policy/migrate-check`.
 - `kube-noob policy migrate-check` (G115; and the read-only MCP tool `policy_migrate_check`): lints legacy Kyverno policies
   (kyverno.io ClusterPolicy, Policy, ClusterCleanupPolicy, CleanupPolicy, PolicyException; removed in Kyverno 1.20)
   rule by rule against the CEL policy types. Each finding is direct, inverted, manual or blocked, with the field
@@ -70,7 +83,7 @@
 - kube-noob as an Agent Skill (G108): `skill/kube-noob/SKILL.md` and `scripts/kn.py` run the plugin's tools as one
   command each, JSON out, so kube-noob also works where a local MCP server cannot run (chat on claude.ai, the
   Claude API's code execution) and where a plugin's install-time dependency resolution is not wanted. It needs Python
-  3.11+ with pydantic, PyYAML, jsonschema and httpx (no MCP SDK, no HTTP stack); it forces the offline lock (no web,
+  3.11+ with pydantic, PyYAML and jsonschema (no MCP SDK, no HTTP stack); it forces the offline lock (no web,
   no cluster, no model) whatever the config or `KUBE_NOOB_*` variables say, caps input at 5 MiB and reads only the
   files it is given. Calls go through the new `kube_noob.tool_runner.call`, which the MCP server and the REST routes
   now share, so validation, `knowledgeAsOf` and the cleaning of instruction-shaped text are the same everywhere.

@@ -4,7 +4,7 @@ description: Kubernetes, OpenShift and ROSA audit, debugging and learning tools 
 type: application
 version: 0.6.0
 appVersion: "0.6.0"
-kubeVersion: ">=1.25.0-0"
+kubeVersion: ">=1.33.0-0"
 home: https://github.com/aashishmahajan/kube-noob
 sources:
   - https://github.com/aashishmahajan/kube-noob

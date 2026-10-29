@@ -70,8 +70,8 @@ configuration can lift it.
 The plugin starts the bundled server on your computer over stdio, with web access, cluster access and model calls
 off. Its Python dependencies are installed from PyPI at the versions and hashes in the plugin's `uv.lock`, into a
 throwaway environment in uv's cache (and uv's managed CPython once, if no Python 3.11 or later is installed). The
-plugin ships only the modules of the stdio server: no CLI, model agent, HTTP service or cluster access, and it reads
-no credentials. Personal data is never requested. If text you paste contains some, it is processed in memory
+plugin ships only the modules of the stdio server: no CLI, model agent, HTTP service, web client or cluster access,
+so it reads no credentials and makes no network calls of its own. Personal data is never requested. If text you paste contains some, it is processed in memory
 and not stored, except words you choose to put in a confirmed note or a learner id.
 
 ## The Agent Skill

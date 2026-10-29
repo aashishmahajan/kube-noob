@@ -40,11 +40,16 @@ _NS_PATTERNS = (
     re.compile(r"\bnamespace ((?=[a-z0-9-]*[-0-9])(?=[0-9-]*[a-z])[a-z0-9][-a-z0-9]{0,62}|default)\b"),
 )
 # "pod/api-1", 'pod "api-1"', or "pod api-7d9f" in a sentence; a bare word after "pod " ("my pod keeps restarting")
-# is English, so the unquoted form needs the hyphen or digit generated pod names carry.
+# is English, so the unquoted form needs the hyphen or digit generated pod names carry. The name is whole: it ends in
+# a letter or digit, and is followed by the kubelet's "_<namespace>" ("in pod web-7d9f-x2lqp_shop"), a sentence's
+# full stop or anything a name cannot hold (a word boundary cut it at its last hyphen before "_").
 _POD_PATTERNS = (
     re.compile(r"\bpod/\"?([a-z0-9][-a-z0-9.]{0,252})\"?"),
     re.compile(r"\bpod \"([a-z0-9][-a-z0-9.]{0,252})\""),
-    re.compile(r"\bpod ([a-z0-9][a-z0-9.]{0,120}[-0-9][-a-z0-9.]{0,130})\b"),
+    re.compile(
+        r"\bpod ((?=[a-z0-9.]*[-0-9])[a-z0-9](?:[-a-z0-9.]{0,251}[a-z0-9])?)"
+        r"(?=_[a-z0-9]|[^-a-z0-9._]|\.(?![a-z0-9])|\Z)"
+    ),
     re.compile(r"^Name:\s+([a-z0-9][-a-z0-9.]{0,252})$", re.MULTILINE),
 )
 # The Service a paste is about: "svc/web", "kubectl get svc web" (a command, not "when I get endpoints for the

@@ -222,3 +222,54 @@ def test_live_debug_in_the_sidecar_reads_names_never_secrets(tmp_path: Path, mon
     argvs = [json.loads(line) for line in log.read_text().splitlines()]
     assert all(a[0] in {"get", "logs", "version"} for a in argvs)
     assert not any(len(a) > 1 and a[1].startswith("secrets") for a in argvs)
+
+
+# E2E review 2026-10-29: the kubelet's "in pod NAME_NAMESPACE" BackOff line cut the name at its last hyphen, so the
+# first read-only step of every crash-looping describe was `kubectl describe pod orders-api-7c4b9d6f5-` (NotFound).
+@pytest.mark.parametrize(
+    ("text", "pod"),
+    [
+        (
+            "Back-off restarting failed container api in pod orders-api-7c4b9d6f5-x2lqp_shop(9f1c...)",
+            "orders-api-7c4b9d6f5-x2lqp",
+        ),
+        (
+            "Back-off restarting failed container api in pod orders-api-7c4b9d6f5-x2lqp_shop",
+            "orders-api-7c4b9d6f5-x2lqp",
+        ),
+        ("pod web-0 crashed.", "web-0"),
+        ("the pod nginx-1.2 is pending.", "nginx-1.2"),
+        ("pod api-7d9f keeps restarting", "api-7d9f"),
+        ("my pod keeps restarting", None),
+        ("pod/web-7d9f-abcde is OOMKilled", "web-7d9f-abcde"),
+    ],
+)
+def test_pod_names_are_whole(text: str, pod: str | None) -> None:
+    assert extract_context(text).get("pod") == pod
+
+
+def test_the_crashloop_example_names_the_whole_pod_in_every_step() -> None:
+    from kube_noob import toolkit as tk
+    from kube_noob.config import load_settings
+
+    text = (Path(__file__).resolve().parents[1] / "examples" / "events-crashloop.txt").read_text(encoding="utf-8")
+    assert extract_context(text)["pod"] == "orders-api-7c4b9d6f5-x2lqp"
+    kit = tk.Toolkit(load_settings(overrides={"learningEnabled": False}))
+    out = json.dumps(kit.insight(tk.InsightIn(text=text)))
+    assert "describe pod orders-api-7c4b9d6f5-x2lqp -n shop" in out
+    assert "orders-api-7c4b9d6f5- " not in out and 'orders-api-7c4b9d6f5-"' not in out
+
+
+def test_no_example_gets_a_step_with_a_cut_name() -> None:
+    """Every read-only step built from a shipped example names whole objects (no name ending in '-' or '.')."""
+    import re
+
+    from kube_noob import toolkit as tk
+    from kube_noob.config import load_settings
+
+    kit = tk.Toolkit(load_settings(overrides={"learningEnabled": False}))
+    cut = re.compile(r"\b(?:kubectl|oc) [^\n\"]*?\b(?:pod|pods|pvc|svc|deployment|deploy)[ /]([a-z0-9][-a-z0-9.]*)")
+    for path in sorted((Path(__file__).resolve().parents[1] / "examples").glob("*.txt")):
+        out = json.dumps(kit.insight(tk.InsightIn(text=path.read_text(encoding="utf-8")[:400_000])))
+        for name in cut.findall(out):
+            assert not name.endswith(("-", ".")), (path.name, name)
