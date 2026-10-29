@@ -8,7 +8,7 @@
   program; `web_fetch` is offered only where the network module ships. The Agent Skill drops `httpx` from what it
   needs. `plugin.json` carries the directory listing links (documentation, support, privacy policy) and says the
   plugin makes no network calls of its own while uv installs its pinned dependencies once; `claude plugin validate`
-  passes with nothing to report. The chart's `kubeVersion` is `>=1.33.0-0` (OpenShift 4.20), as its README says.
+  passes with nothing to report.
 - End-to-end review fixes: every crash-looping `describe` lost the end of its pod name (the kubelet's "in pod
   NAME_NAMESPACE" line cut it at the last hyphen), so the first read-only step was `kubectl describe pod
   orders-api-7c4b9d6f5-` and failed; names are now whole, and a test runs every shipped example. The plugin's
