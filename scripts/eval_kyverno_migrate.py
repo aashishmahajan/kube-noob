@@ -57,7 +57,11 @@ def _cel_docs(main: Path, paths: list[str]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for rel in paths:
         for doc in yaml.safe_load_all((main / rel).read_text(encoding="utf-8")):
-            if isinstance(doc, dict) and str(doc.get("apiVersion", "")).startswith("policies.kyverno.io/"):
+            # apiVersion is <group>/<version>: compare the API group whole, not as a string prefix
+            group, sep, _version = (
+                str(doc.get("apiVersion", "")).partition("/") if isinstance(doc, dict) else ("", "", "")
+            )
+            if sep and group == "policies.kyverno.io":
                 out.append(doc)
     return out
 

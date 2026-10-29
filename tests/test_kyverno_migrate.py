@@ -645,3 +645,22 @@ def test_mcp_tool_is_read_only_and_strict() -> None:
         tk.PolicyMigrateCheckIn(policies=text, apply=True)  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         tk.PolicyMigrateCheckIn(policies="x" * (tk.MAX_MANIFEST_CHARS + 1))
+
+
+def test_the_eval_reads_only_the_policies_kyverno_io_group(tmp_path: Path) -> None:
+    """The upstream CEL files are told apart by API group, compared whole (CodeQL: a prefix test is a substring)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "eval_kyverno_migrate", Path(__file__).resolve().parents[1] / "scripts" / "eval_kyverno_migrate.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    (tmp_path / "a.yaml").write_text(
+        "apiVersion: policies.kyverno.io/v1\nkind: ValidatingPolicy\n---\n"
+        "apiVersion: kyverno.io/v1\nkind: ClusterPolicy\n---\n"
+        "apiVersion: evil.policies.kyverno.io/v1\nkind: Lookalike\n---\n"
+        "apiVersion: policies.kyverno.io.evil/v1\nkind: Lookalike\n---\n- not a mapping\n"
+    )
+    assert [d["kind"] for d in mod._cel_docs(tmp_path, ["a.yaml"])] == ["ValidatingPolicy"]
