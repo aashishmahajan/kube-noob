@@ -1,0 +1,84 @@
+# Original fixture for kube-noob (Apache-2.0): rules whose CEL form needs hand work (manual) or has no documented
+# equivalent (blocked), per kyverno/website guides/migration-to-cel.md and guides/jmespath-to-cel.md
+# @b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: hand-work
+spec:
+  validationFailureAction: Audit
+  useServerSideApply: true
+  rules:
+  - name: limit-services-per-namespace
+    match:
+      any:
+      - resources:
+          kinds:
+          - Service
+    context:
+    - name: servicecount
+      apiCall:
+        urlPath: "/api/v1/namespaces/{{request.namespace}}/services"
+        jmesPath: "items | length(@)"
+    validate:
+      message: "At most 10 Services per Namespace."
+      deny:
+        conditions:
+          any:
+          - key: "{{ servicecount }}"
+            operator: GreaterThan
+            value: 10
+  - name: total-memory
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    context:
+    - name: totalmemory
+      variable:
+        jmesPath: "sum(request.object.spec.containers[].resources.requests.memory)"
+    validate:
+      message: "Too much memory requested."
+      deny:
+        conditions:
+          any:
+          - key: "{{ totalmemory }}"
+            operator: GreaterThan
+            value: 8Gi
+  - name: signed-manifests
+    match:
+      any:
+      - resources:
+          kinds:
+          - Deployment
+    validate:
+      manifests:
+        attestors:
+        - entries:
+          - keys:
+              publicKeys: "-----BEGIN PUBLIC KEY-----\nexample\n-----END PUBLIC KEY-----"
+  - name: no-host-path-in-containers
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "hostPath volumes must be read-only."
+      foreach:
+      - list: "request.object.spec.containers"
+        pattern:
+          =(volumeMounts):
+          - (name): "host-*"
+            readOnly: true
+  - name: baseline
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      podSecurity:
+        level: baseline
+        version: latest

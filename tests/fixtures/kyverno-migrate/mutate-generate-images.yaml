@@ -1,0 +1,80 @@
+# The generate rule is adapted from kyverno/policies (Apache-2.0) best-practices/add-network-policy/add-network-policy.yaml
+# @282e77f6d54e1e1a636190ff2dacc3d02c2d689c (branch release-1.19), annotations trimmed. The mutate and verifyImages
+# rules are original fixtures for kube-noob (Apache-2.0).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-defaults
+spec:
+  rules:
+  - name: add-managed-label
+    match:
+      any:
+      - resources:
+          kinds:
+          - ConfigMap
+    mutate:
+      patchesJson6902: |-
+        - op: add
+          path: /metadata/labels/managed-by
+          value: platform
+  - name: default-pull-policy
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    mutate:
+      patchStrategicMerge:
+        spec:
+          containers:
+          - (name): "*"
+            +(imagePullPolicy): IfNotPresent
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-networkpolicy
+spec:
+  rules:
+  - name: default-deny
+    match:
+      any:
+      - resources:
+          kinds:
+          - Namespace
+    generate:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      name: default-deny
+      namespace: "{{request.object.metadata.name}}"
+      synchronize: true
+      data:
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          - Egress
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-signatures
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+  - name: check-signature
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    verifyImages:
+    - imageReferences:
+      - "registry.example.com/*"
+      mutateDigest: true
+      attestors:
+      - entries:
+        - keys:
+            publicKeys: "-----BEGIN PUBLIC KEY-----\nexample\n-----END PUBLIC KEY-----"

@@ -357,6 +357,22 @@ class PolicyGenerateIn(_In):
     )
 
 
+class PolicyMigrateCheckIn(_In):
+    policies: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MANIFEST_CHARS,
+        description="One or more legacy Kyverno policies (YAML): kyverno.io ClusterPolicy, Policy, "
+        "ClusterCleanupPolicy, CleanupPolicy or PolicyException. Other documents are listed and skipped; Secrets are "
+        "not read.",
+    )
+    drafts: bool = Field(
+        True,
+        description="Include a draft CEL policy for each rule whose fields all map directly, and a kyverno test "
+        "fixture skeleton per policy (good and bad resources run against the legacy rule and the draft).",
+    )
+
+
 _ENDPOINT_HELP = (
     "namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod "
     "labels, or an IP address / CIDR outside the cluster."
@@ -1115,6 +1131,13 @@ class Toolkit:
         )
         return {**g.summary(), "yaml": g.yaml(header)}
 
+    def policy_migrate_check(self, p: PolicyMigrateCheckIn) -> dict[str, Any]:
+        from kube_noob import kyverno_migrate
+
+        out = kyverno_migrate.check(p.policies, drafts=p.drafts)
+        self._observe([f"policy-migrate:{v}" for v, n in out["summary"]["verdicts"].items() if n])
+        return out
+
     def posture_scan(self, p: PostureScanIn) -> dict[str, Any]:
         from kube_noob import attack_paths
 
@@ -1785,6 +1808,19 @@ class Toolkit:
                 "or that the API server already enforces are listed with the reason. Nothing is applied.",
                 PolicyGenerateIn,
                 self.policy_generate,
+            ),
+            ToolSpec(
+                "policy_migrate_check",
+                "Check legacy Kyverno policies for their CEL form",
+                "Kyverno 1.20 removes the kyverno.io ClusterPolicy, Policy, CleanupPolicy and legacy PolicyException. "
+                "Lint them rule by rule against the policies.kyverno.io types: direct, inverted (a deny or a negated "
+                "pattern: the CEL validation must state what is allowed), manual (JMESPath, API calls, anchors, "
+                "strategic merge patches) or blocked (no documented CEL equivalent), each with the field path, the "
+                "target kind, the reason and the Kyverno documentation section (pinned commit). Rules that map "
+                "directly get a draft CEL policy and a kyverno test fixture skeleton to prove it. Nothing is applied "
+                "or rewritten.",
+                PolicyMigrateCheckIn,
+                self.policy_migrate_check,
             ),
             ToolSpec(
                 "posture_scan",

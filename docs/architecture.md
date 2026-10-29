@@ -138,6 +138,11 @@ flowchart LR
   cluster and fetches nothing. What the policies do is decided by the person who applies them; enforce mode refuses
   requests, so the default is audit. The CEL reads only the admitted object and the requester's name, never other
   objects, and exempts platform namespaces and operators so a cluster upgrade is never blocked by a generated policy.
+- `policy migrate-check` (CLI and the read-only `policy_migrate_check` tool; `kube_noob.kyverno_migrate`) reads legacy
+  Kyverno policies as bounded YAML (the `yamlio` caps, Secret documents skipped unread) and rewrites, applies and
+  fetches nothing. Its verdicts come from mapping tables pinned to kyverno/website and kyverno/kyverno commits; a draft
+  CEL policy is text labelled as a draft, and the `kyverno test` skeleton beside it is how equivalence gets proven.
+  With `-o` the CLI writes only new files under the given directory, from sanitised names, and refuses to overwrite.
 - `<dataDir>/learning.json` holds user-confirmed summaries, the user's profile and id counters only. Notes are indexed
   as `origin: local`, are never redistributable and never exported as training data.
 - Evaluation (maintainer tools, not shipped in the package or plugin): `scripts/eval_questions.py` reads a question
