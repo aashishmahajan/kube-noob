@@ -1,0 +1,9 @@
+{
+  "name": "kube-noob-video",
+  "private": true,
+  "description": "Renders the kube-noob demo videos (capture.js, capture_page.js, thumbnail.js): Chromium through Playwright.",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

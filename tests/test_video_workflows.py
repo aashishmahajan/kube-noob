@@ -1,0 +1,75 @@
+"""The videos are built where they must be: a fast check on every change (ci.yml, silent voice), and the 4K masters
+with their 1080p copies, captions and description for every release (videos.yml, called by release.yml), rendered
+from the release's own code and the sidecar transcript its CI recorded, measured before they are attached."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+WF = ROOT / ".github" / "workflows"
+
+
+def _wf(name: str) -> dict[str, Any]:
+    return yaml.safe_load((WF / name).read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+
+
+def _run(job: dict[str, Any]) -> str:
+    return "\n".join(str(s.get("run", "")) for s in job["steps"])
+
+
+def test_every_action_in_the_video_workflows_is_pinned() -> None:
+    for name in ("videos.yml", "ci.yml", "release.yml"):
+        for job in _wf(name)["jobs"].values():
+            for step in job.get("steps", []):
+                uses = step.get("uses", "")
+                local = uses.startswith("./")  # this repository's own action
+                assert not uses or local or re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", uses), (name, uses)
+
+
+def test_ci_checks_every_video_on_every_change_without_the_voice_model() -> None:
+    job = _wf("ci.yml")["jobs"]["videos"]
+    run = _run(job)
+    spec = json.loads((ROOT / "demos" / "video" / "stage" / "videos.json").read_text(encoding="utf-8"))
+    assert re.search(r"for v in (.+); do", run).group(1).split() == list(spec["videos"])  # type: ignore[union-attr]
+    assert "--engine silent" in run and 'capture.js "out/$v" --check' in run and "--stills" in run
+    assert "build_scenes.py walkthrough" in run and "thumbnail.js" in run
+    assert "tests/fixtures/video-sidecar-transcript.txt" in str(job["steps"])
+
+
+def test_every_release_renders_and_attaches_measured_4k_masters() -> None:
+    release = _wf("release.yml")["jobs"]["videos"]
+    assert release["uses"] == "./.github/workflows/videos.yml" and release["needs"] == "github-release"
+    assert release["permissions"] == {"contents": "write", "actions": "read"}
+    assert release["with"]["tag"] == "${{ github.ref_name }}"
+    videos = _wf("videos.yml")
+    jobs = videos["jobs"]
+    assert jobs["transcript"]["permissions"]["actions"] == "read" and "sidecar-transcript-4.22" in _run(
+        jobs["transcript"]
+    )
+    spec = json.loads((ROOT / "demos" / "video" / "stage" / "videos.json").read_text(encoding="utf-8"))
+    assert set(jobs["render"]["strategy"]["matrix"]["video"]) == {"walkthrough", *spec["videos"]}
+    render = _run(jobs["render"])
+    assert "KN_VIDEO_SCALE=2" in render and "KN_SCALE=2" in render  # 3840x2160 masters
+    assert '= "3840,2160"' in render and "scale=1920:1080" in render
+    assert "loudness.py --verify dist/*.mp4" in render and ".vtt" in render and "youtube-description.txt" in render
+    install = next(s for s in jobs["render"]["steps"] if "pip install" in str(s.get("run", "")))
+    assert "./product" in install["run"] and "kube_noob.__version__" in install["run"]  # the tag's own code
+    assert all(
+        re.search(r"==\d", d) for d in re.findall(r'"(numpy[^"]*|kokoro-onnx[^"]*|onnxruntime[^"]*)"', install["run"])
+    )
+    assert jobs["attach"]["permissions"] == {"contents": "write"} and "gh release upload" in _run(jobs["attach"])
+    assert "SHA256SUMS-videos.txt" in _run(jobs["attach"])
+
+
+def test_the_playwright_version_is_locked() -> None:
+    pkg = json.loads((ROOT / "demos" / "video" / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((ROOT / "demos" / "video" / "package-lock.json").read_text(encoding="utf-8"))
+    assert all(re.fullmatch(r"\d+\.\d+\.\d+", v) for v in pkg["devDependencies"].values())
+    assert lock["packages"]["node_modules/playwright"]["version"] == pkg["devDependencies"]["playwright"]
+    assert all(p.get("integrity", "").startswith("sha512-") for k, p in lock["packages"].items() if k)

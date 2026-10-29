@@ -29,6 +29,13 @@
   voice), for the website, YouTube and LinkedIn. The walkthrough render also writes `youtube-description.txt` with
   its numbers filled and the chapters at the real scene times (the script's had drifted by up to 8 seconds); its end
   card now lasts 12 seconds, long enough to be a YouTube chapter and carry an end screen.
+- Every release gets its videos (`.github/workflows/videos.yml`, called by `release.yml` after the release exists,
+  or run by hand for an existing tag): 4K masters and 1080p copies of the walkthrough and the three animated videos,
+  WebVTT captions, poster frames, the YouTube thumbnail and description, and `SHA256SUMS-videos.txt`, rendered from
+  the tag's own code with the sidecar transcript its CI run recorded, each file measured before it is attached.
+- CI checks the videos on every change in a few minutes (`videos` job): the scripts, every fact, the layout rules
+  on every frame and stills of every scene, with `--engine silent` (no voice model; the same timing). Playwright is
+  pinned in `demos/video/package-lock.json`.
 - `tests/test_guidance.py` checks rows G100 and later too (it matched only two-digit ids).
 
 ## 0.6.0 - 2026-10-29

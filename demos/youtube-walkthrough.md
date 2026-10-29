@@ -1,5 +1,10 @@
 # YouTube walkthrough: script, voice-over and metadata
 
+Every release has the rendered cut attached (`.github/workflows/videos.yml`): `kube-noob-walkthrough-4k.mp4` (the
+3840x2160 master), `kube-noob-walkthrough-1080p.mp4`, `kube-noob-walkthrough.vtt` (captions),
+`youtube-thumbnail.jpg` and `youtube-description.txt` (the description below with its numbers filled and the
+chapters at the render's real times). Upload those rather than copying from this page.
+
 There are two cuts:
 
 - The **rendered cut** (about 2 minutes, 3840x2160) is recorded from the installed `kube-noob`'s real output by

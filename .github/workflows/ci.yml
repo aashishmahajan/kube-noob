@@ -57,6 +57,55 @@ jobs:
       - name: MCP stdio end-to-end under the offline lock (installed wheel)
         run: /tmp/wheelenv/bin/python -I scripts/e2e_mcp_offline.py /tmp/wheelenv/bin/kube-noob
 
+  videos:
+    # The demo videos on every change, in a few minutes and without the voice model (a silent voice with the same
+    # timing): videos.json against its schema with every number filled from this commit's code, the brand layout
+    # rules on every frame (capture.js --check), and stills of every scene, the walkthrough cards and the thumbnail
+    # uploaded to look at. The 4K masters are rendered for releases by videos.yml.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: kube-noob, ffmpeg and Chromium (pinned in demos/video/package-lock.json)
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip && pip install . "numpy==2.5.3"
+          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+          cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
+      - name: Video scripts, facts and layout rules on every frame, and stills (silent voice)
+        env:
+          NODE_PATH: ${{ github.workspace }}/demos/video/node_modules
+          KN_SIDECAR_TRANSCRIPT: ${{ github.workspace }}/tests/fixtures/video-sidecar-transcript.txt
+        run: |
+          set -euo pipefail
+          for v in teaser sidecar mcp; do
+            python demos/video/stage/voiceover.py "$v" "out/$v" --engine silent
+            node demos/video/stage/capture.js "out/$v" --check
+            stills="$(python -c "import json; t = json.load(open('out/$v/timeline.json')); print(','.join(str(round(s['start'] + s['dur'] * 0.8, 2)) for s in t['scenes']))")"
+            node demos/video/stage/capture.js "out/$v" --scale 1 --stills "$stills"
+          done
+          python demos/video/build_scenes.py walkthrough out/walkthrough
+          node demos/video/capture_page.js out/walkthrough walkthrough.html out/walkthrough/unused.mp4 --scale 1 --stills 2.5,20
+          cp demos/video/thumbnail.html out/walkthrough/ && node demos/video/thumbnail.js out/walkthrough
+          ls out/*/still-*.png | wc -l
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: video-stills
+          path: |
+            out/*/still-*.png
+            out/walkthrough/youtube-thumbnail.jpg
+          retention-days: 7
+          if-no-files-found: ignore
+
   plugin:
     # The Claude plugin runs the bundled server source with dependencies pinned by hash; prove it starts and answers.
     runs-on: ubuntu-latest

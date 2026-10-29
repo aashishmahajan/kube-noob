@@ -77,7 +77,9 @@ PIPER_SPEAKER = 37
 CREDITS = {
     "kokoro": "Voice: Kokoro-82M (Apache-2.0) · Music: generated for kube-noob",
     "piper": "Voice: Piper, LibriTTS voice (CC BY 4.0) · Music: generated for kube-noob",
+    "silent": "No voice (layout check only) · Music: generated for kube-noob",
 }
+SILENT_CPS = 16.0  # characters a second the Kokoro voice speaks, for --engine silent
 
 # Words the voice models say wrongly, checked against the phonemes Kokoro produces.
 PRONOUNCE = [
@@ -197,15 +199,25 @@ class Voice:
         self, engine: str = "kokoro", voice: str = DEFAULT_VOICE, speed: float = 1.0, speaker: int = PIPER_SPEAKER
     ) -> None:
         if engine not in CREDITS:
-            raise SystemExit(f"unknown voice engine {engine!r}: use kokoro or piper")
+            raise SystemExit(f"unknown voice engine {engine!r}: use kokoro or piper (or silent for layout checks)")
         self.engine, self.voice, self.speed, self.speaker = engine, voice, speed, speaker
         self.credit = CREDITS[engine]
-        self._say: Callable[[str], np.ndarray] = self._kokoro() if engine == "kokoro" else self._piper()
+        engines = {"kokoro": self._kokoro, "piper": self._piper, "silent": self._silent}
+        self._say: Callable[[str], np.ndarray] = engines[engine]()
 
     def say(self, text: str) -> np.ndarray:
         audio = self._say(speakable(text))
         peak = float(np.max(np.abs(audio))) or 1.0
         return audio / peak * VOICE_PEAK
+
+    def _silent(self) -> Callable[[str], np.ndarray]:
+        """No voice: silence as long as the voice would take (SILENT_CPS), so CI can check every scene's layout and
+        timing without downloading the voice model. Never for a published video."""
+
+        def say(text: str) -> np.ndarray:
+            return np.zeros(int(len(text) / (SILENT_CPS * self.speed) * RATE))
+
+        return say
 
     def _kokoro(self) -> Callable[[str], np.ndarray]:
         from kokoro_onnx import Kokoro

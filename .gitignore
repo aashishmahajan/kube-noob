@@ -15,3 +15,6 @@ dist/
 /corpus-out/
 /out/
 *.local.yaml
+
+# demo video renders
+demos/video/node_modules/
