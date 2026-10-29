@@ -157,6 +157,44 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
   background: rgba(2,10,22,.6); border: 1px solid rgba(var(--kn-green-rgb), .4); }
 #endcard .url { font: 600 32px var(--sans); color: var(--kn-sky); margin-top: 22px; }
 #endcard .credit { position: absolute; left: 0; width: 1920px; bottom: 34px; text-align: center; font: 500 20px var(--sans); color: var(--kn-muted); }
+
+/* payoff: the example's YAML, its findings on their lines, the fix as a diff, the score climbing */
+.payoff { position: absolute; left: 130px; top: 64px; width: 1660px; height: 812px; border-radius: 26px; overflow: hidden;
+  background: linear-gradient(165deg, rgba(var(--kn-panel-rgb), .96), rgba(var(--kn-navy-night-rgb), .97) 70%);
+  border: 1.5px solid rgba(var(--kn-sky-rgb), .28);
+  box-shadow: 0 50px 140px -40px rgba(var(--kn-navy-night-rgb), .95), 0 0 120px -40px rgba(var(--kn-blue-rgb), .7); }
+.payoff .head { height: 58px; display: flex; align-items: center; gap: 14px; padding: 0 26px; border-bottom: 1px solid rgba(var(--kn-sky-rgb), .16);
+  font: 500 22px var(--mono); color: var(--kn-muted); }
+.payoff .head i { width: 15px; height: 15px; border-radius: 50%; display: inline-block; }
+.payoff .body { display: grid; grid-template-columns: 1000px 1fr; gap: 26px; padding: 18px 26px; }
+.payoff .yaml { font: 400 23px/1.45 var(--mono); border-radius: 14px; padding: 8px 0; background: rgba(var(--kn-navy-night-rgb), .6);
+  border: 1px solid rgba(var(--kn-sky-rgb), .12); }
+.payoff .row { display: flex; gap: 18px; padding: 0 16px; white-space: pre; border-radius: 6px; }
+.payoff .row .no { color: rgba(var(--kn-sky-rgb), .45); min-width: 34px; text-align: right; }
+.payoff .row .src { color: var(--kn-ink-soft); }
+.payoff .row.high { background: rgba(var(--kn-danger-rgb), .18); box-shadow: inset 5px 0 0 var(--kn-danger); }
+.payoff .row.medium { background: rgba(var(--kn-warning-rgb), .14); box-shadow: inset 5px 0 0 var(--kn-warning); }
+.payoff .row.fixed { background: rgba(var(--kn-green-rgb), .16); box-shadow: inset 5px 0 0 var(--kn-green); }
+.payoff .row.fixed .src { color: var(--kn-green-soft); }
+.payoff .row.fixed::after { content: "fixed"; margin-left: auto; font: 700 17px var(--mono); color: var(--kn-green); align-self: center; }
+.payoff .side { position: relative; }
+.payoff .ring { position: relative; width: 250px; height: 250px; margin: 4px auto 18px; }
+.payoff .ring svg { width: 250px; height: 250px; transform: rotate(-90deg); }
+.payoff .ring .track { fill: none; stroke: rgba(var(--kn-sky-rgb), .14); stroke-width: 3.4; }
+.payoff .ring .arc { fill: none; stroke-width: 3.4; stroke-linecap: round; }
+.payoff .ring .num { position: absolute; inset: 0; display: grid; place-items: center; font: 800 92px var(--sans); color: var(--kn-ink); padding-bottom: 22px; letter-spacing: -0.03em; }
+.payoff .ring .unit { position: absolute; left: 0; right: 0; bottom: 62px; text-align: center; font: 600 26px var(--sans); color: var(--kn-muted); }
+.payoff .chips, .payoff .diff { position: absolute; left: 0; right: 0; top: 280px; }
+.payoff .chip2 { display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: baseline; margin-bottom: 12px; padding: 12px 16px; border-radius: 14px;
+  background: rgba(var(--kn-ink-rgb), .05); border: 1px solid rgba(var(--kn-ink-rgb), .09); font: 500 23px var(--sans); color: var(--kn-ink-soft); }
+.payoff .chip2 b { font: 700 18px var(--mono); padding: 3px 9px; border-radius: 7px; }
+.payoff .chip2.high b { background: rgba(var(--kn-danger-rgb), .22); color: var(--kn-danger-soft); }
+.payoff .chip2.medium b { background: rgba(var(--kn-warning-rgb), .2); color: var(--kn-warning); }
+.payoff .chip2 code { font: 600 21px var(--mono); color: var(--kn-sky); }
+.payoff .chip2 span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.payoff .diff { font: 500 21px/1.6 var(--mono); padding: 14px 18px; border-radius: 14px; background: rgba(var(--kn-navy-night-rgb), .6); border: 1px solid rgba(var(--kn-green-rgb), .3); }
+.payoff .diff .add { color: var(--kn-green-soft); } .payoff .diff .del { color: var(--kn-danger-soft); }
+.payoff .note { position: absolute; left: 0; right: 0; top: 590px; text-align: center; font: 600 24px/1.35 var(--sans); color: var(--kn-warning); }
 </style>
 </head>
 <body>
@@ -576,6 +614,27 @@ function buildDesk() {
   DESK.book.querySelectorAll('.pg').forEach((p, k) => { for (let i = 0; i < 8; i++) el(p, `<i style="top:${22 + i * 19}px;width:${50 + ((k * 7 + i * 13) % 40)}%"></i>`); });
   DESK.chips = ['audit_manifests', 'fix_manifests', 'diagnose'].map(n => reg('chip-' + n, el(props, `<div class="chip">${n}</div>`)));
 }
+const PAY = {};
+function buildPayoff(data) {
+  const e = reg('payoff', el($('front'), `<div class="payoff"><div class="head"><i style="background:var(--kn-danger)"></i>
+    <i style="background:var(--kn-warning)"></i><i style="background:var(--kn-green)"></i><span class="title"></span></div>
+    <div class="body"><div class="yaml"></div><div class="side"><div class="ring"><svg viewBox="0 0 36 36">
+    <circle class="track" cx="18" cy="18" r="15.9" pathLength="100"/><circle class="arc" cx="18" cy="18" r="15.9" pathLength="100"/></svg>
+    <div class="num"></div><div class="unit">/100</div></div><div class="chips"></div><div class="diff"></div><div class="note"></div></div></div></div>`));
+  const yaml = e.querySelector('.yaml');
+  PAY.rows = new Map(data.yaml.map(r => {
+    const row = el(yaml, `<div class="row"><span class="no">${r.n}</span><span class="src"></span></div>`);
+    row.querySelector('.src').textContent = r.text || ' ';
+    return [r.n, row];
+  }));
+  PAY.chips = data.findings.map(f => {
+    const c = el(e.querySelector('.chips'), `<div class="chip2 ${f.severity}"><b>${esc(f.severity.toUpperCase())}</b><code>${esc(f.rule)}</code><span></span></div>`);
+    c.querySelector('span').textContent = `line ${f.line} · ${f.title}`;
+    return c;
+  });
+  PAY.diff = data.diff.map(d => { const x = el(e.querySelector('.diff'), `<div class="${d.op === '+' ? 'add' : 'del'}"></div>`); x.textContent = `${d.op} ${d.text}`; return x; });
+  PAY.e = e;
+}
 function deskBase(T, o) {
   const d = $('desk'); d.style.display = ''; d.style.opacity = o.op ?? 1;
   const lap = on('laptop');
@@ -832,8 +891,42 @@ const KINDS = {
     room(T, { color: TEAL.join(','), floor: false });
     deskBase(T, { op: 0.25 });
     const u = easeOut(clamp(L / 0.5));
-    drawTerm(TERM, { x: 140, y: 100, w: 1640, h: 730, ...GREEN, lines: sc.term, sched: sc._s, local: L, fs: 25, solid: true,
+    const fs = 31, h = Math.min(800, 110 + sc.term.length * fs * 1.5); // the terminal is as tall as its lines
+    drawTerm(TERM, { x: 110, y: Math.max(50, (900 - h) / 2), w: 1700, h, ...GREEN, lines: sc.term, sched: sc._s, local: L, fs, solid: true,
       op: u, tf: `translateY(${(1 - u) * 30}px)`, title: 'Claude Code · kube-noob plugin' });
+  },
+  payoff(L, dur, sc, T) {
+    room(T, { color: TEAL.join(','), floor: false });
+    drawCubes(T, { color: TEAL.join(','), op: 0.25 });
+    const d = sc.payoff, e = on('payoff');
+    const u = easeOut(clamp(L / 0.5));
+    e.style.opacity = u; e.style.transform = `translateY(${(1 - u) * 28}px) scale(${1 + 0.02 * clamp(L / dur)})`;
+    const step = 0.75, t0 = 0.9, nf = d.findings.length;
+    const fixAt = Math.max(t0 + nf * step + 1.0, dur * 0.5);
+    const diffDone = fixAt + 0.3 + d.diff.length * 0.22;
+    e.querySelector('.title').textContent = L < fixAt
+      ? 'deployment.yaml · kubenoob_audit_manifests (openshift 4.22)' : 'deployment.yaml · kubenoob_fix_manifests (safe fixes only)';
+    for (const row of PAY.rows.values()) row.className = 'row';
+    d.findings.forEach((f, i) => {
+      const at = t0 + i * step;
+      const row = PAY.rows.get(f.line);
+      if (row && L >= at) row.className = `row ${f.severity}`;
+      if (row && L >= diffDone && d.fixedLines.includes(f.line)) row.className = 'row fixed';
+      const c = PAY.chips[i];
+      const show = sstep(at, at + 0.3, L) * (1 - sstep(fixAt, fixAt + 0.4, L));
+      c.style.opacity = show; c.style.transform = `translateX(${(1 - sstep(at, at + 0.3, L)) * 40}px)`;
+    });
+    PAY.diff.forEach((x, j) => { x.style.opacity = sstep(fixAt + 0.3 + j * 0.22, fixAt + 0.5 + j * 0.22, L); });
+    e.querySelector('.diff').style.opacity = sstep(fixAt, fixAt + 0.3, L);
+    const v = L < fixAt ? lerp(0, d.score, easeOut((L - 0.8) / (nf * step)))
+      : lerp(d.score, d.fixed, easeOut((L - fixAt - 0.4) / 1.4));
+    const arc = e.querySelector('.arc');
+    arc.style.strokeDasharray = `${Math.max(0, v)} 100`;
+    arc.style.stroke = v >= 80 ? KN.tokens.colors.green : v >= 50 ? KN.tokens.colors.warning : KN.tokens.colors.danger;
+    e.querySelector('.num').textContent = String(Math.max(0, Math.round(v)));
+    const note = e.querySelector('.note');
+    note.textContent = `${d.manual} changes left for a person: kube-noob says which`;
+    note.style.opacity = sstep(diffDone + 0.6, diffDone + 1.0, L);
   },
   explain(L, dur, sc, T) {
     room(T, { color: TEAL.join(','), floor: false });
@@ -919,6 +1012,8 @@ async function init() {
   const kinds = new Set(TL.scenes.map(s => s.kind));
   if (['pod', 'loopback', 'lock', 'gauge', 'pullback'].some(k => kinds.has(k))) buildIso(); else $('iso').style.display = 'none';
   if (['desk', 'beam', 'explain', 'local'].some(k => kinds.has(k))) buildDesk();
+  const pay = TL.scenes.find(s => s.kind === 'payoff');
+  if (pay) buildPayoff(pay.payoff);
   for (const s of TL.scenes) if (s.term) {
     const typedEnd = s.kind === 'install' ? s.dur * 0.62 : s.dur * 0.72;
     s._s = schedule(s.term, s.kind === 'cta' ? 0.5 : 0.55, typedEnd);

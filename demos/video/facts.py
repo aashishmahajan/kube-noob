@@ -165,6 +165,44 @@ def _manifest_limit_mib() -> int:
     raise FactError(f"{SIDECAR_MANIFEST}: no kube-noob container")
 
 
+def _payoff(
+    manifests: str, rules: dict[str, Any], shown: list[dict[str, Any]], fix: dict[str, Any], values: dict[str, Any]
+) -> dict[str, Any]:
+    lines = manifests.splitlines()
+    marked = sorted({x["line"] for x in shown if x["line"]})
+    first, last = max(1, marked[0] - 9), min(len(lines), marked[-1] + 1)
+    fixed_rules = {c["ruleId"] for c in fix["changes"]}
+
+    def value(v: Any) -> str:
+        if isinstance(v, bool):
+            return str(v).lower()
+        if isinstance(v, dict):
+            return "{" + ", ".join(f"{k}: {value(x)}" for k, x in v.items()) + "}"
+        if isinstance(v, list):
+            return "[" + ", ".join(value(x) for x in v) + "]"
+        return str(v)
+
+    diff = []
+    for c in fix["changes"]:
+        name = c["path"].rsplit(".", 1)[-1]
+        if c.get("before") is not None:
+            diff.append({"op": "-", "text": f"{name}: {value(c['before'])}"})
+        if c.get("after") is not None:
+            diff.append({"op": "+", "text": f"{name}: {value(c['after'])}"})
+    return {
+        "yaml": [{"n": i, "text": lines[i - 1]} for i in range(first, last + 1)],
+        "findings": [
+            {"rule": x["ruleId"], "severity": x["severity"], "line": x["line"], "title": rules[x["ruleId"]]["title"]}
+            for x in shown
+        ],
+        "fixedLines": [x["line"] for x in shown if x["ruleId"] in fixed_rules],
+        "diff": diff,
+        "score": values["audit.score"],
+        "fixed": values["fix.score"],
+        "manual": values["fix.manual"],
+    }
+
+
 def _change(c: dict[str, Any]) -> str:
     def show(v: Any) -> str:
         if v is None:
@@ -257,6 +295,7 @@ class Facts:
         ]
         lines += [f"  MED   {x['ruleId']}  line {x['line']}  {rules[x['ruleId']]['title']}" for x in wiring[:1]]
         changes = [_change(c) for c in f["changes"]]
+        self._payoff = _payoff(manifests, rules, high + wiring[:1], f, self._values)
         lines.append("● kube-noob · kubenoob_fix_manifests")
         for i in range(0, len(changes), 3):
             lines.append("  " + " · ".join(changes[i : i + 3]))
@@ -342,6 +381,11 @@ class Facts:
         if name not in self._values:
             raise FactError(f"unknown fact {name!r}; see demos/video/facts.py")
         return self._values[name]
+
+    def payoff(self) -> dict[str, Any]:
+        """The payoff scene: the example's YAML, its findings on their lines, the fix as a diff, and both scores."""
+        self._ensure("audit")
+        return json.loads(json.dumps(self._payoff))
 
     def recording(self, name: str) -> list[str]:
         self._ensure(name)

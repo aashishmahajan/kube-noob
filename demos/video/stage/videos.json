@@ -150,6 +150,14 @@
           ]
         },
         {
+          "kind": "payoff",
+          "min": 10.0,
+          "caption": "{audit.score} → {fix.score} after the safe fixes",
+          "captionPos": "lower",
+          "vo": "Each finding lands on its line. The safe fixes take the score from {audit.score} to {fix.score}, and kube-noob lists the {fix.manual} changes that need a person.",
+          "say": "Each finding lands on its line. The safe fixes take the score from {audit.score:words} to {fix.score:words}, and kube noob lists the {fix.manual:words} changes that need a person."
+        },
+        {
           "kind": "explain",
           "min": 9.0,
           "caption": "Claude explains. kube-noob checks.",

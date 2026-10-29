@@ -91,6 +91,16 @@
   refused the old one (payload in the name) before admission, so the policy test on kind could not see the policy.
   The policy test creates every namespace its fixtures name (ingress-nginx for the controller rules).
 
+- Video redesign (from a review of the published cuts: mostly empty terminals with small text, the same laptop shot
+  four times, and no visual payoff):
+  - The walkthrough puts the chapter's point in a rail beside a terminal sized to what it shows. The font is the
+    largest that fits (22 to 36 px at 1080p). The lines to look at light up once the output is printed: findings,
+    scores, verdicts and read-only steps. A slow push-in keeps every frame moving, and commands type fast, so no frame
+    holds an empty box. Chapter cards become big numbers with progress dots over the brand aurora.
+  - The MCP video gets a payoff scene, from the same audit the facts use. The example's YAML is shown with each finding
+    lighting its line and a ring counting to the score. Then the fix's diff appears, the fixed lines turn green, the
+    ring climbs to the score after the fixes, and the changes left for a person are named. The MCP terminal now uses
+    31 px type in a box as tall as its lines.
 - `corpus-refresh`: a saved Jira copy that no longer decrypts (CORPUS_PASSPHRASE changed since it was saved) starts
   a new copy with a warning instead of failing the daily run ("bad decrypt" on 2026-10-29).
 

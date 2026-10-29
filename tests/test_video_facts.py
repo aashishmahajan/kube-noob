@@ -228,6 +228,25 @@ def test_the_text_to_video_prompts_say_what_the_rendered_videos_say() -> None:
         assert [(r[3].replace("`", ""), r[4]) for r in rows] == [(s["caption"], s["vo"]) for s in scenes], name
 
 
+def test_the_payoff_scene_shows_the_real_audit_and_fix(facts: vfacts.Facts) -> None:
+    pay = facts.payoff()
+    lines = (ROOT / vfacts.EXAMPLE).read_text(encoding="utf-8").splitlines()
+    assert pay["yaml"] and all(lines[r["n"] - 1] == r["text"] for r in pay["yaml"])
+    shown = {r["n"] for r in pay["yaml"]}
+    tool = "\n".join(facts.recording("tool:audit"))
+    for f in pay["findings"]:
+        assert f["line"] in shown and f"{f['rule']}  line {f['line']}" in tool, f  # the same findings as on screen
+    assert set(pay["fixedLines"]) <= {f["line"] for f in pay["findings"] if f["severity"] == "high"}
+    assert (pay["score"], pay["fixed"], pay["manual"]) == (
+        facts.get("audit.score"),
+        facts.get("fix.score"),
+        facts.get("fix.manual"),
+    )
+    assert pay["diff"] and all(d["op"] in "+-" for d in pay["diff"])
+    payoff = next(s for s in _spec()["videos"]["mcp"]["scenes"] if s["kind"] == "payoff")
+    assert "{audit.score}" in payoff["caption"] and "{fix.score}" in payoff["caption"]
+
+
 def test_rules_a_script_names_are_real_and_found_in_the_example(facts: vfacts.Facts) -> None:
     from kube_noob.audit.engine import list_rules
 
