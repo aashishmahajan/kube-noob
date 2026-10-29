@@ -6,6 +6,9 @@ name: videos
 # from the sidecar transcript its CI run recorded on a kind cluster (demos/video/facts.py); every file's sound is
 # measured against the brand spec before it is attached (demos/video/loudness.py). release.yml calls this after the
 # release exists; run it by hand to render (or re-render) the videos of an existing release.
+# Only reviewed code runs here: the verify job resolves the tag and pipeline_ref to commits and refuses any that is
+# not on the default branch, and every later job checks out those commits, never a ref typed into the inputs. A
+# dispatched run writes to the default branch's cache scope, so an unmerged ref must never execute in it.
 
 on:
   workflow_call:
@@ -41,11 +44,64 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    # The release tag (vX.Y.Z) and the pipeline commit must both be on the default branch: tags are cut from it after
+    # review, and pipeline_ref exists to render an older tag with the newer, merged rendering code.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      product: ${{ steps.commits.outputs.product }}
+      pipeline: ${{ steps.commits.outputs.pipeline }}
+    steps:
+      - name: Resolve the tag and the pipeline to commits on the default branch
+        id: commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PIPELINE: ${{ inputs.pipeline_ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s inherit_errexit
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error title=videos::tag must be a release tag like v0.6.0"
+            exit 1
+          fi
+          if [ -n "$PIPELINE" ] && ! printf '%s' "$PIPELINE" | grep -Eq '^([0-9a-f]{7,40}|v[0-9]+\.[0-9]+\.[0-9]+|main)$'; then
+            echo "::error title=videos::pipeline_ref must be a commit, a release tag or main"
+            exit 1
+          fi
+          default="$(gh api "repos/${REPO}" --jq .default_branch)"
+          if [ "$(gh api "repos/${REPO}/git/ref/tags/${TAG}" --jq .ref 2>/dev/null)" != "refs/tags/${TAG}" ]; then
+            echo "::error title=videos::there is no tag ${TAG}"
+            exit 1
+          fi
+          on_default() {
+            local sha status
+            sha="$(gh api "repos/${REPO}/commits/$1" --jq .sha)"
+            printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'
+            status="$(gh api "repos/${REPO}/compare/${sha}...${default}" --jq .status)"
+            if [ "$status" != ahead ] && [ "$status" != identical ]; then
+              echo "::error title=videos::$1 (${sha}) is not on ${default}: only merged code renders the videos" >&2
+              return 1
+            fi
+            printf '%s' "$sha"
+          }
+          product="$(on_default "refs/tags/${TAG}")"
+          pipeline="$product"
+          if [ -n "$PIPELINE" ]; then pipeline="$(on_default "$PIPELINE")"; fi
+          echo "product=${product}" >> "$GITHUB_OUTPUT"
+          echo "pipeline=${pipeline}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=videos::${TAG} is ${product}; rendered with the pipeline at ${pipeline}"
+
   transcript:
     # The sidecar video shows a real session on a cluster that enforces Pod Security restricted: the transcript
     # scripts/demo_sidecar_kind.sh recorded in the ci run of the tagged commit. The transcript attached to the release
     # wins (a re-render after the ci artifact expired); otherwise the newest completed ci run of the commit whose
     # sidecar step passed, whatever its other jobs did. Waits while a run is still going; fails when there is none.
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -56,11 +112,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
+          PRODUCT: ${{ needs.verify.outputs.product }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           file=transcript/sidecar-transcript-4.22.txt
-          sha="$(gh api "repos/${REPO}/commits/${TAG}" --jq .sha)"
+          sha="$PRODUCT"
           if gh release download "$TAG" --repo "$REPO" -p sidecar-transcript-4.22.txt -D transcript 2>/dev/null; then
             echo "::notice title=videos::sidecar transcript attached to ${TAG}"
           else
@@ -100,8 +157,8 @@ jobs:
 
   render:
     # Every leg but the sidecar one renders without the transcript, so a ci problem costs one video, not four.
-    needs: transcript
-    if: ${{ !cancelled() }}
+    needs: [verify, transcript]
+    if: ${{ !cancelled() && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
@@ -111,11 +168,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.pipeline_ref || inputs.tag }}
+          ref: ${{ needs.verify.outputs.pipeline }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.verify.outputs.product }}
           path: product
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -189,8 +246,8 @@ jobs:
 
   attach:
     # Attaches every video that rendered, even when another leg failed, and then fails the run if one did.
-    needs: [transcript, render]
-    if: ${{ !cancelled() && inputs.attach }}
+    needs: [verify, transcript, render]
+    if: ${{ !cancelled() && inputs.attach && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

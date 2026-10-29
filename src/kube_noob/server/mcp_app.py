@@ -23,7 +23,7 @@ from pydantic_core import PydanticUndefined
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from kube_noob import __version__, sanitize
+from kube_noob import __version__, sanitize, tool_runner
 from kube_noob.audit.engine import list_rules
 from kube_noob.config import Settings
 from kube_noob.errors import KubeNoobError
@@ -61,7 +61,9 @@ def _instructions(settings: Settings) -> str:
         "release notes and, when this install keeps a local copy of Red Hat's public Jira, the tickets: fixed and in "
         "which version, still open, or closed as not a bug, won't fix or a duplicate) and give the issue link; say "
         "what became of the ticket, not only that it exists. kubenoob_ticket looks up one key; kubenoob_ticket_changes "
-        "lists the tickets fixed, closed, reopened or opened since a date and the open tickets. For a denied request "
+        "lists the tickets fixed, closed, reopened or opened since a date and the open tickets. Before an OpenShift "
+        "update, kubenoob_upgrade_risks lists the risks declared for that update (from and to as x.y.z) with what "
+        "decides each; give the read-only check, and show a query it cannot evaluate as written. For a denied request "
         "(Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, SCC, RHACS, quota, RBAC) use "
         "kubenoob_explain_denial; to enforce the audit rules at admission, kubenoob_policy_generate writes "
         "ValidatingAdmissionPolicy and Kyverno policy YAML (suggest audit mode first; it applies nothing); for "
@@ -117,15 +119,7 @@ def run_tool(spec: ToolSpec, kwargs: dict[str, Any], knowledge: str, via: str = 
     started = time.monotonic()
     outcome = "ok"
     try:
-        validated = spec.model.model_validate(kwargs)
-        result: dict[str, Any] = spec.fn(validated)
-        if isinstance(result, dict):
-            # Every answer says how current kube-noob's knowledge is, so the model can tell the user.
-            result.setdefault("knowledgeAsOf", knowledge)
-            # Text from outside (events, logs, tickets, memory, pages) is data: shapes that try to steer the calling
-            # model are neutralised and flagged before the result leaves the server.
-            result = sanitize.result(result)
-        return result
+        return tool_runner.call(spec, kwargs, knowledge)
     except ValidationError as exc:
         outcome = "invalid-arguments"
         raise CallFailed(400, outcome, f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from None

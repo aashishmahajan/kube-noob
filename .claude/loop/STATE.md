@@ -156,9 +156,7 @@ which ships tested and documented on its own.
 - Run the headline test: "No AI inside. Works with yours." versus "The ground truth your AI SRE checks against",
   a week apart, compare click-through to the repository.
 - Submit the OpenShift Helm catalog pull requests (`docs/openshift-catalog.md`).
-- kube-noob.com (source in the private kube-noob-site repository, setup in its README): add the deploy key and the
-  `DEPLOY_KEY` secret, enable Pages on kube-noob-www (branch main), verify the domain (TXT record), add the A, AAAA and
-  `www` CNAME records at Network Solutions, set the custom domain and enforce HTTPS.
+- kube-noob.com: its owner steps are kept with the site's source, outside this repository.
 - Videos for 0.6.0: once this branch is on main, run the `videos` workflow by hand with tag `v0.6.0` and
   pipeline_ref `main` (0.6.0's own tag predates the pipeline); later releases get them from `release.yml`.
 - `CORPUS_PASSPHRASE` repository secret: set by the owner on 2026-10-28 (a random passphrase; keep the local file in a
@@ -325,6 +323,16 @@ which ships tested and documented on its own.
 - CI (GitHub Actions) has helm, kind and docker: chart, image and cluster behaviour is proven there.
 
 ## Iteration log (newest first; at most 10 lines per entry)
+- 2026-10-29 CodeQL (G109): PR #5's code scanning review flagged videos.yml (cache poisoning via execution of untrusted
+  code x2, untrusted checkout: `inputs.pipeline_ref || inputs.tag` executed in a dispatched run) and two test URL
+  substrings; PR #4's clear-text logging and node-role prefix were still open. verify job against the live API:
+  v0.6.0 -> f01ba7d, v0.5.0 + main -> 073fe80/d70cdd6 accepted; unmerged fa5ec46, `v0.6`, `main` as tag, `feature/x`,
+  missing v9.9.9 refused. PR #6 CodeQL: "No new alerts in code changed by this pull request". db_bundle chmod 0644 is
+  public data: owner dismissal. check.sh 1637 passed, 1 skipped, selftest 63/63.
+- 2026-10-29 G108 Agent Skill: `kn.py insight '{"text":"Failed to pull image ...: pull access denied; the pull secret
+  regcred is in namespace build, the pod runs in namespace app","platform":"openshift"}'` from the release zip (824 KB)
+  in a venv with only pydantic, PyYAML, jsonschema, httpx -> DBG-IMAGEPULL then kn:k8s-images#0, knowledge as of
+  2026-10-27; `kn.py check` ok on Python 3.13. Tools run with subprocess and sockets refused (test).
 - 2026-10-29 QA9 content: 7 drafts (Helm template functions, Kyverno and Gatekeeper usage, Rook-Ceph operations and troubleshooting, kubectl output, Jobs and kustomize) checked against VERIFY files (a composed Kyverno MutatingPolicy replaced by the kyverno/policies replace-image-registry policy; broad `requires` groups tightened; a templating group added to the Helm doc after golden helm-010 moved). Test half, two blinded graders: all drafts as-is 59/59 better, 42/42 worse, but the new-document rows alone were 27/28 better and 35/35 worse (Rook 8 better, 24 worse). Train half: subject words not counted in posts 84/76 better, 37/37 worse; limited to long posts (keeps a short compose post's answer) 69/61 better, 25/25 worse. Shipped: Helm functions, Gatekeeper, kubectl output; held: Rook pair, Jobs/kustomize, Kyverno usage. Shipped config vs base, 122 changed test rows not used for decisions: 54/53 better, 31/27 worse. `kube-noob insight "How do I add OSDs to a Rook Ceph cluster with useAllDevices?"` -> generic gather steps only (Rook docs held); `kube-noob insight "How do I make a Gatekeeper constraint apply to Deployments, not only Pods?"` -> kn:gatekeeper-constraints-usage#9 (ExpansionTemplate) first; `kube-noob search "helm lookup function returns empty during helm template"` -> kn:helm-template-functions#11 (selftest helm-lookup accepts it). Golden 89/96, out of scope 22/23 (rosa-019 promoted to abstain), regressed 0.
 - 2026-10-29 RT9 (red team of the 0.6.0 candidate): `kube-noob must-gather analyze <mg with namespace "shop\n", pod env>` -> `shop/pod env` listed with no `next:` step (was `oc describe pod -n shop` then ` env` on its own line); `kube-noob known-issues 'could not find any suitable subnets for creating the ELB' --version 4.20.8` -> OCPBUGS-57440 (was no match); `kube-noob diagnose 'kind cluster node NotReady' --platform kubernetes` -> note names `kubectl describe pod` (was `oc`); GKE PVC post -> knowledge [storage-access-modes] (was + rosa-efs). Community 6,218 rows before/after: known-issue matches 479 -> 479, unchanged; insight answers 4 changed, RWX fix wording only (a first try that added a separate cloud-neutral fix flipped 6 static-PV guesses to the RWX cause through shared words, so the fix was reworded instead). Golden 89/96 in scope, regressed 0; held-out 80/114; train 136/171. check.sh exit 0.
 - 2026-10-29 QA9 baseline: owner's by-technology file (2,486 rows, none in questions.csv) in the scratchpad only. `scripts/eval_questions.py bytech.csv --split test` -> 1,276 rows: none 881, docs 176, reported-issue 152, playbook 67. Two independent graders on a 126-row stratified test sample: helpful 21/32, partial 18/8, wrong 6/8, missed 48/60, out of scope 33/18 (agreement 94/126); 0 helpful for ODF storage, Kyverno/Gatekeeper usage, Helm templating, kubectl/YAML and workload debugging. Ids and verdicts in docs/evals/by-technology-test-sample-grades.csv. CI 40789680461 green on abb489c, 40787710957 on 4de6810, 40785723159 on 3ae4646. Tag v0.5.0 (main 073fe80, CI green, never tagged so never on PyPI) refused to this session: owner action.

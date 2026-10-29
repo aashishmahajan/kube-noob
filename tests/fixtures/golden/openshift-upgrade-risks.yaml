@@ -1,0 +1,107 @@
+# Golden questions: openshift (openshift-upgrade-risks). Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository). Added 2026-10-29 as misses: graded
+# against kube-noob by an independent agent before any is promoted to pass or abstain.
+- id: upg-001
+  technology: openshift
+  kind: error
+  question: 'oc adm upgrade --include-not-recommended on my 4.15 cluster lists 4.16.15 under "Supported but not recommended updates" with "Recommended: Unknown, Reason: EvaluationFailed, Message: Exposure to AzureRegistryImagePreservation is unknown due to an evaluation failure: invalid PromQL result length must be one, but is 0". Does that mean this update is actually broken for my cluster?'
+  answer: 'Not necessarily. The Cluster Version Operator could not work out whether the declared risk applies to your cluster (the PromQL check returned no usable result), and when it cannot evaluate a risk it offers the target as a conditional update instead of a recommended one, hence Unknown rather than a confirmed problem. Follow the linked issue to judge whether its conditions match your cluster, ideally test in a non-production cluster, and if you have no specific need for that version wait for a recommended path; if you do need it, for example for a CVE fix, the benefit may outweigh the risk.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/update-preparing-conditional.adoc
+    commit: 547ec4ebb2cfe6826e645692704a4eddc2c92179
+    url: 'https://github.com/openshift/openshift-docs/blob/547ec4ebb2cfe6826e645692704a4eddc2c92179/modules/update-preparing-conditional.adoc'
+  outOfScope: false
+  status: miss
+- id: upg-002
+  technology: openshift
+  kind: concept
+  question: 'In oc get clusterversion version -o json some target versions are under .status.availableUpdates and others under .status.conditionalUpdates with a Recommended condition of False. What decides which list a version ends up in?'
+  answer: 'The Cluster Version Operator periodically asks the OpenShift Update Service for data for the subscribed channel, including the known risks per version, and most risks only affect clusters with certain traits such as a given size or cloud platform. It continuously compares the cluster''s characteristics with each risk: if the cluster matches, the target is stored in conditionalUpdates, and if it does not match (or the version has no risks) the target is stored in availableUpdates. The web console and oc just present those two fields as separate sections, with a link per known issue.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/update-evaluate-availability.adoc
+    commit: 547ec4ebb2cfe6826e645692704a4eddc2c92179
+    url: 'https://github.com/openshift/openshift-docs/blob/547ec4ebb2cfe6826e645692704a4eddc2c92179/modules/update-evaluate-availability.adoc'
+  outOfScope: false
+  status: miss
+- id: upg-003
+  technology: openshift
+  kind: howto
+  question: 'oc adm upgrade on my 4.15.33 cluster only shows "Recommended updates", but I know 4.16.15 has been released. How do I list the updates that are not recommended and see why?'
+  answer: 'Run oc adm upgrade --include-not-recommended. In addition to the recommended list it prints a "Supported but not recommended updates" section where each version shows its release image, a Recommended value (the sample shows Unknown), a Reason, and a Message that usually ends with a link to the issue describing the risk. Read that message and linked issue to decide whether the risk applies to your cluster.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/update-performing-the-second-y-stream-update.adoc
+    commit: 547ec4ebb2cfe6826e645692704a4eddc2c92179
+    url: 'https://github.com/openshift/openshift-docs/blob/547ec4ebb2cfe6826e645692704a4eddc2c92179/modules/update-performing-the-second-y-stream-update.adoc'
+  outOfScope: false
+  status: miss
+- id: upg-004
+  technology: openshift
+  kind: howto
+  question: 'jq on my ClusterVersion shows a conditionalUpdates entry with a condition {"type": "Recommended", "status": "False", "reason": "PatchesOlderRelease", "message": "The 4.11.36 release only resolves an installation issue ..."}. Where is this data and what do the fields tell me about the risk?'
+  answer: 'Query the ClusterVersion resource directly: oc get clusterversion version -o json | jq ''.status.conditionalUpdates'' lists every update that is available but not recommended, while .status.availableUpdates holds the recommended ones. Each conditional entry has a release block (version, image, errata URL, channels), a conditions array whose Recommended condition has status False with a CamelCase reason and a human-readable message that usually links to a bug or knowledge article, and a risks list. oc adm upgrade presents this same ClusterVersion data in a human-readable form, and adding --include-not-recommended includes the conditional updates.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/update-cluster-version-object.adoc
+    commit: 547ec4ebb2cfe6826e645692704a4eddc2c92179
+    url: 'https://github.com/openshift/openshift-docs/blob/547ec4ebb2cfe6826e645692704a4eddc2c92179/modules/update-cluster-version-object.adoc'
+  outOfScope: false
+  status: miss
+- id: upg-005
+  technology: openshift
+  kind: howto
+  question: 'Red Hat marks 4.14.22 as not recommended for my cluster because of a known issue. We read the linked bug and decided to accept the risk because we need the CVE fix. What exact command proceeds with the update, and is --force the right flag?'
+  answer: 'After you have evaluated the risk and decided it is acceptable, waive the safeguard with the opt-in flag: oc adm upgrade --allow-not-recommended --to <version>. Do not use --force instead: it bypasses cluster-side guards such as release verification and precondition checks, is heavily discouraged, and does not guarantee a successful update. Beforehand you can check whether a specific version is recommended with oc adm upgrade recommend --version, and afterwards you can watch progress with oc adm upgrade status.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/update-upgrading-cli.adoc
+    commit: 547ec4ebb2cfe6826e645692704a4eddc2c92179
+    url: 'https://github.com/openshift/openshift-docs/blob/547ec4ebb2cfe6826e645692704a4eddc2c92179/modules/update-upgrading-cli.adoc'
+  outOfScope: false
+  status: miss
+- id: upg-006
+  technology: openshift
+  kind: error
+  question: 'oc adm upgrade recommend prints "Failed to check for at least some preconditions: no token is currently in use for this session" and the alert-based checks are missing from the output. I am using the admin kubeconfig generated by the installer.'
+  answer: 'The command needs a bearer token because it queries the cluster''s Thanos monitoring service for firing alerts. The installer''s system:admin kubeconfig uses certificate authentication, which cannot provide that token, so the alert-based precondition checks are skipped. Log in with a token-based identity such as kubeadmin using oc login and run oc adm upgrade recommend again; the command is read-only, so repeating it does not change the cluster.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/oc-adm-upgrade-recommend.adoc
+    commit: 547ec4ebb2cfe6826e645692704a4eddc2c92179
+    url: 'https://github.com/openshift/openshift-docs/blob/547ec4ebb2cfe6826e645692704a4eddc2c92179/modules/oc-adm-upgrade-recommend.adoc'
+  outOfScope: false
+  status: miss
+- id: upg-007
+  technology: openshift
+  kind: howto
+  question: 'We run a local OpenShift Update Service for a disconnected cluster. The release images are mirrored, but OSUS has no channel membership or blocked-update (risk) data because it cannot reach the internet. How do we give it the graph data?'
+  answer: 'OSUS gets channel membership and blocked update edges from a graph data container image; with internet access it fetches this from the update graph data repository, but offline you supply it through an init container that carries a copy of the data and copies it into a volume when the pod starts. If you mirrored releases with the oc-mirror plugin, it already creates this image. Otherwise build one from the graph-data tarball downloaded from https://api.openshift.com/api/upgrades_info/graph-data (the documented Dockerfile unpacks it and copies it into /var/lib/cincinnati/graph-data), push it to a registry that OSUS can reach, and use oc image mirror to copy it into the disconnected registry.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/update-service-graph-data.adoc
+    commit: 547ec4ebb2cfe6826e645692704a4eddc2c92179
+    url: 'https://github.com/openshift/openshift-docs/blob/547ec4ebb2cfe6826e645692704a4eddc2c92179/modules/update-service-graph-data.adoc'
+  outOfScope: false
+  status: miss
+- id: upg-008
+  technology: openshift
+  kind: concept
+  question: 'A file in cincinnati-graph-data/blocked-edges has to, from, url, name and message plus a matchingRules list with type: PromQL. How does that decide whether a particular cluster sees the update as recommended, and what happens if the PromQL cannot be evaluated?'
+  answer: 'Each blocked-edges file declares a risk on the edges into the release named in to, from earlier versions matching the from regex, with url, name and message describing the issue. A file with only to and from drops the edges outright, whereas matchingRules (available since schema version 1.1.0) make the update conditional: consumers walk the list in order, skip entries whose type they do not recognise or whose evaluation fails, and use the first entry that evaluates successfully, whether it is a match or an explicit non-match. If no entry can be evaluated, the update is not recommended.'
+  source:
+    repo: openshift/cincinnati-graph-data
+    path: README.md
+    commit: 7572174a551561c30e07e9b5ca6f156ef5cd513c
+    url: 'https://github.com/openshift/cincinnati-graph-data/blob/7572174a551561c30e07e9b5ca6f156ef5cd513c/README.md#block-edges'
+  outOfScope: false
+  status: miss
+- id: upg-009
+  technology: openshift
+  kind: out-of-scope
+  question: 'Our CFO wants a three-year cost comparison between renewing our OpenShift subscriptions and moving everything to EKS with Karpenter. Can you build the spreadsheet and tell us which one is cheaper?'
+  answer: 'This is a licensing and cost-modelling request rather than a cluster troubleshooting question, so it is outside what this tool covers. Pricing comparisons need current vendor quotes and your own usage data from your account teams and finance.'
+  source: {}
+  outOfScope: true
+  status: miss

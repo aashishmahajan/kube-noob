@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- Update risks before an OpenShift update, offline (G110): `kube-noob upgrade-risks --from 4.20.3 --to 4.21.4` (and the
+  `upgrade_risks` MCP tool) lists the risks Red Hat declares for that update in the public update graph
+  (openshift/cincinnati-graph-data, 356 risks for targets 4.18.0 to 4.22.17, commit 7572174a, 2026-10-29), as a
+  disconnected cluster would see them only through a local OpenShift Update Service. Each risk has its message, link
+  and fix version, and says whether it applies to every cluster, which single fact decides it with the read-only
+  `oc` command or must-gather file that shows it (installer invoker, platform type, a ClusterOperator, a capability,
+  a node label, assigned egress IPs), or that its PromQL cannot be evaluated offline (shown as written). `from` is
+  matched as the update service matches it, by a linear-time engine that refuses look-around, back-references and
+  oversized patterns. `doctor` and every result's `knowledgeAsOf` show the snapshot date.
+- PRIVACY.md said the website had no backend and that the maintainers receive nothing. Its contact, feedback and
+  student-license forms send what you type to a Google Apps Script web app the maintainer runs, which stores it in a
+  private Google Sheet. The website section now says what each form keeps, what it is used for and how to have it
+  deleted, next to the Bring your own AI page and the Playground.
+- Code scanning findings from the 0.7 merge (G109): the videos workflow ran whatever `pipeline_ref` or `tag` a dispatch
+  named, in the default branch's cache scope (CodeQL: cache poisoning via execution of untrusted code, and checkout of
+  untrusted code). A new `verify` job resolves the tag (`vX.Y.Z`, an existing tag) and the pipeline to commits, refuses
+  any commit not on the default branch, and every later job checks out those commits. The Homebrew workflow's
+  free-text `ref` input is now a `default_branch` switch. The kind posture test logs how many kubectl calls asked for
+  Secrets, never their arguments; the must-gather reader compares the `node-role.kubernetes.io` label domain whole;
+  two tests check a URL as a whole token instead of a substring.
+- kube-noob as an Agent Skill (G108): `skill/kube-noob/SKILL.md` and `scripts/kn.py` run the plugin's tools as one
+  command each, JSON out, so kube-noob also works where a local MCP server cannot run (chat on claude.ai, the
+  Claude API's code execution) and where a plugin's install-time dependency resolution is not wanted. It needs Python
+  3.11+ with pydantic, PyYAML, jsonschema and httpx (no MCP SDK, no HTTP stack); it forces the offline lock (no web,
+  no cluster, no model) whatever the config or `KUBE_NOOB_*` variables say, caps input at 5 MiB and reads only the
+  files it is given. Calls go through the new `kube_noob.tool_runner.call`, which the MCP server and the REST routes
+  now share, so validation, `knowledgeAsOf` and the cleaning of instruction-shaped text are the same everywhere.
+  `scripts/build_skill.py --check` (CI and `scripts/check.sh`) holds SKILL.md to the Agent Skills rules and keeps
+  `references/tools.md` equal to the code; releases attach `kube-noob-skill-<version>.zip` for **Customize > Skills**.
+
 - Gap review 2026-10 (G107, `docs/evals/gap-review-2026-10.md`: what kube-noob lacked against the Kubernetes CVE
   feed, the Helm and Argo CD advisories, Helm's best practices, kube-score, Polaris, kube-linter, Checkov and the
   Kyverno library, and what was left out and why). 69 -> 77 rules:

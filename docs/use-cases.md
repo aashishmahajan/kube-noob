@@ -151,6 +151,25 @@ kube-noob corpus known-issues --online
 The bundled index is dated (`kube-noob doctor` prints it, and every MCP result carries `knowledgeAsOf`);
 `corpus known-issues --online` refreshes it from the release notes on GitHub.
 
+### What could go wrong with this update?
+
+Red Hat attaches known risks to some OpenShift updates ("conditional updates"): a cluster sees them in
+`oc adm upgrade --include-not-recommended` when it can reach an update service, and a disconnected cluster only through
+a local OpenShift Update Service. `upgrade-risks` answers before you start, with no network: it lists the risks declared
+for your update in the public update graph (targets 4.18 and later), with the message, the link and the version that
+fixes each. A risk either applies to every cluster, or one fact decides it (the platform type, whether the cluster is a
+hosted control plane, a ClusterOperator, an enabled capability, a node label, assigned egress IPs) and you get the
+read-only `oc` command or the must-gather file that shows it, or its PromQL query is shown as written because it
+cannot be evaluated offline. Whether the update is in your channel is not checked.
+
+```bash
+kube-noob upgrade-risks --from 4.20.3 --to 4.21.4
+kube-noob upgrade-risks --from 4.18.5 --to 4.19.0 --format json
+```
+
+The snapshot is dated and pinned to an upstream commit (`kube-noob doctor` prints it);
+`scripts/vendor_upgrade_risks.py` refreshes it from a clone of openshift/cincinnati-graph-data.
+
 ### Has Red Hat seen this error before?
 
 The release notes list only a few hundred issues. Red Hat's public Jira holds every reported ticket, including the ones
@@ -723,6 +742,14 @@ existing breaker admitted, and nothing blocked with the webhook scaled to zero.
 
 Install the plugin or add the MCP server (see the [README](../README.md)), then ask for the `getting_started` prompt.
 It reads your saved profile, asks for your role and platform, and suggests the first three tools to use.
+
+### Chat on claude.ai: the Agent Skill
+
+The local MCP server does not run in chat on claude.ai. Upload `kube-noob-skill-<version>.zip` (a release asset, or
+`python scripts/build_skill.py --zip kube-noob-skill.zip` from a checkout) under **Customize > Skills** and turn on
+code execution. Paste a describe, an event or a manifest: Claude runs `kn.py insight` or `kn.py audit_manifests` in
+its sandbox and cites the playbook, rule and issue ids kube-noob returns. The skill is always offline: no web lookups,
+no cluster, no model inside.
 
 ## Model builders
 

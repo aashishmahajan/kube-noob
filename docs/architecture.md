@@ -11,6 +11,7 @@ flowchart LR
     B[kube-noob CLI]
     C[Optional agent: kube-noob ask<br/>a model you configure]
     D[Sidecar app in the same pod]
+    SK[Agent Skill: scripts/kn.py<br/>one tool per command, offline]
   end
   subgraph Server["kube-noob (stdio or streamable HTTP)"]
     T[Toolkit<br/>one tool surface]
@@ -31,7 +32,7 @@ flowchart LR
     S2[Release history from tags]
     S3[Red Hat Jira copy via REST API<br/>1 req/s, PII scrubbed, local only]
   end
-  A & B & C & D --> T
+  A & B & C & D & SK --> T
   T --> P --> E & F & K
   T --> G & L & R
   T -.-> W & X
@@ -59,6 +60,11 @@ flowchart LR
   characters, role and tool-call markers, instruction phrases, exfiltrating Markdown) and flags it `untrusted`.
   Pasted payloads are data too: an Alertmanager payload is read as JSON only (2 MB, 500 alerts, 64 labels, 2,000
   characters per value, control characters dropped), and only an OpenShift release label sets the version.
+- The Agent Skill (`skill/kube-noob/scripts/kn.py`) is a fourth surface over the same toolkit: it calls
+  `kube_noob.tool_runner.call` (the code path `mcp_app.run_tool` uses), loads only the bundled copy of the server
+  source next to it, and forces `offline: true`, web and cluster off and no model, whatever the config file or
+  `KUBE_NOOB_*` variables say. Its trust boundary is the model that runs it: arguments are validated by the tool's
+  model, input is capped at 5 MiB, and results are cleaned and flagged like MCP results.
 - The HTTP transport authenticates with a bearer token (constant time) unless bound to loopback (sidecar).
 - REST routes (`kube_noob.server.rest`, `/v1/...`) sit beside MCP on the same app and run the same toolkit call
   (`mcp_app.run_tool`: validation, sanitising, `knowledgeAsOf`, the content-free audit line, now with `via=rest`).

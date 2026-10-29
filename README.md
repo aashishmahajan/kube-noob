@@ -32,7 +32,7 @@ Design requests run a 7-step protocol: Clarify, Validate, Research, Audit, Calib
 | You use | Who answers | What leaves your machine |
 |---|---|---|
 | The Claude plugin (Claude Code, Cowork) | Claude, calling kube-noob's tools | What you share with Claude, as in any chat; kube-noob sends nothing |
-| OpenShift Lightspeed or another MCP client | That client's model | Whatever that client sends its model; kube-noob sends nothing |
+| OpenShift Lightspeed or another MCP client | That client's model | What that client sends; kube-noob sends nothing |
 | The CLI | kube-noob's rules, no model | Nothing |
 | `kube-noob ask` (optional) | A model you configure: Anthropic or a local one | Your question, to that model only |
 
@@ -49,7 +49,7 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-No Homebrew: `uv tool install kube-noob` (Python 3.11+). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+No Homebrew: `uv tool install kube-noob` (Python 3.11+); [install help](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 
 ## Use with Claude or any MCP client
 
@@ -60,7 +60,8 @@ Claude plugin, in Claude Code (needs [uv](https://docs.astral.sh/uv/)):
 /plugin install kube-noob@kube-noob
 ```
 
-In claude.ai or the desktop app: **Customize > Plugins > Add > Add marketplace**, `aashishmahajan/kube-noob`.
+Desktop app: **Customize > Plugins > Add > Add marketplace**, `aashishmahajan/kube-noob`. claude.ai chat: upload the
+[Agent Skill](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md#agent-skill) under **Customize > Skills**.
 
 Any MCP client:
 
@@ -78,10 +79,10 @@ NetworkPolicies and runs under `restricted-v2`.
 
 | Setting | Default | Change with |
 |---|---|---|
-| Web lookups (HTTPS GET, allowlisted docs, text only) | off | `webEnabled: true` / `KUBE_NOOB_WEB_ENABLED=true` |
-| Admin offline lock (overrides web, local models only) | off | `offline: true` / `KUBE_NOOB_OFFLINE=1` / chart `config.offline` |
+| Web lookups (allowlisted HTTPS docs, text only) | off | `webEnabled: true` / `KUBE_NOOB_WEB_ENABLED=true` |
+| Admin offline lock (overrides web) | off | `offline: true` / `KUBE_NOOB_OFFLINE=1` / chart `config.offline` |
 | Live cluster (read-only, no Secrets) | off | `cluster.enabled: true` / `--cluster-enabled` |
-| Local learning file (profile, confirmed notes) | on | `learningEnabled: false` |
+| Local learning file (confirmed notes) | on | `learningEnabled: false` |
 | Model for `kube-noob ask` only | none | `llm.provider: anthropic` (`kube-noob[ask]`) or `openai-compatible` |
 
 `kube-noob doctor` shows what it can reach. Config never comes from the current directory. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).

@@ -31,6 +31,29 @@ which -a kube-noob
 one: remove it with the tool that installed it (`pipx uninstall kube-noob`, `uv tool uninstall kube-noob` or
 `brew uninstall kube-noob`).
 
+## Agent Skill
+
+The same tools as the MCP server, as an [Agent Skill](https://claude.com/docs/skills/how-to): a folder with
+`SKILL.md`, a runner (`scripts/kn.py`, one tool per call, JSON out) and the readable server source the Claude plugin
+ships. Use it where no MCP server runs: chat on claude.ai (the plugin's local MCP server runs in Claude Code and
+Cowork only) and the Claude API's code execution. It runs with the offline lock on and needs Python 3.11 or later
+with pydantic, PyYAML, jsonschema and httpx; `kn.py check` says which are missing.
+
+| Where | Install |
+|---|---|
+| claude.ai (Pro, Max, Team, Enterprise, with code execution on) | Download `kube-noob-skill-<version>.zip` from the GitHub release (from 0.7.0), then upload it under **Customize > Skills** and turn it on |
+| Claude Code | Unzip it into `~/.claude/skills/` (so the file is `~/.claude/skills/kube-noob/SKILL.md`), or install the plugin instead, which also gives the MCP tools |
+| From a checkout | `python scripts/build_skill.py --zip kube-noob-skill.zip` or `--out ~/.claude/skills/kube-noob` |
+
+Run it yourself to see what Claude sees:
+
+```bash
+python3 -I -B kube-noob/scripts/kn.py check
+python3 -I -B kube-noob/scripts/kn.py tools
+python3 -I -B kube-noob/scripts/kn.py insight '{"text": "0/3 nodes are available: 3 Insufficient memory"}'
+python3 -I -B kube-noob/scripts/kn.py audit_manifests --text-file manifests=app.yaml
+```
+
 ## Errors and fixes
 
 | You see | Why | Fix |

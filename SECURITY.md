@@ -22,6 +22,11 @@ posture. The local learning file stores only user-confirmed summaries and ids, n
 when cluster access is enabled; the maintainer CLI commands `corpus build --online` and `helm-audit` run `git` and
 `helm template` locally.
 
+The Agent Skill (`skill/kube-noob`) cannot be configured out of this posture: its runner forces the offline lock,
+web and cluster off and no model on every call, ignoring the config file and `KUBE_NOOB_*` variables, imports the
+bundled server source only (it refuses another installed kube-noob), and its tools start no other program and
+open no connection (a test runs them with both refused).
+
 ## Security design
 
 | Area | Control |
@@ -43,6 +48,10 @@ when cluster access is enabled; the maintainer CLI commands `corpus build --onli
 | Sidecar | Binds 127.0.0.1 only, so only containers in the same pod can call it (the pod is the trust boundary); no Service port, no token, no egress needed. CI proves the port is closed on the pod IP. |
 | Egress on OpenShift | Chart NetworkPolicy allows DNS only by default; optional OVN-Kubernetes EgressFirewall allows only the API server and allowlisted HTTPS domains, then denies all. |
 | Homebrew | The formula installs the release wheel and wheels-only dependencies pinned by hash from the release's `requirements.lock`. |
+
+Workflows run only reviewed code with write-capable tokens or caches: no checkout takes a ref typed into a workflow
+input, and the videos workflow renders only a release tag and a pipeline commit that are on the default branch.
+CodeQL (`security-extended`, Python and Actions) runs on every pull request and on main.
 
 ## Capability tiers
 

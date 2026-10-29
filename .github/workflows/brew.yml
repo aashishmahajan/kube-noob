@@ -17,10 +17,10 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      ref:
-        description: Git ref to check out (the release workflow passes main, where it pushed the new formula)
-        type: string
-        default: ""
+      default_branch:
+        description: Check out the default branch, where the release workflow pushed the new formula
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.default_branch && github.event.repository.default_branch || '' }}
           persist-credentials: false
       - name: Install and test the formula from a local tap
         env:

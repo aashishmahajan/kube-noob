@@ -4,6 +4,7 @@ and the description's chapters are the real scene times, valid for YouTube (firs
 from __future__ import annotations
 
 import itertools
+import re
 import sys
 from pathlib import Path
 
@@ -79,7 +80,7 @@ def test_description_chapters_are_the_real_scene_times() -> None:
     chapters = text.split("Chapters\n", 1)[1].split("\n\n", 1)[0].splitlines()
     assert chapters[0].startswith("0:00 ") and chapters[1].startswith("0:12 ") and chapters[-1].startswith("2:20 ")
     assert len(chapters) == len(IDS) and "{" not in text  # every fact filled
-    assert "kube-noob.com" in text and "trademarks of their respective owners" in text
+    assert re.search(r"(?<![\w.-])kube-noob\.com(?![\w-])", text) and "trademarks of their respective owners" in text
     short_end = captions.youtube_description(ROOT / "demos" / "youtube-walkthrough.md", MARKS, 149.6, IDS)
     assert "Try it" not in short_end  # a 9 s end card is not a valid YouTube chapter: left out
     squeezed = {**MARKS, "diagnose": 15.0}

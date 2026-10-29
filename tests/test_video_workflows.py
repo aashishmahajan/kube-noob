@@ -100,3 +100,32 @@ def test_the_playwright_version_is_locked() -> None:
     assert all(re.fullmatch(r"\d+\.\d+\.\d+", v) for v in pkg["devDependencies"].values())
     assert lock["packages"]["node_modules/playwright"]["version"] == pkg["devDependencies"]["playwright"]
     assert all(p.get("integrity", "").startswith("sha512-") for k, p in lock["packages"].items() if k)
+
+
+def test_only_merged_code_renders_the_videos() -> None:
+    """A dispatched run writes to the default branch's cache scope (CodeQL: cache poisoning via execution of untrusted
+    code), so the refs typed into the inputs are resolved to commits on the default branch first, and every checkout
+    uses those commits."""
+    jobs = _wf("videos.yml")["jobs"]
+    verify = _run(jobs["verify"])
+    assert "^v[0-9]+\\.[0-9]+\\.[0-9]+$" in verify and "inherit_errexit" in verify
+    assert "/compare/${sha}...${default}" in verify and '"$status" != ahead' in verify and "identical" in verify
+    assert jobs["verify"]["permissions"] == {"contents": "read"}
+    assert set(jobs["verify"]["outputs"]) == {"product", "pipeline"}
+    refs = [s["with"]["ref"] for s in jobs["render"]["steps"] if str(s.get("uses", "")).startswith("actions/checkout")]
+    assert refs == ["${{ needs.verify.outputs.pipeline }}", "${{ needs.verify.outputs.product }}"]
+    for name in ("transcript", "render", "attach"):
+        needs = jobs[name]["needs"]
+        assert "verify" in ([needs] if isinstance(needs, str) else needs), name
+    assert "needs.verify.result == 'success'" in jobs["render"]["if"] + jobs["attach"]["if"]
+    assert "${{ needs.verify.outputs.product }}" in str(jobs["transcript"]["steps"][0]["env"])
+
+
+def test_no_workflow_checks_out_a_ref_typed_into_its_inputs() -> None:
+    for path in sorted(WF.glob("*.yml")):
+        for job in (yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}).values():
+            for step in job.get("steps", []):
+                if str(step.get("uses", "")).startswith("actions/checkout"):
+                    ref = str((step.get("with") or {}).get("ref", ""))
+                    assert "inputs." not in ref.replace("inputs.default_branch", ""), (path.name, ref)
+    assert _wf("release.yml")["jobs"]["brew"]["with"] == {"default_branch": True}

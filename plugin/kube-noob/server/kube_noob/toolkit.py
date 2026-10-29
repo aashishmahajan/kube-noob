@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kube_noob.audit.engine import analyze, explain_rule, list_rules
 from kube_noob.audit.fixer import fix_manifests
@@ -43,6 +43,8 @@ from kube_noob.learn.memory import LearningStore
 from kube_noob.learn.tutor import Tutor
 from kube_noob.net import Purpose, http_client
 from kube_noob.signals import alertmanager, for_text, playbooks_for
+from kube_noob.upgrade_risks import parse_version
+from kube_noob.upgrade_risks import risks as upgrade_risk_match
 
 PlatformT = Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
 MAX_MANIFEST_CHARS = 1_000_000
@@ -189,6 +191,28 @@ class KnownIssuesIn(_In):
         description="The cluster's OpenShift version (4.20 or 4.20.8): keeps only issues that can affect it.",
     )
     limit: int = Field(3, ge=1, le=10)
+
+
+class UpgradeRisksIn(_In):
+    current: str = Field(..., max_length=20, description="The OpenShift version the cluster runs, x.y.z, e.g. 4.20.3.")
+    target: str = Field(..., max_length=20, description="The version to update to, x.y.z, e.g. 4.21.4.")
+    arch: Literal["amd64", "arm64", "multi", "ppc64le", "s390x"] | None = Field(
+        None,
+        description="The release architecture (multi for a multi-architecture payload). Without it, every "
+        "architecture is checked and a risk declared for some of them only says which.",
+    )
+
+    @field_validator("current", "target")
+    @classmethod
+    def _release_version(cls, v: str) -> str:
+        parse_version(v)
+        return v
+
+    @model_validator(mode="after")
+    def _forward(self) -> UpgradeRisksIn:
+        if parse_version(self.target) <= parse_version(self.current):
+            raise ValueError("the target must be newer than the current version")
+        return self
 
 
 class SignalsIn(_In):
@@ -920,6 +944,11 @@ class Toolkit:
         out = known_issue_match(p.text, p.platform, p.version, p.limit, self.settings.data_dir)
         self._observe([f"known-issue:{m['id']}" for m in out["matches"]])
         self._attach_memory(out, p.text, p.version, p.platform)
+        return out
+
+    def upgrade_risks(self, p: UpgradeRisksIn) -> dict[str, Any]:
+        out = upgrade_risk_match(p.current, p.target, p.arch)
+        self._observe([f"upgrade-risk:{r['name']}" for r in out["risks"]])
         return out
 
     def _attach_memory(self, out: dict[str, Any], text: str, version: str | None, platform: str | None) -> None:
@@ -1713,6 +1742,18 @@ class Toolkit:
                 "remarks from the comments; with `version`, only issues that can affect that version.",
                 KnownIssuesIn,
                 self.known_issues,
+            ),
+            ToolSpec(
+                "upgrade_risks",
+                "Known risks for an OpenShift update",
+                "Before updating OpenShift from one x.y.z version to another: the risks Red Hat declares for that "
+                "update in the public update graph (conditional updates, as an OpenShift Update Service serves them), "
+                "from a bundled snapshot, offline. Each risk has its name, message, link, the version that fixes it "
+                "and a verdict: applies (declared for every cluster), check (one fact decides it, with the read-only "
+                "command or must-gather file that shows it) or cannot evaluate offline (its PromQL, as written). "
+                "Whether the update is in your channel is not checked.",
+                UpgradeRisksIn,
+                self.upgrade_risks,
             ),
             ToolSpec(
                 "ticket",

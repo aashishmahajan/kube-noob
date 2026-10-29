@@ -326,7 +326,8 @@ def test_helm_audit_flags_the_helm_advisories(tmp_path: Path) -> None:
         assert "CVE-2024-25620" in issue and "CVE-2026-35206" in issue, name
     deps = [{"name": "redis", "version": "~18.1.0", "repository": "http://charts.example.com"}]
     (plain,) = lint_chart_metadata(_chart(tmp_path / "deps", dependencies=deps))
-    assert "http://charts.example.com" in plain and "https://" in plain
+    urls = [u.rstrip(".:") for u in re.findall(r"https?://[^\s,;)'\"]+", plain)]
+    assert any(u == "http://charts.example.com" for u in urls) and "https://" in plain
     sub = _chart(tmp_path / "sub")
     (sub / "charts" / "x").mkdir(parents=True)
     (sub / "charts" / "x" / "Chart.yaml").write_text(

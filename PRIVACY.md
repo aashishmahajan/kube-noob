@@ -1,7 +1,9 @@
 # Privacy
 
 kube-noob is open-source software that you run yourself: on your computer, in your CI, or in your cluster. The
-maintainers run no service and receive nothing from it. There are no accounts, no telemetry and no analytics.
+maintainers run no service for it and receive nothing from it. There are no accounts, no telemetry and no analytics.
+The website's contact and license forms are the one place the maintainer receives data: see
+[The website](#the-website-kube-noobcom).
 
 There is no AI inside kube-noob. When you use it from Claude, OpenShift Lightspeed or another MCP client, that client
 and its model do the talking and call kube-noob's tools. What you share in that conversation is handled by that
@@ -72,14 +74,30 @@ plugin ships only the modules of the stdio server: no CLI, model agent, HTTP ser
 no credentials. Personal data is never requested. If text you paste contains some, it is processed in memory
 and not stored, except words you choose to put in a confirmed note or a learner id.
 
+## The Agent Skill
+
+The skill runs where Claude runs code: your computer in Claude Code, a sandbox for chat on claude.ai. It reads only
+the files named in a call, makes no network connections (web, cluster and model are forced off) and sends nothing to
+the maintainer. Like the server, it keeps learning progress and notes you confirm in kube-noob's data folder
+(`KUBE_NOOB_DATA_DIR`, else `~/.local/share/kube-noob`) inside that environment; a claude.ai sandbox discards them
+when it ends.
+
 ## The website (kube-noob.com)
 
-A static site on GitHub Pages, built from this repository's releases. It has no backend, no analytics, no cookies and
-loads nothing from other hosts; GitHub Pages, which serves it, keeps its own access logs under GitHub's privacy
-statement. The Playground runs kube-noob's tools in your browser: what you paste stays on your device. The "Bring
-your own AI" page sends your Anthropic API key and your messages from your browser straight to `api.anthropic.com`,
-under Anthropic's terms for your key; the key is kept in memory, or in the tab's session storage only if you tick the
-box.
+A static site on GitHub Pages, built from this repository's releases. It sets no cookies, runs no analytics and loads
+its pages, scripts and fonts from its own host only. GitHub Pages, which serves it, keeps its own access logs under
+GitHub's privacy statement. Data leaves your browser in three cases, and only when you act:
+
+- **Contact, feedback and student-license forms.** When you submit one, what you typed goes to a Google Apps Script
+  web app the maintainer runs, which stores it in the maintainer's private Google Sheet and emails the maintainer a
+  copy. A message keeps its time, topic or area, rating, your name, email address, text and the page it was sent
+  from. A student license keeps its id, your name, email address and school, and that you said you are a student; the
+  license id is emailed to you. The data is used only to reply to you or to keep your student record, is not sold or
+  shared, and is deleted on request through the contact form.
+- **Bring your own AI.** That page sends your Anthropic API key and your messages from your browser straight to
+  `api.anthropic.com`, under Anthropic's terms for your key; the site never receives them. The key is kept in memory,
+  or in the tab's session storage only if you tick the box.
+- **Playground.** It runs kube-noob's tools in your browser: what you paste stays on your device.
 
 ## Children
 

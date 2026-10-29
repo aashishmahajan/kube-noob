@@ -14,6 +14,7 @@ kube-noob bundles derived data and links to public sources. Licenses were verifi
 | Central, SecuredCluster schemas | stackrox/stackrox @3373dee4 | Apache-2.0 | `schemas/data/crds/` |
 | RHACS default policy names (references only) | stackrox/stackrox `pkg/defaults/policies/files` | Apache-2.0 | `audit/rules.py` |
 | OpenShift 4.20, 4.21 and 4.22 release notes: known and fixed issues (text, issue ids, versions) | openshift/openshift-docs, branches enterprise-4.20 to enterprise-4.22 (commits in each file) | Apache-2.0 | `src/kube_noob/data/known_issues/*.json` |
+| OpenShift update risks (conditional updates) for targets 4.18 and later: `to`, `from`, `url`, `name`, `message`, `fixedIn`, `matchingRules` of 356 `blocked-edges/*.yaml` files, with each file's path | openshift/cincinnati-graph-data @7572174a551561c30e07e9b5ca6f156ef5cd513c (2026-10-29), "OpenShift update graph data (c) Red Hat, Inc. and contributors" | Apache-2.0 | `src/kube_noob/data/upgrade_risks/*.json` |
 
 | MITRE ATT&CK for Containers technique ids, names and tactics (18 techniques) | mitre-attack/attack-stix-data `enterprise-attack/enterprise-attack.json` @c2494b29dd268c46a5d0ea0990553e4327cd2253 (Enterprise ATT&CK 20.0) | ATT&CK Terms of Use (below) | `src/kube_noob/vuln/attack.py` |
 
