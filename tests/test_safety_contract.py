@@ -532,7 +532,8 @@ def test_the_package_has_no_dynamic_code_execution_of_text(sc: ModuleType) -> No
 
 def test_every_mcp_result_and_the_knowledge_resource_pass_through_the_sanitiser(sc: ModuleType) -> None:
     sites = {(s.module, s.function, s.call) for s in sc.sanitizer_sites()}
-    assert ("kube_noob/server/mcp_app.py", "run_tool", "result") in sites
+    assert ("kube_noob/tool_runner.py", "call", "result") in sites  # MCP, REST and the Agent Skill share it
+    assert sc._calls(sc.ROOT / sc.SRC / "server" / "mcp_app.py", "run_tool", "tool_runner", "call")
     assert ("kube_noob/server/mcp_app.py", "build_server.knowledge_doc", "clean") in sites
 
 

@@ -1258,9 +1258,30 @@ def violations() -> list[str]:
     problems += [f"dynamic execution: {d}" for d in dynamic_execution()]
     problems += sanitizer().problems
     sites = {(s.module, s.function, s.call) for s in sanitizer_sites()}
-    if ("kube_noob/server/mcp_app.py", "run_tool", "result") not in sites:
-        problems.append("MCP tool results no longer pass through sanitize.result in run_tool")
+    # Every surface (MCP, REST, the Agent Skill) runs a tool through kube_noob.tool_runner.call, which cleans the
+    # result; the MCP server's run_tool must still go through it.
+    if ("kube_noob/tool_runner.py", "call", "result") not in sites:
+        problems.append("tool results no longer pass through sanitize.result in tool_runner.call")
+    if not _calls(ROOT / SRC / "server" / "mcp_app.py", "run_tool", "tool_runner", "call"):
+        problems.append("MCP tool results no longer go through tool_runner.call in run_tool")
     return problems
+
+
+def _calls(path: Path, function: str, owner: str, attribute: str) -> bool:
+    """Whether ``function`` in ``path`` calls ``owner.attribute(...)``."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function:
+            for call in ast.walk(node):
+                if (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Attribute)
+                    and call.func.attr == attribute
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == owner
+                ):
+                    return True
+    return False
 
 
 # -- the document's sections: each returns its lines, and render() joins them ----------------------------------------

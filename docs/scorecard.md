@@ -4,7 +4,7 @@ What kube-noob answers, what it leaves unanswered and where it is weak, measured
 
 ## How to read it
 
-- The golden set (`tests/fixtures/golden`, 119 questions) was written from each technology's official documentation, and the gaps it showed were then closed by adding what the graders named for each miss. Its score shows that nothing regressed; it is a regression test. As [supported-technologies.md](evals/supported-technologies.md) puts it, the rise is a fit to those questions, "not evidence that kube-noob generalises".
+- The golden set (`tests/fixtures/golden`, 151 questions) was written from each technology's official documentation, and the gaps it showed were then closed by adding what the graders named for each miss. Its score shows that nothing regressed; it is a regression test. As [supported-technologies.md](evals/supported-technologies.md) puts it, the rise is a fit to those questions, "not evidence that kube-noob generalises".
 - The held-out triage set (`tests/fixtures/triage`) was never used to tune a pattern; the training set (`tests/fixtures/triage-train`) was. Compare the two to see what tuning on a set buys, and quote the held-out number.
 - The community questions (last section) are real posts. They are third-party text kept outside this repository, so their tables are quoted unchanged from [docs/evals/supported-technologies.md](evals/supported-technologies.md) and are not recomputed here. They are the numbers to trust for real posts.
 - Counts here are mechanical: a golden question is right when the expected finding is first (among the first three where the item says so) and a triage question when the answer shows the labelled cause. The graded tables in the linked document read the answers instead, so the two can differ by a few items.
@@ -13,12 +13,12 @@ What kube-noob answers, what it leaves unanswered and where it is weak, measured
 
 | What | Result | Command |
 |---|---|---|
-| Golden questions in scope answered right | 89 of 96 | `python scripts/eval_golden.py` |
-| Golden questions out of scope left unanswered | 22 of 23 | `python scripts/eval_golden.py` |
+| Golden questions in scope answered right | 89 of 124 | `python scripts/eval_golden.py` |
+| Golden questions out of scope left unanswered | 24 of 27 | `python scripts/eval_golden.py` |
 | Held-out triage questions that name the labelled cause | 80 of 114 | `python scripts/eval_triage.py` |
 | Training triage questions that name the labelled cause | 136 of 171 | `python scripts/eval_triage.py --dir tests/fixtures/triage-train` |
 | Self-test cases passed | 63 of 63 | `kube-noob selftest` |
-| Audit rules | 61 | `python -c "from kube_noob.audit.engine import RULES; print(len(RULES))"` |
+| Audit rules | 77 | `python -c "from kube_noob.audit.engine import RULES; print(len(RULES))"` |
 | Diagnosis playbooks | 67 | `python -c "from kube_noob.debug.playbooks import PLAYBOOKS; print(len(PLAYBOOKS))"` |
 | Knowledge documents | 64 | `python -c "from kube_noob.knowledge.store import builtin_chunks; print(len({c.doc_id for c in builtin_chunks()}))"` |
 | Knowledge sections | 283 | `python -c "from kube_noob.knowledge.store import builtin_chunks; print(len(builtin_chunks()))"` |
@@ -29,8 +29,8 @@ The community-question numbers are quoted in the last section; their command nee
 
 ## Where it is weak
 
-- Golden questions: 89 of 96 in-scope questions are answered right, and this is the set the gaps were closed on. By technology, weakest first: OpenShift 13 of 16; Admission policy engines 14 of 16; Kubernetes 15 of 16; RHACS 15 of 16; Helm 3 16 of 16; ROSA HCP 16 of 16. 7 in-scope questions get no right answer; each is listed below with what it needs.
-- Out of scope: 22 of 23 questions about another product are left unanswered. 1 got an answer anyway (`rosa-017`); each is listed below with what should have kept it silent.
+- Golden questions: 89 of 124 in-scope questions are answered right, and this is the set the gaps were closed on. By technology, weakest first: storage 0 of 12; OpenShift 13 of 24; Admission policy engines 14 of 24; Kubernetes 15 of 16; RHACS 15 of 16; Helm 3 16 of 16; ROSA HCP 16 of 16. 35 in-scope questions get no right answer; each is listed below with what it needs.
+- Out of scope: 24 of 27 questions about another product are left unanswered. 3 got an answer anyway (`rosa-017`, `pcel-009`, `stor-014`); each is listed below with what should have kept it silent.
 - Cause choice: on questions the patterns were not tuned on, the answer names the labelled cause for 80 of 114 (70%); on the set they were tuned on, for 136 of 171 (80%). The held-out number is the one to quote. Held-out by kind of input: pasted 48 of 57, typed 32 of 57. The right playbook is among the findings for 94 of 114 and first for 85 of 114.
 - Neither set measures how well kube-noob generalises to real posts: the golden questions shaped the content, and the triage questions were written from the playbooks' own root causes. The community tables in the last section do.
 - On real posts, in the words of the linked document's by-technology baseline: Nearly every helpful answer is an OpenShift bug matched in the release notes. Nothing helpful came for ODF/Rook storage (0 of 8), Kyverno and Gatekeeper usage (0 of 8), Helm templating (0 of 8), kubectl and YAML how-tos (0 of 8) or workload debugging (0 of 8). Changes for these are tuned on the train half only and measured on the test half.
@@ -38,11 +38,11 @@ The community-question numbers are quoted in the last section; their command nee
 
 ## What it carries
 
-- 61 audit rules (31 audit, 11 calibrate, 19 validate).
+- 77 audit rules (45 audit, 12 calibrate, 20 validate).
 - 67 diagnosis playbooks with 170 root causes.
 - 283 knowledge sections in 64 documents.
 - 921 reported issues from the bundled OpenShift release notes.
-- 63 self-test cases, 119 golden questions, 114 held-out and 171 training triage questions.
+- 63 self-test cases, 151 golden questions, 114 held-out and 171 training triage questions.
 
 What is bundled for each technology is listed in [supported-technologies.md](evals/supported-technologies.md).
 
@@ -54,11 +54,12 @@ What is bundled for each technology is listed in [supported-technologies.md](eva
 |---|---|---|---|---|---|---|
 | Kubernetes | 16 | 15 (94%) | 15 | 1 | 4 | 4 |
 | Helm 3 | 16 | 16 (100%) | 16 | 0 | 4 | 4 |
-| OpenShift | 16 | 13 (81%) | 13 | 3 | 3 | 3 |
+| OpenShift | 24 | 13 (54%) | 13 | 11 | 4 | 4 |
 | ROSA HCP | 16 | 16 (100%) | 16 | 0 | 4 | 3 |
 | RHACS | 16 | 15 (94%) | 15 | 1 | 4 | 4 |
-| Admission policy engines | 16 | 14 (88%) | 14 | 2 | 4 | 4 |
-| **All** | **96** | **89 (93%)** | **89** | **7** | **23** | **22** |
+| Admission policy engines | 24 | 14 (58%) | 14 | 10 | 5 | 4 |
+| storage | 12 | 0 (0%) | 0 | 12 | 2 | 1 |
+| **All** | **124** | **89 (72%)** | **89** | **35** | **27** | **24** |
 
 ### Golden questions kube-noob does not answer
 
@@ -68,15 +69,45 @@ What is bundled for each technology is listed in [supported-technologies.md](eva
 | `ocp-009` | OpenShift | We added UPI bare-metal workers. They are not listed by oc get nodes yet, and oc logs against the new ones... | doc: UPI worker join: oc get csr, oc adm certificate approve client CSRs first, then serving CSRs | `kn:ocp-install-troubleshooting#6`, `kn:k8s-node-kubelet#2`, `kn:k8s-tls-x509#1` |
 | `ocp-013` | OpenShift | UPI install on bare metal and the bootstrap never finishes. How do I collect logs from the bootstrap node a... | doc: collect bootstrap logs via ssh core, journalctl -b -f -u bootkube.service and podman logs | `kn:ocp-install-troubleshooting#1`, `kn:openshift#2`, `kn:k8s-kubectl-output#7` |
 | `ocp-014` | OpenShift | What is the difference between Available, Progressing, Degraded and Upgradeable on a ClusterOperator, and d... | doc: ClusterOperator condition types Available, Progressing, Degraded and Upgradeable defined side by side | `kn:ocp-cluster-update-status#1`, `DBG-CLUSTEROPERATOR`, `kn:ocp-operators#0` |
+| `upg-001` | OpenShift | oc adm upgrade --include-not-recommended on my 4.15 cluster lists 4.16.15 under "Supported but not recommen... | no gap recorded | `kn:ocp-cluster-update-status#2` |
+| `upg-002` | OpenShift | In oc get clusterversion version -o json some target versions are under .status.availableUpdates and others... | no gap recorded | `kn:ocp-cluster-update-status#3` |
+| `upg-003` | OpenShift | oc adm upgrade on my 4.15.33 cluster only shows "Recommended updates", but I know 4.16.15 has been released... | no gap recorded | none |
+| `upg-004` | OpenShift | jq on my ClusterVersion shows a conditionalUpdates entry with a condition {"type": "Recommended", "status":... | no gap recorded | `kn:ocp-cluster-update-status#3` |
+| `upg-005` | OpenShift | Red Hat marks 4.14.22 as not recommended for my cluster because of a known issue. We read the linked bug an... | no gap recorded | none |
+| `upg-006` | OpenShift | oc adm upgrade recommend prints "Failed to check for at least some preconditions: no token is currently in... | no gap recorded | none |
+| `upg-007` | OpenShift | We run a local OpenShift Update Service for a disconnected cluster. The release images are mirrored, but OS... | no gap recorded | none |
+| `upg-008` | OpenShift | A file in cincinnati-graph-data/blocked-edges has to, from, url, name and message plus a matchingRules list... | no gap recorded | none |
 | `rhacs-006` | RHACS | How do I stop one RHACS deploy-time policy from firing in every namespace whose name starts with test-? | rank: kn:rhacs-policy-rules-scope#3 exclusion doc should outrank the roxctl deployment check doc | `kn:rhacs-roxctl-ci#3`, `kn:rhacs-enforcement#0`, `kn:rhacs-policy-rules-scope#4` |
+| `pcel-001` | Admission policy engines | After upgrading Kyverno to 1.19, every time I apply a ClusterPolicy I get: "Warning: kyverno.io/v1 ClusterP... | no gap recorded | `kn:kyverno-troubleshooting#1` |
+| `pcel-002` | Admission policy engines | I have a ClusterPolicy generate rule that clones a registry secret into every new namespace, with synchroni... | no gap recorded | `kn:k8s-images#0` |
+| `pcel-003` | Admission policy engines | My ClusterPolicy has validationFailureAction: Enforce, a failureActionOverrides block that keeps one namesp... | no gap recorded | `kn:kyverno-troubleshooting#1` |
+| `pcel-004` | Admission policy engines | My old ClusterPolicy has a context entry that reads the allowed-registry ConfigMap in kube-system and anoth... | no gap recorded | `kn:kyverno-troubleshooting#1` |
+| `pcel-005` | Admission policy engines | I am converting a ClusterPolicy mutate rule that uses patchStrategicMerge, a second rule with patchesJson69... | no gap recorded | none |
+| `pcel-006` | Admission policy engines | My ClusterPolicy verifyImages rule uses imageReferences, skipImageReferences, a cosign attestor, mutateDige... | no gap recorded | none |
+| `pcel-007` | Admission policy engines | We run a ClusterCleanupPolicy that deletes completed Jobs every night, using schedule, match, exclude and a... | no gap recorded | `kn:kyverno-troubleshooting#3` |
+| `pcel-008` | Admission policy engines | After replacing a ClusterPolicy with a ValidatingPolicy, my old kyverno.io PolicyException (exceptions: pol... | no gap recorded | `kn:kyverno-troubleshooting#1` |
 | `pol-008` | Admission policy engines | Creating a namespace fails with: Error from server ([ns-needs-owner] you must provide labels: {"owner"}): a... | doc: Gatekeeper constraint spec.enforcementAction dryrun or warn instead of deny | `gatekeeper/ns-needs-owner`, `DBG-WEBHOOK`, `kn:gatekeeper-constraints-usage#4` |
 | `pol-012` | Admission policy engines | If all Gatekeeper webhook pods go down, do constraints still block bad resources by default? What is the tr... | doc: Gatekeeper webhook failurePolicy Ignore by default versus Fail trade-offs | `kn:gatekeeper-enforcement#3`, `kn:gatekeeper-constraints-usage#5` |
+| `stor-001` | storage | From the toolbox on our ODF cluster, ceph health detail shows "[WRN] OSD_DOWN: 1 osds down" followed by "os... | no gap recorded | `OSD_DOWN`, `kn:ocp-egressip#1` |
+| `stor-002` | storage | ceph status on our Rook-Ceph cluster says "HEALTH_WARN 1/3 mons down, quorum a,c" (MON_DOWN). Is the cluste... | no gap recorded | `MON_DOWN` |
+| `stor-003` | storage | After a node reboot ceph status shows "Reduced data availability: 24 pgs inactive, 24 pgs peering" and "Deg... | no gap recorded | none |
+| `stor-004` | storage | We just got "HEALTH_WARN 1 nearfull osd(s)" (OSD_NEARFULL) and writes still work. How is that different fro... | no gap recorded | `OSD_BACKFILLFULL`, `OSD_FULL`, `OSD_NEARFULL` |
+| `stor-005` | storage | Our applications suddenly cannot write to Ceph and ceph health detail says "[ERR] OSD_FULL: 1 full osd(s)".... | no gap recorded | `OSD_FULL` |
+| `stor-006` | storage | ceph health detail shows "[WRN] POOL_NEAR_FULL: 1 pools nearfull" for our replicapool, but ceph df shows lo... | no gap recorded | `POOL_NEAR_FULL` |
+| `stor-007` | storage | After we rebuilt a worker node, ceph status shows "HEALTH_WARN clock skew detected on mon.b" (MON_CLOCK_SKE... | no gap recorded | `MON_CLOCK_SKEW` |
+| `stor-008` | storage | ceph status on our Rook cluster shows "HEALTH_WARN 2 daemons have recently crashed" (RECENT_CRASH). How do... | no gap recorded | `RECENT_CRASH` |
+| `stor-009` | storage | ceph health detail shows "[ERR] OSD_SCRUB_ERRORS: 2 scrub errors" and "[ERR] PG_DAMAGED: Possible data dama... | no gap recorded | `OSD_SCRUB_ERRORS`, `PG_DAMAGED` |
+| `stor-010` | storage | Our CephFS clients hang and ceph health detail shows "MDS_SLOW_REQUEST 1 MDSs report slow requests: mds.myf... | no gap recorded | `MDS_SLOW_REQUEST`, `DBG-ETCD` |
+| `stor-011` | storage | I need to run ceph status and ceph osd status on our Rook-Ceph cluster but there is no Ceph CLI on the node... | no gap recorded | `kn:k8s-node-kubelet#0` |
+| `stor-012` | storage | Three OSDs on different nodes of our Rook cluster keep flapping, and a colleague wants to purge all three a... | no gap recorded | `kn:k8s-node-kubelet#2` |
 
 ### Out-of-scope questions that got an answer
 
 | Id | Technology | Question | Why it is wrong | kube-noob returned |
 |---|---|---|---|---|
 | `rosa-017` | ROSA HCP | In the AWS console our EKS cluster's Resources tab says Your current IAM principal doesn't have access to K... | abstain: doc: kn:rosa-hcp-lifecycle#0, kn:rosa-efs#0 and kn:rosa-troubleshooting#1 should not fire for an EKS access question | `kn:rosa-hcp-lifecycle#0`, `kn:rosa-hcp#0`, `kn:rosa-efs#0` |
+| `pcel-009` | Admission policy engines | I want to write my own Kyverno-style admission controller in Go with controller-runtime that reconciles cus... | no gap recorded | `kn:kyverno-troubleshooting#3` |
+| `stor-014` | storage | We want to expose a Ceph RGW to 40 internal teams. How should we design the S3 bucket ACLs and bucket polic... | no gap recorded | `kn:stackrox#3`, `kn:rhacs-roxctl-ci#3` |
 
 ## Cause choice (triage)
 

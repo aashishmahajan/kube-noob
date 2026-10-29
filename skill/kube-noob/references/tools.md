@@ -60,7 +60,7 @@ Diagnose symptoms offline. Match pasted events / describe output / logs / CLI er
 
 - `limit` (integer)
 - `platform` (null/string)
-- `text`* (string): Events, `describe` output, logs, CLI errors, status JSON or an Alertmanager webhook payload (its alerts are read as text; an `openshift_version` or `version` label gives the version).
+- `text`* (string): Events, `describe` output, logs, CLI errors, status JSON, Ceph health output (`ceph health detail`, `ceph status`, their JSON or a CephCluster) or an Alertmanager webhook payload (its alerts are read as text; an `openshift_version` or `version` label gives the version).
 - `version` (null/string): The cluster's OpenShift version (4.20 or 4.20.8): leaves out reported issues already fixed there.
 
 ## explain_denial
@@ -145,7 +145,7 @@ Incidents the watch has seen. Open (or resolved) incidents from the local incide
 What is this, and what does it say?. Start here for anything the user pastes. Names what the input is (events, pod status, logs, an Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at once) and runs every analyser that applies: diagnosis with reported issues and team memory, the denial explainer, the audit, the documentation. Returns every finding with its source, read-only next steps and what was not analysed and why. Read-only, local.
 
 - `platform` (null/string)
-- `text`* (string): Anything pasted: events, describe output, logs, an Alertmanager payload, a policy denial, a ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.
+- `text`* (string): Anything pasted: events, describe output, logs, an Alertmanager payload, Ceph health output (ceph health detail or ceph status, text or JSON), a policy denial, a ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.
 - `version` (null/string)
 
 ## known_issues
