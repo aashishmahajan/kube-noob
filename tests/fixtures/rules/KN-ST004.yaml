@@ -1,0 +1,15 @@
+rule: KN-ST004
+good: |
+  apiVersion: storage.k8s.io/v1
+  kind: StorageClass
+  metadata: {name: efs}
+  provisioner: efs.csi.aws.com
+  volumeBindingMode: Immediate
+  parameters: {provisioningMode: efs-ap, fileSystemId: fs-0123456789abcdef0, directoryPerms: '700'}
+bad: |
+  apiVersion: storage.k8s.io/v1
+  kind: StorageClass
+  metadata: {name: efs}
+  provisioner: efs.csi.aws.com
+  volumeBindingMode: Immediate
+  parameters: {directoryPerms: '700'}

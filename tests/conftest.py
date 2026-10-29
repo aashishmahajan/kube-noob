@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,24 @@ import pytest
 from kube_noob.config import Settings, load_settings
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _escape(text: str, prop: bool = False) -> str:
+    out = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return out.replace(":", "%3A").replace(",", "%2C") if prop else out
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """On GitHub Actions, print each failure as an error annotation (the runner's log host is not always readable)."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    for report in terminalreporter.stats.get("failed", []) + terminalreporter.stats.get("error", []):
+        crash = getattr(report.longrepr, "reprcrash", None)
+        root = str(terminalreporter.config.rootpath)
+        where = f"file={_escape(os.path.relpath(crash.path, root), True)},line={crash.lineno}," if crash else ""
+        detail = str(crash.message if crash is not None else report.longrepr)[:1500]
+        title = _escape(f"pytest {report.nodeid}", True)
+        terminalreporter.write_line(f"::error {where}title={title}::{_escape(detail)}")
 
 
 @pytest.fixture(autouse=True)

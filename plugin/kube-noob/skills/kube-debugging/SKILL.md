@@ -14,18 +14,29 @@ description: >
 Diagnose before change. Never lead with a command that executes in a container or changes the cluster. Commands
 are for the user to run: give them as copy-paste lines (no shell comments) and do not run them yourself.
 
+0. When the user pastes something and it is not obvious what it is (or it is several things at once), call
+   `kubenoob_insight` with the text: it names each kind, runs every analyser that applies and returns the findings
+   with their source, `readOnlyNextSteps` and what it `skipped` and why. Lead with the first finding; say what was
+   skipped. If it only returned evidence-gathering steps, ask the user to run them and paste the output.
 1. Call `kubenoob_incidents` first: if the watch already recorded the problem, its incident has the diagnosis, what
    changed before it started, how often it came back and the fix the team confirmed last time; lead with that.
    Otherwise ask for read-only evidence: the output of `oc describe pod`, `oc get events --sort-by=.lastTimestamp`,
    `oc logs --previous`, or a redacted bundle (`kube-noob bundle deployment/<name> -n <ns> --cluster-enabled`).
 2. Call `kubenoob_diagnose` with the raw text, the platform and, on OpenShift, the cluster version if known (`4.20.8`).
-   Present its `readOnlyNextSteps` first.
-3. If `knownIssues` is not empty, or the user asks "is this a known bug?", say so plainly: the issue id with its link,
+   An Alertmanager webhook payload goes in as it is; its `openshift_version` label stands in for the version (see
+   `input`). Name the `signals` it found (alert names, reasons), then present `readOnlyNextSteps` first.
+   `kubenoob_extract_signals` lists the signals alone, with the alerts the words imply and the playbooks they point at.
+3. If `memory` is not empty, your team has seen this before: lead with the approved fix as `[mem:MEM-<n>]` and its
+   outcome summary ("matched 3 times, resolved 2"); say "tried, did not work" for negative entries and treat retired
+   entries as history for the user's version. After the user confirms a new fix, offer `kubenoob_memory_propose`
+   (it shows the YAML; it saves a proposed entry only when the user asks, and never on the HTTP server).
+   If `knownIssues` is not empty, or the user asks "is this a known bug?", say so plainly: the issue id with its link,
    what became of it (`status`; for Red Hat Jira tickets also `verdict`: fixed, fix in progress, open, not a bug, won't
    fix, cannot reproduce, obsolete or duplicate), and the `workaround` or `remarks` from the comments. A ticket closed
    as not a bug usually means configuration: lead with the remark that says why. Call `kubenoob_known_issues` directly
-   for a symptom with no playbook and `kubenoob_ticket` for a key the user names. Never claim a bug is reported unless
-   the tool returned it.
+   for a symptom with no playbook and `kubenoob_ticket` for a key the user names. For "what changed in Jira since
+   yesterday?" or reconciling open tickets, call `kubenoob_ticket_changes` (fixed with fix versions, closed, reopened,
+   opened, and the open tickets per project). Never claim a bug is reported unless the tool returned it.
 4. If the request was denied by a policy (`policyDenials` in the diagnosis, or a Kyverno, Gatekeeper, Pod Security,
    SCC, RHACS, quota or RBAC message), call `kubenoob_explain_denial` and name each policy and rule, the failing field
    and the fix (its `patch` for Pod Security and RBAC). Exceptions, quota increases and new permissions are the policy

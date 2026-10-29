@@ -1,0 +1,10 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] found 0 vulnerabilities
+[build : build] + npm ci
+[build : build] npm ERR! code EACCES
+[build : build] npm ERR! syscall mkdir
+[build : build] npm ERR! path /.npm
+[build : build] npm ERR! errno -13
+[build : build] npm ERR! Error: EACCES: permission denied, mkdir '/.npm'
+task build failed: "step-build" exited with code 243. Run tkn tr desc app-ci-run-x7k2p-04-build for more details

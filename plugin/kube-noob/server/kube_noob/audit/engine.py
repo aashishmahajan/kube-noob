@@ -60,7 +60,18 @@ def analyze(
 def explain_rule(rule_id: str) -> dict[str, object]:
     r = RULES.get(rule_id.upper())
     if r is None:
-        raise KeyError(f"Unknown rule {rule_id!r}. Known rules: {', '.join(sorted(RULES))}")
+        build_checks: list[str] = []
+        try:
+            from kube_noob.build import containerfile
+        except ImportError:  # the Claude plugin build ships without the Containerfile checks
+            pass
+        else:
+            built = containerfile.explain(rule_id)
+            if built is not None:
+                return built
+            build_checks = sorted(containerfile.CHECKS)
+        known = ", ".join([*sorted(RULES), *build_checks])
+        raise KeyError(f"Unknown rule {rule_id!r}. Known rules: {known}")
     from kube_noob.audit.controls import CATALOG, describe
     from kube_noob.catalog import SOURCES
 

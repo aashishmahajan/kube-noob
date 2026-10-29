@@ -299,7 +299,7 @@ def _kyverno(text: str, platform: str | None) -> list[Denial]:
         entries.append((m["policy"], m["rule"], _unquote(m["msg"])))
     if not entries and re.search(r"admission webhook \"[^\"]*kyverno[^\"]*\" denied the request", text):
         msg = text.split("denied the request:", 1)[1].strip().splitlines()[0] if "denied the request:" in text else ""
-        pm = re.search(r"\bpolicy (" + _NAME + r")", msg)
+        pm = re.search(r"\b[Pp]olicy (" + _NAME + r")", msg)  # "Policy require-team-label failed" (ValidatingPolicy)
         entries.append((pm.group(1) if pm else "", "", msg or "Kyverno denied the request."))
     seen: set[tuple[str, str]] = set()
     for policy, rule, raw in entries:
@@ -342,7 +342,10 @@ def _kyverno(text: str, platform: str | None) -> list[Denial]:
         d.fixes = fixes or [f"Change {resource or 'the object'} so it satisfies the rule the message describes."]
         d.approvals.append(
             f"If this workload really needs an exception, ask the owner of {policy or 'the policy'} for a Kyverno "
-            "PolicyException scoped to this workload only."
+            "PolicyException scoped to this workload only. PolicyExceptions are off by default: Kyverno must run with "
+            "enablePolicyException set to true and exceptionNamespace naming where exceptions may be used. The "
+            "exception names the policy in spec.policyRefs (name and kind) and matches the workload with a CEL "
+            "matchConditions expression; the PolicyReport then shows result: skip."
         )
         out.append(d)
     return out
@@ -394,8 +397,11 @@ def _gatekeeper(text: str, platform: str | None) -> list[Denial]:
         d.checks.append("kube-noob audit -f <manifest.yaml>")
         d.fixes = fixes or ["Change the object so it satisfies the constraint the message describes."]
         d.approvals.append(
-            f"If the namespace must be exempt, the owner of {constraint} can exclude it (spec.match.excludedNamespaces "
-            "or the Gatekeeper Config exemptions)."
+            f"The owner of {constraint} can roll it out without blocking: spec.enforcementAction: dryrun (violations "
+            "only in status.violations) or warn (admitted with a warning), instead of the default deny. To exempt a "
+            "namespace: spec.match.excludedNamespaces in the constraint, the Gatekeeper Config resource "
+            "(excludedNamespaces per process), or --exempt-namespace=<NAMESPACE NAME> plus the "
+            "admission.gatekeeper.sh/ignore namespace label (skips the webhook only; audit still reports it)."
         )
         out.append(d)
     return out
@@ -439,14 +445,21 @@ def _vap(text: str, platform: str | None) -> list[Denial]:
             if expr:
                 d.details["failedExpression"] = expr.group(1)
                 d.meaning += " The CEL expression evaluated to false for this object."
+                d.approvals.append(
+                    "The denial quotes the CEL expression because the validation has no message or messageExpression. "
+                    f"The owner of {m['policy']} can add spec.validations[i].messageExpression (CEL returning a "
+                    "string, for example 'object.spec.replicas must be no greater than ' + "
+                    "string(params.maxReplicas)) so the denial says what to change."
+                )
             d.checks = [
                 f"{kc} get validatingadmissionpolicy {m['policy']} -o yaml",
                 f"{kc} get validatingadmissionpolicybinding {m['binding']} -o yaml",
             ]
             d.fixes = fixes or ["Change the object so the policy's expression holds (see spec.validations)."]
             d.approvals.append(
-                f"If this object must be excluded, the owner of binding {m['binding']} can narrow its "
-                "matchResources or change validationActions."
+                f"If this object must be excluded, the owner of binding {m['binding']} can narrow its matchResources "
+                "(for example its namespaceSelector). To report instead of reject while workloads are fixed, the "
+                "binding can use validationActions: [Warn, Audit] (Deny and Warn cannot be combined)."
             )
             out.append(d)
     return out
@@ -458,7 +471,8 @@ _PSA = re.compile(
     r"(?P<mode>would violate|violates) PodSecurity \"(?P<level>[a-z]{1,20}):(?P<ver>[^\"\n]{1,20})\": "
     r"(?P<list>[^\n]{1,8000})"
 )
-_PSA_ITEM = re.compile(r"(?P<check>[^,()][^()]{0,200}?) \((?P<detail>[^()]{0,2000})\)(?:,\s*|$)")
+# An item ends at a comma, at the end, or at a period that ends the message (a pasted question may follow it).
+_PSA_ITEM = re.compile(r"(?P<check>[^,()][^()]{0,200}?) \((?P<detail>[^()]{0,2000})\)(?:,\s*|\.?\s*$|\.\s)")
 _CONTAINERS = re.compile(r"containers? ((?:\"[^\"]+\"(?:, | and )?)+)")
 _POD_FORBIDDEN = re.compile(r"pods \"(?P<pod>[^\"]+)\" is forbidden")
 _CREATED = re.compile(r"^(?P<kind>[a-z]+(?:\.[a-z.]+)?)/(?P<name>" + _NAME + r") (?:created|configured)", re.MULTILINE)
@@ -544,8 +558,10 @@ def _pod_security(text: str, platform: str | None, ns: str | None) -> list[Denia
         violations: list[dict[str, str]] = []
         rules: list[str] = []
         fixes: list[str] = []
-        for item in _PSA_ITEM.finditer(m["list"]):
-            check, detail = item["check"].strip(), item["detail"].strip()
+        items = [(i["check"].strip(), i["detail"].strip()) for i in _PSA_ITEM.finditer(m["list"])]
+        if not items:  # quoted without the details: "violates PodSecurity "restricted:latest": privileged, ..."
+            items = [(c.strip()[:200], "") for c in m["list"].split(", ")[:20] if c.strip()]
+        for check, detail in items:
             cm = _CONTAINERS.search(detail)
             names = re.findall(r"\"([^\"]+)\"", cm.group(1)) if cm else []
             violations.append({"check": check, "detail": detail})
@@ -740,9 +756,11 @@ def _scc(text: str, ns: str | None, sa: str | None) -> list[Denial]:
         d.checks.append("kube-noob audit --platform openshift -f <manifest.yaml>")
         d.fixes.append("`kube-noob fix --platform openshift -f <manifest.yaml>` removes the fixed IDs from a manifest.")
         d.approvals.append(
-            f"Only if the workload truly needs it: grant the least permissive SCC that fits (for example "
-            f"`oc adm policy add-scc-to-user nonroot-v2 -z {sa or '<serviceaccount>'} -n {_ns(ns)}`); never "
-            "privileged or anyuid for application workloads."
+            "Only if the workload truly needs it: grant the least permissive SCC that fits to its ServiceAccount "
+            "(pods of a Deployment or DaemonSet are admitted with the ServiceAccount's SCCs, not yours), for example "
+            f"`oc adm policy add-scc-to-user nonroot-v2 -z {sa or '<serviceaccount>'} -n {_ns(ns)}`. privileged is "
+            "for cluster administration components only, never application workloads. Never edit the default SCCs "
+            "(upgrades can reset them and platform pods can break); create your own SCC instead."
         )
         out.append(d)
     return out
@@ -795,6 +813,12 @@ def _rhacs(text: str, platform: str | None) -> list[Denial]:
             "it raises a violation and needs the security team's approval."
         )
         out.append(d)
+    if (
+        not out
+        and re.search(r"failed calling webhook \"[^\"\n]{0,60}stackrox\.io\"", text)
+        and not re.search(r"denied the request|violated \d+ enforced polic|Failed currently enforced policies", text)
+    ):
+        return []  # the webhook could not be called (timeout, unreachable): no policy was evaluated
     if not out:
         out.append(
             Denial(
@@ -1035,6 +1059,12 @@ def _namespace(text: str) -> str | None:
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
+def admission_signal(denial: dict[str, Any]) -> str:
+    """The signal name of a denial: ``engine``, or ``engine:policy/rule`` (``kube_noob.signals`` kind admission)."""
+    parts = [p for p in (denial.get("policy"), denial.get("rule")) if p]
+    return f"{denial['engine']}:{'/'.join(parts)}" if parts else str(denial["engine"])
+
+
 def explain(text: str, platform: str | None = None) -> dict[str, Any]:
     """Every admission denial in ``text``, explained. Returns ``{"denials": [...], "summary": ..., ...}``.
 
@@ -1064,6 +1094,9 @@ def explain(text: str, platform: str | None = None) -> dict[str, Any]:
         ),
         "denials": [d.as_dict() for d in denials],
     }
+    names = list(dict.fromkeys(admission_signal(d) for d in out["denials"]))
+    first = {n: next(i for i, d in enumerate(out["denials"]) if admission_signal(d) == n) for n in names}
+    out["signals"] = [{"kind": "admission", "name": n, "source": f"denial[{first[n]}]"} for n in names]
     if denials:
         names = [
             f"{ENGINES[d.engine]} {d.policy}" + (f"/{d.rule}" if d.rule else "") if d.policy else ENGINES[d.engine]

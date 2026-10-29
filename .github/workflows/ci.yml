@@ -124,6 +124,40 @@ jobs:
               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" \
               | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium
           done
+      - name: Audit our own Containerfiles; find a credential planted in a real image and deleted by a later layer
+        run: |
+          set -euo pipefail
+          trap 'echo "::error title=image audit::line $LINENO: $BASH_COMMAND"' ERR
+          helm template kn deploy/helm/kube-noob --set auth.existingSecret=kn-token > /tmp/kn-chart.yaml
+          for f in Containerfile Containerfile.db Containerfile.seed; do
+            kube-noob build audit -f "$f" --context . --manifests /tmp/kn-chart.yaml --fail-on high --format text
+          done
+          work=$(mktemp -d)
+          head="-----BEGIN OPEN""SSH PRIVATE KEY-----"
+          printf '%s\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n-----END OPENSSH PRIVATE KEY-----\n' "$head" > "$work/id_rsa"
+          printf 'FROM registry.access.redhat.com/ubi9/ubi-minimal:latest\nCOPY id_rsa /root/.ssh/id_rsa\nRUN rm /root/.ssh/id_rsa\nUSER 1001\n' > "$work/Containerfile"
+          docker build -q -t kn-planted:1 -f "$work/Containerfile" "$work"
+          mkdir "$work/layout"
+          docker save kn-planted:1 | tar -x -C "$work/layout"
+          ls "$work/layout"
+          rc=0
+          kube-noob build audit -f "$work/Containerfile" --image-layout "$work/layout" --format json > "$work/report.json" || rc=$?
+          test "$rc" = 1
+          python -c "
+          import json, sys
+          text = open(sys.argv[1]).read()
+          rep = json.loads(text)
+          assert 'b3BlbnNzaC1rZXkt' not in text, 'the key body leaked into the report'
+          hits = [f for f in rep['findings'] if f['ruleId'] == 'KN-B009']
+          planted = [f for f in hits if 'root/.ssh/id_rsa' in f['message']]
+          assert planted and 'deleted in layer' in planted[0]['message'], hits
+          others = [f['message'] for f in hits if f not in planted]
+          print('::notice title=image audit::planted key found in layer', planted[0]['layer'], 'of', rep['image']['layers'],
+                '(deleted later);', len(others), 'other layer findings;', rep['image']['files'], 'files read;',
+                'not read:', rep['image']['notRead'])
+          for m in others[:10]:
+              print('::warning title=image audit other finding::' + m[:300])
+          " "$work/report.json"
       - name: Chart guards (fail-closed NetworkPolicy, fsGroup only off-OpenShift, web flag wired to env)
         run: |
           set -euo pipefail
@@ -168,6 +202,38 @@ jobs:
           assert cfg['watch'] == {'enabled': True, 'intervalSeconds': 60, 'namespaces': ['shop', 'payments']}, cfg
           "
           wt --set replicaCount=1 | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if helm template kn deploy/helm/kube-noob $base --set posture.report.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::posture.report.enabled without config.clusterEnabled must fail to render"; exit 1
+          fi
+          if wt --set replicaCount=1 --set posture.report.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::posture.report.enabled without persistence must fail to render"; exit 1
+          fi
+          wt --set replicaCount=1 --set posture.report.enabled=true --set persistence.enabled=true \
+            --set "rbac.namespaces={payments}" --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['posture'] == {'reportEnabled': True, 'keep': 14, 'namespaces': ['shop', 'payments']}, cfg
+          "
+          if helm template kn deploy/helm/kube-noob $base --set rhacs.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::rhacs.enabled without rhacs.tokenSecret.name must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set rhacs.enabled=true --set rhacs.tokenSecret.name=rox \
+               --set config.offline=true --set rhacs.endpoint=https://central.example.com >/dev/null 2>&1; then
+            echo "::error title=chart::config.offline with an external RHACS Central must fail to render"; exit 1
+          fi
+          rh="--set rhacs.enabled=true --set rhacs.tokenSecret.name=rox --set rhacs.caConfigMap.name=rox-ca"
+          helm template kn deploy/helm/kube-noob $base $rh --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['rhacs'] == {'enabled': True, 'endpoint': 'https://central.stackrox.svc', 'maxPolicies': 500,
+                                  'caFile': '/etc/kube-noob-rhacs-ca/ca.pem'}, cfg
+          Settings.model_validate(cfg)
+          "
+          helm template kn deploy/helm/kube-noob $base $rh | grep -A2 "name: ROX_API_TOKEN" | grep -q 'name: "rox"'
+          helm template kn deploy/helm/kube-noob $base $rh --show-only templates/networkpolicy.yaml | grep -q "port: 8443"
+          helm template kn deploy/helm/kube-noob $base $rh | kube-noob audit -f - --platform openshift --version 4.22 \
+            --fail-on high
           if helm template kn deploy/helm/kube-noob $base --set jira.sync.enabled=true --set replicaCount=1 \
                >/dev/null 2>&1; then
             echo "::error title=chart::jira.sync.enabled without persistence must fail to render"; exit 1
@@ -194,6 +260,203 @@ jobs:
             | grep -q "dnsName: redhat.atlassian.net"
           jt --set replicaCount=1 --api-versions security.openshift.io/v1 \
             | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if helm template kn deploy/helm/kube-noob $base | grep -q -- "-probe\|-dry-run"; then
+            echo "::error title=chart::tier Roles must not render by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set probe.enabled=true >/dev/null 2>&1; then
+            echo "::error title=chart::probe.enabled without config.clusterEnabled must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set config.offline=true --set itsm.writeEnabled=true \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::itsm.writeEnabled under config.offline must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set dryRun.enabled=true --set config.clusterEnabled=true \
+               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" \
+               --set "dryRun.rules[0].apiGroups={}" --set "dryRun.rules[0].resources={secrets}" >/dev/null 2>&1; then
+            echo "::error title=chart::dry-run rules must never name Secrets"; exit 1
+          fi
+          tt() { helm template kn deploy/helm/kube-noob -n shop $base --set config.clusterEnabled=true \
+            --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" --set probe.enabled=true \
+            --set dryRun.enabled=true --set "rbac.namespaces={payments}" "$@"; }
+          tt --show-only templates/rbac-tiers.yaml | python -c "
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
+          roles = {(d['metadata']['name'], d['metadata']['namespace']) for d in docs if d['kind'] == 'Role'}
+          want = {(n, ns) for n in ('kn-kube-noob-probe', 'kn-kube-noob-dry-run') for ns in ('shop', 'payments')}
+          assert roles == want, roles
+          probe = next(d for d in docs if d['kind'] == 'Role' and d['metadata']['name'].endswith('-probe'))
+          assert probe['rules'][0] == {'apiGroups': [''], 'resources': ['pods/ephemeralcontainers'], 'verbs': ['patch']}
+          assert not any(d['kind'].startswith('Cluster') for d in docs)
+          "
+          tt --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          from kube_noob import tiers
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          on = {t['tier'] for t in tiers.describe(Settings.model_validate(cfg)) if t['enabled']}
+          assert on == {'R', 'P', 'D'}, on
+          "
+          tt --api-versions security.openshift.io/v1 | kube-noob audit -f - --platform openshift --version 4.22 \
+            --fail-on high
+          mt() { helm template kn deploy/helm/kube-noob -n shop $base "$@"; }
+          git="--set memory.source=git --set memory.git.url=https://git.example.com/team/memory.git"
+          gimg="--set memory.git.image.repository=quay.io/acme/git --set memory.git.image.tag=2.47.1"
+          gcidr="--set memory.git.egressCIDRs={203.0.113.10/32}"
+          for args in "--set memory.source=configMap" "--set memory.source=pvc" "--set memory.source=git" \
+              "$git" "$git $gimg" "$git $gimg $gcidr --set config.offline=true" \
+              "--set memory.source=git --set memory.git.url=ssh://git@git.example.com/team/memory.git $gimg $gcidr"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::memory values must fail to render: $args"; exit 1
+            fi
+          done
+          if mt --set memory.source=git --set "memory.git.url=https://u:p@git.example.com/x" $gimg $gcidr \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::credentials in memory.git.url must be refused by the schema"; exit 1
+          fi
+          mt --set memory.source=configMap --set memory.configMap.name=team-memory | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          assert {'name': 'memory', 'configMap': {'name': 'team-memory'}} in pod['volumes'], pod['volumes']
+          mounts = pod['containers'][0]['volumeMounts']
+          assert {'name': 'memory', 'mountPath': '/srv/kube-noob/memory/entries', 'readOnly': True} in mounts, mounts
+          assert 'initContainers' not in pod
+          cfg = yaml.safe_load(docs['ConfigMap']['data']['config.yaml'])
+          assert cfg['memory'] == {'paths': ['/srv/kube-noob/memory']}, cfg
+          assert [str(x) for x in Settings.model_validate(cfg).memory.paths] == ['/srv/kube-noob/memory']
+          "
+          mt --set mustGather.pvc.claimName=case-files --set mustGather.pvc.subPath=gathers | python -c "
+          import sys, yaml
+          from kube_noob.config import Settings
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          assert {'name': 'must-gather', 'persistentVolumeClaim': {'claimName': 'case-files', 'readOnly': True}} in pod['volumes']
+          m = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == 'must-gather')
+          assert m == {'name': 'must-gather', 'mountPath': '/srv/kube-noob/must-gather', 'readOnly': True, 'subPath': 'gathers'}, m
+          cfg = yaml.safe_load(docs['ConfigMap']['data']['config.yaml'])
+          assert str(Settings.model_validate(cfg).must_gather.allowed_dir) == '/srv/kube-noob/must-gather', cfg
+          "
+          if mt --set 'mustGather.pvc.claimName=../x' >/dev/null 2>&1; then
+            echo "::error title=chart::an invalid mustGather.pvc.claimName must be refused by the schema"; exit 1
+          fi
+          mt --set memory.source=pvc --set memory.pvc.claimName=team-memory --set memory.pvc.subPath=repo | python -c "
+          import sys, yaml
+          pod = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')['spec']['template']['spec']
+          assert {'name': 'memory', 'persistentVolumeClaim': {'claimName': 'team-memory', 'readOnly': True}} in pod['volumes']
+          m = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == 'memory')
+          assert m == {'name': 'memory', 'mountPath': '/srv/kube-noob/memory', 'readOnly': True, 'subPath': 'repo'}, m
+          "
+          mt $git $gimg $gcidr --set egressFirewall.enabled=true --set memory.git.ref=release-1 | python -c "
+          import sys, yaml
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          init = pod['initContainers'][0]
+          assert init['name'] == 'memory-clone' and init['image'] == 'quay.io/acme/git:2.47.1', init
+          assert init['command'] == ['git'] and init['args'] == ['clone', '--depth=1', '--branch', 'release-1', '--',
+            'https://git.example.com/team/memory.git', '/srv/kube-noob/memory'], init['args']
+          assert init['securityContext']['readOnlyRootFilesystem'] is True
+          assert {'name': 'memory', 'mountPath': '/srv/kube-noob/memory', 'readOnly': True} in pod['containers'][0]['volumeMounts']
+          assert {'name': 'memory', 'emptyDir': {'sizeLimit': '256Mi'}} in pod['volumes']
+          egress = docs['NetworkPolicy']['spec']['egress']
+          assert {'to': [{'ipBlock': {'cidr': '203.0.113.10/32'}}], 'ports': [{'protocol': 'TCP', 'port': 443}]} in egress, egress
+          fw = docs['EgressFirewall']['spec']['egress']
+          assert {'type': 'Allow', 'to': {'dnsName': 'git.example.com'}, 'ports': [{'protocol': 'TCP', 'port': 443}]} in fw, fw
+          assert fw[-1]['type'] == 'Deny'
+          "
+          mt --set memory.source=git --set memory.git.url=ssh://git@git.example.com:2222/team/memory.git $gimg $gcidr \
+            --set memory.git.sshSecret=memory-deploy-key | python -c "
+          import sys, yaml
+          docs = {d['kind']: d for d in yaml.safe_load_all(sys.stdin) if d}
+          pod = docs['Deployment']['spec']['template']['spec']
+          init = pod['initContainers'][0]
+          assert init['command'] == ['sh', '-c'] and '\"\$MEMORY_URL\"' in init['args'][0], init
+          assert 'StrictHostKeyChecking=yes' in init['args'][0]
+          env = {e['name']: e['value'] for e in init['env']}
+          assert env['MEMORY_URL'] == 'ssh://git@git.example.com:2222/team/memory.git' and env['MEMORY_REF'] == 'main'
+          assert {'name': 'memory-ssh', 'secret': {'secretName': 'memory-deploy-key', 'defaultMode': 288}} in pod['volumes']
+          assert pod['securityContext']['fsGroup'] == 1001
+          egress = docs['NetworkPolicy']['spec']['egress']
+          assert any(r.get('ports') == [{'protocol': 'TCP', 'port': 2222}] for r in egress), egress
+          "
+          mt --set memory.source=git --set memory.git.url=https://gitea.tools.svc/team/memory.git $gimg $gcidr \
+            --set config.offline=true --set egressFirewall.enabled=true --show-only templates/egressfirewall.yaml \
+            | python -c "
+          import sys, yaml
+          fw = yaml.safe_load(sys.stdin)['spec']['egress']
+          assert not any('dnsName' in r['to'] for r in fw), fw
+          "
+          mt $git $gimg $gcidr --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          seed="--set jira.seed.source=image --set jira.seed.image.repository=quay.io/acme/kn-seed"
+          for args in "--set jira.seed.source=image" "$seed" "--set jira.seed.source=pvc" "--set jira.seed.source=s3" \
+              "$seed --set jira.seed.image.tag=ci1 --set jira.seed.path=/seed/../x.tgz" \
+              "$seed --set jira.seed.image.tag=ci1 --set jira.seed.path=/kube-noob-seed/x.tgz" \
+              "$seed --set jira.seed.image.tag=ci1 --set jira.seed.sizeLimit=1Ti"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::jira.seed values must fail to render: $args"; exit 1
+            fi
+          done
+          mt $seed --set jira.seed.image.tag=2026-10-28 $git $gimg $gcidr | python -c "
+          import sys, yaml
+          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
+          pod = dep['spec']['template']['spec']
+          names = [c['name'] for c in pod['initContainers']]
+          assert names == ['jira-seed', 'memory-clone'], names
+          init = pod['initContainers'][0]
+          assert init['image'] == 'quay.io/acme/kn-seed:2026-10-28', init
+          assert init['command'] == ['cp', '--', '/seed/jira-snapshot.tgz', '/kube-noob-seed/jira-snapshot.tgz'], init
+          assert init['securityContext']['readOnlyRootFilesystem'] is True, init
+          assert init['volumeMounts'] == [{'name': 'jira-seed', 'mountPath': '/kube-noob-seed'}], init
+          mounts = pod['containers'][0]['volumeMounts']
+          assert {'name': 'jira-seed', 'mountPath': '/var/lib/kube-noob/seed', 'readOnly': True} in mounts, mounts
+          assert {'name': 'jira-seed', 'emptyDir': {'sizeLimit': '4Gi'}} in pod['volumes'], pod['volumes']
+          assert {'name': 'data', 'emptyDir': {'sizeLimit': '8Gi'}} in pod['volumes'], pod['volumes']
+          "
+          mt --set jira.seed.source=pvc --set jira.seed.pvc.claimName=jira-main --set jira.seed.pvc.subPath=jira \
+            --set persistence.enabled=true --set replicaCount=1 | python -c "
+          import sys, yaml
+          dep = next(d for d in yaml.safe_load_all(sys.stdin) if d and d['kind'] == 'Deployment')
+          pod = dep['spec']['template']['spec']
+          assert 'initContainers' not in pod, pod.get('initContainers')
+          assert {'name': 'jira-seed', 'persistentVolumeClaim': {'claimName': 'jira-main', 'readOnly': True}} in pod['volumes']
+          m = next(v for v in pod['containers'][0]['volumeMounts'] if v['name'] == 'jira-seed')
+          assert m == {'name': 'jira-seed', 'mountPath': '/var/lib/kube-noob/seed', 'readOnly': True, 'subPath': 'jira'}, m
+          "
+          mt $seed --set jira.seed.image.digest=sha256:$(printf '0%.0s' $(seq 64)) --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if mt | grep -q "jira-seed"; then
+            echo "::error title=chart::jira-seed must not render with jira.seed.source none"; exit 1
+          fi
+          dbd="--set db.image.digest=sha256:$(printf 'a%.0s' $(seq 64))"
+          for args in "--set db.enabled=true" "--set db.enabled=true --set db.image.digest=latest" \
+              "--set db.enabled=true $dbd --set db.path=/kube-noob-db-seed/x.tgz" \
+              "--set db.enabled=true $dbd --set db.path=/db/../x.tgz" "--set db.enabled=true $dbd --set db.image.tag=v1"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::db values must fail to render: $args"; exit 1
+            fi
+          done
+          render() { mt "$@" > /tmp/render.yaml 2> /tmp/render.err \
+            || { echo "::error title=chart render::$(tr '\n' ' ' < /tmp/render.err | cut -c1-1500)"; return 1; }; }
+          render --set db.enabled=true $dbd $seed --set jira.seed.image.tag=ci1
+          python scripts/chart_seed_guard.py db < /tmp/render.yaml
+          render --set db.enabled=true $dbd
+          python scripts/chart_seed_guard.py db-data < /tmp/render.yaml
+          sealed="$seed --set jira.seed.image.tag=ci1 --set jira.seed.path=/seed/jira-snapshot.tgz.enc"
+          render $sealed --set jira.seed.keySecret.name=kn-seed-key
+          python scripts/chart_seed_guard.py sealed < /tmp/render.yaml
+          for args in "--set jira.seed.keySecret.name=kn-seed-key" "$sealed --set jira.seed.keySecret.name=Bad_Name" \
+              "$sealed --set jira.seed.keySecret.name=k --set jira.seed.keySecret.key=../x" \
+              "$sealed --set jira.seed.path=/seed/x.enc"; do
+            if mt $args >/dev/null 2>&1; then
+              echo "::error title=chart::jira.seed.keySecret values must fail to render: $args"; exit 1
+            fi
+          done
+          mt --set db.enabled=true $dbd --api-versions security.openshift.io/v1 \
+            | kube-noob audit -f - --platform openshift --version 4.22 --fail-on high
+          if mt | grep -q "kube-noob-db"; then
+            echo "::error title=chart::kube-noob-db must not render unless db.enabled"; exit 1
+          fi
           helm lint --strict deploy/helm/kube-noob
           helm template kn deploy/helm/kube-noob | grep -q "name: kn-kube-noob-token"
           helm template kn deploy/helm/kube-noob --show-only templates/secret.yaml | grep -q "kind: Secret"
@@ -228,6 +491,114 @@ jobs:
           for v in 4.20 4.21 4.22; do
             kube-noob audit -f deploy/sidecar/app-with-kube-noob-sidecar.yaml --platform openshift --version "$v" --fail-on medium
           done
+      - name: Admission webhook chart (R3.3) renders in three certificate modes, refuses bad values, audits clean
+        run: |
+          set -euo pipefail
+          trap 'echo "::error title=admission chart::line $LINENO: $BASH_COMMAND"' ERR
+          base="--set auth.existingSecret=kn-token --set admission.enabled=true"
+          at() { helm template kn deploy/helm/kube-noob -n kube-noob $base "$@"; }
+          helm lint --strict deploy/helm/kube-noob $base
+          for v in 1.33.0 1.35.0; do
+            at --kube-version "$v" --set networkPolicy.allowRouter=false \
+              --set admission.certificates=secret --set admission.tls.secretName=kn-tls --set admission.tls.caBundle=Zm9v \
+              | kube-noob audit -f - --platform kubernetes --fail-on medium
+          done
+          for v in 4.20:1.33.0 4.22:1.35.0; do
+            at --kube-version "${v#*:}" --api-versions security.openshift.io/v1 --set admission.lookups=true \
+              --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" --set "admission.enforce={KN-S001}" \
+              | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium
+          done
+          at --kube-version 1.33.0 --api-versions security.openshift.io/v1 > /tmp/adm-sca.yaml
+          at --kube-version 1.33.0 --set admission.certificates=cert-manager \
+            --set admission.certManager.issuerRef.name=ca-issuer > /tmp/adm-cm.yaml
+          at --kube-version 1.29.0 --set admission.certificates=secret --set admission.tls.secretName=kn-tls \
+            --set admission.tls.caBundle=Zm9v --set admission.lookups=true \
+            --set "networkPolicy.egress.apiServerCIDRs={10.96.0.1/32}" > /tmp/adm-secret.yaml
+          python - <<'PY'
+          import yaml
+
+          def load(path):
+              return [d for d in yaml.safe_load_all(open(path)) if d]
+
+          def one(docs, kind, name=None):
+              hits = [d for d in docs if d["kind"] == kind and (name is None or d["metadata"]["name"] == name)]
+              assert len(hits) == 1, (kind, name, [d["metadata"]["name"] for d in hits])
+              return hits[0]
+
+          name = "kn-kube-noob-admission"
+          system = {"kube-system", "kube-public", "kube-node-lease", "openshift", "kube-noob"}
+          for path in ("/tmp/adm-sca.yaml", "/tmp/adm-cm.yaml", "/tmp/adm-secret.yaml"):
+              docs = load(path)
+              vwc = one(docs, "ValidatingWebhookConfiguration")
+              assert not [d for d in docs if d["kind"] == "MutatingWebhookConfiguration"]
+              (hook,) = vwc["webhooks"]
+              assert hook["failurePolicy"] == "Ignore" and hook["sideEffects"] == "None", hook
+              assert hook["timeoutSeconds"] == 3 and hook["matchPolicy"] == "Equivalent", hook
+              assert hook["admissionReviewVersions"] == ["v1"], hook
+              assert hook["clientConfig"]["service"] == {"name": name, "namespace": "kube-noob", "path": "/validate",
+                                                         "port": 443}, hook["clientConfig"]
+              sel = hook["namespaceSelector"]["matchExpressions"]
+              assert set(sel[0]["values"]) == system and sel[0]["operator"] == "NotIn", sel
+              assert sel[1] == {"key": "kube-noob.io/admission", "operator": "NotIn", "values": ["disabled"]}, sel
+              assert all(r["scope"] == "Namespaced" and r["operations"] == ["CREATE", "UPDATE"] for r in hook["rules"])
+              assert not any("secrets" in r["resources"] for r in hook["rules"])
+              dep = one(docs, "Deployment", name)
+              spec = dep["spec"]["template"]["spec"]
+              assert dep["spec"]["replicas"] == 2 and spec["affinity"]["podAntiAffinity"], spec
+              (c,) = spec["containers"]
+              assert c["args"][:2] == ["admission", "serve"] and c["readinessProbe"]["httpGet"]["scheme"] == "HTTPS"
+              assert one(docs, "PodDisruptionBudget", name)["spec"]["minAvailable"] == 1
+              main = one(docs, "Service", "kn-kube-noob")["spec"]["selector"]
+              pod = dep["spec"]["template"]["metadata"]["labels"]
+              assert not all(pod.get(k) == v for k, v in main.items()), "the server's Service must not select the webhook"
+              netpol = one(docs, "NetworkPolicy", name)["spec"]
+              assert netpol["ingress"] == [{"ports": [{"protocol": "TCP", "port": 8443}]}], netpol
+          sca = load("/tmp/adm-sca.yaml")
+          vwc = one(sca, "ValidatingWebhookConfiguration")
+          assert vwc["metadata"]["annotations"] == {"service.beta.openshift.io/inject-cabundle": "true"}
+          assert "caBundle" not in vwc["webhooks"][0]["clientConfig"]
+          assert [m["name"] for m in vwc["webhooks"][0]["matchConditions"]] == ["not-an-openshift-namespace",
+                                                                                 "not-owned-by-a-controller"]
+          svc = one(sca, "Service", name)
+          assert svc["metadata"]["annotations"] == {"service.beta.openshift.io/serving-cert-secret-name": name + "-tls"}
+          assert "fsGroup" not in one(sca, "Deployment", name)["spec"]["template"]["spec"]["securityContext"]
+          assert not [d for d in sca if d["kind"] in ("ClusterRole", "ClusterRoleBinding")], "no lookups, no RBAC"
+          assert one(sca, "ServiceAccount", name)["automountServiceAccountToken"] is False
+          assert one(sca, "NetworkPolicy", name)["spec"]["egress"] == [], "the webhook connects to nothing"
+          cm = load("/tmp/adm-cm.yaml")
+          assert one(cm, "ValidatingWebhookConfiguration")["metadata"]["annotations"] == {
+              "cert-manager.io/inject-ca-from": "kube-noob/" + name}
+          cert = one(cm, "Certificate", name)["spec"]
+          assert cert["secretName"] == name + "-tls" and cert["issuerRef"]["name"] == "ca-issuer", cert
+          assert cert["dnsNames"] == [name + ".kube-noob.svc", name + ".kube-noob.svc.cluster.local"], cert
+          sec = load("/tmp/adm-secret.yaml")
+          hook = one(sec, "ValidatingWebhookConfiguration")["webhooks"][0]
+          assert hook["clientConfig"]["caBundle"] == "Zm9v" and "matchConditions" not in hook, "1.29: no matchConditions"
+          vol = {v["name"]: v for v in one(sec, "Deployment", name)["spec"]["template"]["spec"]["volumes"]}
+          assert vol["tls"]["secret"]["secretName"] == "kn-tls", vol
+          role = one(sec, "ClusterRole")
+          granted = {r for rule in role["rules"] for r in rule["resources"]}
+          assert granted == {"poddisruptionbudgets", "networkpolicies", "persistentvolumeclaims",
+                             "horizontalpodautoscalers", "storageclasses"}, granted
+          assert all(rule["verbs"] == ["get", "list"] for rule in role["rules"])
+          config = yaml.safe_load(one(sec, "ConfigMap", name)["data"]["config.yaml"])
+          assert config["offline"] is True and config["cluster"]["enabled"] is True, config
+          assert config["admission"]["lookups"] is True and config["admission"]["enforce"] == [], config
+          print("::notice title=admission chart::three certificate modes render as expected")
+          PY
+          refuse() {
+            if at "$@" > /tmp/refused.out 2>&1; then
+              echo "::error title=admission chart::rendered with $*"; exit 1; fi
+          }
+          refuse --set admission.certificates=cert-manager
+          refuse --set admission.certificates=secret --set admission.tls.secretName=kn-tls
+          refuse --set admission.lookups=true
+          refuse --set "admission.enforce={KN-X}"
+          refuse --set admission.timeoutSeconds=31
+          refuse --set admission.certificates=self-signed
+          if helm template kn deploy/helm/kube-noob --set auth.existingSecret=kn-token | grep -q "kube-noob-admission"; then
+            echo "::error title=admission chart::the webhook must be opt-in"; exit 1
+          fi
       - name: Generated Helm charts render and audit clean
         run: |
           for p in kubernetes openshift rosa-hcp; do
@@ -238,6 +609,89 @@ jobs:
             helm lint --strict /tmp/charts-$p/demo
             helm template demo /tmp/charts-$p/demo -n demo | kube-noob audit -f - --platform $p --fail-on high
           done
+
+  db-image:
+    # The public kube-noob-db image end to end: bundle, gate, image, the chart's cp init container (read-only, no
+    # capabilities, user 1001) and the server importing the bundle on start.
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Bundle a small public corpus and gate it
+        env:
+          KUBE_NOOB_DATA_DIR: /tmp/db-data
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, shutil
+          from importlib import resources
+          from pathlib import Path
+          from kube_noob.sources.corpus import write_shard
+
+          data = Path("/tmp/db-data")
+          doc = {"sourceId": "k8s-docs", "license": "CC-BY-4.0", "redistributable": True}
+          write_shard(data, "k8s-docs", [{**doc, "id": f"k{i}", "title": f"doc {i}", "text": f"Pods {i}"} for i in range(5)])
+          write_shard(data, "jira-ocpbugs", [{"id": "j1", "title": "t", "text": "PRIVATE", "sourceId": "jira:OCPBUGS",
+                                              "license": "public, not redistributable", "redistributable": False}])
+          (data / "known_issues").mkdir()
+          src = resources.files("kube_noob").joinpath("data", "known_issues", "openshift-4.21-known-1.json")
+          (data / "known_issues" / "openshift-4.21-known-1.json").write_text(src.read_text())
+          PY
+          mkdir -p dist/kube-noob-db
+          kube-noob corpus db-bundle -o dist/kube-noob-db/kube-noob-db.tgz
+          tar -xzf dist/kube-noob-db/kube-noob-db.tgz -C dist/kube-noob-db ATTRIBUTION.md
+          kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
+          if tar -xzOf dist/kube-noob-db/kube-noob-db.tgz | grep -q PRIVATE; then
+            echo "::error title=db::Jira text reached the public bundle"; exit 1; fi
+      - name: Live Red Hat VEX (three CVEs, one over the size cap) joins the bundle under CC BY 4.0
+        env:
+          KUBE_NOOB_DATA_DIR: /tmp/db-data
+        run: |
+          set -euo pipefail
+          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-21626,CVE-2024-3094 --format json \
+            > /tmp/vex.json 2> /tmp/vex.err || { echo "::error title=Red Hat VEX live::$(tr '\n' ' ' < /tmp/vex.err | cut -c1-1500)"; exit 1; }
+          curl -s --max-time 120 -o /tmp/vex-raw.json \
+            https://security.access.redhat.com/data/csaf/v2/vex/2024/cve-2024-21626.json || true
+          python scripts/vex_ci_check.py /tmp/vex.json /tmp/db-data/corpus/redhat-vex.jsonl /tmp/vex-raw.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' https://security.access.redhat.com/data/csaf/v2/vex/archive_latest.txt)
+          echo "::notice title=VEX archive pointer::archive_latest.txt HTTP $code"
+          kube-noob corpus db-bundle -o dist/kube-noob-db/kube-noob-db.tgz
+          kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
+          tar -xzf dist/kube-noob-db/kube-noob-db.tgz -C dist/kube-noob-db ATTRIBUTION.md
+          grep -q "Red Hat Security Data" dist/kube-noob-db/ATTRIBUTION.md
+      - name: Build both images
+        run: |
+          docker build -f Containerfile.db -t kube-noob-db:ci .
+          docker build -f Containerfile -t kube-noob:ci .
+          [ "$(docker image inspect kube-noob-db:ci --format '{{.Config.User}}')" = "1001" ]
+      - name: The init container copies the archive and the server imports it on start
+        run: |
+          set -euo pipefail
+          docker volume create kn-db-seed
+          # an emptyDir is group-writable for the pod's group 0; a fresh docker volume is root-only until set so
+          docker run --rm -v kn-db-seed:/kube-noob-db-seed --user 0 kube-noob-db:ci chmod 0770 /kube-noob-db-seed
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --user 1001:0 \
+            -v kn-db-seed:/kube-noob-db-seed kube-noob-db:ci \
+            cp -- /kube-noob-db/kube-noob-db.tgz /kube-noob-db-seed/kube-noob-db.tgz
+          docker run -d --name kn -e KUBE_NOOB_HTTP_TOKEN=ci-token -p 18080:8080 \
+            -v kn-db-seed:/var/lib/kube-noob/seed-db:ro kube-noob:ci
+          for _ in $(seq 60); do curl -fsS http://127.0.0.1:18080/healthz >/dev/null 2>&1 && break; sleep 1; done
+          docker logs kn 2>&1 | tee /tmp/kn.log
+          grep -q "kube-noob-db imported from /var/lib/kube-noob/seed-db/kube-noob-db.tgz" /tmp/kn.log
+          docker exec kn kube-noob corpus stats --format json > /tmp/stats.json
+          docker exec kn cat /var/lib/kube-noob/corpus/DB_SEED.json
+          python -c "
+          import json
+          s = json.load(open('/tmp/stats.json'))
+          assert 'k8s-docs' in json.dumps(s) and 'jira' not in json.dumps(s['manifest']['shards']), s
+          "
+          docker rm -f kn
 
   e2e-kind:
     # One leg per supported OpenShift minor (by its Kubernetes version) plus the newest Kubernetes kind ships.
@@ -341,6 +795,9 @@ jobs:
             || { kubectl -n kube-noob get events --sort-by=.lastTimestamp | tail -30 | sed 's/^/::error title=install::/'; exit 1; }
       - name: Helm test (in-cluster readiness through the Service)
         run: helm test kn -n kube-noob --timeout 3m --logs
+      - name: Sealed private Jira seed, wrong key, sync on and off (requirements R1.4, R1.5)
+        if: matrix.ocp == '4.22'
+        run: bash scripts/e2e_jira_seed_kind.sh kube-noob:ci kn
       - name: Sidecar under Pod Security restricted (loopback only, transcript)
         run: scripts/demo_sidecar_kind.sh kube-noob:ci "/tmp/sidecar-transcript-${{ matrix.ocp }}.txt"
       - name: Publish the sidecar transcript as an annotation (source of the sidecar demo video)
@@ -396,3 +853,424 @@ jobs:
           enc() { sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g'; }
           echo "::warning title=describe::$(kubectl -n kube-noob describe pods 2>&1 | tail -60 | enc)" || true
           echo "::warning title=logs::$(kubectl -n kube-noob logs deploy/kn-kube-noob --tail=80 2>&1 | enc)" || true
+
+  gate-ci:
+    # R4.3: the gate passes this repository's chart and fails on fixtures, as a GitHub Action, a Tekton Task (in
+    # kind) and a GitLab CI template (run by gitlab-ci-local).
+    runs-on: ubuntu-latest
+    needs: [test]
+    env:
+      TEKTON_VERSION: v1.15.5
+      # release.yaml of that version, as CI 40661279945 read it on first use; a different file fails the job
+      TEKTON_SHA256: "c2fe5c2ac98af2984f2d58199e81ef2056802f671051744d986ec998ad19ba84"
+      GITLAB_CI_LOCAL: gitlab-ci-local@4.76.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Values for rendering our chart
+        run: |
+          printf 'auth:\n  existingSecret: kn-token\n' > /tmp/kn-values.yaml
+      - id: good
+        name: GitHub Action on our own chart (must pass)
+        uses: ./
+        with:
+          chart: deploy/helm/kube-noob
+          values: /tmp/kn-values.yaml
+          namespace: kube-noob
+          containerfiles: Containerfile
+          platform: openshift
+          version: "4.20"
+          sarif: /tmp/kn-good.sarif
+      - id: bad
+        name: GitHub Action on the bad fixtures (must fail)
+        continue-on-error: true
+        uses: ./
+        with:
+          paths: tests/fixtures/gate/bad
+          containerfiles: tests/fixtures/containerfile/KN-B005.bad.Containerfile
+          platform: openshift
+          version: "4.20"
+          sarif: /tmp/kn-bad.sarif
+      - name: Scanner report fixtures for the vulnerability gate (R5.1-R5.3)
+        run: python tests/fixtures/vuln/generate.py /tmp/kn-vuln
+      - id: vuln
+        name: GitHub Action with a scanner report, VEX and KEV (must fail on fixable criticals)
+        continue-on-error: true
+        uses: ./
+        with:
+          paths: tests/fixtures/vuln/shop.yaml
+          scanner-reports: /tmp/kn-vuln/trivy.json
+          vex: /tmp/kn-vuln/vex
+          kev: /tmp/kn-vuln/kev.json
+          platform: openshift
+          version: "4.20"
+          fail-on: critical
+          sarif: /tmp/kn-vuln.sarif
+      - name: SAST fixtures for the code gate (R4.5)
+        run: python tests/fixtures/code/generate.py /tmp/kn-code
+      - id: code
+        name: GitHub Action with SARIF from five SAST tools (must fail on shipped highs)
+        continue-on-error: true
+        uses: ./
+        with:
+          sarif-reports: >-
+            /tmp/kn-code/semgrep.sarif /tmp/kn-code/bandit.sarif /tmp/kn-code/spotbugs.sarif
+            /tmp/kn-code/eslint.sarif /tmp/kn-code/codeql.sarif
+          platform: openshift
+          version: "4.20"
+          fail-on: high
+          sarif: /tmp/kn-code.sarif
+      - name: The action's verdicts and SARIF 2.1.0 schema
+        env:
+          GOOD: ${{ steps.good.outputs.result }}
+          BAD: ${{ steps.bad.outputs.result }}
+          VULN: ${{ steps.vuln.outputs.result }}
+          CODE: ${{ steps.code.outputs.result }}
+        run: |
+          set -euo pipefail
+          test "$GOOD" = passed || { echo "::error title=gate action::our chart: $GOOD"; exit 1; }
+          test "$BAD" = failed || { echo "::error title=gate action::bad fixtures: $BAD"; exit 1; }
+          test "$VULN" = failed || { echo "::error title=gate action::scanner report: $VULN"; exit 1; }
+          test "$CODE" = failed || { echo "::error title=gate action::SARIF input: $CODE"; exit 1; }
+          python -m pip install --quiet check-jsonschema==0.38.2
+          check-jsonschema --schemafile https://json.schemastore.org/sarif-2.1.0.json /tmp/kn-good.sarif /tmp/kn-bad.sarif \
+            /tmp/kn-vuln.sarif /tmp/kn-code.sarif
+          python -c "
+          import json
+          bad = json.load(open('/tmp/kn-bad.sarif'))['runs'][0]['results']
+          print('::notice title=gate action::our chart passed; bad fixtures failed with', len(bad), 'SARIF results')
+          cves = {r['ruleId'] for r in json.load(open('/tmp/kn-vuln.sarif'))['runs'][0]['results'] if r['ruleId'].startswith('CVE-')}
+          exp = json.load(open('/tmp/kn-vuln/expected.json'))
+          want = {n['cve'] for n in exp['kept']}
+          dropped = {c for _, c in exp['excluded']}
+          assert cves == want, (sorted(cves ^ want))
+          assert not cves & dropped, sorted(cves & dropped)
+          print('::notice title=gate action::scanner report: failed as planned;', len(cves), 'CVEs in SARIF after VEX dropped', len(dropped))
+          code = {r['ruleId'] for r in json.load(open('/tmp/kn-code.sarif'))['runs'][0]['results']}
+          assert {'B602', 'no-unsanitized/property', 'security/detect-child-process'} <= code, sorted(code)
+          assert 'no-unused-vars' not in code and 'security/detect-eval-with-expression' not in code, sorted(code)
+          print('::notice title=gate action::SARIF input: failed as planned;', len(code), 'code findings (suppressed, fixed and lint left out)')
+          "
+      - name: Build the image the Tekton Task and the GitLab template run
+        run: |
+          docker build -f Containerfile -t kube-noob:ci .
+          docker tag kube-noob:ci "ghcr.io/aashishmahajan/kube-noob:$(python -c 'import re;print(re.search(r"__version__ = \"([^\"]+)\"", open("src/kube_noob/__init__.py").read()).group(1))')"
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: kn
+          version: v0.32.0
+          node_image: "kindest/node:v1.33.12@sha256:3f5c8443c620245e4d355cfe09e96a91ead32ceaa569d3f1ca9edf0cb2fe2ff4"
+          kubectl_version: v1.33.12
+      - name: Install Tekton Pipelines
+        run: |
+          set -euo pipefail
+          url="https://github.com/tektoncd/pipeline/releases/download/${TEKTON_VERSION}/release.yaml"
+          curl -fsSL --retry 3 -o /tmp/tekton.yaml "$url"
+          got=$(sha256sum /tmp/tekton.yaml | cut -d' ' -f1)
+          if [ "$got" != "$TEKTON_SHA256" ]; then
+            echo "::error title=Tekton release.yaml::sha256 ${got} differs from the pinned ${TEKTON_SHA256}"; exit 1
+          fi
+          kubectl apply -f /tmp/tekton.yaml > /tmp/tekton.out 2>&1 \
+            || { echo "::error title=Tekton install::$(tail -c 1500 /tmp/tekton.out | tr '\n' ' ')"; exit 1; }
+          kubectl -n tekton-pipelines rollout status deploy/tekton-pipelines-controller --timeout=300s
+          kubectl -n tekton-pipelines rollout status deploy/tekton-pipelines-webhook --timeout=300s
+          kind load docker-image kube-noob:ci --name kn
+      - name: Tekton Task on our chart (must pass) and on the bad fixtures (must fail)
+        run: |
+          set -euo pipefail
+          kubectl apply -f deploy/tekton/kube-noob-gate.yaml
+          helm template kn deploy/helm/kube-noob -n kube-noob -f /tmp/kn-values.yaml > /tmp/kn-chart.yaml
+          kubectl create configmap gate-good --from-file=chart.yaml=/tmp/kn-chart.yaml --from-file=Containerfile=Containerfile
+          kubectl create configmap gate-bad --from-file=tests/fixtures/gate/bad/ \
+            --from-file=Containerfile=tests/fixtures/containerfile/KN-B005.bad.Containerfile
+          for case in good bad; do
+            cat <<EOF | kubectl create -f -
+          apiVersion: tekton.dev/v1
+          kind: TaskRun
+          metadata: {name: gate-${case}}
+          spec:
+            taskRef: {name: kube-noob-gate}
+            params:
+              - {name: image, value: kube-noob:ci}
+              - {name: paths, value: "."}
+              - {name: containerfiles, value: Containerfile}
+              - {name: platform, value: openshift}
+              - {name: version, value: "4.20"}
+            workspaces:
+              - {name: source, configMap: {name: gate-${case}}}
+          EOF
+          done
+          for case in good bad; do
+            kubectl wait "taskrun/gate-${case}" --for=condition=Succeeded=Unknown --timeout=5s >/dev/null 2>&1 || true
+            for i in $(seq 1 90); do
+              s=$(kubectl get "taskrun/gate-${case}" -o jsonpath='{.status.conditions[0].status}')
+              [ "$s" = True ] || [ "$s" = False ] && break
+              sleep 5
+            done
+          done
+          good=$(kubectl get taskrun/gate-good -o jsonpath='{.status.results[?(@.name=="result")].value}')
+          bad=$(kubectl get taskrun/gate-bad -o jsonpath='{.status.results[?(@.name=="result")].value}')
+          counts=$(kubectl get taskrun/gate-bad -o jsonpath='{.status.results[?(@.name=="counts")].value}')
+          echo "::notice title=Tekton gate::good=${good} bad=${bad} counts=${counts}"
+          test "$good" = passed && test "$bad" = failed \
+            || { kubectl get taskrun -o yaml | tail -80 | sed 's/^/::warning title=taskrun::/'; exit 1; }
+      - name: GitLab CI template under gitlab-ci-local (must pass on the chart, fail on the fixtures)
+        run: |
+          set -euo pipefail
+          cp /tmp/kn-chart.yaml rendered-chart.yaml
+          cat > .gitlab-ci-gate.yml <<'EOF'
+          include:
+            - local: deploy/gitlab/kube-noob-gate.gitlab-ci.yml
+          gate-good:
+            extends: .kube-noob-gate
+            variables: {KUBE_NOOB_PATHS: rendered-chart.yaml, KUBE_NOOB_CONTAINERFILES: Containerfile, KUBE_NOOB_PLATFORM: openshift, KUBE_NOOB_VERSION: "4.20"}
+          gate-bad:
+            extends: .kube-noob-gate
+            variables: {KUBE_NOOB_PATHS: tests/fixtures/gate/bad, KUBE_NOOB_CONTAINERFILES: tests/fixtures/containerfile/KN-B005.bad.Containerfile, KUBE_NOOB_PLATFORM: openshift, KUBE_NOOB_VERSION: "4.20"}
+          EOF
+          git add -f rendered-chart.yaml .gitlab-ci-gate.yml  # in the index only, in case untracked files are not copied
+          npx --yes "$GITLAB_CI_LOCAL" --file .gitlab-ci-gate.yml gate-good > /tmp/gl-good.out 2>&1 \
+            || { tail -c 2000 /tmp/gl-good.out | tr '\n' ' ' | sed 's/^/::error title=gitlab good::/'; exit 1; }
+          rc=0
+          npx --yes "$GITLAB_CI_LOCAL" --file .gitlab-ci-gate.yml gate-bad > /tmp/gl-bad.out 2>&1 || rc=$?
+          test "$rc" != 0 || { echo "::error title=gitlab bad::the bad fixtures passed"; exit 1; }
+          grep -q "kube-noob gate failed" /tmp/gl-bad.out \
+            || { tail -c 2000 /tmp/gl-bad.out | tr '\n' ' ' | sed 's/^/::error title=gitlab bad output::/'; exit 1; }
+          echo "::notice title=GitLab gate::chart passed, fixtures failed (exit ${rc})"
+
+  admission-kind:
+    # R3.3 acceptance on a real API server: in warn mode kube-noob's findings come back as kubectl warnings and the
+    # object is admitted; fuzzed reviews sent from inside the cluster are never denied and 50 requests per second for
+    # 30 seconds answer with p99 under 50 ms; in enforce mode only the listed rule is denied, and an object that already
+    # broke it can still be updated; a webhook scaled to zero blocks nothing.
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: kn
+          version: v0.32.0
+          node_image: "kindest/node:v1.33.12@sha256:3f5c8443c620245e4d355cfe09e96a91ead32ceaa569d3f1ca9edf0cb2fe2ff4"
+          kubectl_version: v1.33.12
+      - name: Build image and load into kind
+        run: |
+          docker build -f Containerfile -t kube-noob:ci .
+          kind load docker-image kube-noob:ci --name kn
+      - name: Serving certificate from a CA made here (openssl; the CA key never leaves the runner)
+        run: |
+          set -euo pipefail
+          d=$(mktemp -d)
+          svc=kn-kube-noob-admission.kube-noob.svc
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$d/ca.key" -out "$d/ca.crt" -days 2 \
+            -subj "/CN=kube-noob-ci-ca" -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash"
+          openssl req -newkey rsa:2048 -nodes -keyout "$d/tls.key" -out "$d/tls.csr" -subj "/CN=$svc"
+          printf '%s\n' "basicConstraints=CA:FALSE" "keyUsage=critical,digitalSignature,keyEncipherment" \
+            "extendedKeyUsage=serverAuth" "subjectKeyIdentifier=hash" "authorityKeyIdentifier=keyid,issuer" \
+            "subjectAltName=DNS:$svc,DNS:$svc.cluster.local" > "$d/ext.cnf"
+          openssl x509 -req -in "$d/tls.csr" -CA "$d/ca.crt" -CAkey "$d/ca.key" -CAcreateserial -out "$d/tls.crt" \
+            -days 2 -extfile "$d/ext.cnf"
+          kubectl create namespace kube-noob
+          kubectl -n kube-noob create secret tls kn-admission-tls --cert="$d/tls.crt" --key="$d/tls.key"
+          kubectl -n kube-noob create secret generic kn-token --from-literal=token=ci-token
+          kubectl create namespace loadtest
+          kubectl -n loadtest create configmap admission-ca --from-file=ca.crt="$d/ca.crt"
+          kubectl -n loadtest create configmap admission-load --from-file=scripts/admission_kind_load.py
+          echo "CA_BUNDLE=$(base64 -w0 "$d/ca.crt")" >> "$GITHUB_ENV"
+      - name: Install the chart with the webhook in warn mode
+        run: |
+          set -euo pipefail
+          helm install kn deploy/helm/kube-noob -n kube-noob \
+            --set image.repository=kube-noob --set image.tag=ci --set image.pullPolicy=Never \
+            --set auth.existingSecret=kn-token --set config.defaultPlatform=kubernetes \
+            --set networkPolicy.allowRouter=false --set networkPolicy.egress.dnsNamespace=kube-system \
+            --set networkPolicy.egress.dnsPort=53 --set admission.enabled=true --set admission.certificates=secret \
+            --set admission.tls.secretName=kn-admission-tls --set "admission.tls.caBundle=$CA_BUNDLE" \
+            --wait --timeout 5m \
+            || { kubectl -n kube-noob get events --sort-by=.lastTimestamp | tail -30 | sed 's/^/::error title=install::/'; exit 1; }
+          kubectl -n kube-noob rollout status deploy/kn-kube-noob-admission --timeout=180s
+      - name: Warn mode - a privileged Deployment is admitted with KN-S001 as a kubectl warning
+        run: |
+          set -euo pipefail
+          kubectl create namespace shop
+          cat > /tmp/priv.yaml <<'Y'
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: priv, namespace: shop}
+          spec:
+            replicas: 1
+            selector: {matchLabels: {app: priv}}
+            template:
+              metadata: {labels: {app: priv}}
+              spec:
+                containers:
+                  - name: c
+                    image: registry.k8s.io/pause:3.10
+                    securityContext: {privileged: true}
+          Y
+          for i in $(seq 1 45); do
+            kubectl apply --dry-run=server -f /tmp/priv.yaml > /tmp/warn.out 2>&1 || true
+            grep -q 'Warning: \[KN-S001\]' /tmp/warn.out && break
+            sleep 2
+          done
+          grep -q 'Warning: \[KN-S001\]' /tmp/warn.out \
+            || { echo "::error title=warn mode::no KN-S001 warning: $(tr '\n' ' ' < /tmp/warn.out)"; exit 1; }
+          kubectl apply -f /tmp/priv.yaml 2>&1 | tee /tmp/applied.out
+          grep -q 'deployment.apps/priv created' /tmp/applied.out
+          echo "::notice title=warn mode::$(grep -m1 'KN-S001' /tmp/warn.out | cut -c1-200)"
+          kubectl create namespace quiet
+          kubectl label namespace quiet kube-noob.io/admission=disabled
+          sed 's/namespace: shop/namespace: quiet/' /tmp/priv.yaml | kubectl apply --dry-run=server -f - > /tmp/quiet.out 2>&1
+          if grep -q 'KN-' /tmp/quiet.out; then echo "::error title=opt-out::a disabled namespace was reviewed"; exit 1; fi
+          sed 's/namespace: shop/namespace: kube-noob/' /tmp/priv.yaml | kubectl apply --dry-run=server -f - > /tmp/own.out 2>&1
+          if grep -q 'KN-' /tmp/own.out; then echo "::error title=own namespace::the release namespace was reviewed"; exit 1; fi
+      - name: In-cluster fuzz (never denied in warn mode) and 50 requests/s for 30 s (p99 under 50 ms)
+        run: |
+          set -euo pipefail
+          cat <<'Y' | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata: {name: admission-load, namespace: loadtest}
+          spec:
+            backoffLimit: 0
+            template:
+              spec:
+                restartPolicy: Never
+                automountServiceAccountToken: false
+                securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+                containers:
+                  - name: load
+                    image: kube-noob:ci
+                    imagePullPolicy: Never
+                    command: ["python3", "/scripts/admission_kind_load.py",
+                              "https://kn-kube-noob-admission.kube-noob.svc/validate", "/ca/ca.crt",
+                              "--fuzz", "600", "--rate", "50", "--seconds", "30", "--p99-ms", "50"]
+                    resources:
+                      requests: {cpu: 200m, memory: 128Mi}
+                      limits: {memory: 512Mi}
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities: {drop: [ALL]}
+                    volumeMounts:
+                      - {name: script, mountPath: /scripts, readOnly: true}
+                      - {name: ca, mountPath: /ca, readOnly: true}
+                volumes:
+                  - name: script
+                    configMap: {name: admission-load}
+                  - name: ca
+                    configMap: {name: admission-ca}
+          Y
+          ok=0
+          kubectl -n loadtest wait --for=condition=complete job/admission-load --timeout=300s && ok=1 || true
+          kubectl -n loadtest logs job/admission-load > /tmp/load.out 2>&1 || true
+          cat /tmp/load.out
+          [ "$ok" = 1 ] || { echo "::error title=fuzz and load::$(tr '\n' ' ' < /tmp/load.out | cut -c1-1500)"; exit 1; }
+          echo "::notice title=fuzz and load::$(head -1 /tmp/load.out)"
+          kubectl -n kube-noob port-forward svc/kn-kube-noob-admission 18443:443 > /dev/null 2>&1 &
+          sleep 3
+          echo "::notice title=metrics::$(curl -sk https://127.0.0.1:18443/metrics | grep -E '^kube_noob_admission_requests_total' | tr '\n' ' ' | cut -c1-600)"
+          kill %1 || true
+      - name: Enforce mode - KN-S001 is denied, other findings warn, an existing breaker can still be updated
+        run: |
+          set -euo pipefail
+          helm upgrade kn deploy/helm/kube-noob -n kube-noob --reuse-values --set "admission.enforce={KN-S001}" \
+            --wait --timeout 5m
+          kubectl -n kube-noob rollout status deploy/kn-kube-noob-admission --timeout=180s
+          sed 's/name: priv,/name: priv2,/' /tmp/priv.yaml > /tmp/priv2.yaml
+          for i in $(seq 1 45); do
+            if ! kubectl apply --dry-run=server -f /tmp/priv2.yaml > /tmp/deny.out 2>&1 && grep -q 'KN-S001' /tmp/deny.out; then
+              break; fi
+            sleep 2
+          done
+          grep -q 'denied the request: kube-noob denied Deployment/shop/priv2: \[KN-S001\]' /tmp/deny.out \
+            || { echo "::error title=enforce::not denied: $(tr '\n' ' ' < /tmp/deny.out)"; exit 1; }
+          echo "::notice title=enforce::$(head -c 300 /tmp/deny.out)"
+          sed 's/privileged: true/privileged: false/; s/name: priv,/name: plain,/' /tmp/priv.yaml \
+            | kubectl apply --dry-run=server -f - > /tmp/plain.out 2>&1 \
+            || { echo "::error title=enforce::a Deployment without KN-S001 was denied: $(tr '\n' ' ' < /tmp/plain.out)"; exit 1; }
+          grep -q 'Warning: \[KN-' /tmp/plain.out || { echo "::error title=enforce::other findings stopped warning"; exit 1; }
+          kubectl -n shop label deployment priv touched=yes --dry-run=server > /tmp/update.out 2>&1 \
+            || { echo "::error title=enforce::updating a Deployment that already broke KN-S001 was denied: $(tr '\n' ' ' < /tmp/update.out)"; exit 1; }
+      - name: A webhook scaled to zero blocks nothing (failurePolicy Ignore)
+        run: |
+          set -euo pipefail
+          kubectl -n kube-noob scale deploy/kn-kube-noob-admission --replicas=0
+          for i in $(seq 1 60); do
+            [ -z "$(kubectl -n kube-noob get pods -l app.kubernetes.io/name=kube-noob-admission -o name)" ] && break
+            sleep 2
+          done
+          [ -z "$(kubectl -n kube-noob get pods -l app.kubernetes.io/name=kube-noob-admission -o name)" ]
+          start=$(date +%s)
+          kubectl apply --dry-run=server -f /tmp/priv2.yaml 2>&1 | tee /tmp/dead.out
+          took=$(( $(date +%s) - start ))
+          [ "$took" -lt 15 ] || { echo "::error title=dead webhook::admission took ${took}s"; exit 1; }
+          echo "::notice title=dead webhook::admitted in ${took}s with the webhook down"
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          enc() { sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g'; }
+          echo "::warning title=pods::$(kubectl get pods -A 2>&1 | tail -40 | enc)" || true
+          echo "::warning title=webhook logs::$(kubectl -n kube-noob logs deploy/kn-kube-noob-admission --tail=80 2>&1 | enc)" || true
+          echo "::warning title=webhook describe::$(kubectl -n kube-noob describe pods -l app.kubernetes.io/name=kube-noob-admission 2>&1 | tail -60 | enc)" || true
+          echo "::warning title=vwc::$(kubectl get validatingwebhookconfigurations -o yaml 2>&1 | head -80 | enc)" || true
+
+  policy-kind:
+    # R3.1 acceptance: each generated admission policy refuses its rule's bad fixture and admits the good one on a real
+    # API server (server-side dry-run), for the built-in ValidatingAdmissionPolicy and for Kyverno ValidatingPolicy.
+    name: policy-kind (${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [vap, kyverno]
+    env:
+      KYVERNO_VERSION: v1.19.1
+      # install.yaml of that release, first read by run 40646897729 (GitHub's runner) and pinned here
+      KYVERNO_SHA256: d3322cb346d3d42dd0f41e230b0d1d7bc5619960e1c36fdac4d9151d724b88e6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: kn
+          version: v0.32.0
+          node_image: "kindest/node:v1.33.12@sha256:3f5c8443c620245e4d355cfe09e96a91ead32ceaa569d3f1ca9edf0cb2fe2ff4"
+          kubectl_version: v1.33.12
+      - run: pip install -e .
+      - name: Install Kyverno
+        if: matrix.engine == 'kyverno'
+        run: |
+          set -euo pipefail
+          url="https://github.com/kyverno/kyverno/releases/download/${KYVERNO_VERSION}/install.yaml"
+          curl -fsSL --retry 3 -o /tmp/kyverno-install.yaml "$url"
+          echo "${KYVERNO_SHA256}  /tmp/kyverno-install.yaml" | sha256sum -c - \
+            || { echo "::error title=Kyverno install.yaml::sha256 differs from the pinned ${KYVERNO_SHA256}"; exit 1; }
+          kubectl create -f /tmp/kyverno-install.yaml > /tmp/kyverno.out 2>&1 \
+            || { echo "::error title=Kyverno install::$(tail -c 1500 /tmp/kyverno.out | tr '\n' ' ')"; exit 1; }
+          kubectl -n kyverno rollout status deploy/kyverno-admission-controller --timeout=300s
+          kubectl get crd validatingpolicies.policies.kyverno.io
+      - name: Generated policies on the API server
+        run: python scripts/policy_kind_test.py --engine ${{ matrix.engine }}
+      - name: Attack-path scan ranks the planted path first, reading no Secrets (R3.2)
+        if: matrix.engine == 'vap'
+        run: python scripts/posture_kind_test.py
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          enc() { sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g'; }
+          echo "::warning title=pods::$(kubectl get pods -A 2>&1 | tail -40 | enc)" || true
+          echo "::warning title=kyverno logs::$(kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=60 2>&1 | enc)" || true

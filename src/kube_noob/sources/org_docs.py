@@ -22,7 +22,7 @@ from kube_noob.sources.git_ingest import clean_text
 SUFFIXES = (".md", ".markdown", ".adoc", ".asciidoc", ".txt", ".rst")
 MAX_FILES = 5000
 MAX_FILE_BYTES = 2_000_000
-_SOURCE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+_SOURCE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}\Z")
 
 
 def _slug(rel: str) -> str:

@@ -131,6 +131,11 @@ def tokenize(text: str) -> list[str]:
             out.append(single)
         if any(ch in tok for ch in "-./"):
             out.extend(p for p in re.split(r"[-./]", tok) if p and p not in _STOP)
+        if "/" in tok:
+            # A prefixed name ("service.beta.openshift.io/serving-cert-secret-name") is often written bare.
+            name = tok.rsplit("/", 1)[1]
+            if "-" in name and name not in _STOP:
+                out.append(name)
     return out
 
 
@@ -162,10 +167,15 @@ class Chunk:
 
 
 def _split_markdown(body: str) -> Iterator[tuple[str, str]]:
+    """Sections by heading. A ``#`` line inside a fenced code block is a shell or YAML comment, not a heading."""
     heading = ""
     buf: list[str] = []
+    fence = ""
     for line in body.splitlines():
-        m = re.match(r"^(#{1,3})\s+(.*)$", line)
+        marker = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if marker and (not fence or marker.group(1).startswith(fence)):
+            fence = "" if fence else marker.group(1)
+        m = None if fence or marker else re.match(r"^(#{1,3})\s+(.*)$", line)
         if m:
             if "".join(buf).strip():
                 yield heading, "\n".join(buf).strip()
@@ -301,12 +311,15 @@ class KnowledgeStore:
         self._tf: list[Counter[str]] = []
         self._len: list[int] = []
         self._df: Counter[str] = Counter()
-        for c in self.chunks:
+        self._postings: dict[str, list[int]] = {}  # term -> chunks that contain it, in chunk order
+        for i, c in enumerate(self.chunks):
             toks = tokenize(f"{c.title} {c.heading} {c.heading} {c.text}")
             tf = Counter(toks)
             self._tf.append(tf)
             self._len.append(len(toks))
             self._df.update(tf.keys())
+            for t in tf:
+                self._postings.setdefault(t, []).append(i)
         self._avg = (sum(self._len) / len(self._len)) if self._len else 0.0
 
     def search(
@@ -321,31 +334,41 @@ class KnowledgeStore:
         if not q or not self.chunks:
             return []
         n = len(self.chunks)
-        scores: list[tuple[float, int]] = []
-        for i, c in enumerate(self.chunks):
-            if origin and c.origin != origin:
+        # BM25 with the query's term counts: a word the query repeats counts that many times. Scoring walks each
+        # distinct term's postings, so a long or repetitive query costs its distinct words, not its length.
+        sums: dict[int, float] = {}
+        allowed: dict[int, bool] = {}
+        for t, qtf in Counter(q).items():
+            df = self._df.get(t)
+            if not df:
                 continue
-            if source_prefix and not c.source_id.startswith(source_prefix):
-                continue
-            if not include_restricted and not c.redistributable:
-                continue
-            tf = self._tf[i]
-            s = 0.0
-            for t in q:
-                f = tf.get(t)
-                if not f:
+            idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
+            for i in self._postings[t]:
+                ok = allowed.get(i)
+                if ok is None:
+                    c = self.chunks[i]
+                    ok = not (
+                        (origin and c.origin != origin)
+                        or (source_prefix and not c.source_id.startswith(source_prefix))
+                        or (not include_restricted and not c.redistributable)
+                    )
+                    allowed[i] = ok
+                if not ok:
                     continue
-                df = self._df[t]
-                idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
-                s += idf * (f * 2.5) / (f + 1.5 * (1 - 0.75 + 0.75 * self._len[i] / (self._avg or 1)))
-            if s > 0:
-                scores.append((s * c.extra.get("searchWeight", 1.0), i))
+                f = self._tf[i][t]
+                part = idf * (f * 2.5) / (f + 1.5 * (1 - 0.75 + 0.75 * self._len[i] / (self._avg or 1)))
+                sums[i] = sums.get(i, 0.0) + qtf * part
+        scores = [(s * self.chunks[i].extra.get("searchWeight", 1.0), i) for i, s in sums.items() if s > 0]
         scores.sort(reverse=True)
         return [Hit(self.chunks[i], s) for s, i in scores[:limit]]
 
     def doc_frequency(self, token: str) -> float:
         """Share of chunks containing ``token`` (0..1); rare tokens carry the meaning of a claim."""
         return self._df.get(token, 0) / len(self.chunks) if self.chunks else 0.0
+
+    def doc_count(self, token: str) -> int:
+        """Number of chunks containing ``token``: unlike the share, adding chunks never lowers it."""
+        return self._df.get(token, 0)
 
     def get(self, chunk_id: str) -> Chunk | None:
         return self.by_id.get(chunk_id)
@@ -362,6 +385,31 @@ class KnowledgeStore:
             "byOrigin": dict(by_origin),
             "bySource": dict(by_source.most_common(20)),
         }
+
+
+def requires_groups(value: Any) -> list[list[str]]:
+    """A knowledge doc's ``requires`` front matter: groups of words, each group any-of, all groups needed, before the
+    doc is offered as the answer to a pasted question. For a doc whose words are broader than its subject: a
+    Compose-to-Kubernetes page shares "docker" and "compose" with every Docker Compose question. Malformed values
+    raise, so a typo cannot silently drop the gate."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(
+        isinstance(g, list) and g and all(isinstance(w, str) and w.strip() for w in g) for g in value
+    ):
+        raise ValueError(f"requires must be a list of non-empty word lists, got {value!r}")
+    return [[w.strip().lower() for w in g] for g in value]
+
+
+def works_with(value: Any) -> list[str]:
+    """A knowledge doc's ``worksWith`` front matter: named products (as the named-product gate in ``insight`` spells
+    them) that the doc applies to without naming them in its text, such as the CI systems a roxctl pipeline step runs
+    in. Malformed values raise."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(w, str) and w.strip() for w in value):
+        raise ValueError(f"worksWith must be a list of product names, got {value!r}")
+    return [w.strip().lower() for w in value]
 
 
 def builtin_chunks() -> list[Chunk]:
@@ -391,6 +439,8 @@ def builtin_chunks() -> list[Chunk]:
                     "tags": meta.get("tags") or [],
                     "platforms": meta.get("platforms") or [],
                     "searchWeight": float(meta.get("searchWeight", 1.0)),
+                    "requires": requires_groups(meta.get("requires")),
+                    "worksWith": works_with(meta.get("worksWith")),
                 },
             )
         )
@@ -419,8 +469,19 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
     cdir = data_dir / "corpus"
     if not cdir.is_dir():
         return out
+    listed: set[str] | None = None  # a shard the manifest does not list (a refused import, a stray file) is not read
+    manifest = cdir / "MANIFEST.json"
+    if manifest.is_file():
+        try:
+            shards = json.loads(manifest.read_text(encoding="utf-8")).get("shards") or {}
+            listed = {str(e.get("file")) for e in shards.values() if isinstance(e, dict)}
+        except (ValueError, AttributeError):
+            listed = None
     for f in sorted(cdir.glob("*.jsonl")):
         if _ticket_shard(f):
+            continue
+        if listed is not None and f.name not in listed:
+            _log.warning("skipping %s: not listed in the corpus MANIFEST.json", f.name)
             continue
         with f.open(encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
@@ -428,7 +489,7 @@ def corpus_chunks(data_dir: Path) -> list[Chunk]:
                     continue
                 try:
                     rec = json.loads(line)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, RecursionError):
                     _log.warning("skipping malformed JSON in %s line %d", f.name, lineno)
                     continue
                 if not isinstance(rec, dict) or not isinstance(rec.get("id"), str) or not rec["id"]:

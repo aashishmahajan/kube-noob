@@ -1,0 +1,13 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] npm WARN config production Use `--omit=dev` instead.
+[unit-test : run-tests] + pytest -q
+[unit-test : run-tests] ============================= test session starts ==============================
+[unit-test : run-tests] collected 214 items
+[unit-test : run-tests] tests/test_api.py ....................F.....
+[unit-test : run-tests] =================================== FAILURES ===================================
+[unit-test : run-tests] ___________________________ test_refund_rounding ___________________________
+[unit-test : run-tests] E       AssertionError: assert Decimal('10.01') == Decimal('10.00')
+[unit-test : run-tests] FAILED tests/test_api.py::test_refund_rounding - AssertionError: assert Decimal('10.01') == Decimal('10.00')
+[unit-test : run-tests] ========================= 1 failed, 213 passed in 41.27s =========================
+task unit-test failed: "step-run-tests" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-05-unit-test for more details

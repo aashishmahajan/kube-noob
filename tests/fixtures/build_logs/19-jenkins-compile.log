@@ -1,0 +1,18 @@
+Started by an SCM change
+Running as SYSTEM
+Building on the built-in node in workspace /var/lib/jenkins/workspace/billing-build
+The recommended git tool is: NONE
+No credentials specified
+ > git rev-parse --resolve-git-dir /var/lib/jenkins/workspace/billing-build/.git # timeout=10
+Checking out Revision 1f2e3d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e (refs/remotes/origin/main)
+[billing-build] $ /bin/sh -xe /tmp/jenkins8123456789.sh
++ npm run build
+> shop@0.9.0 build
+> react-scripts build
+
+Creating an optimized production build...
+Failed to compile.
+
+Module not found: Error: Can't resolve './components/Chart' in '/opt/app-root/src/src/pages'
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE

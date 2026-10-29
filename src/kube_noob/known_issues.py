@@ -1,10 +1,13 @@
 """Is this a reported issue? Match an error against the OpenShift release notes and the local Red Hat Jira copy.
 
 The index holds every known issue (open in a release) and every fixed issue (fixed in a release or update) that the
-release notes link to an issue id, for the minor releases in the bundled snapshot. A match is returned only when the
-text shares several rare words with the issue, so a generic error (OOMKilled, ImagePullBackOff) does not pull in an
-unrelated bug. Each match carries the issue link, the release-notes file it came from, whether a fix exists, and
-what that means for the version the user runs.
+release notes link to an issue id, for the minor releases in the bundled snapshot. The query is the text plus the
+terms of the signals it carries or implies (``kube_noob.signals``: an alert name, an event reason, "leader changed"
+for etcd leader elections). A match is returned only when the text itself shares rare words with the issue, backed by
+more rare words, a strong score or the signal's terms, so a generic error (OOMKilled, ImagePullBackOff) does not pull
+in an unrelated bug. The frozen eval ``data/evals/known_issue_recall.yaml`` gates recall and precision. Each match
+carries the issue link, the release-notes file it came from, whether a fix exists, and what that means for the
+version the user runs.
 
 Data: ``kube_noob/data/known_issues/*.json`` (refreshed with ``scripts/vendor_known_issues.py``) plus, when present,
 a newer copy in ``<dataDir>/known_issues/`` written by ``kube-noob corpus known-issues --online``.
@@ -16,9 +19,11 @@ duplicate (see ``kube_noob.tickets``). A release-note issue that is also in the 
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -30,10 +35,138 @@ from kube_noob.knowledge.store import Chunk, KnowledgeStore, builtin_chunks, tok
 MIN_RARE_TERMS = 3  # rare words shared with the issue text before it counts as a match
 RARE_SHARE = 0.03  # a word in at most 3% of issues is rare
 MIN_SCORE = 20.0  # BM25 score floor, set from tests/test_known_issues.py
-GENERAL_SHARE = 0.02  # and in at most 2% of the bundled Kubernetes and OpenShift docs
+GENERAL_MAX_CHUNKS = 2  # and in at most 2 sections of the bundled docs (a count: new documents never make more
+# words rare, which a share of sections would; a count of documents was measured and made 22 test-half rows name
+# an unrelated bug)
 RELATIVE_FLOOR = 0.75  # further matches must score at least 75% of the best one
+STRONG_SCORE = 40.0  # a score this high with two rare shared words, or one and a clear lead, is a match
+DOMINANCE = 2.0  # "a clear lead": at least twice the next applicable issue's score
+QUOTE_WORDS = 7  # a run of this many words copied from an issue's text, one of them rare, is a quotation of it
+_WORD = re.compile(r"[a-z0-9]+(?:[._/-][a-z0-9]+)*")
+
+
+@functools.cache
+def _templates() -> tuple[re.Pattern[str], ...]:
+    from kube_noob.signals.vocab import MESSAGE_TEMPLATES
+
+    return tuple(re.compile(t) for t in MESSAGE_TEMPLATES)
+
+
+def strip_templates(text: str) -> str:
+    """``text`` with the fixed wording of known component messages replaced by their variable parts
+    (``kube_noob.signals.vocab.MESSAGE_TEMPLATES``): "Unable to retrieve some image pull secrets (regcred); ..." keeps
+    "regcred" only."""
+    for rx in _templates():
+        text = rx.sub(lambda m: " ".join(g for g in m.groups() if g), text)
+    return text
+
+
+def stems(text: str, known: Callable[[str], bool] | None = None) -> str:
+    """Light stems so "restarted", "draining" and "uncordoning" meet "restart", "drain" and "uncordon": the word
+    without -ed or -ing, or with a final e ("updated" -> "update"). With ``known``, only stems that are real words
+    of the corpus are kept, so "exceed" never becomes "exce"."""
+    out: set[str] = set()
+    for tok in tokenize(text[:200_000]):
+        if not tok.isalpha() or len(tok) < 6 or tok.endswith("eed"):
+            continue
+        for suffix in ("ing", "ed"):
+            if tok.endswith(suffix) and len(tok) - len(suffix) >= 4:
+                stem = tok[: -len(suffix)]
+                if len(stem) >= 4 and stem[-1] == stem[-2] and stem[-1] not in "aeiouls":
+                    stem = stem[:-1]  # "running" -> "run"
+                for candidate in (stem, stem + "e"):
+                    if known is None or known(candidate):
+                        out.add(candidate)
+    return " ".join(sorted(out))
+
+
+# Words and names only OpenShift (and its Red Hat family) uses. A text without one, and no platform given, is not
+# matched against OpenShift release notes: on 25,292 community questions (Stack Overflow, GitHub, forums) matching
+# them anyway put an OpenShift bug at the top of 6,177 answers about other platforms (scripts/eval_questions.py).
+_OPENSHIFT_CONTEXT = re.compile(
+    r"(?i)\b(?:openshift|okd|ocp|rhocp|ocpbugs|rosa|aro|hypershift|hosted control planes?|rhcos|red hat|redhat|rhel|"
+    r"oc(?:\s+(?:adm|get|describe|logs|rsh|debug|apply|create|delete|patch|edit|login|project|new-app|"
+    r"rollout|whoami|mirror|image|import-image|start-build)\b)|oc-mirror|must-gather|machineconfig(?:pool)?s?|"
+    r"machine-config(?:-operator|-daemon)?|clusteroperators?|clusterversions?|cluster-version-operator|"
+    r"securitycontextconstraints?|security context constraints?|scc|application is not available|egressips?|"
+    r"ovn-kubernetes|ovnkube|openshift-sdn|olm|operatorhub|catalogsources?|"
+    r"clusterserviceversions?|ingresscontrollers?|imagestreams?|buildconfigs?|deploymentconfigs?|routes?\.route|"
+    r"route\.openshift\.io|odf|ocs|noobaa|rhacs|stackrox|quay\.io/openshift|registry\.redhat\.io|"
+    r"cluster-etcd-operator|kube-apiserver-operator|ibm cloud satellite|microshift|openshift-[a-z0-9-]{1,60}|"
+    r"(?<![a-z0-9.-])[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,3}\.openshift\.io|consolequickstarts?|consoleplugins?|consolelinks?|helmchartrepositor(?:y|ies)|"
+    r"baremetalhosts?|bmh|metal3|machinesets?|machine-api|controlplanemachinesets?|nmstate|sriov|"
+    r"cluster-logging|clusterlogforwarder|lokistack|compliance-operator|file-integrity-operator)\b"
+)
+
+
+# Everyday English in bug reports and questions (base forms and common inflections). In the small release-note corpus
+# these look rare, and three of them ("deployed", "following", "plugin") were enough to match an unrelated issue.
+EVERYDAY_WORDS = frozenset(
+    """
+    too took long time times very much many few linux enterprise red hat rpm package packages os kubernetes
+    kubernete k8s yaml json follow following cause causes caused deploy deployed deploying deployment plugin plugins
+    mirror mirrors replace replaced change changed update updated install installed upgrade upgraded add added
+    remove removed delete deleted run runs ran work works worked try tried need needs want see show shows display
+    return returns report reports expect expected happen happens happened issue issues problem problems question
+    questions example examples case cases way ways step steps thing things something anything nothing everything
+    someone user users team project projects application applications app apps setup setting settings option options
+    feature features support supported allow allows enable enabled disable disabled include includes contain
+    contains provide provides require requires required apply applied configure configured configuration manage
+    managed handle handled send sent receive received access load loaded save saved store stored open opened close
+    closed test tests tested testing check checked find found create created build built release released new old
+    different same multiple several other another correct correctly incorrect incorrectly wrong right properly
+    successful successfully always never sometimes already instead without within between during because however
+    even here what which who why how where whether able unable possible impossible current currently latest previous
+    next first second third last main help thanks thank please hello hi regards anyone idea ideas tips solution
+    solutions fix fixed fixes fixing behavior behaviour result results output input information details detail list
+    lists page pages view views field fields name names label labels tag tags type types mode format line lines
+    number numbers size make local through come custom component components private clean cleaned confirm confirmed
+    verify verified understand trying mean means meant actual actually specific being beside besides document
+    documented retrieve whole entire simple simply really although though
+    """.split()  # noqa: SIM905 - a word list reads better as text
+)
+
+
+def openshift_context(text: str) -> bool:
+    """Whether the text says it is about OpenShift or the Red Hat products around it."""
+    return bool(_OPENSHIFT_CONTEXT.search(text[:200_000]))
+
+
+# Red Hat names that run on any Kubernetes or none: a Kubespray cluster on RHEL, RHACS on EKS, an image from
+# registry.redhat.io. They count for the bug matcher (openshift_context) but do not make the cluster OpenShift.
+_NOT_THE_CLUSTER = frozenset({"rhel", "red hat", "redhat", "rhacs", "stackrox", "registry.redhat.io"})
+
+
+_RHACS_TEXT = re.compile(r"(?i)\b(?:rhacs|stackrox|roxctl|roxie|ROX-\d+|advanced cluster security)\b")
+
+
+def openshift_cluster_context(text: str) -> bool:
+    """Whether the text says the cluster itself is OpenShift (or ROSA, ARO, OKD...): what decides OpenShift steps and
+    causes. "RHEL", "Red Hat" or RHACS alone do not."""
+    return any(m.group(0).lower() not in _NOT_THE_CLUSTER for m in _OPENSHIFT_CONTEXT.finditer(text[:200_000]))
+
+
+def _forms(token: str) -> tuple[str, ...]:
+    """The base forms an English inflection may come from: "deployed" -> "deploy", "following" -> "follow",
+    "causes" -> "cause", "mirrors" -> "mirror", "libraries" -> "library"."""
+    out = [token]
+    for suffix, add in (
+        ("ies", "y"),
+        ("es", ""),
+        ("s", ""),
+        ("ed", ""),
+        ("ed", "e"),
+        ("ing", ""),
+        ("ing", "e"),
+        ("ly", ""),
+    ):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            out.append(token[: -len(suffix)] + add)
+    return tuple(out)
+
+
 _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(`])")
-_lock = threading.Lock()
+_lock = threading.RLock()  # re-entrant: building an index builds the general store too
 _cache: dict[str, Index] = {}
 _general: dict[str, KnowledgeStore] = {}
 
@@ -108,13 +241,18 @@ class Index:
     def __init__(self, issues: list[Issue], meta: dict[str, Any]) -> None:
         self.issues = issues
         self.meta = meta
+        raw: set[str] = set()
+        for i in issues:
+            raw.update(tokenize(f"{i.summary} {i.text}"))
+        general = _general_store()
+        self.known = lambda t: t in raw or general.doc_frequency(t) > 0
         self.store = KnowledgeStore(
             Chunk(
                 chunk_id=f"{i.id}@{i.version}#{n}",
                 doc_id=i.id,
                 title=i.summary,
                 heading="",
-                text=i.text,
+                text=f"{i.text}\n{stems(i.text, self.known)}",
                 url=i.url,
                 license="Apache-2.0",
                 origin="known-issues",
@@ -124,6 +262,7 @@ class Index:
             for n, i in enumerate(issues)
         )
         self.by_chunk = {f"{i.id}@{i.version}#{n}": i for n, i in enumerate(issues)}
+        self._token_cache: dict[str, set[str]] = {}
 
     def knowledge(self) -> dict[str, Any]:
         minors = sorted({i.minor for i in self.issues}, key=vkey)
@@ -133,40 +272,134 @@ class Index:
             "issues": len(self.issues),
         }
 
-    def _rare_shared(self, query_tokens: set[str], issue: Issue) -> list[str]:
-        """Words the text and the issue share that are rare among issues and in general Kubernetes writing, so
-        `spec`, `pod` or `securitycontext` never make a match on their own."""
-        doc = set(tokenize(f"{issue.summary} {issue.text}"))
+    def _tokens(self, issue: Issue) -> set[str]:
+        key = f"{issue.id}@{issue.version}"
+        if key not in self._token_cache:
+            text = f"{issue.summary} {issue.text}"
+            self._token_cache[key] = set(tokenize(text)) | set(tokenize(stems(text, self.known)))
+        return self._token_cache[key]
+
+    def _rare(self, shared: set[str]) -> list[str]:
+        """Words that are rare among issues and in general Kubernetes writing and are not everyday status vocabulary,
+        so `spec`, `pod`, `deadline exceeded` or `securitycontext` never make a match on their own."""
+        from kube_noob.tickets import GENERIC_WORDS
+
         general = _general_store()
         return sorted(
             t
-            for t in query_tokens & doc
-            if len(t) > 2 and self.store.doc_frequency(t) <= RARE_SHARE and general.doc_frequency(t) <= GENERAL_SHARE
+            for t in shared
+            if len(t) > 2
+            and not any(f in GENERIC_WORDS or f in EVERYDAY_WORDS for f in _forms(t))
+            and self.store.doc_frequency(t) <= RARE_SHARE
+            and general.doc_count(t) <= GENERAL_MAX_CHUNKS
         )
 
+    def _rare_shared(self, query_tokens: set[str], issue: Issue) -> list[str]:
+        return self._rare(query_tokens & self._tokens(issue))
+
+    def _quotes(self, text: str) -> set[str]:
+        """Runs of ``QUOTE_WORDS`` words from ``text`` with a rare word in them: an error copied from the product
+        quotes the issue that describes it, even when it shares fewer rare words than ``MIN_RARE_TERMS``."""
+        words = _WORD.findall(text.lower())[:3000]
+        rare = {w for w in set(words) if self._rare(set(tokenize(w)))}
+        return {
+            " ".join(words[i : i + QUOTE_WORDS])
+            for i in range(len(words) - QUOTE_WORDS + 1)
+            if rare.intersection(words[i : i + QUOTE_WORDS])
+        }
+
+    def _quoted(self, quotes: set[str], issue: Issue) -> bool:
+        body = f" {' '.join(_WORD.findall(issue.text.lower()))} "
+        return any(f" {q} " in body for q in quotes)
+
     def match(
-        self, text: str, platform: str | None = None, version: str | None = None, limit: int = 3
+        self,
+        text: str,
+        platform: str | None = None,
+        version: str | None = None,
+        limit: int = 3,
+        require_context: bool = False,
     ) -> dict[str, Any]:
+        """Issues that describe ``text``. Candidates come from text search on the words and on the signals the text
+        carries or implies (``kube_noob.signals``: an alert name, or "leader changed" for etcd leader elections);
+        a candidate counts only with rare shared words from the text itself, backed by more rare words, a strong
+        score or support from the signal's terms."""
         out: dict[str, Any] = {"knowledge": self.knowledge(), "matches": []}
         if platform and platform not in OPENSHIFT_FAMILY:
             out["note"] = "The index holds OpenShift release-note issues; it does not apply to plain Kubernetes."
             return out
+        if require_context and not platform and not openshift_context(text):
+            out["note"] = (
+                "The text does not say it is about OpenShift, so the OpenShift release notes were not searched; give "
+                "the platform (openshift, rosa-hcp) to search them."
+            )
+            return out
+        if (
+            require_context
+            and not platform
+            and _RHACS_TEXT.search(text[:200_000])
+            and not openshift_cluster_context(text)
+        ):
+            # A RHACS ticket (roxctl, Scanner, Central, the UI) that never says the cluster is OpenShift: OpenShift
+            # release-note issues matched it only on shared words (community graders, 2026-10-28).
+            out["note"] = (
+                "The text is about RHACS and does not say the cluster is OpenShift, so the OpenShift release notes "
+                "were not searched; give the platform (openshift, rosa-hcp) to search them."
+            )
+            return out
+        from kube_noob.signals import extract
+        from kube_noob.signals.catalogue import infer, terms_for
+
+        text = text[:100_000]
         running = version if version and re.fullmatch(r"\d+\.\d+(\.\d+)?", version) else None
-        q = set(tokenize(text))
-        seen: set[str] = set()
-        top = 0.0
-        for hit in self.store.search(text, limit=40):
-            issue = self.by_chunk[hit.chunk.chunk_id]
-            if hit.score < MIN_SCORE or issue.id in seen or (top and hit.score < RELATIVE_FLOOR * top):
-                continue
+        signals = [x for x in extract(text) if x.kind in {"alert", "event_reason", "pod_reason"}] + infer(text)
+        sig_terms = terms_for(signals)
+        text = strip_templates(text)  # the fixed words of component messages are not evidence for any one issue
+        query = f"{text}\n{stems(text, self.known)}"
+        q_tokens = set(tokenize(query))
+        sig_tokens = set(tokenize(" ".join(sig_terms))) - q_tokens
+        scores: dict[str, tuple[float, float]] = {}  # chunk id -> (score on the text, score with signal terms)
+        for hit in self.store.search(query, limit=40):
+            scores[hit.chunk.chunk_id] = (hit.score, hit.score)
+        if sig_terms:
+            for hit in self.store.search(f"{query}\n{' '.join(sig_terms)}", limit=40):
+                own = scores.get(hit.chunk.chunk_id, (0.0, 0.0))[0]
+                scores[hit.chunk.chunk_id] = (own, max(hit.score, own))
+        quotes = self._quotes(text)
+        rows: list[tuple[float, Issue, list[str], list[str]]] = []
+        best: dict[str, float] = {}
+        for chunk_id, (own, expanded) in scores.items():
+            issue = self.by_chunk[chunk_id]
             if running and not self._applies(issue, running):
                 continue
-            rare = self._rare_shared(q, issue)
-            if len(rare) < MIN_RARE_TERMS:
+            doc = self._tokens(issue)
+            r_text, r_sig = _distinct(self._rare(q_tokens & doc)), _distinct(self._rare(sig_tokens & doc))
+            score = expanded if r_sig else own
+            if score <= best.get(issue.id, -1.0):
                 continue
-            seen.add(issue.id)
-            top = top or hit.score
-            out["matches"].append({**issue.as_dict(running, hit.score), "sharedTerms": rare[:8]})
+            best[issue.id] = score
+            rows.append((score, issue, r_text, r_sig))
+        rows = sorted((r for r in rows if best[r[1].id] == r[0]), key=lambda r: (-r[0], r[1].id))
+        top = 0.0
+        for n, (score, issue, r_text, r_sig) in enumerate(rows):
+            runner_up = rows[n + 1][0] if n + 1 < len(rows) else 0.0
+            if score < MIN_SCORE or (top and score < RELATIVE_FLOOR * top):
+                continue
+            quoted = bool(r_text) and self._quoted(quotes, issue)
+            accepted = (
+                quoted
+                or len(r_text) >= MIN_RARE_TERMS
+                or (len(r_text) >= 1 and len(r_text) + len(r_sig) >= MIN_RARE_TERMS)
+                or (len(r_text) >= 2 and score >= STRONG_SCORE)
+                or (len(r_text) >= 1 and score >= STRONG_SCORE and score >= DOMINANCE * runner_up)
+            )
+            if not accepted:
+                continue
+            top = top or score
+            match = {**issue.as_dict(running, score), "sharedTerms": (r_text + r_sig)[:8], "exactError": quoted}
+            if r_sig:
+                match["signals"] = sorted({f"{x.kind}:{x.name}" for x in signals})[:5]
+            out["matches"].append(match)
             if len(out["matches"]) >= limit:
                 break
         if not out["matches"]:
@@ -188,6 +421,22 @@ class Index:
         if _minor(issue.version) != _minor(running):
             return False
         return vkey(running) < vkey(issue.version)
+
+
+def _distinct(words: list[str]) -> list[str]:
+    """One word per base form and per compound: "item" and "items", "openshift-etcd" and "etcd", or a prefixed name
+    and the bare name after its slash, are one piece of evidence, not two."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for w in sorted(words, key=lambda t: (-len(t), t)):  # compounds first, so their parts are recognised as seen
+        forms = set(_forms(w))
+        parts = {f for p in re.split(r"[-._/]", w) if p for f in _forms(p)} if re.search(r"[-._/]", w) else set()
+        parts |= {f for p in w.split("/")[1:] if p for f in _forms(p)}
+        if forms & seen:
+            continue
+        seen |= forms | parts
+        out.append(w)
+    return sorted(out)
 
 
 def _general_store() -> KnowledgeStore:
@@ -255,11 +504,19 @@ def get_index(data_dir: Path | None = None) -> Index:
 
 
 def match(
-    text: str, platform: str | None = None, version: str | None = None, limit: int = 3, data_dir: Path | None = None
+    text: str,
+    platform: str | None = None,
+    version: str | None = None,
+    limit: int = 3,
+    data_dir: Path | None = None,
+    require_context: bool = False,
 ) -> dict[str, Any]:
+    """Reported issues for ``text``. ``require_context``: with no platform given, search the OpenShift release notes
+    only when the text says it is about OpenShift (diagnose, insight and the watch pass it: their text can be about
+    any platform; ``known-issues`` asks about OpenShift by definition)."""
     from kube_noob import tickets
 
-    out = get_index(data_dir).match(text, platform, version, limit)
+    out = get_index(data_dir).match(text, platform, version, limit, require_context)
     found = tickets.match(text, platform, version, limit, data_dir)
     if not found.get("available"):
         if found.get("note"):

@@ -1,0 +1,12 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] warning: unused import: `std::fmt`
+[build : build] STEP 1/6: FROM registry.access.redhat.com/ubi9/nodejs-20:1-60
+[build : build] STEP 6/6: CMD ["npm", "start"]
+[build : build] COMMIT quay.io/acme/api:1.8.0
+[build : build] --> 5f70bf18a086
+[build : push] + docker push docker.io/acme/api:1.8.0
+[build : push] The push refers to repository [docker.io/acme/api]
+[build : push] 5f70bf18a086: Preparing
+[build : push] denied: requested access to the resource is denied
+task build failed: "step-push" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-03-build for more details

@@ -1,0 +1,51 @@
+Started by user Dana
+Obtained Jenkinsfile from git https://github.com/acme/orders.git
+[Pipeline] Start of Pipeline
+[Pipeline] node
+Running on agent-linux-3 in /home/jenkins/agent/workspace/orders_main
+[Pipeline] {
+[Pipeline] stage
+[Pipeline] { (Declarative: Checkout SCM)
+[Pipeline] checkout
+The recommended git tool is: NONE
+using credential github-app
+Checking out Revision 1f2e3d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e (main)
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] withEnv
+[Pipeline] {
+[Pipeline] stage
+[Pipeline] { (Build)
+[Pipeline] sh
++ mvn -B -DskipTests package
+[INFO] BUILD SUCCESS
+Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError("HTTPSConnectionPool(host='pypi.org', port=443): Read timed out. (read timeout=15)")'
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] stage
+[Pipeline] { (Publish)
+[Pipeline] sh
++ docker push quay.io/acme/web-frontend:2.0.1
+The push refers to repository [quay.io/acme/web-frontend]
+5f70bf18a086: Preparing
+name unknown: repository name not known to registry
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] stage
+[Pipeline] { (Deploy)
+Stage "Deploy" skipped due to earlier failure(s)
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] stage
+[Pipeline] { (Declarative: Post Actions)
+[Pipeline] junit
+Recording test results
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] }
+[Pipeline] // withEnv
+[Pipeline] }
+[Pipeline] // node
+[Pipeline] End of Pipeline
+ERROR: script returned exit code 1
+Finished: FAILURE

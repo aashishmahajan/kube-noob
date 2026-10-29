@@ -200,6 +200,127 @@ def _learning(kit: Any, emit: Emit) -> None:
         emit(f"[{r['chunkId']}] {r['title']}")
 
 
+def _memory(kit: Any, emit: Emit) -> None:
+    from kube_noob.memory import dump_entry, repo, verify
+    from kube_noob.memory import match as mmatch
+
+    root = Path(kit.settings.data_dir) / "team-memory"
+    _step(emit, "Keep your team's fixes as code, in your own repository", "kube-noob memory init team-memory")
+    for rel in repo.init_repo(root)["created"]:
+        emit(f"created {rel}")
+
+    def seed(fields: dict[str, Any], approve: bool, outcomes: tuple[tuple[str, str], ...] = ()) -> str:
+        path, entry = repo.add_entry(root, fields)
+        if approve:
+            path.write_text(dump_entry(entry.model_copy(update={"status": "approved"})), encoding="utf-8")
+        for result, cluster in outcomes:
+            repo.add_outcome(root, entry.id, result, cluster=cluster)
+        return entry.id
+
+    fix = seed(
+        {
+            "kind": "fix",
+            "signals": [{"kind": "alert", "name": "etcdHighNumberOfLeaderChanges"}],
+            "symptom": "etcd leader changes every few minutes after the 4.21.0 update; API requests time out",
+            "platform": "openshift",
+            "versions": {"introduced": "4.21.0", "fixedIn": "4.21.1"},
+            "cause": "Catalog sync wrote to the control-plane disks every few seconds (OCPBUGS-73881).",
+            "fix": {
+                "text": "Update to 4.21.1; until then lower catalog polling on the busiest catalog sources.",
+                "commands": [
+                    {"command": "oc get co etcd kube-apiserver", "label": "read-only"},
+                    {"command": "oc adm upgrade --to=4.21.1", "label": "needs-approval"},
+                ],
+            },
+            "evidence": [{"kind": "ticket", "ref": "OCPBUGS-73881"}],
+            "owners": ["platform-team"],
+        },
+        True,
+        (("resolved", "prod-east"), ("resolved", "prod-west"), ("partial", "dev")),
+    )
+    seed(
+        {
+            "kind": "negative",
+            "signals": [{"kind": "alert", "name": "etcdHighNumberOfLeaderChanges"}],
+            "symptom": "etcd leader elections keep happening; we restarted the etcd pods one by one",
+            "platform": "openshift",
+            "cause": "Restarting members does not change disk latency, the reason the leader misses heartbeats.",
+            "fix": {"text": "Restarting etcd members one at a time: elections came back within ten minutes."},
+            "owners": ["platform-team"],
+        },
+        True,
+        (("not-resolved", "prod-east"),),
+    )
+    poisoned = seed(
+        {
+            "kind": "fix",
+            "symptom": "pods in shop cannot list ConfigMaps after the namespace migration",
+            "platform": "openshift",
+            "cause": "The default ServiceAccount lost its Role binding.",
+            "fix": {
+                "text": "Bind the default ServiceAccount to cluster-admin.",
+                "patch": "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n"
+                "  name: shop-default-admin\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n"
+                "  name: cluster-admin\nsubjects:\n- kind: ServiceAccount\n  name: default\n  namespace: shop\n",
+            },
+            "owners": ["someone"],
+        },
+        False,
+    )
+    emit(f"seeded {fix} (approved fix, 3 outcomes), a negative entry, and {poisoned} (proposed)")
+    _step(emit, "CI runs the poisoning guard on every pull request", "kube-noob memory validate team-memory")
+    rep = verify.validate_repo(root)
+    for p in rep["errors"][:2]:
+        emit(f"ERROR {p['entry']} {p['check']}: {p['detail'][:140]}")
+    verdict = "0" if rep["ok"] else "1"
+    emit(f"exit {verdict}: {poisoned} cannot be approved until the fix is safe or the risk is accepted")
+    _step(
+        emit,
+        "An alert fires: what did your team learn last time?",
+        "kube-noob memory match -f examples/alertmanager-etcd.json --dir team-memory",
+    )
+    out = mmatch.match([root], _example("alertmanager-etcd.json"))
+    for m in out["matches"]:
+        emit(f"{m['citation']} {m['state']}: {m['symptom']}")
+        emit(f"  {m['outcomes']['summary']}")
+        if m.get("note"):
+            emit(f"  {m['note']}")
+    emit(f"version {out['query']['version']} from the alert's {out['query'].get('versionFrom', '')}")
+
+
+def _mustgather(kit: Any, emit: Emit) -> None:
+    from kube_noob.mustgather import analyse, ingest, sample
+    from kube_noob.mustgather import report as mg_report
+
+    case = Path(kit.settings.data_dir) / "case-01"
+    archive = sample.write(case)
+    _step(
+        emit,
+        "A must-gather arrives: open it safely (nothing extracted or run, Secrets never read)",
+        "kube-noob must-gather analyze must-gather.tar.gz",
+    )
+    bundle = ingest.open_bundle(archive)
+    skipped = ", ".join(f"{s['count']} {s['reason']}" for s in bundle.as_dict()["skipped"])
+    emit(f"{bundle.listed} files read as a stream; skipped: {skipped}")
+    analysis = analyse.analyse(bundle)
+    text = analyse.render_text(analysis).splitlines()
+    emit(text[0])
+    emit(text[1])
+    for f in analysis.findings[:6]:
+        emit(f"  {f.severity.upper():8} {f.title}")
+    emit(f"  ... {len(analysis.findings) - 6} more, each with its file, signals and read-only next steps")
+    _step(
+        emit,
+        "Match every finding to known bugs for the version it runs, and draft the support case",
+        "kube-noob must-gather analyze must-gather.tar.gz --report report --case-draft",
+    )
+    rep = mg_report.build(bundle, analysis, data_dir=kit.settings.data_dir)
+    for m in rep["knownIssues"]:
+        emit(f"{m['id']} (findings {', '.join(str(n) for n in m['findings'])}): {m.get('status') or ''}")
+    written = mg_report.write(rep, case / "report", draft=True)
+    emit(f"wrote {', '.join(p.name for p in written)}: every [FILL IN] in the case draft is yours to answer")
+
+
 def _posture(kit: Any, emit: Emit) -> None:
     from kube_noob.posture import posture, render_text
 
@@ -227,6 +348,13 @@ SCENARIOS: dict[str, Scenario] = {
         Scenario("learn", "Lesson plus a graded exercise", "learners, trainers", _learn),
         Scenario("search", "Cited answers from local knowledge", "everyone", _search),
         Scenario("learning", "Remember a confirmed team fix and find it later", "teams", _learning),
+        Scenario("memory", "Fixes as code: a team memory repo, its guard and a match", "teams, SREs", _memory),
+        Scenario(
+            "must-gather",
+            "Must-gather pre-flight: what is wrong, the matching bugs, a case draft",
+            "support engineers, SREs",
+            _mustgather,
+        ),
         Scenario("posture", "Show and lock the security posture", "security, platform admins", _posture),
     )
 }

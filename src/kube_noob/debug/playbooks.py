@@ -1,13 +1,25 @@
 """Offline troubleshooting playbooks.
 
 Each playbook maps observable signals (event reasons, status strings, log lines, CLI errors) to root causes, ordered
-read-only checks, and fixes. ``{ns}``, ``{name}``, ``{pod}``, ``{pvc}`` placeholders are filled by the diagnoser when
-it can parse them from the input. ``oc`` and ``kubectl`` are interchangeable for every check unless marked [OCP].
+read-only checks, and fixes. ``{ns}``, ``{name}``, ``{pod}``, ``{pvc}``, ``{svc}`` and ``{selector}`` placeholders are
+filled by the diagnoser when it can parse them from the input. ``oc`` and ``kubectl`` are interchangeable for
+every check unless marked [OCP].
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Cause:
+    """One root cause of a playbook, tied to what points at it and what to do about it, so an answer can show the
+    cause the user's words point at, its fix, and the read-only steps that confirm it (in that order)."""
+
+    cause: int  # index into the playbook's root_causes
+    when: tuple[str, ...] = ()  # case-insensitive regexes: words in the input that point at this cause
+    checks: tuple[int, ...] = ()  # indexes into checks: the steps that confirm or rule it out, most telling first
+    fixes: tuple[int, ...] = ()  # indexes into fixes, best first; empty when the cause is a pointer, not a fault
 
 
 @dataclass(frozen=True)
@@ -23,25 +35,43 @@ class Playbook:
     knowledge: tuple[str, ...] = ()
     weight: float = 1.0
     tags: tuple[str, ...] = field(default=())
+    causes: tuple[Cause, ...] = ()  # cause-linked triage (every root cause once); empty: causes are not linked yet
+    # The cause shown when no cause's own patterns match: set only where independent graders found the playbook's
+    # most common cause better than a guess from shared words on the community train half (None: shared words decide).
+    default_cause: int | None = None
 
 
 PLAYBOOKS: tuple[Playbook, ...] = (
     Playbook(
         "DBG-CRASHLOOP",
         "Container keeps crashing (CrashLoopBackOff)",
-        (r"CrashLoopBackOff", r"Back-off restarting failed container", r"restartCount:\s*[1-9]\d*"),
+        (
+            r"CrashLoopBackOff",
+            r"Back-off restarting failed container",
+            r"restartCount:\s*[1-9]\d*",
+            r"\b(?:keeps?|kept) (?:restarting|crashing|dying)\b|\bgets? restarted over and over\b|"
+            r"\brestart(?:s|ed|ing)? (?:over and over|every (?:few )?(?:seconds|minutes)|constantly|repeatedly)\b",
+        ),
         (
             "The process exits right after start (bad config, missing env/secret, failed migration, wrong command).",
             "Liveness probe kills a slow-starting app (look for 'Liveness probe failed' before each restart).",
             "OOMKilled at startup (see lastState.terminated.reason).",
             "On OpenShift: the image expects root or a fixed UID and cannot write its directories under the "
             "random restricted-v2 UID.",
+            "CrashLoopBackOff is the waiting state between restarts, not a cause: the kubelet restarts the container "
+            "with an exponential back-off (10s, 20s, 40s...) capped at 300 seconds, and resets it once the container "
+            "has run for 10 minutes without a problem.",
+            "An init container fails (Init:CrashLoopBackOff): the app containers never start, and `logs --previous` "
+            "without -c shows nothing useful.",
         ),
         (
             "oc logs {pod} -n {ns} --previous            # output of the crashed attempt",
             "oc get pod {pod} -n {ns} -o jsonpath='{{.status.containerStatuses[*].lastState.terminated}}'",
             "oc describe pod {pod} -n {ns}               # Events: probe failures, OOMKilled, exit codes",
             "oc get events -n {ns} --field-selector involvedObject.name={pod} --sort-by=.lastTimestamp",
+            # kubernetes/website ed70e31 content/en/docs/tasks/debug/debug-application/debug-init-containers.md
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.status.initContainerStatuses[*].lastState.terminated}}'",
+            "oc logs {pod} -n {ns} -c <init-container> --previous   # the failing init container's own output",
         ),
         (
             "Fix the error shown by `logs --previous` (most common: missing env var, wrong DB URL, bad flag).",
@@ -50,12 +80,64 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Slow start -> add a startupProbe instead of loosening liveness.",
             "OpenShift arbitrary UID -> make writable dirs group-0 owned and group-writable "
             "(chgrp -R 0 /app && chmod -R g=u /app) in the image.",
+            "Init container -> fix what its own logs show (a dependency it waits for, a migration, a permissions "
+            "step); the app containers start once every init container exits 0.",
         ),
         related_rules=("KN-C003", "KN-C005"),
         knowledge=("k8s-debug-pods", "ocp-arbitrary-uid"),
         weight=0.9,  # a symptom, not a cause: a specific cause (OOM, probe, UID) with equal evidence ranks first
+        default_cause=0,
+        causes=(
+            Cause(
+                0,
+                (
+                    r"\bexit(?:ed)?\s+(?:with\s+)?(?:code|status)\b",
+                    r"\b(?:panic|traceback|exception|fatal|segfault)\b",
+                    r"\b(?:env(?:ironment)?\s+var(?:iable)?s?|config(?:uration)?|database|migration|missing\s+(?:file|"
+                    r"key|secret))\b",
+                ),
+                (0, 1, 3, 2),
+                (0, 1),
+            ),
+            Cause(
+                1,
+                (
+                    r"liveness",
+                    r"\bprobe\b",
+                    r"slow(?:ly)?\s+start|(?:takes?|needs?)\s+(?:\w+\s+){0,3}(?:seconds|minutes)\s+to\s+start",
+                    r"\b143\b",
+                ),
+                (2, 3, 0),
+                (2,),
+            ),
+            Cause(2, (r"OOMKilled", r"\b137\b", r"out of memory|memory limit"), (1, 2), (1,)),
+            Cause(
+                3,
+                (
+                    r"permission denied|EACCES",
+                    r"read-only file system|cannot (?:create|write|open)",
+                    r"\b(?:uid|gid|runAsUser|root user|as root)\b",
+                ),
+                (0, 1),
+                (3,),
+            ),
+            Cause(
+                4,
+                (
+                    r"\bwhat (?:does|is)\b",
+                    r"\bmean(?:s|ing)?\b",
+                    r"back-?off (?:time|delay|interval|period)|how long",
+                    r"restart (?:delay|interval)",
+                ),
+                (2, 1),
+                (),
+            ),
+            Cause(5, (r"Init:CrashLoopBackOff|Init:Error", r"\binit[- ]?containers?\b"), (4, 5, 2), (4,)),
+        ),
     ),
     Playbook(
+        # Local images: kubernetes/website concepts/containers/images.md (no tag or :latest -> Always) and
+        # kubernetes/minikube site/content/en/docs/handbook/pushing.md (image load, docker-env, IfNotPresent/Never).
         "DBG-IMAGEPULL",
         "Image cannot be pulled (ImagePullBackOff / ErrImagePull)",
         (
@@ -76,22 +158,180 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Registry TLS not trusted by the nodes (x509) or the registry is unreachable from the node network "
             "(egress/proxy restrictions; on ROSA private clusters check NAT/VPC endpoints).",
             "Architecture mismatch is a different error ('exec format error' after pull).",
+            "An image built only on your workstation (minikube, a local Docker) is in no registry, and a ':latest' "
+            "tag or no tag makes imagePullPolicy default to Always, so the kubelet tries to pull it.",
         ),
         (
             "oc describe pod {pod} -n {ns}   # exact pull error in Events",
             "oc get pod {pod} -n {ns} -o jsonpath='{{.spec.containers[*].image}}'",
             "oc get sa {sa} -n {ns} -o jsonpath='{{.imagePullSecrets}}'",
             "skopeo inspect docker://<image>   # from a workstation with the same credentials",
+            "oc get deploy <deployment> -n {ns} -o jsonpath='{{.spec.template.spec.containers[*].image}} "
+            "{{.spec.template.spec.imagePullSecrets}} {{.spec.template.spec.serviceAccountName}}'   # image, pull "
+            "secrets and ServiceAccount the pods get",
         ),
         (
             "Correct the image reference; prefer digests.",
-            "oc create secret docker-registry <name> --docker-server=<registry> --docker-username=... "
+            "[OCP] oc create secret docker-registry <name> --docker-server=<registry> --docker-username=... "
             "--docker-password=... -n {ns} && oc secrets link {sa} <name> --for=pull -n {ns}",
             "Mirror public images to a private registry (Quay, ECR) to avoid rate limits.",
             "[OCP] add the registry CA via image.config.openshift.io/cluster additionalTrustedCA.",
+            "Local image on minikube: minikube image load <image> (or build with eval $(minikube docker-env)) and set "
+            "imagePullPolicy: IfNotPresent or Never.",
+            "[K8S] kubectl create secret docker-registry <name> --docker-server=<registry> --docker-username=... "
+            "--docker-password=... -n {ns} && kubectl patch serviceaccount {sa} -n {ns} -p "
+            '\'{{"imagePullSecrets": [{{"name": "<name>"}}]}}\'',
         ),
-        related_rules=("KN-S012",),
+        related_rules=("KN-S012", "KN-C013"),
         knowledge=("k8s-images",),
+        weight=0.9,  # a symptom with several causes: a playbook that names the cause ranks first on equal evidence
+        default_cause=0,
+        causes=(
+            Cause(
+                0,
+                (
+                    r"manifest unknown|not found: manifest|manifest for \S{1,200} not found",
+                    r"repository does not exist|repository \S{1,200} not found",
+                    r"\b(?:tag|typo|misspel\w*|wrong image)\b",
+                    r"clean-?up|retention|garbage.collect\w*|purged|deleted|no longer (?:exists|there)",
+                    r"(?:already|still) running|only (?:the )?(?:new|freshly)|freshly scheduled"
+                    r"|new (?:replicas|pods|nodes) (?:can't|cannot|fail)",
+                ),
+                (0, 4, 1, 3),
+                (0,),
+            ),
+            Cause(
+                1,
+                (
+                    r"pull access denied(?! for [a-z0-9_.-]+(?::[\w.-]+)?(?:,|\s|$))",
+                    r"unauthorized|authentication required|403 forbidden|denied: requested access",
+                    r"\bprivate\b|docker login|credential|pull[- ]?secret|imagepullsecret",
+                ),
+                (0, 4, 2, 3),
+                (5, 1),
+            ),
+            Cause(2, (r"toomanyrequests|too many requests", r"rate limit", r"docker ?hub|docker\.io"), (0, 4), (2,)),
+            Cause(
+                3,
+                (
+                    r"x509|certificate|\btls\b",
+                    r"i/o timeout|connection refused|no such host|dial tcp|context deadline",
+                    r"\bproxy\b|egress|private cluster|nat gateway|vpc endpoint",
+                ),
+                (0, 3),
+                (3,),
+            ),
+            Cause(4, (r"exec format error", r"architecture|\barm64\b|\bamd64\b|multi-arch|aarch64"), (0,), ()),
+            Cause(
+                5,
+                (
+                    r"minikube|\bkind (?:cluster|load)\b|kind-control-plane|\bk3d\b|microk8s|docker desktop",
+                    r"built (?:it )?locally|local(?:ly built)? image|exists locally|docker build|docker images"
+                    r"|my (?:laptop|machine|workstation)",
+                    r"never pushed|(?:didn't|did not|haven't|have not|never) push\w*|without pushing",
+                    r"imagePullPolicy|:latest\b",
+                    r"pull access denied for [a-z0-9_.-]+(?::[\w.-]+)?(?:,|\s|$)",
+                ),
+                (1, 4, 0),
+                (4,),
+            ),
+        ),
+    ),
+    Playbook(
+        # kubelet emits FailedToRetrieveImagePullSecret when a name in imagePullSecrets is not found in the pod's own
+        # namespace and the pull then fails (pkg/kubelet/kubelet.go, getPullSecretsForPod in kubelet_pods.go);
+        # imagePullSecrets are LocalObjectReferences (staging/src/k8s.io/api/core/v1/types.go). OpenShift options:
+        # openshift-docs modules/images-allow-pods-to-reference-images-across-projects.adoc and
+        # modules/images-update-global-pull-secret.adoc (enterprise-4.21).
+        "DBG-PULLSECRET",
+        "Pull secret not found in the pod's namespace (FailedToRetrieveImagePullSecret)",
+        (
+            r"FailedToRetrieveImagePullSecret",
+            r"Unable to retrieve some image pull secrets",
+            r"pull[- ]?secrets?\b[^.\n]{0,40}\b(?:in|from)\s+(?:a\s+|an\s+)?(?:different|another|other)\s+"
+            r"(?:namespace|project)",
+            r"(?:different|another|other)\s+(?:namespace|project)[^.\n]{0,60}\bpull[- ]?secret",
+            r"(?:copy|share|use|reuse)\s+(?:a\s+|the\s+)?pull[- ]?secrets?\s+(?:across|between)\s+"
+            r"(?:namespaces|projects)",
+            r"secrets?\s+(?:can't|cannot|could not|couldn't)\s+be\s+retrieved"
+            r"|(?:can't|cannot|could not|couldn't|unable to)"
+            r"\s+retrieve\s+(?:the\s+|some\s+)?(?:image\s+)?pull[- ]?secrets?",
+            r"(?:another|other|different) project'?s? (?:internal )?(?:registry|image ?streams?|images?)",
+        ),
+        (
+            "imagePullSecrets name Secrets in the pod's own namespace only (they are LocalObjectReferences): kubelet "
+            "looks up {secret} in {ns}, and a Secret of that name in any other namespace is never used.",
+            "The Secret exists in the namespace under another name, or the pod's ServiceAccount links a name that is "
+            "missing (the ServiceAccount's imagePullSecrets are also looked up in its own namespace).",
+            "[OCP] The image is in the internal registry of another project: no pull secret is needed, the pod's "
+            "ServiceAccount needs the system:image-puller role in that project.",
+        ),
+        (
+            "oc describe pod {pod} -n {ns}   # FailedToRetrieveImagePullSecret names the secret kubelet could not find",
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.spec.imagePullSecrets}} {{.spec.serviceAccountName}}'",
+            "oc get sa {sa} -n {ns} -o jsonpath='{{.imagePullSecrets}}'",
+            "oc get secrets -n {ns} --field-selector type=kubernetes.io/dockerconfigjson -o name   # names only",
+            "oc get secrets -A --field-selector metadata.name={secret} "
+            "-o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name   # where it really is",
+        ),
+        (
+            "[OCP] Create the pull secret in {ns} and link it to the ServiceAccount: oc create secret "
+            "docker-registry {secret} --docker-server=<registry> --docker-username=<user> --docker-password=<token> "
+            "-n {ns} && oc secrets link {sa} {secret} --for=pull -n {ns}",
+            "[K8S] Create the pull secret in {ns} and add it to the ServiceAccount: kubectl create secret "
+            "docker-registry {secret} --docker-server=<registry> --docker-username=<user> --docker-password=<token> "
+            "-n {ns} && kubectl patch serviceaccount {sa} -n {ns} -p "
+            '\'{{"imagePullSecrets": [{{"name": "{secret}"}}]}}\'',
+            "Keep one source of truth instead of hand-made copies: sync the Secret into each namespace that needs it "
+            "with the External Secrets Operator or your secret manager.",
+            "[OCP] A registry the whole cluster uses: add it to the global pull secret (cluster-admin; rolls out to "
+            "every node): oc set data secret/pull-secret -n openshift-config --from-file=.dockerconfigjson=<file>. "
+            "On hosted control planes (ROSA with HCP 4.20.6 or later) use secret/additional-pull-secret in "
+            "kube-system.",
+            "[OCP] An image in another project's internal registry: oc policy add-role-to-user system:image-puller "
+            "system:serviceaccount:{ns}:{sa} --namespace=<image-project>",
+        ),
+        related_rules=("KN-C013",),
+        knowledge=("k8s-images",),
+        weight=2.0,  # one named cause: ranks above the image-pull symptom that matches the same events
+        causes=(
+            Cause(
+                0,
+                (
+                    r"pull[- ]?secrets?\b[^.\n]{0,40}\b(?:in|from)\s+(?:a\s+|an\s+)?(?:different|another|other)\s+(?:n"
+                    r"amespace|project)",
+                    r"(?:different|another|other)\s+(?:namespace|project)[^.\n]{0,60}\bpull[- ]?secret",
+                    r"(?:copy|share|use|reuse)\s+(?:a\s+|the\s+)?pull[- ]?secrets?\s+(?:across|between)\s+(?:namespace"
+                    r"s|projects)",
+                    r"(?:different|another|other)\s+namespace",
+                    r"FailedToRetrieveImagePullSecret|Unable to retrieve some image pull secrets",
+                ),
+                (0, 1, 4, 2),
+                (1, 0, 2),
+            ),
+            Cause(
+                1,
+                (
+                    r"service ?account|\bsa\b",
+                    r"\blink(?:ed|s)?\b",
+                    r"(?:wrong|different|another) name|renamed|typo|mismatch",
+                    r"get (?:sa|serviceaccount)\b|\bget secrets\b",
+                ),
+                (1, 2, 3, 0),
+                (1, 0),
+            ),
+            Cause(
+                2,
+                (
+                    r"internal registry|image-registry\.openshift-image-registry|image ?stream",
+                    r"image-puller",
+                    r"another project",
+                    r"unauthorized|authentication required",
+                ),
+                (1, 0),
+                (4,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-OOM",
@@ -121,6 +361,36 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C004", "KN-C005"),
         knowledge=("k8s-resources",),
+        default_cause=0,
+        causes=(
+            Cause(0, (r"\b(?:jvm|java|heap|xmx|node\.?js|max-old-space-size|python)\b", r"\blimit\b"), (0, 1), (0, 1)),
+            Cause(
+                1,
+                (
+                    r"\bleak",
+                    r"\bgrow(?:s|ing)?\b|increas\w+ (?:over time|steadily)|after (?:a few )?(?:hours|days)",
+                    r"climb\w*|steadily|sawtooth|every (?:few|\d+) hours|never goes down|keeps (?:growing|increasing)",
+                    r"\bcach(?:e|es|ing)\b|in[- ]memory (?:map|dict|store|list)|dict of"
+                    r"|keeps? (?:a|an) (?:dict|map|list)",
+                    r"per (?:hour|day)\b|(?:raised|increased|doubled|bumped) the (?:memory )?limit"
+                    r"|took (?:twice|longer)|just (?:takes|took) longer",
+                ),
+                (1, 0),
+                (0,),
+            ),
+            Cause(
+                2,
+                (
+                    r"OOMKilling",
+                    r"\bnode\b.{0,40}(?:oom|out of memory)|system oom|no (?:memory )?limits|without (?:memory )?limits"
+                    r"|BestEffort",
+                    r"SystemOOM|oom_score_adj|kernel: Out of memory|oom[- ]?killer|\bdmesg\b"
+                    r"|kernel (?:logs?|messages?)|NotReady",
+                ),
+                (2, 0),
+                (2,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-CONFIGERR",
@@ -130,6 +400,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"secret \"?[\w.-]+\"? not found",
             r"configmap \"?[\w.-]+\"? not found",
             r"couldn't find key [\w.-]+ in (Secret|ConfigMap)",
+            r"failed to prepare subPath",
             r"CreateContainerError",
         ),
         (
@@ -147,6 +418,80 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "reference optional: true if the app tolerates absence.",
         ),
         knowledge=("k8s-debug-pods",),
+        causes=(
+            Cause(
+                0,
+                (
+                    r"secret \"?[\w.-]+\"? not found",
+                    r"configmap \"?[\w.-]+\"? not found",
+                    r"couldn't find key [\w.-]+ in (?:Secret|ConfigMap)",
+                    r"\bnot found\b",
+                ),
+                (0, 1, 2),
+                (0,),
+            ),
+            Cause(1, (r"runAsNonRoot|non-?root|run as root|image will run as root",), (0,), ()),
+            Cause(2, (r"subPath|sub path|\bmount\b",), (0, 2), (0,)),
+        ),
+    ),
+    Playbook(
+        "DBG-INVALID-UTF8",
+        "A string sent over gRPC is not valid UTF-8 (string field contains invalid UTF-8)",
+        (
+            r"string field (?:'[\w.]{1,120}' )?contains invalid UTF-8",
+            r"contains invalid UTF-8 data when serializing a protocol buffer",
+            r"error (?:un)?marshall?ing request:? string field contains invalid UTF-8",
+            r"\bUTF-?8\b[^.\n]{0,60}\b(?:unmarshal\w*|protobuf)\b|\b(?:unmarshal\w*|protobuf)\b[^.\n]{0,60}\bUTF-?8\b",
+        ),
+        (
+            "An environment variable from a Secret or ConfigMap (env valueFrom or envFrom) holds bytes that are not "
+            "valid UTF-8, so the container runtime rejects the gRPC request (error unmarshalling request: string "
+            "field contains invalid UTF-8) and the pod stays in CreateContainerError: "
+            "typically a value base64-encoded twice under the Secret's data (Kubernetes decodes it once, leaving "
+            "random bytes) or binary data such as a key or keystore.",
+            "Reported after node upgrades to containerd 2.2: pods using the same Secret failed on the new nodes and "
+            "still started on nodes running containerd 2.1.",
+            "RHACS Collector in CrashLoopBackOff with String field 'storage.ProcessSignal.args' contains invalid "
+            "UTF-8 data: a process on the host has arguments that are not UTF-8 (RHACS 4.5, tracked as ROX-26025; "
+            "no workaround published).",
+        ),
+        (
+            "oc describe pod {pod} -n {ns}",
+            "oc get pod {pod} -n {ns} -o jsonpath='{{.spec.containers[*].envFrom}}{{.spec.containers[*].env}}'",
+            "oc get secret <secret> -n {ns} "
+            "-o go-template='{{{{range $k, $v := .data}}}}{{{{$k}}}}{{{{\"\\n\"}}}}{{{{end}}}}'",
+            "oc get nodes -o wide",
+            "oc get pods -n stackrox",
+            "oc logs <collector-pod> -c collector -n stackrox --previous",
+        ),
+        (
+            "Store each value so that it decodes to valid UTF-8 text: plain text under stringData, or base64-encoded "
+            "exactly once under data; check a suspect key yourself by decoding it (base64 -d) on your workstation.",
+            "For binary data (keys, keystores), mount the key as a file from a Secret volume instead of an "
+            "environment variable, or base64-encode it once more and decode it in the application.",
+            "RHACS Collector: follow ROX-26025 and the Red Hat article; send oc logs <collector-pod> -c collector "
+            "-n stackrox to Red Hat support.",
+        ),
+        knowledge=("k8s-invalid-utf8",),
+        weight=1.4,
+        causes=(
+            Cause(
+                0,
+                (r"CreateContainerError", r"\b(?:secrets?|configmaps?|envFrom|env vars?|environment)\b", r"base64"),
+                (0, 1, 2),
+                (0, 1),
+            ),
+            Cause(1, (r"containerd", r"upgrad\w+|new nodes?|node group|\bami\b|node pool"), (3, 1, 2), (0, 1)),
+            Cause(
+                2,
+                (
+                    r"contains invalid UTF-8 data when serializing a protocol buffer",
+                    r"collector|ProcessSignal|stackrox|\brhacs\b",
+                ),
+                (4, 5),
+                (2,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-RUNASROOT",
@@ -174,8 +519,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         "DBG-SCC",
         "Pod rejected by SecurityContextConstraints",
         (
-            r"unable to validate against any security context constraint",
-            r"forbidden: unable to validate against any security context",
+            r"unable to validate against any security\W{1,4}context constraint",  # also when a forum mangled the line
+            r"forbidden: unable to validate against any security\W{1,4}context",
             r"provider restricted(-v2)?: .*not allowed",
             r"Invalid value: \d+: must be in the ranges",
             r"Forbidden: not usable by user or serviceaccount",
@@ -184,6 +529,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "The pod asks for something restricted-v2 forbids: fixed runAsUser/fsGroup outside the namespace range, "
             "privileged, hostPath, hostNetwork, added capabilities, allowPrivilegeEscalation: true.",
             "The ServiceAccount was never granted the more permissive SCC the workload genuinely needs.",
+            "Pods of a Deployment, DaemonSet or other workload are admitted with the SCCs their ServiceAccount may "
+            "use; an SCC granted to the user who created the workload does not count.",
+            "privileged: true in the pod spec does not select the privileged SCC by itself: admission takes the "
+            "highest-priority SCC with allowPrivilegedContainer: true that the requester or ServiceAccount may use.",
+            "The pod template sets openshift.io/required-scc to an SCC that does not exist, or that neither the "
+            "requester nor the ServiceAccount may use in the namespace.",
         ),
         (
             "oc get events -n {ns} --field-selector reason=FailedCreate",
@@ -196,10 +547,19 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Drop privileged/host settings; use a Service instead of hostPort; PVCs instead of hostPath.",
             "Only if truly required: oc adm policy add-scc-to-user nonroot-v2 -z {sa} -n {ns} (least permissive SCC "
             "that fits; never 'privileged' for app workloads).",
+            "Never edit the default SCCs (restricted-v2, privileged, anyuid, ...): it can break platform pods and "
+            "upgrades, and some upgrades reset them. Create your own SCC if none fits.",
+            "A cluster administration component that truly needs privileged containers: grant the SCC to its "
+            "ServiceAccount, not to a user (oc adm policy add-scc-to-user privileged -z {sa} -n {ns}); privileged is "
+            "the most relaxed SCC (host directories, host IPC and PID, any UID, any capability).",
+            "To pin the SCC, set openshift.io/required-scc in spec.template.metadata.annotations (never on a running "
+            "pod); the SCC must exist and the ServiceAccount must be allowed to use it.",
+            "A pod that an SCC admits can still be rejected by Pod Security Admission: OpenShift runs both checks "
+            "independently (see DBG-PSA).",
         ),
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
         related_rules=("KN-S001", "KN-S004", "KN-S009", "KN-S010"),
-        knowledge=("ocp-scc",),
+        knowledge=("ocp-scc", "ocp-pod-security-admission"),
         weight=1.3,
     ),
     Playbook(
@@ -209,6 +569,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Namespace enforces the baseline/restricted Pod Security Standard and the pod spec violates it "
             "(missing seccompProfile, capabilities not dropped, allowPrivilegeEscalation not false, runAsNonRoot).",
+            "The Deployment, Job or other workload was created with a 'would violate PodSecurity' warning (warn and "
+            "audit check pod templates), but enforce applies only to Pods, so every pod its controller creates is "
+            "rejected.",
+            "[OCP] The pod also has to pass its SCC; SCC admission and Pod Security Admission are independent.",
         ),
         (
             "oc get ns {ns} --show-labels   # pod-security.kubernetes.io/enforce",
@@ -217,6 +581,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Add the restricted securityContext: runAsNonRoot: true, allowPrivilegeEscalation: false, "
             "capabilities.drop: [ALL], seccompProfile.type: RuntimeDefault (`kube-noob fix` does this).",
+            "Before raising a namespace's enforce level, preview it without changing anything: kubectl label "
+            "--dry-run=server --overwrite ns --all pod-security.kubernetes.io/enforce=baseline (existing pods that "
+            "would violate come back as warnings).",
         ),
         related_rules=("KN-S002", "KN-S003", "KN-S006", "KN-S008"),
         knowledge=("k8s-pss",),
@@ -229,6 +596,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"0/\d+ nodes are available",
             r"FailedScheduling",
             r"Too many pods",
+            r"\bPending\b[^.\n]{0,40}\b(?:lack of|not enough|insufficient|out of) (?:cpu|memory|resources|capacity)\b",
         ),
         (
             "Requests exceed the free allocatable capacity on every node.",
@@ -247,6 +615,37 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C004",),
         knowledge=("k8s-resources",),
+        causes=(
+            Cause(
+                0,
+                (r"Insufficient (?:cpu|memory|nvidia\.com/gpu|ephemeral-storage)|0/\d+ nodes are available",),
+                (0, 1),
+                (0,),
+            ),
+            Cause(
+                1,
+                (
+                    r"requests? (?:are |is )?(?:too|very|far) (?:big|large|high)|over-?(?:provision|request)\w*|copied"
+                    r"|default requests",
+                    r"\btop (?:pods?|nodes?)\b|utili[sz]ation|barely|real (?:load|usage)|actual usage",
+                    r"(?:shared|common|default|generated|fixed)\b[^.\n]{0,40}\b(?:requests?|numbers)\b|\btemplate\b"
+                    r"|requests:\s*\n\s*cpu:\s*\x22?[1-9]",
+                    r"\b\d{1,3}m\s+\d{1,4}Mi\b",
+                ),
+                (1, 0),
+                (0,),
+            ),
+            Cause(
+                2,
+                (
+                    r"autoscal\w*",
+                    r"machine ?pool|node ?pool|scale.?up|max(?:imum)? (?:size|nodes|replicas)",
+                    r"NotTriggerScaleUp|max node group size",
+                ),
+                (2, 3, 0),
+                (1, 0),
+            ),
+        ),
     ),
     Playbook(
         "DBG-PENDING-PLACEMENT",
@@ -290,6 +689,11 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"ExternalProvisioning",
             r"access mode .* not supported",
             r"failed to provision volume",
+            r"(?i)\b(?:pvcs?|persistentvolumeclaims?|volume claims?)\b[^\n]{0,40}"
+            r"\b(?:stuck|pending|not bound|unbound)\b",
+            r"(?i)\b(?:stuck|pending)\b[^\n]{0,20}\b(?:pvcs?|persistentvolumeclaims?)\b",
+            r"\b(?:pvcs?|persistentvolumeclaims?)\b[^.\n]{0,80}\b(?:stays?|stuck|remains?|hangs?) (?:in )?Pending\b|"
+            r"\bclaims? (?:is|are|stays?|remains?) (?:still )?Pending\b",
         ),
         (
             "Access mode unsupported by the class: ReadWriteMany on EBS (gp3-csi/gp2-csi) or Ceph RBD filesystem.",
@@ -304,13 +708,52 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "oc get pods -n openshift-cluster-csi-drivers   # [OCP]",
         ),
         (
-            "RWX on AWS/ROSA: install the AWS EFS CSI Driver Operator, create an EFS StorageClass "
-            "(provisioningMode: efs-ap, fileSystemId) and use it; on ODF use ocs-storagecluster-cephfs.",
+            "RWX needs a file-storage class whose CSI driver supports ReadWriteMany, not a block-storage one: on "
+            "AWS/ROSA install the AWS EFS CSI Driver Operator, create an EFS StorageClass (provisioningMode: efs-ap, "
+            "fileSystemId) and use it; on ODF use ocs-storagecluster-cephfs; elsewhere an NFS or CephFS class.",
             "Recreate the PVC with a valid storageClassName (the field is immutable).",
         ),
         related_rules=("KN-ST001", "KN-ST004", "KN-ST005"),
         knowledge=("storage-access-modes", "rosa-efs"),
         weight=1.2,
+        causes=(
+            Cause(
+                0,
+                (
+                    r"ReadWriteMany|\bRWX\b",
+                    r"access mode \S{0,20} ?(?:is )?not supported|unsupported access mode|capabilit\w+ not supported",
+                ),
+                (0, 1),
+                (0,),
+            ),
+            Cause(
+                1,
+                (
+                    r"storageclass\.storage\.k8s\.io \"?[\w.-]+\"? not found",
+                    r"no default storage ?class|storageClassName"
+                    r"|storage ?class \S{0,40} ?(?:missing|not found|does not exist)",
+                    r"no storage ?class (?:is )?set|storage ?class is not set",
+                ),
+                (1, 0),
+                (1,),
+            ),
+            Cause(
+                2,
+                (
+                    r"waiting for first consumer|WaitForFirstConsumer",
+                    r"before deploying|no pod (?:uses|is using|yet)|not (?:yet )?used by (?:a|any) pod"
+                    r"|just to (?:check|test)",
+                ),
+                (0,),
+                (),
+            ),
+            Cause(
+                3,
+                (r"(?<![\w-])csi\b|\bdriver\b|\befs\b|provisioner|AccessDenied|ExternalProvisioning",),
+                (2, 3, 0),
+                (0,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-MULTIATTACH",
@@ -333,8 +776,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Use a StatefulSet with volumeClaimTemplates (one RWO volume per replica) or strategy: Recreate with "
             "replicas: 1, or a genuine RWX class if the app supports concurrent writers.",
-            "After a node loss, wait for detach (~6 min) or delete the stale VolumeAttachment only once the node is "
-            "confirmed down.",
+            "After a node crashed or shut down with an RWO volume, and once the node is confirmed down, force delete "
+            "the old pod on it: `oc delete pod <old_pod> --force=true --grace-period=0`; the stuck volume is released "
+            "after six minutes. Use ReadWriteMany where the storage supports it.",
         ),
         related_rules=("KN-ST002",),
         knowledge=("storage-access-modes",),
@@ -347,16 +791,24 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"FailedMount",
             r"MountVolume\.SetUp failed",
             r"Unable to attach or mount volumes",
-            r"timed out waiting for the condition",
+            # kubelet: "Unable to attach or mount volumes: unmounted volumes=[...]: timed out waiting for the
+            # condition"; alone the phrase is Helm's, kubeadm's and every wait loop's (community graders, 2026-10-28).
+            r"(?:mount|attach|volume)[^\n]{0,120}timed out waiting for the condition",
             r"MountVolume\.\w+ failed .*permission denied",
             r"Read-only file system",
+            r"\b(?:permission denied|EACCES)\b[^\n]{0,80}\b(?:mounted|volume|pvc|persistent volume)\b|"
+            r"\b(?:mounted|mount point|persistent volume|pvc)\b[^\n]{0,80}\b"
+            r"(?:permission denied|EACCES|owned by root)\b|"
+            r"\b(?:can't|cannot|unable to) write to (?:\w+ ){0,2}(?:volume|pvc|mount)\b",
         ),
         (
             "Referenced Secret/ConfigMap volume missing.",
             "Filesystem ownership does not match the container UID/GID (fsGroup missing on vanilla Kubernetes; "
             "arbitrary UID on OpenShift).",
             "readOnlyRootFilesystem: true while the app writes outside its mounted emptyDir paths.",
-            "NFS/EFS mount blocked by security groups (TCP 2049) or missing mount targets in the node's subnet.",
+            "NFS/EFS mount blocked: the node cannot reach the NFS server or EFS mount target (a firewall or security "
+            "group on TCP 2049, no EFS mount target in the node's subnet) or the server's export does not allow the "
+            "node.",
         ),
         (
             "oc describe pod {pod} -n {ns}",
@@ -366,9 +818,29 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Vanilla Kubernetes: set pod securityContext.fsGroup; OpenShift assigns fsGroup from the namespace range.",
             "Mount an emptyDir at every path the app writes when using a read-only root filesystem.",
             "[ROSA/EKS + EFS] allow NFS (2049/tcp) from worker node security groups to the EFS mount targets.",
+            "Create the missing Secret or ConfigMap in the pod's namespace, or mark the volume optional: true if the "
+            "app can start without it.",
+            "Let every node reach the NFS server on TCP 2049 and list the node network in the server's exports; for "
+            "EFS, add a mount target in each node subnet and allow 2049 from the nodes' security group.",
         ),
         related_rules=("KN-S007",),
         knowledge=("ocp-arbitrary-uid",),
+        causes=(
+            Cause(
+                0,
+                (r"secrets? \"?[\w.-]+\"? not found|configmaps? \"?[\w.-]+\"? not found", r"\bnot found\b"),
+                (0,),
+                (3,),
+            ),
+            Cause(1, (r"permission denied", r"fsGroup|\buid\b|\bgid\b|\bowner\b|chown"), (1, 0), (0,)),
+            Cause(2, (r"read-only file system|readOnlyRootFilesystem",), (0,), (1,)),
+            Cause(
+                3,
+                (r"\bnfs\b|\befs\b|2049|mount target|security group", r"timed out waiting for the condition"),
+                (0,),
+                (4, 2),
+            ),
+        ),
     ),
     Playbook(
         "DBG-PROBE",
@@ -380,6 +852,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"probe failed:.*connection refused",
             r"Client\.Timeout exceeded while awaiting headers",
             r"HTTP probe failed with statuscode",
+            r"\bprobes? (?:keeps? |kept |are |is |was )?(?:fail(?:s|ed|ing)?|timing out|times? out|timed out)\b|"
+            r"\bfail(?:ed|ing|s)? (?:liveness|readiness|startup) (?:probes?|checks?)\b",
+            r"\b(?:flips?|flapping|toggles?|switch\w*) between (?:Ready|NotReady) and (?:Ready|NotReady)\b",
         ),
         (
             "Probe port/path does not match what the app serves (wrong port name, /healthz vs /health).",
@@ -399,6 +874,30 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C001", "KN-C002", "KN-C003"),
         knowledge=("k8s-probes",),
+        causes=(
+            Cause(
+                0,
+                (
+                    r"statuscode: 404|\b404\b|wrong (?:port|path)|/healthz?\b|named port",
+                    r"HTTP probe failed with statuscode",
+                ),
+                (0, 1),
+                (0,),
+            ),
+            Cause(
+                1,
+                (r"connection refused", r"127\.0\.0\.1|0\.0\.0\.0|\bbind\b|listen(?:s|ing)? on (?:127|localhost)"),
+                (1, 2),
+                (0,),
+            ),
+            Cause(
+                2,
+                (r"Client\.Timeout|timeoutSeconds|timed? ?out|deadline", r"dependenc\w+|database|downstream"),
+                (0, 2),
+                (1,),
+            ),
+            Cause(3, (r"startup|slow(?:ly)? (?:start|boot)|takes? .{0,30}to start|warm-?up",), (0, 2), (2,)),
+        ),
     ),
     Playbook(
         "DBG-ROUTE-503",
@@ -421,7 +920,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         (
             "oc get route {name} -n {ns} -o yaml   # status.ingress[].conditions",
-            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={name}",
+            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={svc}",
             "oc get pods -n {ns} --show-labels",
             "oc get networkpolicy -n {ns}",
         ),
@@ -443,6 +942,10 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"Endpoints:\s*<none>",
             r"endpoints \"[\w.-]+\" not found",
             r"connection refused",
+            r"get (?:endpoints|ep)\b[^\n]{0,120}(?:\n[^\n]{0,120}){0,2}?<none>",
+            r"\b(?:services?|svc)\b[^.\n]{0,40}\b(?:has|have|shows?|with|gets?)\s+(?:no|zero|empty)\s+endpoints?\b",
+            r"\bendpoints?(?: list| slices?)?\s+(?:is|are|was|stays?)\s+empty\b|\bempty endpoints?(?: list)?\b",
+            r"notReadyAddresses",
         ),
         (
             "Service selector does not match pod labels.",
@@ -450,9 +953,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "targetPort names a port the container does not declare.",
         ),
         (
-            "oc describe svc {name} -n {ns}",
-            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={name} -o wide",
-            "oc get pods -n {ns} -l <selector> -o wide",
+            "oc describe svc {svc} -n {ns}",
+            "oc get endpointslices -n {ns} -l kubernetes.io/service-name={svc} -o wide",
+            "oc get pods -n {ns} -l {selector} -o wide",
         ),
         (
             "Align spec.selector with pod template labels; fix readiness; use numeric targetPort or declare the "
@@ -460,6 +963,11 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-V011", "KN-V012"),
         knowledge=("k8s-services",),
+        causes=(
+            Cause(0, (r"selector|\blabels?\b",), (0, 2, 1), (0,)),
+            Cause(1, (r"not ready|readiness|0/\d+\s+(?:ready|running)",), (1, 2), (0,)),
+            Cause(2, (r"targetPort|port name|named port|containerPort",), (0, 1), (0,)),
+        ),
     ),
     Playbook(
         "DBG-RBAC",
@@ -500,27 +1008,84 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "A policy engine (RHACS/StackRox, Gatekeeper, Kyverno) rejected the object - the message names the policy.",
             "The webhook service is down/unreachable and failurePolicy is Fail, blocking all matching requests.",
+            "Kyverno: the API server cannot reach the Kyverno webhook on the worker nodes (TCP 9443 by default). A "
+            "private GKE cluster does not allow that traffic from the control plane until a firewall rule opens it; "
+            "on EKS a custom CNI such as Calico, an outdated VPC CNI plug-in, or a node security group without an "
+            "inbound rule for 9443 from the cluster security group has the same effect (failed calling webhook "
+            '"validate.kyverno.svc-fail": ... context deadline exceeded).',
+            "Kyverno: every Kyverno pod is down while policies matching Pods fail closed, so the API server times out "
+            "on those requests.",
         ),
         (
-            "oc get validatingwebhookconfigurations,mutatingwebhookconfigurations",
+            "oc get validatingwebhookconfigurations,mutatingwebhookconfigurations   # age should match its pods",
             "oc get validatingwebhookconfiguration <name> -o jsonpath='{{.webhooks[*].failurePolicy}}'",
+            "kubectl get pods -n kyverno   # Kyverno pods must be Running",
         ),
         (
             "Fix the manifest to satisfy the named policy (run `kube-noob audit` first - rules map to RHACS policies).",
             "If the webhook backend is down: restore it; do not delete the webhook configuration in production "
             "without the owning team.",
+            "[Kyverno, private GKE] Add a firewall rule that lets the control plane reach the worker nodes on the "
+            "Kyverno TCP port (9443 by default).",
+            "[Kyverno, EKS] Custom CNI (e.g. Calico): install Kyverno with the Helm option hostNetwork set to true. "
+            "VPC CNI: upgrade the plug-in to a version that supports the cluster's Kubernetes version. Own node "
+            "security group: allow inbound 9443 from the EKS cluster security group.",
+            "[Kyverno, every Kyverno pod down] Kyverno's documented recovery: kubectl delete "
+            "validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg and kubectl delete "
+            "mutatingwebhookconfiguration kyverno-resource-mutating-webhook-cfg (Kyverno recreates both when it is "
+            "back), then run the admission controller with 3 replicas.",
+            "[Kyverno] Exception for one workload (the policy owner decides): PolicyExceptions are off by default; "
+            "Kyverno must run with enablePolicyException set to true and exceptionNamespace naming where exceptions "
+            "may be used. A PolicyException (policies.kyverno.io) lists the policy in spec.policyRefs (name and kind) "
+            "and selects the workload with a CEL matchConditions expression; the PolicyReport then shows result: skip.",
+            "[Gatekeeper] Rolling out a constraint (the constraint owner decides): set spec.enforcementAction: dryrun "
+            "(violations only in the constraint's status.violations) or warn (admitted, the client sees a warning) "
+            "instead of the default deny.",
         ),
-        knowledge=("stackrox-admission",),
+        knowledge=("stackrox-admission", "kyverno-troubleshooting", "gatekeeper-enforcement"),
+    ),
+    Playbook(
+        # kubernetes/website ed70e31 content/en/docs/reference/access-authn-authz/validating-admission-policy.md
+        # (denial message, Validation actions, Message expression) and examples/validatingadmissionpolicy/.
+        "DBG-VAP",
+        "Request denied by a ValidatingAdmissionPolicy (a CEL validation is false)",
+        (r"ValidatingAdmissionPolicy '[^'\n]{1,253}' with binding '[^'\n]{1,253}' denied request",),
+        (
+            "One of the policy's spec.validations CEL expressions returned false for this object, and the binding in "
+            "the message has validationActions: [Deny]. 'failed expression: <expr>' quotes the expression itself "
+            "(the validation has no message or messageExpression); any other text is the policy's message.",
+            "Every matching (policy, binding, parameter) combination must pass, so a second binding or parameter "
+            "resource can deny what another allows.",
+        ),
+        (
+            "kubectl get validatingadmissionpolicy <policy> -o yaml   # spec.validations, failurePolicy, "
+            "status.typeChecking",
+            "kubectl get validatingadmissionpolicybinding <binding> -o yaml   # validationActions, matchResources, "
+            "paramRef",
+        ),
+        (
+            "Change the object so the expression holds (for object.spec.replicas <= 5, set spec.replicas to 5 or "
+            "fewer).",
+            "Policy owner: add spec.validations[i].messageExpression (CEL returning a string) so the denial says what "
+            "to change; it takes precedence over message, which remains the fallback.",
+            "Policy owner: if the object should not be covered, narrow the binding's matchResources (for example its "
+            "namespaceSelector); to report instead of reject, set the binding's validationActions to [Warn, Audit] "
+            "(Deny and Warn cannot be combined).",
+        ),
+        knowledge=("k8s-validating-admission-policy",),
+        weight=1.4,
     ),
     Playbook(
         "DBG-STACKROX-ADMISSION",
         "RHACS / StackRox admission controller blocked a deployment",
         (
             r"policyeval\.stackrox\.io",
-            r"stackrox",
-            r"Red Hat Advanced Cluster Security",
+            # The product's name alone (a GitHub or Jira ticket about roxctl, Scanner, the UI) is not a blocked
+            # deployment: community graders found this playbook on 53 of 60 such tickets (2026-10-28).
             r"violated .* polic(y|ies)",
             r"The attempted operation violated \d+ enforced polic",
+            r"\b(?:rhacs|stackrox)\b[^.\n]{0,80}\b(?:block\w*|den(?:y|ied|ies)|reject\w*|refus\w*)\b",
+            r"admission controller enforcement|deploy[- ]?(?:stage|time) enforcement|\benforced polic(?:y|ies)\b",
         ),
         (
             "A RHACS policy with deploy-time enforcement matched (e.g. Privileged Container, Latest tag, "
@@ -537,10 +1102,27 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Remediate the manifest (kube-noob rules list the matching RHACS policy for each finding).",
             "If a justified exception is needed, add a scoped policy exclusion in Central - do not disable "
             "enforcement cluster-wide.",
+            "Emergency only: annotate the Deployment with admission.stackrox.io/break-glass: <ticket> to bypass the "
+            "admission controller (bypass must be enabled on the cluster; each bypass raises an 'Emergency Deployment "
+            "Annotation' violation). Redeploy without it afterwards.",
         ),
         related_rules=("KN-S001", "KN-S012", "KN-C004", "KN-S003"),
-        knowledge=("stackrox-admission",),
+        knowledge=("stackrox-admission", "rhacs-enforcement"),
         weight=1.4,
+        causes=(
+            Cause(
+                0,
+                (r"violated .{0,40}polic", r"privileged|latest tag|resource requests|root user|\bpolicy\b"),
+                (0, 1),
+                (0, 1, 2),
+            ),
+            Cause(
+                1,
+                (r"enforce\w*|admissionControl|enforceOn(?:Creates|Updates)", r"\benabled\b|turn(?:ed)? on"),
+                (2, 0),
+                (1, 2),
+            ),
+        ),
     ),
     Playbook(
         "DBG-HELM-LOCK",
@@ -578,6 +1160,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Adopt it deliberately: label app.kubernetes.io/managed-by=Helm and annotate "
             "meta.helm.sh/release-name=<release>, meta.helm.sh/release-namespace={ns}; or rename/delete the stray "
             "object.",
+            "Or let Helm adopt it: helm install/upgrade --take-ownership skips the ownership check and takes over the "
+            "existing objects (on Helm 3 releases whose --help lists the flag).",
         ),
         knowledge=("helm-troubleshooting",),
         weight=1.3,
@@ -631,6 +1215,15 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         related_rules=("KN-C004", "KN-C005"),
         knowledge=("k8s-resources",),
+        causes=(
+            Cause(
+                0,
+                (r"low on resource: (?:memory|cpu)|MemoryPressure|DiskPressure", r"BestEffort|Burstable|node pressure"),
+                (1, 0),
+                (0,),
+            ),
+            Cause(1, (r"ephemeral|local storage usage exceeds", r"\blogs?\b|/tmp|emptyDir|temp files"), (0, 1), (0, 1)),
+        ),
     ),
     Playbook(
         "DBG-DNS",
@@ -641,6 +1234,11 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"server misbehaving",
             r"lookup [\w.-]+ on [\d.:]+: (read udp|dial udp).*i/o timeout",
             r"NXDOMAIN",
+            r"nslookup: can't resolve",  # busybox nslookup (kubernetes/website dns-debugging-resolution.md)
+            r"no servers could be reached",
+            r"\b\d{1,3}(?:\.\d{1,3}){3}:(?:53|5353)\b",
+            r"(?i)\b(?:dns|name resolution)\b[^\n]{0,30}\b(?:issues?|problems?|not (?:working|resolving)|"
+            r"fail(?:s|ed|ing|ure)?|broken|timeouts?)\b",
         ),
         (
             "Egress NetworkPolicy blocks DNS (OpenShift DNS listens on 5353 in openshift-dns; CoreDNS on 53 in "
@@ -648,17 +1246,53 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Wrong service name/namespace (use <svc>.<ns>.svc.cluster.local).",
             "Upstream resolver/VPC DNS issue for external names (ROSA private clusters: VPC DNS hostnames/resolution "
             "must be enabled).",
+            "CoreDNS itself: its pods are not Running, the kube-dns Service has no endpoints, or the ClusterRole "
+            "system:coredns lacks list/watch on Services and EndpointSlices (SERVFAIL in its logs).",
         ),
         (
+            "kubectl exec -ti {pod} -n {ns} -- cat /etc/resolv.conf   # nameserver = the cluster DNS Service IP",
             "oc rsh -n {ns} {pod} getent hosts kubernetes.default.svc",
+            "kubectl get pods -n kube-system -l k8s-app=kube-dns   # [K8S] CoreDNS",
+            "kubectl logs -n kube-system -l k8s-app=kube-dns   # [K8S]",
+            "kubectl get endpointslice -l kubernetes.io/service-name=kube-dns -n kube-system   # [K8S]",
             "oc get networkpolicy -n {ns} -o yaml | grep -B3 -A10 egress",
             "oc get pods -n openshift-dns   # [OCP]",
+            # openshift-docs 1400f2c modules/nw-dns-viewlog.adoc
+            "oc logs -n openshift-dns -c dns -l dns.operator.openshift.io/daemonset-dns=default --tail=100   # [OCP]",
         ),
         (
             "Allow egress to the cluster DNS pods (port 5353 TCP/UDP to namespace openshift-dns on OpenShift; 53 to "
             "kube-system elsewhere).",
+            "Call a Service in another namespace by its full name, <svc>.<ns>.svc.cluster.local (or <svc>.<ns>): a "
+            "short name resolves only in the pod's own namespace.",
+            "External names: check the upstream resolver the cluster DNS forwards to; on ROSA private clusters the "
+            "VPC needs DNS hostnames and DNS resolution enabled.",
+            "Restore cluster DNS: its pods Running (openshift-dns on OpenShift, CoreDNS in kube-system elsewhere), the "
+            "kube-dns Service with endpoints, and the system:coredns ClusterRole able to list and watch Services and "
+            "EndpointSlices.",
         ),
         knowledge=("k8s-networkpolicy",),
+        causes=(
+            Cause(
+                0,
+                (r"network ?polic|networkpolicy|default-deny|deny-all", r"\begress\b|lock(?:ed)? down|allow rules?"),
+                (5, 6, 0),
+                (0,),
+            ),
+            Cause(
+                1,
+                (
+                    r"NXDOMAIN|no such host",
+                    r"svc\.cluster\.local|service name|another namespace|other namespace|short name",
+                ),
+                (1, 0),
+                (1,),
+            ),
+            Cause(
+                2, (r"external|upstream|internet|public (?:name|domain)|\bvpc\b|private cluster|forward",), (0, 1), (2,)
+            ),
+            Cause(3, (r"coredns|kube-dns|SERVFAIL|dns pods?|openshift-dns",), (2, 3, 4, 6, 7), (3,)),
+        ),
     ),
     Playbook(
         "DBG-NETPOL",
@@ -669,6 +1303,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"dial tcp [\d.:]+: (connect: )?connection timed out",
             r"EgressFirewall",
             r"context deadline exceeded",
+            r"\bdefault-deny\b|\bdeny-all\b|\bdeny all (?:policy|ingress|egress)\b",
         ),
         (
             "A default-deny NetworkPolicy without an allow rule for this source/port.",
@@ -685,10 +1320,32 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "Add explicit allow rules (podSelector/namespaceSelector + ports).",
             "Order EgressFirewall rules: specific Allow first, catch-all Deny last; the object must be named "
             "'default'.",
+            "Allow the traffic in the cloud security groups, network ACLs or firewall between the nodes and the "
+            "destination: they sit outside Kubernetes.",
         ),
         related_rules=("KN-N006", "KN-V015", "KN-N001"),
         knowledge=("k8s-networkpolicy", "ocp-egressfirewall"),
         weight=0.8,
+        causes=(
+            Cause(0, (r"network ?polic|networkpolicy|default-deny|deny-all|podSelector",), (0, 2), (0,)),
+            Cause(
+                1,
+                (r"egress ?firewall", r"\bOVN\b|egressfirewall\.k8s\.ovn\.org|first[- ]match|allow ?list|0\.0\.0\.0/0"),
+                (1, 2),
+                (1,),
+            ),
+            Cause(
+                2,
+                (
+                    r"security groups?|\bfirewall\b|\bnacl\b|network acl|\baws\b|\bazure\b|\bgcp\b|\bvpc\b|outbound"
+                    r"|\bec2\b|compute\.internal|different subnets",
+                    r"no (?:network ?polic\w*|netpol\w*)|networkpolic\w* -A\s+No resources found"
+                    r"|(?:not|never) use\w* network ?polic",
+                ),
+                (2,),
+                (2,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-X509-CLIENT",
@@ -702,6 +1359,8 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "The kubeconfig does not trust the CA that signed the API server certificate (new cluster, rotated "
             "certificate, or a corporate proxy that re-signs TLS).",
             "The kubeconfig points at the wrong server, or the machine clock is skewed.",
+            "After kubeadm reset and kubeadm init the cluster has a new CA, but ~/.kube/config still holds the old "
+            'cluster\'s certificates (crypto/rsa verification error naming the CA "kubernetes").',
         ),
         (
             "oc config view --minify -o jsonpath='{{.clusters[0].cluster.server}}'   # which API server you call",
@@ -714,6 +1373,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "OpenShift Dedicated serve a publicly trusted certificate unless you changed it). Behind a TLS-inspecting "
             "proxy, add the proxy's CA to the system trust store. Avoid --insecure-skip-tls-verify outside "
             "throwaway clusters.",
+            "kubeadm cluster: use the new admin kubeconfig: export KUBECONFIG=/etc/kubernetes/admin.conf, or copy it "
+            "(sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && sudo chown $(id -u):$(id -g) "
+            "$HOME/.kube/config).",
         ),
         knowledge=("k8s-tls-x509",),
         weight=1.4,
@@ -727,6 +1389,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             r"x509: certificate is valid for",
             r"tls: failed to verify certificate",
             r"certificate verify failed",
+            r"\bcertificate has expired\b|\bERR_CERT_[A-Z_]+\b",
         ),
         (
             "Expired certificate (check notAfter), clock skew, or the client does not trust the issuing CA.",
@@ -741,8 +1404,31 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "Renew/rotate the certificate (cert-manager, OpenShift service CA); add the CA to the client trust bundle "
             "(OpenShift: config map with label config.openshift.io/inject-trusted-cabundle=true).",
+            "Reissue the certificate with the host the client calls in its subjectAltName (a Route host, a Service DNS "
+            "name), or call the host the certificate was issued for.",
         ),
         knowledge=("ocp-routes",),
+        causes=(
+            Cause(
+                0,
+                (
+                    r"certificate has expired|not yet valid|(?<!not )(?<!n't )\bexpired\b",
+                    r"unknown authority|self-signed|not trusted|ca bundle|\bclock\b",
+                ),
+                (2, 0),
+                (0,),
+            ),
+            Cause(
+                1,
+                (
+                    r"certificate is valid for",
+                    r"\bsan\b|subject ?alt\w*|hostname|does(?:n't| not) match",
+                    r"renamed|moved (?:it )?to (?:a )?new namespace|new (?:service )?name",
+                ),
+                (2, 1),
+                (1,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-EXEC-FORMAT",
@@ -762,6 +1448,36 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         ),
         knowledge=("k8s-images",),
         weight=1.3,
+    ),
+    Playbook(
+        "DBG-ENTRYPOINT-NOT-FOUND",
+        "Container command not found in the image (executable file not found)",
+        (
+            r"executable file not found in \$PATH",
+            r"exec: \"[^\"\n]{1,200}\": stat [^\n]{1,200}: no such file or directory",
+            r"unable to start container process: exec: ",
+        ),
+        (
+            "The container's command (the pod's command, or the image's ENTRYPOINT and CMD) names a program that is "
+            "not in the image or not on its PATH: runc looks it up when it creates the container.",
+            "A multi-stage build left the program in an earlier stage (only what COPY --from copies reaches the "
+            "final image).",
+            'kubectl exec into an image without a shell (distroless and other minimal images): `exec: "sh"` or '
+            '`"bash"`: executable file not found. The container is fine; it has no shell to start.',
+        ),
+        (
+            "kubectl get pod {pod} -n {ns} -o jsonpath='{{.spec.containers[*].command}} {{.spec.containers[*].args}}'",
+            "kubectl describe pod {pod} -n {ns}   # the Events carry the runtime's error with the program's name",
+            "docker image inspect <image> --format '{{{{.Config.Entrypoint}}}} {{{{.Config.Cmd}}}}'",
+        ),
+        (
+            "Point command at the program's full path inside the image, or install or copy it into the final image; "
+            "a path that exists but is not executable fails with permission denied instead (chmod +x in the build).",
+            "No shell in the image: attach an ephemeral debug container that shares the process namespace, "
+            "kubectl debug -it {pod} -n {ns} --image=busybox:1.28 --target=<container>.",
+        ),
+        knowledge=("k8s-debug-pods",),
+        weight=1.2,
     ),
     Playbook(
         "DBG-QUOTA",
@@ -844,6 +1560,12 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             r"ClusterOperator\w* .*Degraded",
             r"Degraded\s+True",
+            # an `oc get co` row (NAME VERSION AVAILABLE PROGRESSING DEGRADED) with Degraded True or Available False
+            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+(?:"
+            r"True|False|Unknown)\s+(?:True|False|Unknown)\s+True\b",
+            r"\b[a-z][a-z0-9-]{1,62}\s+4\.\d{1,2}\.\d{1,3}\S*\s+Fal"
+            r"se\s+(?:True|False|Unknown)\s+(?:True|False|Unknown)\b",
+            r"\b[A-Z][A-Za-z]{2,60}ControllerDegraded\b",  # library-go operator condition reasons
             r"Available\s+False",
             r"clusteroperator",
             r"ClusterVersion.*(Failing|Progressing)",
@@ -862,7 +1584,80 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "support case rather than editing openshift-* namespaces.",
         ),
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
-        knowledge=("ocp-operators",),
+        knowledge=("ocp-operators", "ocp-cluster-update-status"),
+    ),
+    # Sources (checked 2026-10-28): etcd FAQ (disk latency is part of leader liveness; WAL fsync p99 < 10 ms,
+    # backend commit p99 < 25 ms; CPU starvation) https://etcd.io/docs/v3.5/faq/ ; etcd maintenance guide (space
+    # quota, NOSPACE alarm, compact, defrag, alarm disarm) https://etcd.io/docs/v3.5/op-guide/maintenance/ ; log and
+    # error strings: server/storage/wal/wal.go ("slow fdatasync"), server/etcdserver/raft.go ("leader failed to send
+    # out heartbeat on time"), server/etcdserver/txn/util.go ("apply request took too long"),
+    # api/v3rpc/rpctypes/error.go ("etcdserver: leader changed", "mvcc: database space exceeded") in etcd-io/etcd;
+    # alert names in kube_noob/data/signals.yaml; OpenShift commands from openshift-docs modules/etcd-defrag.adoc,
+    # restore-determine-state-etcd-member.adoc and recommended-etcd-practices.adoc (enterprise-4.21); kubeadm static
+    # pod labels (component=etcd) from cmd/kubeadm/app/util/staticpod/utils.go.
+    Playbook(
+        "DBG-ETCD",
+        "etcd is slow or unstable (leader changes, slow disk, no leader, database space)",
+        (
+            r"etcdHighNumberOfLeaderChanges",
+            r"etcdNoLeader",
+            r"etcd(MembersDown|InsufficientMembers)",
+            r"etcdHigh(Fsync|Commit)Durations",
+            r"etcdGRPC(Read|Write)?RequestsSlow",
+            r"etcd(DatabaseQuotaLowSpace|ExcessiveDatabaseGrowth|DatabaseHighFragmentationRatio)",
+            r"etcdserver: (leader changed|no leader|request timed out)",
+            r"mvcc: database space exceeded",
+            r"apply request took too long",
+            r"slow fdatasync",
+            r"failed to send out heartbeat on time",
+            r"\betcd\b[^\n]{0,60}\bleader (changed|changes|election)",
+        ),
+        (
+            "Slow disk under etcd: every write is persisted before it is acknowledged, so disk latency is part of "
+            "leader liveness. A WAL fsync p99 above 10 ms or a backend commit p99 above 25 ms makes the leader miss "
+            "heartbeats, members hold elections, and the API server times out.",
+            "CPU starvation on the control-plane nodes, the second most common cause of missed heartbeats.",
+            "Slow or lossy network between control-plane nodes (high round-trip time between zones).",
+            "The database reached its space quota: etcd raises a NOSPACE alarm and accepts only reads and deletes "
+            "(`mvcc: database space exceeded`) until it is compacted, defragmented and the alarm is cleared.",
+            "A member is down or its node is NotReady; with too few members the cluster loses quorum and has no "
+            "leader.",
+            "A product bug that adds control-plane I/O: check the reported issues listed for your version.",
+        ),
+        (
+            "oc get co etcd kube-apiserver   # [OCP] Degraded or Progressing, and since when",
+            "oc describe co etcd   # [OCP] the operator's messages name the failing member or check",
+            "oc get pods -n openshift-etcd -l k8s-app=etcd -o wide   # [OCP] one per control-plane node, restarts",
+            "kubectl get pods -n kube-system -l component=etcd -o wide   # [K8S] kubeadm runs etcd as a static pod",
+            "oc get nodes -l node-role.kubernetes.io/master   # [OCP] control-plane nodes Ready?",
+            "kubectl get nodes -l node-role.kubernetes.io/control-plane   # [K8S] control-plane nodes Ready?",
+            "oc adm top nodes -l node-role.kubernetes.io/master   # [OCP] CPU and memory pressure",
+            "kubectl top nodes -l node-role.kubernetes.io/control-plane   # [K8S] CPU and memory pressure",
+            "In Observe > Metrics (or Prometheus), graph histogram_quantile(0.99, "
+            "rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) (healthy under 0.01 s), histogram_quantile(0.99, "
+            "rate(etcd_disk_backend_commit_duration_seconds_bucket[5m])) (under 0.025 s) and "
+            "changes(etcd_server_is_leader[10m]).",
+            "oc rsh -n openshift-etcd etcd-<control-plane-node> etcdctl endpoint status --cluster -w table   # [OCP] "
+            "leader, database size and raft index of every member",
+            "oc rsh -n openshift-etcd etcd-<control-plane-node> etcdctl alarm list   # [OCP] NOSPACE means the "
+            "database hit its quota",
+        ),
+        (
+            "Give etcd fast, dedicated storage: Red Hat asks for a block device that writes at least 50 IOPS of 8 KB "
+            "sequentially, including fdatasync, in under 10 ms, prefers NVMe in production and rules out network "
+            "file systems and spinning disks. Move other I/O off the control-plane disks.",
+            "Relieve CPU pressure on control-plane nodes: keep workloads off them and size them up.",
+            "If a reported issue below matches your version, update to the release that fixes it before changing "
+            "hardware.",
+            "NOSPACE alarm: find what grows (events, custom resources, secrets), then defragment one member at a "
+            "time, starting with a member that is not the leader, and clear the alarm (`etcdctl defrag`, "
+            "`etcdctl alarm disarm`) following OpenShift's 'Defragmenting etcd data' procedure. Defragmenting "
+            "blocks reads and writes on that member while it runs.",
+            "Member down or no leader: fix the node first (NotReady, disk full, network); replace a member only by "
+            "following OpenShift's 'Replacing an unhealthy etcd member' procedure, never removing members below "
+            "quorum.",
+        ),
+        platforms=("kubernetes", "openshift"),
     ),
     Playbook(
         "DBG-ROSA-HCP-NODES",
@@ -894,10 +1689,33 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         platforms=("rosa-hcp",),
         related_rules=("KN-V017",),
         knowledge=("rosa-hcp",),
+        causes=(
+            Cause(
+                0,
+                (
+                    r"privatelink|vpc endpoint|route table|security group|cannot reach|unreachable|\bendpoint\b",
+                    r"waiting for nodes to join|not joining|never join\w*",
+                ),
+                (0, 3),
+                (0, 1),
+            ),
+            Cause(1, (r"subnet|ip address(?:es)?|\btags?\b",), (1, 2), (0,)),
+            Cause(
+                2,
+                (
+                    r"InsufficientInstanceCapacity"
+                    r"|instance type[^.\n]{0,40}\b(?:not (?:being )?(?:available|supported|offered)|unavailable|unsupp"
+                    r"orted)|quota|insufficient capacity",
+                    r"\b[a-z]\d[a-z]{0,2}\.(?:\d{0,2}x?large|metal|medium)\b|\bAZ\b|availability zone",
+                ),
+                (2, 1),
+                (0,),
+            ),
+        ),
     ),
     Playbook(
         "DBG-ARBITRARY-UID",
-        "Permission denied writing files on OpenShift",
+        "Permission denied on OpenShift (writing files, or listening on a port below 1024)",
         (
             r"mkdir: cannot create directory .*Permission denied",
             r"mkdir\(\) \S+ failed \(13: Permission denied\)",
@@ -910,6 +1728,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "OpenShift runs containers with a random UID (from the namespace range) and GID 0; image directories "
             "owned by a specific user are not writable.",
+            "The process is not privileged, so it cannot listen on a port below 1024 (listen EACCES on port 80).",
         ),
         (
             "oc get pod {pod} -n {ns} -o jsonpath='{{.metadata.annotations.openshift\\.io/scc}}'   # admitting SCC",
@@ -921,6 +1740,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         (
             "In the Dockerfile: RUN chgrp -R 0 <dirs> && chmod -R g=u <dirs>; write only to mounted volumes or "
             "emptyDir; never chown at runtime.",
+            "Listen on a port above 1024 (for example 8080) and map port 80 or 443 in the Service or Route.",
         ),
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
         related_rules=("KN-S004",),
@@ -1027,6 +1847,762 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         platforms=("openshift", "rosa-classic", "rosa-hcp"),
         knowledge=("ocp-egressip",),
         weight=1.3,
+    ),
+    Playbook(
+        # kubernetes/website troubleshoot-kubectl.md; kubectl's message text from kubernetes/kubernetes
+        # staging/src/k8s.io/kubectl/pkg/cmd/util/helpers.go and the localhost:8080 default from client-go
+        # tools/clientcmd/client_config.go (getDefaultServer).
+        "DBG-APISERVER-UNREACHABLE",
+        "kubectl / oc cannot reach the API server",
+        (
+            r"Unable to connect to the server: dial tcp [^\n]{1,200}: (?:i/o timeout|connect: no route to host|"
+            r"connect: network is unreachable|connect: connection timed out)",
+            r"The connection to the server \S{1,300} was refused - did you specify the right host or port\?",
+            r"Unable to connect to the server: dial tcp: lookup [^\n]{1,200}: no such host",
+        ),
+        (
+            "The VPN or network path to the cluster is down (a dropped VPN is the most common cause of i/o timeout).",
+            "The kubeconfig in use points at the wrong server or context ($KUBECONFIG, --kubeconfig, the current "
+            "context).",
+            "The API server, or the load balancer in front of it, is down or a firewall blocks its port (6443 on "
+            "kubeadm and OpenShift).",
+            "`localhost:8080 was refused` means kubectl found no kubeconfig at all and fell back to "
+            "http://localhost:8080.",
+        ),
+        (
+            "kubectl config current-context",
+            "kubectl config get-contexts",
+            "kubectl config view --minify -o jsonpath='{{.clusters[0].cluster.server}}'   # the server you call",
+            "echo $KUBECONFIG",
+            "ping <api-host>   # then check the port: nc -vz <api-host> 6443",
+        ),
+        (
+            "Reconnect the VPN, then retry.",
+            "Select the right cluster: kubectl config use-context <context>, or set KUBECONFIG to the right file.",
+            "No kubeconfig: get one from the cluster admin (kubeadm: copy /etc/kubernetes/admin.conf to "
+            "$HOME/.kube/config; cloud clusters: the provider's CLI writes it).",
+            "API server or load balancer down: check the control plane nodes and the cloud provider's health "
+            "checks for the API endpoint.",
+        ),
+        knowledge=("k8s-kubeconfig-exec", "k8s-kubeadm-troubleshooting"),
+        weight=1.5,  # more specific than DBG-NETPOL's bare "i/o timeout"
+    ),
+    Playbook(
+        # kubernetes/website concepts/workloads/controllers/deployment.md (Failed Deployment, Progress Deadline
+        # Seconds, Rolling Back a Deployment).
+        "DBG-PROGRESS-DEADLINE",
+        "Deployment rollout stalled (exceeded its progress deadline)",
+        (
+            r"exceeded its progress deadline",
+            r"ProgressDeadlineExceeded",
+        ),
+        (
+            "The new pods did not become available within .spec.progressDeadlineSeconds (600 by default): "
+            "insufficient quota, failing readiness probes, image pull errors, missing permissions, limit ranges or "
+            "bad application configuration.",
+            "Kubernetes only reports it (Progressing=False, reason ProgressDeadlineExceeded); it does not roll back, "
+            "and kubectl rollout status exits 1.",
+        ),
+        (
+            "kubectl rollout status deployment/<name> -n {ns}",
+            "kubectl describe deployment <name> -n {ns}   # Conditions and the new ReplicaSet",
+            "oc get rs -n {ns} -l <selector>",
+            "oc get events -n {ns} --sort-by=.lastTimestamp",
+        ),
+        (
+            "Fix the cause on the new pods (their events name it), then the rollout continues.",
+            "Or go back: kubectl rollout undo deployment/<name> -n {ns} (or --to-revision=<n>).",
+            "A slow but healthy app: raise spec.progressDeadlineSeconds (it must be greater than minReadySeconds).",
+        ),
+        knowledge=("k8s-deployment-rollouts",),
+        weight=1.3,
+    ),
+    Playbook(
+        # kubernetes/website concepts/storage/persistent-volumes.md (Storage Object in Use Protection).
+        "DBG-PVC-TERMINATING",
+        "PersistentVolumeClaim stuck in Terminating",
+        (
+            r"kubernetes\.io/pvc-protection",
+            r"kubernetes\.io/pv-protection",
+            r"(?i)\b(?:pvc|persistentvolumeclaim)s?\b[^\n]{0,80}\b(?:stuck|stays?|hangs?)\b[^\n]{0,40}\bTerminating\b",
+            r"(?i)\b(?:pvc|persistentvolumeclaim)s?\b[^\n]{0,80}\bTerminating\b",
+        ),
+        (
+            "A Pod object still uses the claim (the pvc-protection finalizer holds deletion until no Pod object "
+            "references it, including Completed or Failed pods of a Job).",
+            "For a PersistentVolume: it is still bound to a claim (pv-protection).",
+        ),
+        (
+            "kubectl describe pvc <claim> -n {ns}   # Status: Terminating, Finalizers: [kubernetes.io/pvc-protection]",
+            'kubectl get pods -n {ns} -o jsonpath=\'{{range .items[*]}}{{.metadata.name}}{{" "}}'
+            '{{.spec.volumes[*].persistentVolumeClaim.claimName}}{{"\\n"}}{{end}}\'',
+        ),
+        (
+            "Delete or scale down the workloads whose pods use the claim (and finished Job pods); the claim is then "
+            "removed.",
+            "Do not remove the finalizer while a pod uses the claim: the protection exists to prevent data loss.",
+        ),
+        knowledge=("k8s-common-errors",),
+        weight=1.4,
+    ),
+    Playbook(
+        # helm/helm-www versioned_docs/version-3/faq/troubleshooting.md.
+        "DBG-HELM-REPO-EXISTS",
+        "Helm: repository name already exists",
+        (r"repository name \([^)\n]{1,200}\) already exists",),
+        (
+            "Since Helm 3.3.2, helm repo add errors when the name is already configured (a breaking change made for a "
+            "security fix); --no-update is ignored.",
+        ),
+        ("helm repo list",),
+        (
+            "Make the step repeatable: helm repo add <name> <url> --force-update (overwrites the entry), or use a "
+            "different name.",
+        ),
+        knowledge=("helm-cli-operations",),
+        weight=1.4,
+    ),
+    Playbook(
+        # helm/helm-www versioned_docs/version-3/topics/kubernetes_apis.md.
+        "DBG-HELM-REMOVED-API",
+        "Helm: the deployed release uses an API the cluster removed",
+        (r"current release manifest contains removed kubernetes api",),
+        (
+            "Helm diffs the last deployed manifest against the new one; that stored manifest uses an API version "
+            "this Kubernetes version removed, so Helm cannot parse it, even when the new chart is fixed.",
+        ),
+        (
+            "helm get manifest <release> -n {ns}   # the apiVersions stored in the release",
+            "helm history <release> -n {ns}",
+        ),
+        (
+            "Rewrite the stored release to supported APIs with the helm-mapkubeapis plugin "
+            "(github.com/helm/helm-mapkubeapis), or edit the release Secret by hand as the Helm page describes, then "
+            "upgrade.",
+            "Next time, move charts to supported APIs before upgrading Kubernetes.",
+        ),
+        knowledge=("helm-cli-operations", "k8s-deprecations"),
+        weight=1.5,
+    ),
+    Playbook(
+        # helm/helm-www versioned_docs/version-3/chart_template_guide/control_structures.md (Controlling Whitespace)
+        # and yaml_techniques.md.
+        "DBG-HELM-YAML",
+        "Helm: a template renders invalid YAML",
+        (
+            r"YAML parse error on [^\n]{1,200}: error converting YAML to JSON",
+            r"error converting YAML to JSON: yaml: line \d+: (?:did not find expected|mapping values are not "
+            r"allowed|could not find expected)",
+        ),
+        (
+            "Whitespace from a template action: `{{{{- ` chomps the newline before it and ` -}}}}` the one after, so "
+            "a chomp on the wrong side joins two lines or leaves a line mis-indented.",
+            "An include or toYaml output without nindent/indent lands at the wrong indentation.",
+            "A tab, or a value with a colon that needs quoting.",
+        ),
+        (
+            "helm template <release> <chart> --debug   # prints the rendered YAML even when it fails to parse",
+            "helm template <release> <chart> -s templates/<file>.yaml",
+        ),
+        (
+            "Look at the reported line in the --debug output and fix the chomping ({{{{- if }}}} ... {{{{- end }}}} on "
+            'lines of their own) or pipe includes through nindent: {{{{- include "x" . | nindent 4 }}}}.',
+            "Quote string values: {{{{ .Values.name | quote }}}}.",
+        ),
+        knowledge=("helm-templates-values", "helm-chart-authoring"),
+        weight=1.4,
+    ),
+    # openshift/openshift-docs modules/builds-troubleshooting-access-resources.adoc
+    Playbook(
+        "DBG-BUILD-IMAGE-QUOTA",
+        "OpenShift build fails: 'requested access to the resource is denied' (project image quota exceeded)",
+        (
+            # the message on a line that is not an image pull error (those belong to DBG-IMAGEPULL)
+            r"(?:^|\n)(?![^\n]{0,300}(?:pull access denied|Failed to pull image))[^\n]{0,300}?"
+            r"requested access to the resource is denied",
+        ),
+        (
+            "A build that fails with 'requested access to the resource is denied' has gone over one of the image "
+            "quotas set on its project.",
+        ),
+        ("oc describe quota   # in the build's project: the limits applied and the storage in use",),
+        (
+            "Check the project's current quota with `oc describe quota` and compare the storage in use with the "
+            "limits applied to find the image quota that was exceeded.",
+        ),
+        platforms=("openshift",),
+        weight=1.2,
+    ),
+    # openshift/openshift-docs modules/ipi-install-troubleshooting-runtime-network-not-ready.adoc
+    Playbook(
+        "DBG-OCP-CNI-NOT-READY",
+        "OpenShift: runtime network not ready (NetworkPluginNotReady, Missing CNI default network)",
+        (
+            r"Missing CNI default network",
+            r"NetworkReady=false reason:NetworkPluginNotReady",
+            r"runtime network not ready",
+        ),
+        (
+            "The networking components are missing: the Cluster Network Operator deploys them in response to a "
+            "special object the installation program creates (network.config.openshift.io named cluster). Check "
+            "that the object exists and that the network-operator pod runs (it can sit in ContainerCreating).",
+            "The operator starts very early in the install, once the control plane nodes are up and before the "
+            "bootstrap control plane is torn down, so the error can point to subtler installer problems: control "
+            "plane nodes that take a long time to come up, or trouble communicating with the apiserver.",
+        ),
+        (
+            "oc get all -n openshift-network-operator   # network-operator pod Running, or stuck in ContainerCreating?",
+            "kubectl get network.config.openshift.io cluster -oyaml   # [IPI bare metal: run on the provisioner "
+            "node] the object the installation program creates",
+            "kubectl get pods -n openshift-network-operator",
+            'kubectl logs -n openshift-network-operator -l "name=network-operator"   # with three or more control '
+            "plane nodes one operator wins the leader election and the others sleep",
+        ),
+        (
+            "network.config.openshift.io cluster does not exist: the installation program did not create it; run "
+            "openshift-install create manifests to find out why.",
+            "Read the network-operator logs; also look at slow control plane node bring-up and apiserver "
+            "communication, which this error can indicate.",
+        ),
+        platforms=("openshift",),
+        knowledge=("ocp-install-troubleshooting",),
+        weight=1.3,
+    ),
+    # openshift/openshift-docs modules/olm-operatorgroups-troubleshooting.adoc; check commands as written in
+    # modules/nw-metallb-installing-operator-cli.adoc (oc get operatorgroup / installplan -n <namespace>),
+    # modules/logging-operator-upgrading-all-ns.adoc (oc get operatorgroup <operator_group_name> -o yaml) and
+    # modules/lvms-uninstalling-logical-volume-manager-operator-using-openshift-cli.adoc (oc get csv -n <namespace>);
+    # OperatorGroup fields from modules/olm-operatorgroups-provided-apis-annotations.adoc and
+    # modules/olm-operatorgroups-target-namespace.adoc.
+    Playbook(
+        "DBG-OLM-OPERATORGROUP",
+        "OLM: InstallPlan blocked by the namespace's OperatorGroup (more than one, none, or unsupported)",
+        (
+            r"more than one operator group\(s\) are managing this namespace",
+            r"attenuated service account query failed",
+            r"UnsupportedOperatorGroup",
+            r"\b(?:multiple|two|several|more than one)\s{1,5}operator\s?groups?\b",
+        ),
+        (
+            "An InstallPlan's namespace must hold exactly one OperatorGroup. With two or more (count= in the message "
+            "is how many), the InstallPlan treats the OperatorGroup as invalid, does not generate the CSV and keeps "
+            "installing with this message.",
+            "The same happens when the namespace has no OperatorGroup at all, or when the OperatorGroup names a "
+            "service account (spec.serviceAccountName) that is wrong or does not exist.",
+            "UnsupportedOperatorGroup: the CSV's install modes do not support the OperatorGroup's target namespace "
+            "selection, so the CSV goes to a failed state.",
+        ),
+        (
+            "oc get operatorgroup -n {ns}   # exactly one should be listed",
+            "oc get operatorgroup <operator_group_name> -o yaml   # spec.targetNamespaces, spec.selector, "
+            "spec.serviceAccountName",
+            "oc get installplan -n {ns}",
+            "oc get csv -n {ns}",
+        ),
+        (
+            "Keep a single OperatorGroup in the namespace: remove the extra ones so the InstallPlan can generate the "
+            "CSV.",
+            "No OperatorGroup: create one. Wrong service account: point the OperatorGroup at a service account that "
+            "exists.",
+            "UnsupportedOperatorGroup: change the OperatorGroup's target namespace selection to one the CSV's install "
+            "modes support, or change the CSV's install modes; the failed CSV then goes back to pending.",
+        ),
+        platforms=("openshift",),
+        knowledge=("ocp-operators",),
+        weight=1.4,
+    ),
+    # openshift/openshift-docs modules/pruning-images-troubleshooting.adoc; --registry-url from
+    # modules/pruning-images-options.adoc and the preview without --confirm from
+    # modules/pruning-images-running-operation.adoc.
+    Playbook(
+        "DBG-PRUNE-REGISTRY",
+        "oc adm prune images cannot talk to the registry (HTTP response to HTTPS client, unknown authority)",
+        (
+            r"error communicating with registry: [^\n]{0,300}server gave HTTP response to HTTPS client",
+            r"error communicating with registry: [^\n]{0,300}malformed HTTP response",
+            r"error communicating with registry: [^\n]{0,300}x509: certificate signed by unknown authority",
+            r"\bprune images\b[^\n]{0,300}(?:HTTP response to HTTPS client|malformed HTTP response|"
+            r"certificate signed by unknown authority)",
+        ),
+        (
+            "server gave HTTP response to HTTPS client: the registry is not secured, but the prune client tries a "
+            "secure connection.",
+            "malformed HTTP response, or x509: certificate signed by unknown authority: the registry is secured with "
+            "a certificate signed by another certificate authority than the one the client verifies against. By "
+            "default the client uses the CA data in the user's configuration files, as it does for the control "
+            "plane API.",
+        ),
+        (
+            "oc adm prune images <image_prune_option_one> <image_prune_option_two>   # without --confirm it only "
+            "lists what would be removed",
+        ),
+        (
+            "Unsecured registry: secure the registry (recommended). Otherwise append --force-insecure to the "
+            "command, which is not recommended.",
+            "Registry signed by another CA: pass the right CA with --certificate-authority (adding --force-insecure "
+            "instead works around it but is not recommended).",
+            "When the cluster-internal registry URL cannot be resolved or reached, give a route that works with "
+            "--registry-url; an https:// or http:// prefix on the hostname forces that protocol.",
+        ),
+        platforms=("openshift",),
+        weight=1.4,
+    ),
+    # openshift/openshift-docs modules/cleaning-crio-storage.adoc
+    Playbook(
+        "DBG-CRIO-STORAGE",
+        "Node cannot create pod sandboxes or containers: wipe the CRI-O storage",
+        (
+            r"error recreating the missing symlinks",
+            r"can.t stat lower layer",
+            r"/var/lib/containers/storage/overlay/[^\s/]{1,200}/link: no such file or directory",
+            r"\bcrio wipe\b",
+        ),
+        (
+            "Overlay layer links in the node's CRI-O ephemeral storage are missing: 'Failed to create pod sandbox "
+            "... error recreating the missing symlinks' (the node cannot run any pod) or 'can't stat lower layer' "
+            "(no new container can be created on an otherwise working node).",
+            "Other signs that call for the same cleanup: the node is NotReady after a cluster upgrade or a reboot, "
+            "crio is not working properly, or oc debug node/<node_name> cannot start a debug shell.",
+        ),
+        ("oc get nodes   # NotReady after an upgrade or a reboot is one of the signs",),
+        (
+            "Wipe the node's CRI-O ephemeral storage as cluster-admin, in this order. 1) oc adm cordon <node_name> "
+            "so no workload lands on the node if it turns Ready (Status shows SchedulingDisabled).",
+            "2) oc adm drain <node_name> --ignore-daemonsets --delete-emptydir-data (terminationGracePeriodSeconds "
+            "defaults to 30 s; a pod set above 90 s might be SIGKILLed and fail to terminate).",
+            "3) On the node as root (ssh core@node1.example.com with your node's address, then sudo -i): "
+            "systemctl stop kubelet",
+            "4) Remove the pods outside the host network first, because removing them relies on the network plugin "
+            'pods, which are in the host network: for pod in $(crictl pods -q); do if [[ "$(crictl inspectp $pod | '
+            'jq -r .status.linux.namespaces.options.network)" != "NODE" ]]; then crictl rmp -f $pod; fi; done',
+            "5) Then all other pods: crictl rmp -fa",
+            "6) systemctl stop crio, then wipe the ephemeral storage: crio wipe -f",
+            "7) systemctl start crio, then systemctl start kubelet; oc get nodes shows the node Ready, "
+            "SchedulingDisabled when the cleanup worked.",
+            "8) oc adm uncordon <node_name>",
+        ),
+        platforms=("openshift",),
+        weight=1.4,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshoot-hcp-install.adoc (OCM5011 row); checks from
+        # modules/rosa-troubleshooting-installing.adoc and modules/rosa-hcp-deleting-cluster.adoc
+        # (rosa describe cluster).
+        "DBG-ROSA-OCM5011-CAPACITY",
+        "ROSA HCP install failed: no capacity in the selected AWS region (OCM5011)",
+        (
+            r"\bOCM5011\b",
+            r"unavailable capacity in the selected region",
+        ),
+        (
+            "Capacity was unavailable in the AWS region selected for the cluster. This is the capacity code: "
+            "credential problems are OCM5003/OCM5004, STS role problems OCM5007 and subnet problems "
+            "OCM5005/OCM5006/OCM5010.",
+        ),
+        (
+            "rosa logs install --cluster=<cluster_name>",
+            "rosa describe cluster --cluster=<cluster_name>   # Region: the region the install used",
+        ),
+        ("Retry the cluster installation, or install the cluster in another AWS region.",),
+        platforms=("rosa-hcp",),
+        knowledge=("rosa-troubleshooting",),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshoot-hcp-install.adoc (OCM5010 row) and
+        # modules/rosa-hcp-vpc-subnet-tagging.adoc (required subnet tags and commands).
+        "DBG-ROSA-OCM5010-SUBNET-TAGS",
+        "ROSA HCP install failed to tag subnets (OCM5010)",
+        (
+            r"\bOCM5010\b",
+            r"Failed to tag subnets for the cluster",
+        ),
+        (
+            "The AWS permissions used for the install, or the subnet configuration, are not correct.",
+            "The subnets lack the required tags: at least one private subnet needs kubernetes.io/role/internal-elb "
+            "and, where public subnets are used, one public subnet needs kubernetes.io/role/elb (value 1 or no "
+            "value).",
+        ),
+        (
+            "rosa describe cluster --cluster=<cluster_name>   # Subnets: the subnet IDs given to the cluster",
+            'aws ec2 describe-tags --filters "Name=resource-id,Values=<subnet_id>"   # repeat for each subnet',
+            "rosa logs install --cluster=<cluster_name>",
+        ),
+        (
+            "Tag the private subnets: aws ec2 create-tags --resources <private-subnet-id> --region <aws_region> "
+            "--tags Key=kubernetes.io/role/internal-elb,Value=1",
+            "Tag the public subnets, if the cluster uses them: aws ec2 create-tags --resources <public-subnet-id> "
+            "--region <aws_region> --tags Key=kubernetes.io/role/elb,Value=1",
+            "Confirm that the AWS permissions are correct as well.",
+        ),
+        platforms=("rosa-hcp",),
+        knowledge=("rosa-hcp-lifecycle",),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshooting-elb-service-role.adoc.
+        "DBG-ROSA-ELB-SERVICE-ROLE",
+        "ROSA install: AccessDenied on iam:CreateServiceLinkedRole for Elastic Load Balancing",
+        (
+            r"iam:CreateServiceLinkedRole[^\n]{0,200}elasticloadbalancing\.amazonaws\.com",
+            r"\bAWSServiceRoleForElasticLoadBalancing\b",
+            r"Error creating network Load Balancer: AccessDenied",
+        ),
+        (
+            "No load balancer was ever created in this AWS account, so the Elastic Load Balancing service-linked role "
+            "(AWSServiceRoleForElasticLoadBalancing) may not exist yet, and the installer role is not allowed to "
+            "create it.",
+        ),
+        ('aws iam get-role --role-name "AWSServiceRoleForElasticLoadBalancing"',),
+        (
+            "Create the role if it is missing (needed once per AWS account): aws iam get-role --role-name "
+            '"AWSServiceRoleForElasticLoadBalancing" || aws iam create-service-linked-role --aws-service-name '
+            '"elasticloadbalancing.amazonaws.com"',
+        ),
+        platforms=("rosa-classic", "rosa-hcp"),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshooting-cluster-deletion.adoc; rosa list user-role from
+        # modules/rosa-sts-ocm-and-user-role-troubleshooting.adoc; linking from
+        # modules/rosa-sts-user-role-creation.adoc.
+        "DBG-ROSA-USER-ROLE-UNLINKED",
+        "ROSA: cluster cannot be deleted, sts_user_role is not linked (CLUSTERS-MGMT-400)",
+        (
+            r"sts_user_role is not linked to your account",
+            r"requires sts_user_role to be linked",
+            r"not authorized to perform STS cluster operations",
+            r"CLUSTERS-MGMT-400: Failed to delete cluster",
+        ),
+        (
+            "Your user-role IAM role was unlinked from your Red Hat account or deleted. Your organization has a linked "
+            "ocm-role, so every user who runs STS cluster operations, deletion included, needs a linked user-role.",
+        ),
+        ("rosa list user-role   # LINKED: Yes or No",),
+        (
+            "rosa create user-role (in auto mode it creates the role and links it to your account; look for "
+            "'Successfully linked role ARN ... with account ...').",
+            "Then delete the cluster again: rosa delete cluster --cluster=<cluster_name> --watch, or Delete cluster "
+            "in OpenShift Cluster Manager.",
+        ),
+        platforms=("rosa-classic", "rosa-hcp"),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/rosa-troubleshooting-expired-token.adoc; login methods from
+        # modules/rosa-login.adoc, modules/rosa-login-offline-token.adoc, modules/rosa-login-sso-auth-code.adoc and
+        # modules/rosa-login-sso-device-code.adoc; rosa login, the token page and rosa whoami from
+        # modules/rosa-sts-setting-up-environment.adoc.
+        "DBG-ROSA-EXPIRED-TOKEN",
+        "rosa CLI: Can't get tokens (the offline access token expired)",
+        (
+            r"Can['’]t get (?:access )?tokens\s{0,3}[:.]",
+            r"\brosa\b[^\n]{0,80}\boffline (?:access )?token\b[^\n]{0,60}\b(?:expired|invalid)",
+        ),
+        (
+            "The api.openshift.com offline access token that rosa logged in with has expired: sso.redhat.com "
+            "invalidated it.",
+        ),
+        ("rosa whoami   # the AWS and Red Hat (OCM) accounts rosa uses",),
+        (
+            "Get a new offline access token from OpenShift Cluster Manager (https://console.redhat.com/openshift/"
+            "token/rosa; a new token is generated on every visit), run rosa login and paste it when asked, or pass "
+            "it with the --token option.",
+            "Or log in with Red Hat single sign-on instead of an offline token (rosa 1.2.36 or later; Red Hat "
+            "recommends it): rosa login --use-auth-code on a machine with a web browser, or rosa login "
+            "--use-device-code without one (approve the code from a second device that has a browser).",
+            "For automation, Red Hat recommends service accounts rather than offline tokens.",
+        ),
+        platforms=("rosa-classic", "rosa-hcp"),
+        weight=1.4,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/resolve-ec2nodeclass-not-ready.adoc (assembly
+        # support/troubleshooting/rosa-troubleshooting-autonode.adoc, Red Hat build of Karpenter).
+        "DBG-ROSA-KARPENTER-DISCOVERY-TAG",
+        "ROSA HCP Karpenter: EC2NodeClass SubnetsReady or SecurityGroupsReady is False (discovery tag missing)",
+        (
+            r"SubnetSelector did not match any Subnets",
+            r"SecurityGroupSelector did not match any SecurityGroups",
+            r"\b(?:Subnets|SecurityGroups)Ready\b[\s`'\"=:]{0,8}False\b",
+            r"\bec2nodeclass\b[^\n]{0,80}\bnot ready\b",
+        ),
+        (
+            "Karpenter finds subnets and security groups through a cluster-specific discovery tag, "
+            "karpenter.sh/discovery. SubnetsReady=False ('SubnetSelector did not match any Subnets'): the private "
+            "subnets of the VPC lack the tag.",
+            "SecurityGroupsReady=False ('SecurityGroupSelector did not match any SecurityGroups'): the default "
+            "security group lacks the tag.",
+            "The tag is present but its value differs from the EC2NodeClass spec: values are case-sensitive and must "
+            "match exactly.",
+        ),
+        (
+            'oc get ec2nodeclass/default -o json | jq .status.conditions   # entries with "status": "False"',
+            "oc get ec2nodeclass/default -o json | jq -r "
+            "'.spec.subnetSelectorTerms[0].tags[\"karpenter.sh/discovery\"]'   # the tag value to use",
+            'aws ec2 describe-subnets --filters "Name=vpc-id,Values=<vpc_id>" --query '
+            "'Subnets[?MapPublicIpOnLaunch==`false`].[SubnetId,Tags]' --output table   # the private subnets",
+            "aws ec2 describe-subnets --subnet-ids <subnet_id> --query "
+            "'Subnets[0].Tags[?Key==`karpenter.sh/discovery`].Value' --output text",
+            "aws ec2 describe-security-groups --group-ids <default_sg_id> --query "
+            "'SecurityGroups[0].Tags[?Key==`karpenter.sh/discovery`].Value' --output text",
+        ),
+        (
+            "Tag each private subnet that lacks it: aws ec2 create-tags --resources <subnet_id> --tags "
+            "Key=karpenter.sh/discovery,Value=<discovery_tag_value>",
+            "Tag the default security group if it lacks it: aws ec2 create-tags --resources <default_sg_id> --tags "
+            "Key=karpenter.sh/discovery,Value=<discovery_tag_value>",
+            "Wait 30 to 60 seconds for Karpenter to scan again, then check that Ready is True: oc get "
+            "ec2nodeclass/default -o json | jq '.status.conditions[] | select(.type==\"Ready\")'",
+            "If create-tags fails with an authorization error, give the control plane operator role ec2:CreateTags "
+            "first (DBG-ROSA-KARPENTER-CREATETAGS).",
+        ),
+        platforms=("rosa-hcp",),
+        weight=1.5,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/resolve-iam-permissions-tagging.adoc (assembly
+        # support/troubleshooting/rosa-troubleshooting-autonode.adoc, Red Hat build of Karpenter).
+        "DBG-ROSA-KARPENTER-CREATETAGS",
+        "ROSA HCP Karpenter: the control plane operator role lacks ec2:CreateTags",
+        (
+            r"\bCreateTags\b[\s\S]{0,600}?\bClient\.UnauthorizedOperation\b",
+            r"\bClient\.UnauthorizedOperation\b[\s\S]{0,600}?\bCreateTags\b",
+            r"control-plane-operator[^\n]{0,200}\bec2:CreateTags\b",
+            r"\bec2:CreateTags\b[^\n]{0,200}control-plane-operator",
+            r"\bkarpenter\b[^\n]{0,120}\bCreateTags\b",
+        ),
+        (
+            "Karpenter must tag AWS security groups with its discovery tag, but the control plane operator IAM role "
+            "(<cluster_prefix>-kube-system-control-plane-operator) has no ec2:CreateTags permission. CloudTrail shows "
+            "CreateTags events with error code Client.UnauthorizedOperation from a control-plane-operator identity.",
+        ),
+        (
+            "aws iam list-roles | grep kube-system-control-plane-operator",
+            "In the AWS CloudTrail console, search for event name CreateTags, error code Client.UnauthorizedOperation "
+            "and a user identity that contains control-plane-operator.",
+            "aws iam get-role-policy --role-name <cluster_prefix>-kube-system-control-plane-operator --policy-name "
+            "KarpenterCreateTags   # prints the policy once it is attached",
+        ),
+        (
+            'Save this policy as /tmp/create-tags-policy.json: {{"Version": "2012-10-17", "Statement": '
+            '[{{"Sid": "AllowCreateTags", "Effect": "Allow", "Action": ["ec2:CreateTags"], '
+            '"Resource": "*"}}]}}',
+            "Attach it to the role: aws iam put-role-policy --role-name "
+            "<cluster_prefix>-kube-system-control-plane-operator --policy-name KarpenterCreateTags --policy-document "
+            "file:///tmp/create-tags-policy.json",
+            "If the EC2NodeClass showed SecurityGroupsReady False, add the karpenter.sh/discovery tag to the default "
+            "security group now (DBG-ROSA-KARPENTER-DISCOVERY-TAG); with the permission in place the authorization "
+            "error does not return.",
+        ),
+        platforms=("rosa-hcp",),
+        weight=1.4,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/bypass-admission-controller-enforcement.adoc,
+        # modules/admission-controller-settings.adoc (admissionControl.bypass) and
+        # modules/roxctl-sensor-generate-options.adoc (--admission-controller-disable-bypass);
+        # stackrox/stackrox pkg/defaults/policies/files/admission_controller_annotation.json.
+        "DBG-RHACS-BREAK-GLASS",
+        "RHACS: emergency bypass of admission enforcement (admission.stackrox.io/break-glass)",
+        (
+            r"admission\.stackrox\.io/break-glass",
+            r"Emergency Deployment Annotation",
+            r"\b(?:rhacs|stackrox|acs)\b[^\n]{0,120}\bbreak[- ]?glass\b",
+            r"\bbreak[- ]?glass\b[^\n]{0,120}\b(?:rhacs|stackrox|acs)\b",
+        ),
+        (
+            "An urgent deployment is blocked by an enforced RHACS policy. The admission controller lets a Deployment "
+            "through when it carries the annotation admission.stackrox.io/break-glass, provided the secured cluster "
+            "allows bypass.",
+            "Each bypass is recorded as a violation of the 'Emergency Deployment Annotation' policy (high severity; "
+            "the docs call it 'StackRox Emergency Deployment Annotation'), with the deployment details.",
+            "Bypass is turned off on the cluster, so the annotation does not help: Operator admissionControl.bypass: "
+            "Disabled, Helm admissionControl.dynamic.disableBypass: true, a bundle generated with roxctl sensor "
+            "generate --admission-controller-disable-bypass, or the portal setting 'Admission controller bypass "
+            "annotation' not Enabled.",
+        ),
+        (
+            "oc get deployment <name> -n {ns} -o jsonpath='{{.metadata.annotations}}'   # annotation on the Deployment",
+            "Portal: Platform Configuration -> Clusters -> 'Admission controller bypass annotation' (Operator: "
+            "admissionControl.bypass in the SecuredCluster CR; Helm: admissionControl.dynamic.disableBypass)",
+        ),
+        (
+            "Emergency only: add to the Deployment's metadata.annotations "
+            '"admission.stackrox.io/break-glass": "<ticket or change reference>" (the value tells others why the '
+            "check was bypassed) and apply it.",
+            "After the emergency, redeploy without the annotation (the remediation of the Emergency Deployment "
+            "Annotation policy).",
+            "To allow bypass: Operator admissionControl.bypass: BreakGlassAnnotation (the default), Helm "
+            "admissionControl.dynamic.disableBypass: false, or the portal setting 'Admission controller bypass "
+            "annotation' set to Enabled.",
+        ),
+        knowledge=("rhacs-enforcement", "stackrox-admission"),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/admission-controller-failure-policy-changing.adoc,
+        # modules/understand-admission-controller-enforcement.adoc, modules/admission-controller-settings.adoc and
+        # modules/roxctl-sensor-generate-options.adoc; webhook names and the admission-control service from
+        # stackrox/stackrox image/templates/helm/stackrox-secured-cluster/templates/admission-controller.yaml.
+        "DBG-RHACS-WEBHOOK-FAILURE-POLICY",
+        "RHACS admission webhook error or timeout (failure policy Fail rejects the request)",
+        (
+            r"failed calling webhook \"(?:policyeval|k8sevents)\.stackrox\.io\"",
+            r"(?:policyeval|k8sevents)\.stackrox\.io[^\n]{0,200}(?:deadline exceeded|timeout|timed out)",
+            r"admissionControl\.failurePolicy",
+            r"--admission-controller-fail-on-error",
+        ),
+        (
+            "The RHACS validating webhook (policyeval.stackrox.io, or k8sevents.stackrox.io for exec and "
+            "port-forward) hit an error or a timeout, and the cluster's admission controller failure policy is Fail "
+            "(fail closed), so the API server rejects the request. The default, Ignore (fail open), admits it.",
+            "Admission enforcement adds latency to every evaluated API call; clients with short default API timeouts "
+            "(the docs name fabric8) can give up first.",
+            "The webhook timeout cannot be raised: admissionControl.timeoutSeconds and --admission-controller-timeout "
+            "are deprecated and ignored (RHACS uses a preset timeout).",
+        ),
+        (
+            "oc get validatingwebhookconfiguration stackrox -o jsonpath='{{.webhooks[*].failurePolicy}}'   "
+            "# Fail = fail closed, Ignore = fail open",
+            "oc get deployment admission-control -n stackrox   # the service the webhooks call",
+            "Portal: Platform Configuration -> Clusters -> 'Admission controller failure policy'",
+        ),
+        (
+            "Operator: in the SecuredCluster CR set spec.admissionControl.failurePolicy: Ignore (fail open).",
+            "Helm: set admissionControl.failurePolicy: Ignore in values-public.yaml, then run helm upgrade -n stackrox "
+            "stackrox-secured-cluster-services rhacs/secured-cluster-services --reuse-values "
+            "-f /config/yaml/values-public.yaml -f /config/yaml/values-private.yaml",
+            "Other install methods: portal Platform Configuration -> Clusters -> Secure a cluster -> Legacy "
+            "installation method -> Static configuration (requires deployment) -> Admission controller failure "
+            "policy: Fail open -> Next -> Finish, then redeploy the cluster. New roxctl bundles: "
+            "--admission-controller-fail-on-error=false (the default).",
+            "With fail open, a noncompliant deployment admitted after a timeout still meets RHACS's other deploy-stage "
+            "enforcement, such as scaling to zero replicas. Keep Fail where a CD tool is meant to own the enforcement.",
+        ),
+        knowledge=("rhacs-enforcement", "stackrox-admission"),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/common-scanner-warning-messages.adoc,
+        # modules/acs-secured-cluster-services-overview.adoc (who pulls images), modules/viewing-the-logs.adoc and
+        # modules/checking-image-scan-results.adoc.
+        "DBG-RHACS-SCANNER-REGISTRY",
+        "RHACS Scanner: Failed to retrieve metadata from the registry",
+        (r"Failed to retrieve metadata from the registry",),
+        (
+            "The registry is not reachable on the network, for example a firewall blocks docker.io. The Scanner V4 "
+            "Indexer pulls images itself; on OpenShift the Scanner-slim on each secured cluster scans images in the "
+            "integrated registry.",
+            "Authentication to the registry fails: the private registry or repository has no registry integration "
+            "with working credentials in RHACS.",
+        ),
+        ("oc logs -n stackrox <central_pod>   # the underlying registry error",),
+        (
+            "Let the scanner reach the registry through the firewall.",
+            "Create a registry integration with credentials for the private registry or repository (RHACS docs: "
+            "'Integrating with image registries').",
+            "Then scan again without Central's cache: roxctl image scan --image <image_name> --force",
+        ),
+        knowledge=("rhacs-secured-cluster-troubleshooting",),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/common-scanner-warning-messages.adoc.
+        "DBG-RHACS-SCANNER-CVE-DATA",
+        "RHACS Scanner: CVE DATA MAY BE INACCURATE (stale or missing OS CVE data)",
+        (
+            r"CVE DATA MAY BE INACCURATE",
+            r"Stale OS CVE data",
+            r"Unable to retrieve the OS CVE data",
+            r"only Language CVE data is available",
+            r"Failed to get the base OS information",
+            r"Image out of scope for Red\s?Hat Vulnerability Scanner Certification",
+        ),
+        (
+            "Stale OS CVE data: the image's base OS is end-of-life (Debian 8 and 9 are the examples given) and its "
+            "vendor no longer updates the vulnerability data.",
+            "Unable to retrieve the OS CVE data, only Language CVE data is available: Scanner does not officially "
+            "support the base OS, so OS-level packages get no CVE data.",
+            "Failed to get the base OS information: the image was scanned, but no base OS was found.",
+            "Image out of scope for Red Hat Vulnerability Scanner Certification: the image is old and outside the "
+            "certification scope.",
+        ),
+        ("Read the detail message shown with the CVE DATA MAY BE INACCURATE warning: it names one of the causes.",),
+        (
+            "Stale OS CVE data: the OS-level results stay stale while the image is built on the end-of-life release; "
+            "rebuild it on a base OS release that its vendor still updates.",
+            "Red Hat images out of certification scope: use a base image newer than June 2020.",
+        ),
+        knowledge=("rhacs-secured-cluster-troubleshooting",),
+        weight=1.6,
+    ),
+    Playbook(
+        # openshift/openshift-docs modules/unable-to-connect-to-the-sensor.adoc and
+        # modules/retrieving-the-logs-with-the-oc-or-kubectl-command.adoc.
+        "DBG-RHACS-COLLECTOR-SENSOR",
+        "RHACS Collector cannot connect to Sensor",
+        (
+            r"Unable to connect to Sensor at '[^'\n]{1,200}'",
+            r"Connected to Sensor\?\s{0,40}false",
+            r"\bcollector\b[^\n]{0,120}\b(?:cannot|can't|unable to|fails? to) (?:connect|reach)\b[^\n]{0,40}\bsensor\b",
+        ),
+        (
+            "Collector gets the kernel drivers and the CIDR blocks for network events from Sensor, so its startup "
+            "fails when it cannot reach Sensor.",
+            "Sensor did not start correctly (its pod is not Running with 1/1 READY).",
+            "The Sensor address in Collector's configuration (env GRPC_SERVER) does not match the sensor Service: "
+            "host name, namespace and port must all match.",
+        ),
+        (
+            "oc get pod <collector_pod_name> -n stackrox -o "
+            "jsonpath='{{.spec.containers[0].env[?(@.name==\"GRPC_SERVER\")].value}}'",
+            "oc get service sensor -n stackrox",
+            "oc get pods -n stackrox -l app=sensor   # must be Running, 1/1 READY",
+            "oc logs -n stackrox <collector_pod_name> collector   # add --previous for a restarting pod",
+        ),
+        (
+            "Sensor not running: find the reason in its pod events and logs and fix that first.",
+            "Endpoint mismatch: redeploy the secured cluster resources with the correct Sensor address.",
+            "Then restart Collector: oc delete pods -n stackrox -l app=collector, and check that the startup "
+            "diagnostics now report 'Connected to Sensor?' true.",
+        ),
+        knowledge=("rhacs-secured-cluster-troubleshooting",),
+        weight=1.6,
+    ),
+    Playbook(
+        # stackrox/stackrox pkg/defaults/policies/files/severity_important.json and cvss_7.json,
+        # roxctl/image/check/check.go, roxctl/deployment/check/check.go, roxctl/summaries/policy/policy_errors.go;
+        # openshift/openshift-docs modules/checking-images.adoc and modules/configure-policy-scope.adoc
+        # (Exclude images).
+        "DBG-RHACS-IMAGE-CHECK-FAILED",
+        "roxctl image check fails the build (failed policies found)",
+        (
+            r"Fixable Severity at least Important",
+            r"failed policies found: \d{1,6} policies violated that are failing the check",
+            r"Violated a policy with CI enforcement set",
+        ),
+        (
+            "The default policy 'Fixable Severity at least Important' is enabled with build enforcement "
+            "(FAIL_BUILD_ENFORCEMENT): any vulnerability rated Important or higher that already has a fixed version "
+            "makes roxctl image check exit non-zero.",
+            "Another violated policy has build-time enforcement (roxctl image check) or deploy-time enforcement "
+            "(roxctl deployment check); X in the BREAKS BUILD / BREAKS DEPLOY column marks it. With the deprecated "
+            "--json flag the error reads 'Violated a policy with CI enforcement set'.",
+        ),
+        (
+            "roxctl image check --image=<image_name>   # POLICY, SEVERITY, BREAKS BUILD, VIOLATION, REMEDIATION",
+            "roxctl image check --image=<image_name> --force   # re-pull metadata and scan results, skip the cache",
+            "roxctl deployment check --file=<yaml_filename>",
+        ),
+        (
+            "Update the affected packages to the fixed versions and rebuild (the policy's remediation), or agree a "
+            "mitigation with your security team.",
+            "For an accepted exception, add the image to the policy's Exclude images (it applies to Build-stage checks "
+            "only; cluster and namespace scope do not affect build-time policies).",
+        ),
+        knowledge=("rhacs-roxctl-ci",),
+        weight=1.6,
     ),
 )
 

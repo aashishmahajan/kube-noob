@@ -8,6 +8,9 @@ ruff check src tests scripts && ruff format --check src tests scripts && mypy &&
 Ground rules:
 - **Facts need sources.** Knowledge docs (`src/kube_noob/data/knowledge/*.md`) list their sources in front matter;
   catalog tables (`catalog.py`) cite the document they were verified against. No unverified version numbers.
+  `platforms` decides where a doc answers (an OpenShift- or ROSA-only doc needs the question to say so when no
+  platform is given); a doc whose words are broader than its subject declares `requires` (word groups, each needed),
+  as `k8s-compose-migration.md` does. Rerun `scripts/eval_questions.py --grades` after changing knowledge.
 - **Rule ids are a public contract** (graders, exercises and training rewards use them). Never renumber; add new ids.
 - **Generator output must audit clean** (`tests/test_generate.py`). Exercises must have a passing reference solution.
 - **No network at query time** unless guarded by `webEnabled`. Use `kube_noob.net.http_client` only.

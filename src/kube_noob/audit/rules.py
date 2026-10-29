@@ -152,7 +152,7 @@ def rule(
     return deco
 
 
-DNS1123_SUBDOMAIN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$")
+DNS1123_SUBDOMAIN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\Z")
 
 # =====================================================================================================
 # VALIDATE
@@ -596,15 +596,15 @@ SENSITIVE_ENV = re.compile(
     r"(PASS(WORD|WD)?|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL|ACCESS[_-]?KEY)", re.IGNORECASE
 )
 RUNTIME_SOCKETS = ("docker.sock", "containerd.sock", "crio.sock", "cri-dockerd.sock")
-# --password=x / --token x / password=x style arguments (group 1: dashes, group 3: inline value)
-_SECRET_FLAG = re.compile(
-    r"(?i)^(-{1,2})?([a-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|credentials?))"
-    r"(?:[=:](.+))?$"
-)
-_EMBEDDED_SECRET = re.compile(
+# --password=x / --token x / password=x style arguments (group 1: dashes, group 3: inline value). CREDENTIAL_FLAG_NAME
+# and EMBEDDED_CREDENTIAL are written for RE2 too: kube_noob.generate.policies puts them into admission CEL.
+CREDENTIAL_FLAG_NAME = r"[a-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|credentials?)"
+_SECRET_FLAG = re.compile(r"(?i)^(-{1,2})?(" + CREDENTIAL_FLAG_NAME + r")(?:[=:](.+))?$")
+EMBEDDED_CREDENTIAL = (
     r"://[^:/\s@]+:[^@/\s$]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"
     r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
 )
+_EMBEDDED_SECRET = re.compile(EMBEDDED_CREDENTIAL)
 
 
 def _is_reference(value: str) -> bool:
@@ -625,6 +625,13 @@ def _bare_secret_flag(arg: str) -> bool:
 def _containers(ctx: AuditContext) -> Iterator[tuple[Document, PodTemplate, ContainerRef]]:
     for d, pt in ctx.workloads():
         for c in containers(pt):
+            yield d, pt, c
+
+
+def _resource_containers(ctx: AuditContext) -> Iterator[tuple[Document, PodTemplate, ContainerRef]]:
+    """App and init containers: the API refuses resources on ephemeral (debug) containers, so they cannot be fixed."""
+    for d, pt in ctx.workloads():
+        for c in containers(pt, ephemeral=False):
             yield d, pt, c
 
 
@@ -1079,13 +1086,29 @@ def _s016(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 ESCALATION_VERBS = frozenset({"escalate", "bind", "impersonate"})
 
 
+WORKLOAD_RESOURCES = frozenset(
+    {
+        "pods",
+        "deployments",
+        "replicasets",
+        "statefulsets",
+        "daemonsets",
+        "jobs",
+        "cronjobs",
+        "replicationcontrollers",
+        "deploymentconfigs",
+    }
+)
+
+
 @rule(
     "KN-S017",
     "RBAC privilege-escalation paths",
     Stage.AUDIT,
     "rbac",
     Severity.HIGH,
-    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy and pod exec unless essential.",
+    "Remove escalate/bind/impersonate, cluster-wide secret reads, nodes/proxy, pod exec, ephemeral containers and "
+    "workload creation unless essential; where they are, enforce Pod Security restricted in that namespace.",
     "These permissions let a subject obtain more privileges than it was granted.",
     ("k8s-rbac-good-practices",),
 )
@@ -1103,6 +1126,26 @@ def _s017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 yield r.finding(d, ("rules", i, "resources"), "Grants exec/attach into pods.", severity=Severity.MEDIUM)
             if "nodes/proxy" in resources:
                 yield r.finding(d, ("rules", i, "resources"), "Grants nodes/proxy (kubelet API access).")
+            # Kubernetes RBAC good practices, "Workload creation" and "Persistent volume creation":
+            # https://github.com/kubernetes/website/blob/main/content/en/docs/concepts/security/rbac-good-practices.md
+            if resources & WORKLOAD_RESOURCES and verbs & {"create", "patch", "update", "*"}:
+                sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.MEDIUM
+                yield r.finding(
+                    d,
+                    ("rules", i, "resources"),
+                    f"Can create or change {', '.join(sorted(resources & WORKLOAD_RESOURCES))}: their pods can run as "
+                    "any ServiceAccount in the namespace and mount its Secrets and volumes.",
+                    severity=sev,
+                )
+            if "pods/ephemeralcontainers" in resources and verbs & {"patch", "update", "*"}:
+                yield r.finding(
+                    d,
+                    ("rules", i, "resources"),
+                    "Can add ephemeral containers to running pods: code runs in the pod, like exec.",
+                    severity=Severity.MEDIUM,
+                )
+            if "persistentvolumes" in resources and verbs & {"create", "*"}:
+                yield r.finding(d, ("rules", i, "resources"), "Can create PersistentVolumes, including hostPath.")
 
 
 @rule(
@@ -1656,7 +1699,7 @@ def _c003(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("No CPU request or memory limit specified",),
 )
 def _c004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    for d, _pt, c in _containers(ctx):
+    for d, _pt, c in _resource_containers(ctx):
         req = get_path(c.container, ("resources", "requests")) or {}
         missing = [k for k in ("cpu", "memory") if k not in req]
         if missing:
@@ -1675,7 +1718,7 @@ def _c004(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("No CPU request or memory limit specified",),
 )
 def _c005(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    for d, _pt, c in _containers(ctx):
+    for d, _pt, c in _resource_containers(ctx):
         if not get_path(c.container, ("resources", "limits", "memory")):
             yield r.finding(d, (*c.path, "resources"), f"Container '{c.name}' has no memory limit.")
 
@@ -1691,7 +1734,7 @@ def _c005(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("k8s-resources",),
 )
 def _c006(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    for d, _pt, c in _containers(ctx):
+    for d, _pt, c in _resource_containers(ctx):
         req = get_path(c.container, ("resources", "requests")) or {}
         lim = get_path(c.container, ("resources", "limits")) or {}
         for k in ("cpu", "memory", "ephemeral-storage"):
@@ -1841,6 +1884,50 @@ def _c012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 not get_path(c.container, ("resources", "requests", "cpu")) for c in containers(pt, include_init=False)
             ):
                 yield r.finding(h, ("spec", "metrics"), f"Target {d.ref()} has containers without CPU requests.")
+
+
+def _pull_secret_names(spec: object) -> list[str]:
+    refs = get_path(spec, ("imagePullSecrets",)) if isinstance(spec, dict) else None
+    return [str(x["name"]) for x in refs or [] if isinstance(x, dict) and x.get("name")]
+
+
+@rule(
+    "KN-C013",
+    "Pull secret exists only in another namespace",
+    Stage.VALIDATE,
+    "reliability",
+    Severity.HIGH,
+    "Create (or sync) the pull secret in the workload's namespace and link it to its ServiceAccount; on OpenShift put "
+    "a registry every project uses in the global pull secret, and grant system:image-puller for another project's "
+    "internal registry.",
+    "imagePullSecrets name Secrets in the pod's own namespace (LocalObjectReference): kubelet never looks in another "
+    "namespace, reports FailedToRetrieveImagePullSecret and the pull fails with ImagePullBackOff.",
+    ("k8s-images",),
+)
+def _c013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    secrets: dict[str, set[str]] = {}
+    for s in ctx.by_kind("Secret"):
+        if s.name:
+            secrets.setdefault(s.name, set()).add(ctx.ns(s))
+    if not secrets:
+        return  # the bundle carries no Secrets: nothing to compare with
+
+    def check(doc: Document, path: PathT, names: list[str]) -> Iterator[Finding]:
+        ns = ctx.ns(doc)
+        for i, name in enumerate(names):
+            elsewhere = secrets.get(name, set()) - {ns}
+            if elsewhere and ns not in secrets.get(name, set()):
+                yield r.finding(
+                    doc,
+                    (*path, "imagePullSecrets", i),
+                    f"Pull secret '{name}' is defined in namespace {', '.join(sorted(elsewhere))}, not in {ns}, "
+                    f"where kubelet looks for it.",
+                )
+
+    for d, pt in ctx.workloads():
+        yield from check(d, pt.path, _pull_secret_names(pt.spec))
+    for sa in ctx.by_kind("ServiceAccount"):
+        yield from check(sa, (), _pull_secret_names(sa.data))
 
 
 def run_rules(ctx: AuditContext, stages: set[Stage] | None = None) -> list[Finding]:

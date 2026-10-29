@@ -5,6 +5,9 @@ tags: [kubernetes, openshift, network, security]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [networkpolicy, networkpolicies, podselector, namespaceselector, policytypes]
 sources:
   - {title: "Network Policies", url: "https://kubernetes.io/docs/concepts/services-networking/network-policies/", license: CC-BY-4.0}
   - {title: "openshift-docs nw-networkpolicy-multitenant-isolation (main @10a3557)", url: "https://github.com/openshift/openshift-docs/blob/main/modules/nw-networkpolicy-multitenant-isolation.adoc", license: Apache-2.0}

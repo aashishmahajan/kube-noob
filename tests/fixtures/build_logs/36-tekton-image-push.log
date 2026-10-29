@@ -1,0 +1,11 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] [INFO] Tests run: 120, Failures: 0, Errors: 0, Skipped: 2
+[build : build] STEP 1/6: FROM registry.access.redhat.com/ubi9/nodejs-20:1-60
+[build : build] STEP 6/6: CMD ["npm", "start"]
+[build : build] COMMIT quay.io/acme/api:1.8.0
+[build : build] --> 5f70bf18a086
+[build : push] + buildah push registry.internal.acme.com/team/api:1.8.0
+[build : push] Getting image source signatures
+[build : push] Error: pushing image "registry.internal.acme.com/team/api:1.8.0" to "docker://registry.internal.acme.com/team/api:1.8.0": trying to reuse blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef at destination: pinging container registry registry.internal.acme.com: Get "https://registry.internal.acme.com/v2/": tls: failed to verify certificate: x509: certificate signed by unknown authority
+task build failed: "step-push" exited with code 125. Run tkn tr desc app-ci-run-x7k2p-02-build for more details

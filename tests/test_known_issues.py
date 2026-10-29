@@ -134,7 +134,10 @@ def test_real_errors_match_the_reported_issue(issue_id: str, text: str) -> None:
     top = out["matches"][0]
     assert top["id"] == issue_id
     assert top["url"].startswith("https://redhat.atlassian.net/browse/") and "openshift-docs" in top["source"]
-    assert len(top["sharedTerms"]) >= ki.MIN_RARE_TERMS
+    # Three rare shared words, or two with a strong score: words the bundled docs explain ("serving", "cert") are
+    # not evidence of one bug.
+    shared = len(top["sharedTerms"])
+    assert shared >= ki.MIN_RARE_TERMS or (shared >= 2 and top["score"] >= ki.STRONG_SCORE), top
 
 
 @pytest.mark.parametrize("text", NEGATIVE)
@@ -142,6 +145,19 @@ def test_generic_errors_never_match_a_reported_issue(text: str) -> None:
     out = ki.match(text, "openshift")
     assert out["matches"] == [], (text, [m["id"] for m in out["matches"]])
     assert "No reported issue" in out["note"]
+
+
+def test_an_error_quoted_word_for_word_from_a_known_issue_matches_it() -> None:
+    """The docs' example: the cloud error exactly as a user sees it, with two rare words and no "openshift" in it. A
+    run of seven words copied from the issue text, one of them rare, is evidence enough (red team, 2026-10-29)."""
+    q = "could not find any suitable subnets for creating the ELB"
+    out = ki.match(q, version="4.20.8")
+    assert [m["id"] for m in out["matches"]][:1] == ["OCPBUGS-57440"], out.get("note")
+    assert out["matches"][0]["exactError"] is True
+    assert ki.match("could not find any suitable subnets", version="4.20.8")["matches"] == []  # too short to quote
+    # Seven common words in a row are no quotation: every one of them is in many issues.
+    common = "after you update the cluster to the latest version the pods are not running"
+    assert ki.match(common, "openshift")["matches"] == []
 
 
 def test_version_filter_and_status_messages() -> None:

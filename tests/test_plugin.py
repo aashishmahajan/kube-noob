@@ -149,6 +149,18 @@ def test_bundle_reads_no_credentials_from_the_machine() -> None:
     assert found == {}
 
 
+def test_bundle_reads_no_host_system_files() -> None:
+    """The plugin directory's scan flags reads outside the plugin's own folders (it held 0.5.0 for /proc/sys/crypto)."""
+    paths = re.compile(r"[\"'](?:/proc/sys|/proc/self|/sys/(?:kernel|class|devices|fs)|~/\.kube|/var/run/secrets)")
+    found = {
+        path: m.group(0) for path, text in _bundled_text().items() if path.endswith(".py") and (m := paths.search(text))
+    }
+    assert found == {}
+    from kube_noob.posture import crypto_posture
+
+    assert crypto_posture()["fipsMode"] in {"on", "off", "unknown"}
+
+
 def test_bundle_has_no_download_and_execute_pattern() -> None:
     pattern = re.compile(
         r"(?i)\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b.{0,200}?\|.{0,40}?\b(sudo\s+)?(ba|z|da|k)?sh\b"
@@ -168,3 +180,16 @@ def test_bundle_names_no_credential_variables() -> None:
         if hits:
             found[path] = hits
     assert found == {}
+
+
+def test_the_plugin_ships_no_rhacs_central_reader() -> None:
+    """The RHACS comparison ships; the Central reader (the only code that reads its API token) does not."""
+    mods = _sync().plugin_modules(ROOT)
+    assert "kube_noob.rhacs" in mods and "kube_noob.rhacs_central" not in mods
+    assert not (PLUGIN / "server" / "kube_noob" / "rhacs_central.py").exists()
+
+
+def test_the_plugin_ships_build_log_diagnosis_but_not_the_image_audit() -> None:
+    mods = _sync().plugin_modules(ROOT)
+    assert "kube_noob.build.logs" in mods
+    assert not {"kube_noob.build.containerfile", "kube_noob.build.image", "kube_noob.build.oci"} & mods

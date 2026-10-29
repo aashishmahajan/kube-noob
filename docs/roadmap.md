@@ -1,9 +1,25 @@
-# Roadmap: enterprise self-help for Kubernetes and OpenShift
+# Roadmap: the ground truth for Kubernetes and OpenShift operations
 
 Goal: a platform team deploys kube-noob once. Every developer and SRE then gets answers that are safe, cited and
-read-only first, about their own clusters and their own runbooks, so the platform team's ticket queue shrinks.
-kube-noob has no AI inside: Claude, OpenShift Lightspeed or any MCP client does the talking, and the CLI works with no
-model at all. Updated 2026-10-28, after 0.5.0.
+read-only first, about their own clusters, their own runbooks and their own past fixes, so the platform team's ticket
+queue shrinks. kube-noob has no AI inside: Claude, OpenShift Lightspeed or any MCP client does the talking, and the
+CLI works with no model at all. Updated 2026-10-28, after 0.5.0.
+
+## Principles
+
+- **Models are the commodity layer.** kube-noob competes on what a model cannot supply: the team's own confirmed
+  fixes, deterministic checks, evidence in seconds, and what the network actually did.
+- **The verifier never acts.** Probes, server-side dry-runs, ticket writes and the gate are separate tiers, off by
+  default, each action approved by a person.
+- **Ship fetchers, not data.** Red Hat Jira tickets, customer tickets and team memory stay where they were fetched;
+  they are never bundled, published or exported to datasets.
+- **Signals over prose.** Alert names, event reasons, condition reasons and error templates are the join key between
+  an error, a known issue and a past fix; text search is the fallback.
+- **Land where AI is banned.** Disconnected and regulated OpenShift first; every feature also works on ROSA, EKS, AKS,
+  GKE and upstream Kubernetes.
+
+North star: time from an alert or a must-gather to an evidence pack, offline. Target: 60 seconds. Also tracked:
+memory hit rate and tickets answered without escalation.
 
 ## Who it serves
 
@@ -40,62 +56,37 @@ model at all. Updated 2026-10-28, after 0.5.0.
 | OpenShift Helm catalog (community) submission | Not started: needs the owner's fork and pull requests ([openshift-catalog.md](openshift-catalog.md)) | after 0.2.2 |
 | Admission under a real `restricted-v2` SCC in CI | At risk: needs an OpenShift cluster for CI | Next |
 
-## Now (0.6.0): lightweight wins that reuse what exists
+## The program (milestones in build order)
 
-Each reuses the existing rules, playbooks and counters. None needs new infrastructure or a model.
-
-| Capability | Why it matters | Effort |
+| Milestone | What ships | Why |
 |---|---|---|
-| Known issues for Kubernetes too (OpenShift release notes and Red Hat Jira are done): Kubernetes changelogs | "Is this a known bug, and which version fixes it?" is the first question on every escalation | Medium |
-| `audit --format sarif` plus a GitHub Action and a pre-commit hook | Findings show as code-scanning alerts on the pull request: the cheapest way into every team's workflow | Small |
-| Runbook links: map playbook and rule ids to the company's own URLs (`runbooks.yaml`) | Answers point at "our runbook for this", in the company's terms | Small |
-| `upgrade-check --to 4.22`: removed APIs, DeploymentConfig, Pod Security and SCC changes for the target version | Every OpenShift upgrade starts with this question | Small |
-| `report`: the 10 problems hit most this week, from the id-only counters; a `/metrics` endpoint with the same counts | The platform team fixes root causes (a default, a doc, a quota) instead of tickets | Small |
-| `lightspeed-config`: print the OLSConfig snippet and Secret commands for this install | Removes the most error-prone setup step | Small |
-| `diagnose --brief`: one cause, one read-only command | Fits a chat reply or a glance at the terminal | Small |
+| M1 Signal-keyed matching | Signal extraction (alerts, event and condition reasons, error templates), a verified signal catalogue, known-issue matching on signals with a recall gate | Plain words miss bugs the release notes describe differently (an etcd leader-change question misses OCPBUGS-73881) |
+| M2 Fixes-as-code memory | Reviewed YAML entries in the team's Git, `kube-noob memory` (validate as the poisoning guard, match, outcomes, stats), memory in every answer | The team's own confirmed fixes are the moat no model can copy |
+| M3 Ticket seeding and replay | Offline ServiceNow and Jira importers, `memory replay` with a 30% useful-match gate | Tests the riskiest assumption on real tickets before more is built on it |
+| M4 Must-gather pre-flight | Safe ingest, analysers, report and case draft, a custom must-gather image | The fastest path to evidence on a disconnected cluster |
+| M5 Evidence breadth | Operator release notes, installed-operator inventory, Kubernetes and RHACS known issues, Jira matches filtered by what the cluster runs | Most escalations are about operators, not the core |
+| M6 Network truth | Flow readers (OVN ACL log, Hubble, Network Observability), a pcap analyser, probe and capture plans, `net verify` | "Policy says allowed, packets say dropped" |
+| M7 Verifier hardening | Prompt-injection sanitiser, server-side dry-run (tier D), blast radius | Text from clusters and tickets reaches models; checks must hold under attack |
+| M8 Integrations without AI | Alertmanager receiver, SARIF and CI surfaces, Argo CD, chat commands, console plugin, REST API, `oc kube-noob`, runbook links, `report` and `/metrics` | Reach people where they already work |
+| M9 Proactive | Upgrade pre-mortem, offline what-if | Prevent the ticket instead of answering it |
+| M10 Optional AI layer | Egress log, pre-send preview, admin model controls, provider docs, bench with and without tools | For teams that bring their own key: see exactly what leaves |
+| M11 kube-noob gate | An MCP proxy: kube-noob gate checks agent tool calls, holds writes for approval and keeps a tamper-evident log | The verifier position, without ever acting itself |
+| M12 Governance | Identity in audit records, OSCAL, read as caller, a signed air-gap corpus pack | What regulated buyers need; candidates for an enterprise edition ([editions.md](editions.md)) |
 
-## Next
+Frozen (kept and tested, no new features): learner tracks and credits, brand videos. The grader and
+`kube-noob train bench` stay as an evaluation product: they score any model or MCP client against the same tasks.
+The trained-model track is cut: kube-noob stays model-free and makes every model better through its tools.
 
-1. **Org policy packs.** Teams add audit rules in YAML ("images only from registry.acme.com", "label team= required").
-2. **Runbooks in the in-cluster service.** An init container indexes a Git repo or ConfigMap of runbooks at start.
-3. **Air-gapped corpus pack.** A signed corpus bundle to mirror into disconnected clusters with the image.
-4. **`oc kube-noob` plugin** (krew-style), so `oc kube-noob diagnose pod/api` works where people already are.
-5. **Regulated environments.** Caller identity in every audit record and per-user authorization behind the OAuth
-   proxy; OSCAL assessment results from `audit`; the FedRAMP 20x Key Security Indicator mapping; a FIPS-mode CI
-   runner ([compliance.md](compliance.md)).
-
-## Later: bigger bets
-
-1. **Answers scoped to the caller's own permissions.** Pass the caller's OpenShift identity (oauth-proxy or
-   Lightspeed's client token) and read the cluster as that user. This is the main blocker for multi-tenant clusters;
-   until then the chart reads only its own namespace plus `rbac.namespaces`.
-2. **Single sign-on for the HTTP service** (an oauth-proxy option in the chart).
-3. **OperatorHub** (Software Catalog) operator bundle, once the Helm community listing has users.
-
-Set aside: Slack or Teams bots (Lightspeed and Claude already give the chat surface), embeddings (BM25 with term joins
-passes the self-test, 24 of 25 on unseen paraphrases), a hosted SaaS (it conflicts with the no-egress promise), and a
-model inside the kube-noob package (a trained model ships separately: next section).
-
-## Trained-model track (proposed)
-
-A model trained on kube-noob's rules, playbooks, known issues and the team's approved fixes ships as its own signed
-artifact, served on OpenShift AI and used by OpenShift Lightspeed, with kube-noob as its MCP tools. kube-noob itself
-stays model-free. Each phase ships only when its gate passes.
-
-| Phase | Ships | Gate |
-|---|---|---|
-| 0.3 | Known-issue matching (OpenShift done), knowledge date on every answer (done), policy debugging (done) | Every match cites a Red Hat or upstream page; no false matches on the evaluation set |
-| 0.4 | Chart registers kube-noob in `OLSConfig` (`MCPServer` gate); approved team fixes and runbooks from Git or a ConfigMap, read-only to callers | Lightspeed passes the 61-question selftest through the tools on a test cluster |
-| 0.5 | Training pipeline on OpenShift AI from `kube-noob train export`; runs in the model registry; scored with the reward, selftest and safety checks | Beats the base model on the frozen set; no answer changes the cluster first |
-| 0.6 | Signed ModelCar image and model card; KServe + vLLM `InferenceService`; `OLSConfig` points at it | Installs on a disconnected cluster within the agreed latency |
-| 1.0 | Approved fixes feed scheduled retraining; weekly top-issues report | No regression on the frozen set; a person approves each model release |
+Set aside: embeddings (unless an evaluation shows signals plus BM25 fail), a hosted SaaS (conflicts with the
+no-egress promise), Backstage beyond a design doc, and live outage signals from social or status feeds (conflicts with
+the offline default).
 
 ## Riskiest assumptions and the cheapest test
 
 | Assumption | Cheapest test |
 |---|---|
-| Platform teams will let an OSS tool server into the cluster | Show `doctor`, PRIVACY.md and SECURITY.md to two OpenShift admins; ask what blocks approval |
+| Team memory gets reused often enough to matter | `kube-noob memory replay` on one team's last 50 resolved tickets and the 4 weeks after: at least 30% useful matches |
+| Platform teams will let an OSS tool server into the cluster | Show `doctor`, PRIVACY.md and SECURITY.md to two OpenShift admins; ask what blocks approval and whether they would enable probes and dry-runs |
 | Developers will ask it before opening a ticket | Turn on the Lightspeed integration for one team; compare ticket counts for the top 5 categories over 4 weeks |
-| BM25 over their runbooks is good enough | Run `selftest` plus 20 questions written by the team against their own `add-docs` corpus |
 | Read-as-caller is possible without new infrastructure | Prototype with oauth-proxy's `--pass-access-token` on a test cluster |
-| "No AI inside" reads as a strength, not a gap | Post two headlines a week apart ("No AI inside. Works with yours." and "The Kubernetes rulebook your AI is missing") and compare click-through to the repo |
+| "No AI inside" reads as a strength, not a gap | Post two headlines a week apart ("No AI inside. Works with yours." and "The ground truth your AI SRE checks against") and compare click-through to the repository |

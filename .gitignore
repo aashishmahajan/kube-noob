@@ -8,10 +8,13 @@ __pycache__/
 coverage.xml
 htmlcov/
 dist/
-build/
+/build/
 *.egg-info/
 .env
 .env.*
 /corpus-out/
 /out/
 *.local.yaml
+/_site/
+site/node_modules/
+/.cache/

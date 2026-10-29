@@ -1,0 +1,12 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: legacy
+  namespace: shop
+spec:
+  host: legacy.apps.example.com
+  to:
+    kind: Service
+    name: legacy
+  port:
+    targetPort: 8080

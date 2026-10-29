@@ -1,0 +1,310 @@
+# Golden questions: helm. Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository); graded against kube-noob by an
+# independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
+- id: helm-001
+  technology: helm
+  kind: error
+  question: 'Our CI step helm repo add bitnami https://charts.bitnami.com/bitnami worked for months. After a Helm upgrade
+    it fails with "Error: repository name (bitnami) already exists, please specify a different name". Why, and how do I make
+    the step idempotent?'
+  answer: Since Helm 3.3.2, adding a repo name that already exists is an error (a breaking change made for a security fix).
+    Pass --force-update to overwrite the existing entry (the old --no-update flag is now ignored), or choose a different repo
+    name.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/faq/troubleshooting.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/faq/troubleshooting/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-HELM-REPO-EXISTS
+- id: helm-002
+  technology: helm
+  kind: error
+  question: 'helm rollback myapp 1 fails with "Error: no ConfigMap with the name "myconfig" found". Revision 2 removed that
+    ConfigMap, but that upgrade failed partway through. What is going on?'
+  answer: Older Helm 3 releases expect the resource's metadata in revision 1's history, but revision 2 removed it while the
+    failed upgrade left the object in the cluster. Newer Helm 3 releases use the live cluster state as the baseline, so upgrade
+    your helm client and retry.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/faq/troubleshooting.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/faq/troubleshooting/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#4'
+- id: helm-003
+  technology: helm
+  kind: error
+  question: 'helm install --dry-run --debug fails with "error converting YAML to JSON: yaml: line 9: did not find expected
+    key". My ConfigMap template has an {{ if }} block that adds a mug: "true" line indented four spaces. Why does it break?'
+  answer: 'Template tags leave their surrounding whitespace, so the conditional line renders indented deeper than its sibling
+    keys, which is invalid YAML. Align that line with its siblings and use whitespace chomping ({{- if ... }} and {{- end
+    }}) to remove the blank lines.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/chart_template_guide/control_structures.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/chart_template_guide/control_structures/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-HELM-YAML
+- id: helm-004
+  technology: helm
+  kind: error
+  question: 'We upgraded the cluster to a version that dropped apps/v1beta1. Now helm upgrade on an old release fails with
+    "Error: UPGRADE FAILED: current release manifest contains removed kubernetes api(s)" for kind Deployment, though the new
+    chart already uses apps/v1. How do we recover?'
+  answer: 'Helm cannot diff against the stored manifest, which uses removed APIs. Repair the stored release with the mapkubeapis
+    plugin, or by hand: decode the release Secret/ConfigMap, fix the apiVersions, re-encode and apply it, then helm upgrade.
+    Next time, update releases before upgrading the cluster.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/topics/kubernetes_apis.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/topics/kubernetes_apis/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-HELM-REMOVED-API
+- id: helm-005
+  technology: helm
+  kind: error
+  question: 'I created a chart for shared helpers and set type: library in Chart.yaml. helm install mylib ./mylib says "Error:
+    library charts are not installable". How am I supposed to use it?'
+  answer: 'That is by design: a library chart defines no deployable templates. Add it as a dependency of an application chart
+    and call its named templates from that chart''s templates, then install the application chart instead.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/topics/library_charts.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/topics/library_charts/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#2'
+- id: helm-006
+  technology: helm
+  kind: error
+  question: 'After adding a named template that prints .Chart.Name in labels, helm install --dry-run fails with "unknown object
+    type "nil" in ConfigMap.metadata.labels.chart". Rendering with --disable-openapi-validation shows empty chart and version
+    values. I call it as {{ template "mychart.labels" }}. What is wrong?'
+  answer: 'The template call passes no scope, so inside the named template the dot is empty and .Chart.Name and .Chart.Version
+    resolve to nothing. Pass the context explicitly: {{ template "mychart.labels" . }}.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/chart_template_guide/named_templates.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/chart_template_guide/named_templates/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-templates-values#2'
+- id: helm-007
+  technology: helm
+  kind: error
+  question: 'helm install of my chart fails because a ConfigMap it creates was applied earlier by hand with kubectl. The message
+    says "resource already exists and is not owned by this release". Can Helm adopt the object instead of me deleting it?'
+  answer: Yes. Helm refuses to touch objects that lack its ownership labels and annotations (such as app.kubernetes.io/managed-by).
+    Rerun helm install or helm upgrade with --take-ownership to adopt them, and check the result with --dry-run first.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/topics/advanced.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/topics/advanced/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-troubleshooting#1'
+- id: helm-008
+  technology: helm
+  kind: error
+  question: 'I commented out a line in my template with a #, but helm template still fails with "Error: execution error at
+    (templates/test.yaml:2:13): maxMem must be set". The commented line calls required. Why does a comment still run?'
+  answer: 'A YAML # comment is not a Helm comment: the template engine still evaluates the {{ }} actions inside it, so required
+    still fires. Wrap the block in a template comment such as {{- /* ... */ -}} so it is never rendered.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/chart_best_practices/templates.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/chart_best_practices/templates/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#4'
+- id: helm-009
+  technology: helm
+  kind: howto
+  question: On our build agents the home directory is read-only. How do I make Helm keep its cache, config and data somewhere
+    else?
+  answer: Helm uses the XDG layout, so set XDG_CACHE_HOME, XDG_CONFIG_HOME and XDG_DATA_HOME to the locations you want. Existing
+    repositories do not move with them, so re-add them with helm repo add.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/faq/installing.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/faq/installing/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#6'
+- id: helm-010
+  technology: helm
+  kind: howto
+  question: We migrated from Helm 2 and now helm list shows only some of our releases, or none, although everything is still
+    running. Where did they go?
+  answer: Helm 3 scopes releases to namespaces. Pass -n for the release's namespace, rely on the current namespace of your
+    kube context (see kubectl config view --minify), or run helm list -A to cover all namespaces. The same applies to helm
+    uninstall and other release commands.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/faq/troubleshooting.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/faq/troubleshooting/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-templates-values#6'
+- id: helm-011
+  technology: helm
+  kind: howto
+  question: How do I set a nodeSelector with the key kubernetes.io/role and value master using --set, without Helm splitting
+    the key at the dot?
+  answer: 'Escape the dots with a backslash and quote the key: --set nodeSelector."kubernetes\.io/role"=master. A backslash
+    also escapes commas in values, for example --set name=value1\,value2.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/intro/using_helm.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/intro/using_helm/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#0'
+- id: helm-012
+  technology: helm
+  kind: howto
+  question: When upgrading to a newer chart version I want to start from that chart's built-in values, re-apply the values
+    from my last release, and add one more --set. Which flag does that?
+  answer: '--reset-then-reuse-values: it resets to the values built into the chart, applies the last release''s values, then
+    merges overrides from -f and --set. Do not combine it with --reset-values or --reuse-values, which take precedence and
+    make it ignored.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/helm/helm_upgrade.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/helm/helm_upgrade/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-templates-values#1'
+- id: helm-013
+  technology: helm
+  kind: howto
+  question: 'I ran helm push ./mychart oci://registry.example.com/charts/mychart:0.1.0 and it was rejected. How do I publish
+    a chart to an OCI registry correctly?'
+  answer: 'Package first with helm package to get mychart-0.1.0.tgz, log in with helm registry login, then run helm push mychart-0.1.0.tgz
+    oci://registry.example.com/charts. The reference needs oci:// but no chart name or tag; both come from Chart.yaml. Some
+    registries need the repository created first.'
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/topics/registries.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/topics/registries/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#1'
+- id: helm-014
+  technology: helm
+  kind: concept
+  question: What changed in how Helm 3 computes upgrades and rollbacks compared to Helm 2, and why does it matter if someone
+    ran kubectl scale on a Helm-managed Deployment?
+  answer: Helm 2 diffed only the old and new chart manifests, ignoring live changes. Helm 3 builds a three-way strategic merge
+    patch from the old manifest, the live state and the new manifest, so a rollback restores replicas to 3 even if someone
+    scaled the live Deployment to 0.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/faq/changes_since_helm2.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/faq/changes_since_helm2/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-cli-operations#5'
+- id: helm-015
+  technology: helm
+  kind: concept
+  question: I edited a CRD file in my chart's crds/ directory and ran helm upgrade, but the CRD in the cluster did not change.
+    Is that a bug? What are Helm 3's rules for CRDs?
+  answer: By design. CRDs in crds/ must be plain, untemplated YAML and are installed before the rest of the chart, on install
+    only. Helm never reinstalls, upgrades or deletes them, since deleting a CRD wipes all its custom resources. Upgrade or
+    remove CRDs manually and carefully.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/topics/charts.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/topics/charts/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#0'
+- id: helm-016
+  technology: helm
+  kind: concept
+  question: My chart has a pre-install Job hook. What happens if that Job fails, and why is the Job still there after helm
+    uninstall?
+  answer: Helm waits for Job and Pod hooks to finish, and a failed hook fails the release. Hook resources are not tracked
+    as part of the release, so uninstall does not remove them. Use a helm.sh/hook-delete-policy annotation (the default is
+    before-hook-creation) or a Job TTL to clean up.
+  source:
+    repo: helm/helm-www
+    path: versioned_docs/version-3/topics/charts_hooks.md
+    commit: e5a4c621283c8551426adce8cb27a2cc3f402ea8
+    url: 'https://helm.sh/docs/v3/topics/charts_hooks/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:helm-chart-authoring#1'
+- id: helm-017
+  technology: helm
+  kind: out-of-scope
+  question: 'Flux''s HelmRelease for my chart reports "install retries exhausted" in the helm-controller logs. Which fields
+    of the HelmRelease spec should I change?'
+  answer: 'Outside this assistant''s scope: this is a Flux (GitOps toolkit, HelmRelease and helm-controller) question, not
+    Helm CLI troubleshooting.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: helm-018
+  technology: helm
+  kind: out-of-scope
+  question: In helmfile.yaml, how do I define per-environment values.gotmpl files and select them with --environment? helmfile
+    sync keeps using the default environment.
+  answer: 'Outside this assistant''s scope: this is Helmfile (a separate declarative wrapper tool) configuration, not Helm
+    itself.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: helm-019
+  technology: helm
+  kind: out-of-scope
+  question: 'My Go web service using html/template panics with "nil pointer evaluating interface {}.Title" when it renders
+    a page. How do I guard that field in the template?'
+  answer: 'Outside this assistant''s scope: this is Go''s html/template used in application code, not a Helm chart template.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: helm-020
+  technology: helm
+  kind: out-of-scope
+  question: My Chart.js bar chart in a React dashboard does not redraw when the values array changes. How do I update the
+    dataset?
+  answer: 'Outside this assistant''s scope: this is the Chart.js JavaScript library in application code, not Helm charts.'
+  source: {}
+  outOfScope: true
+  status: abstain

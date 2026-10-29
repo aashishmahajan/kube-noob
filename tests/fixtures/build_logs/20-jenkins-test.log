@@ -1,0 +1,17 @@
+Started by an SCM change
+Running as SYSTEM
+Building on the built-in node in workspace /var/lib/jenkins/workspace/billing-build
+The recommended git tool is: NONE
+No credentials specified
+ > git rev-parse --resolve-git-dir /var/lib/jenkins/workspace/billing-build/.git # timeout=10
+Checking out Revision 1f2e3d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e (refs/remotes/origin/main)
+[billing-build] $ /bin/sh -xe /tmp/jenkins8123456789.sh
++ go test ./...
+ok  	github.com/acme/billing/internal/invoice	0.031s
+=== RUN   TestRetryBackoff
+    backoff_test.go:42: got 400ms, want 200ms
+--- FAIL: TestRetryBackoff (0.00s)
+FAIL
+FAIL	github.com/acme/billing/internal/retry	0.012s
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE

@@ -110,6 +110,32 @@ SOURCES: dict[str, Citation] = {
         "https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer",
         "CC-BY-4.0",
     ),
+    "docker-best-practices": Citation(
+        "docker-best-practices",
+        "Docker - Building best practices (pin base images, apt lists, pipes, USER, multi-stage builds)",
+        "https://docs.docker.com/build/building/best-practices/",
+        "Apache-2.0",
+    ),
+    "docker-secrets-arg-env": Citation(
+        "docker-secrets-arg-env",
+        "Docker build checks - SecretsUsedInArgOrEnv",
+        "https://docs.docker.com/reference/build-checks/secrets-used-in-arg-or-env/",
+        "Apache-2.0",
+    ),
+    "docker-build-secrets": Citation(
+        "docker-build-secrets",
+        "Docker - Build secrets (secret mounts)",
+        "https://docs.docker.com/build/building/secrets/",
+        "Apache-2.0",
+    ),
+    "rh-arbitrary-uid": Citation(
+        "rh-arbitrary-uid",
+        "Red Hat Developer - Adapting Docker and Kubernetes containers to run on OpenShift (arbitrary user ids, "
+        "group 0)",
+        "https://developers.redhat.com/blog/2020/10/26/adapting-docker-and-kubernetes-containers-to-run-on-red-hat-"
+        "openshift-container-platform",
+        "link only",
+    ),
     "ocp-scc": Citation(
         "ocp-scc",
         "OpenShift - Managing security context constraints",

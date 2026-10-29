@@ -114,7 +114,9 @@ class Watcher:
                 }
                 for d in denials[:3]
             ]
-        known = known_issue_match(text, self.platform, self.version, 2, self.settings.data_dir)["matches"]
+        known = known_issue_match(text, self.platform, self.version, 2, self.settings.data_dir, require_context=True)[
+            "matches"
+        ]
         if known:
             keep = ("id", "url", "status", "kind", "verdict", "fixedIn", "workaround")  # kind: known, fixed or ticket
             out["knownIssues"] = [{k: m[k] for k in keep if m.get(k) is not None} for m in known]

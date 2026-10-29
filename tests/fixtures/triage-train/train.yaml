@@ -1,0 +1,1465 @@
+# Training set for cause-level tuning (2026-10-28): 171 questions written by an agent that saw only each playbook's
+# root causes (one typed question, one pasted error and one forum-style post per cause), labelled with playbook and
+# cause index. Cause patterns and symptom signals are tuned on this set only; tests/fixtures/triage is the held-out set.
+#   python scripts/eval_triage.py --dir tests/fixtures/triage-train
+- id: crashloop-0t1
+  playbook: DBG-CRASHLOOP
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My pod restarts every few seconds and kubectl logs just shows a stack trace complaining about a missing config value. How do I work out what it wants at startup?
+- id: crashloop-0t2
+  playbook: DBG-CRASHLOOP
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl logs api-7c9d8f6b5-x2kqp -n payments --previous
+    FATAL: required environment variable STRIPE_WEBHOOK_SECRET is empty
+    $ kubectl get pod api-7c9d8f6b5-x2kqp -n payments
+    NAME                   READY   STATUS             RESTARTS      AGE
+    api-7c9d8f6b5-x2kqp    0/1     CrashLoopBackOff   6 (48s ago)   4m
+- id: crashloop-0t3
+  playbook: DBG-CRASHLOOP
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    Flask app CrashLoopBackOff after Helm upgrade, exit code 1
+    After upgrading the chart the new pod starts, prints "Running alembic upgrade head", then dies about a second later with sqlalchemy.exc.ProgrammingError: relation "users" already exists. The previous release was fine and I have not touched the image. I tried deleting the pod and scaling to zero and back, same result every time.
+- id: crashloop-1t1
+  playbook: DBG-CRASHLOOP
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Spring Boot pod gets restarted over and over and the events say "Liveness probe failed: connection refused", but if I run the jar locally it comes up after a minute or so. Why does k8s keep killing it?
+- id: crashloop-1t2
+  playbook: DBG-CRASHLOOP
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  3m12s (x9 over 5m)  kubelet  Liveness probe failed: Get "http://10.131.0.44:8080/actuator/health": dial tcp 10.131.0.44:8080: connect: connection refused
+    Normal   Killing    3m12s (x3 over 5m)  kubelet  Container orders failed liveness probe, will be restarted
+    Is the app broken or is it the probe?
+- id: crashloop-1t3
+  playbook: DBG-CRASHLOOP
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Java service never gets past ~RESTARTS 8 and I cannot see a crash in the logs
+    The log just stops mid-startup (Hibernate is still initialising) and then the container is restarted. Exit code is 143, not an error. It needs roughly 90 seconds on a cold node. The deployment has a liveness check on /health with initialDelaySeconds 20 that I copied from another service.
+- id: crashloop-2t1
+  playbook: DBG-CRASHLOOP
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    My container dies with OOMKilled almost the moment it starts, before it serves a single request. The limit is 256Mi. What should I check first?
+- id: crashloop-2t2
+  playbook: DBG-CRASHLOOP
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       OOMKilled
+      Exit Code:    137
+      Started:      Tue, 27 Oct 2026 09:14:02 +0000
+      Finished:     Tue, 27 Oct 2026 09:14:05 +0000
+    Restart Count:  11
+- id: crashloop-2t3
+  playbook: DBG-CRASHLOOP
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Node.js worker in CrashLoopBackOff, 137 three seconds after launch
+    On boot the worker loads a big lookup file into memory and primes some caches, then it gets killed immediately. Never reaches the point where it opens its port, so there are no application logs at all. Describe says Reason: OOMKilled. It runs fine on my laptop with no limits.
+- id: crashloop-3t1
+  playbook: DBG-CRASHLOOP
+  cause: 3
+  kind: typed
+  platform: openshift
+  text: |
+    On OpenShift my image runs fine with docker run but crashes in my project with "Permission denied" when it tries to write to /var/cache/nginx. Why is it only broken here?
+- id: crashloop-3t2
+  playbook: DBG-CRASHLOOP
+  cause: 3
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc logs deploy/legacy-app
+    mkdir: cannot create directory '/var/lib/app/data': Permission denied
+    $ oc get pod legacy-app-5d7f9-abcde -o yaml | grep -E 'scc|runAsUser'
+        openshift.io/scc: restricted-v2
+        runAsUser: 1000680000
+- id: crashloop-3t3
+  playbook: DBG-CRASHLOOP
+  cause: 3
+  kind: post
+  platform: openshift
+  text: |
+    Postgres container works on my laptop, CrashLoopBackOff on OpenShift 4.14
+    I took our docker-compose stack to a new OpenShift project. The database pod prints "initdb: error: could not change permissions of directory" and exits. The Dockerfile has USER postgres (uid 999) and nothing special is configured on the deployment. Other teams' pods in the same cluster are fine.
+- id: crashloop-4t1
+  playbook: DBG-CRASHLOOP
+  cause: 4
+  kind: typed
+  platform: null
+  text: |
+    What does CrashLoopBackOff actually mean? Is it an error itself, or just a status, and why does the wait between restarts keep getting longer?
+- id: crashloop-4t2
+  playbook: DBG-CRASHLOOP
+  cause: 4
+  kind: pasted
+  platform: null
+  text: |
+    NAME                    READY   STATUS             RESTARTS        AGE
+    worker-6b8d5c7f9-qh2lw  0/1     CrashLoopBackOff   14 (3m52s ago)  52m
+    Warning  BackOff  2m (x210 over 52m)  kubelet  Back-off restarting failed container worker
+    How long can that back-off get, and when does the counter start over?
+- id: crashloop-4t3
+  playbook: DBG-CRASHLOOP
+  cause: 4
+  kind: post
+  platform: null
+  text: |
+    Is CrashLoopBackOff a reason or a symptom?
+    I keep reading "pod is in CrashLoopBackOff" in tickets as if it were the root cause. When I describe the pod the restart delay seems to be growing, 10s then 20s then more. Can someone explain what the kubelet is doing in that state and whether a pod that finally stays up gets its delay reset?
+- id: imagepull-0t1
+  playbook: DBG-IMAGEPULL
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Pod is in ImagePullBackOff for nginx:1.25.99 and the event says "manifest unknown". Is the tag wrong or is the registry down?
+- id: imagepull-0t2
+  playbook: DBG-IMAGEPULL
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Failed to pull image "registry.example.com/team/web-frontend:v2.3.1": rpc error: code = NotFound desc = failed to pull and unpack image "registry.example.com/team/web-frontend:v2.3.1": failed to resolve reference: registry.example.com/team/web-frontend:v2.3.1: not found
+    Error: ErrImagePull
+- id: imagepull-0t3
+  playbook: DBG-IMAGEPULL
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    Deployment worked yesterday, ImagePullBackOff today with no manifest changes
+    Same YAML, same registry credentials, but the new replicas can't pull ghcr.io/acme/billing:1.8.0-rc2. The registry UI shows a cleanup job ran last night. Pods that were already running keep going fine, only freshly scheduled ones fail.
+- id: imagepull-1t1
+  playbook: DBG-IMAGEPULL
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Pulling from our private Harbor gives "unauthorized: authentication required" inside the cluster, yet docker pull works on my laptop after docker login. What am I missing?
+- id: imagepull-1t2
+  playbook: DBG-IMAGEPULL
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Failed to pull image "harbor.corp.example/finance/ledger:2.0": failed to authorize: failed to fetch anonymous token: unexpected status: 401 Unauthorized
+    Service Account:  default
+    Image Pull Secrets: <none>
+- id: imagepull-1t3
+  playbook: DBG-IMAGEPULL
+  cause: 1
+  kind: post
+  platform: openshift
+  text: |
+    quay.io private repo, I made the secret but pods still get unauthorized
+    On OpenShift 4.13 I ran oc create secret docker-registry quay-cred with a robot account token, and it shows up in oc get secrets in my project. The deployment still ends in ImagePullBackOff with "unauthorized: access to the requested resource is not authorized". I have not changed anything on the service account.
+- id: imagepull-2t1
+  playbook: DBG-IMAGEPULL
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Lots of pods suddenly fail to start with "toomanyrequests: You have reached your pull rate limit" from docker.io, but everything pulled fine this morning. Why?
+- id: imagepull-2t2
+  playbook: DBG-IMAGEPULL
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    Failed to pull image "bitnami/redis:7.2": rpc error: code = Unknown desc = failed to copy: httpReadSeeker: failed open: unexpected status code https://registry-1.docker.io/v2/bitnami/redis/manifests/sha256:9f2c...: 429 Too Many Requests - Server message: toomanyrequests: You have reached your unauthenticated pull rate limit.
+- id: imagepull-2t3
+  playbook: DBG-IMAGEPULL
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Rolling restart of 40 nodes' worth of daemonsets stuck in ErrImagePull
+    We drained and replaced the whole node pool overnight. Now every node pulls the same handful of public images (busybox, alpine, fluentd) from Docker Hub and half of them fail with 429. We never log in to Docker Hub from the cluster. Retrying later sometimes works.
+- id: imagepull-3t1
+  playbook: DBG-IMAGEPULL
+  cause: 3
+  kind: typed
+  platform: null
+  text: |
+    Pod stuck in ErrImagePull with "x509: certificate signed by unknown authority" when pulling from our internal registry. Docker on my machine is fine. What is different on the nodes?
+- id: imagepull-3t2
+  playbook: DBG-IMAGEPULL
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Failed to pull image "registry.corp.internal:5000/platform/api:4.2": rpc error: code = Unknown desc = pinging container registry registry.corp.internal:5000: Get "https://registry.corp.internal:5000/v2/": tls: failed to verify certificate: x509: certificate signed by unknown authority
+- id: imagepull-3t3
+  playbook: DBG-IMAGEPULL
+  cause: 3
+  kind: post
+  platform: rosa-hcp
+  text: |
+    ROSA HCP private cluster, nothing can pull from quay.io or our ECR
+    New private ROSA HCP cluster with no public subnets. Any pod using an external image sits in ImagePullBackOff and describe shows "dial tcp 52.x.x.x:443: i/o timeout". Pods using images from the internal registry are fine. I can curl quay.io from a bastion in the same VPC.
+- id: imagepull-4t1
+  playbook: DBG-IMAGEPULL
+  cause: 4
+  kind: typed
+  platform: null
+  text: |
+    My pod pulled the image successfully but then crashes with "exec format error". Is that an image pull problem, and why does it only happen on the cluster?
+- id: imagepull-4t2
+  playbook: DBG-IMAGEPULL
+  cause: 4
+  kind: pasted
+  platform: null
+  text: |
+    Normal   Pulled   8s   kubelet   Successfully pulled image "myorg/worker:1.0" in 4.1s
+    Warning  BackOff  3s   kubelet   Back-off restarting failed container
+    $ kubectl logs worker-0
+    exec /usr/local/bin/worker: exec format error
+    (image built on an M2 MacBook, nodes are m5.large)
+- id: imagepull-4t3
+  playbook: DBG-IMAGEPULL
+  cause: 4
+  kind: post
+  platform: null
+  text: |
+    Is this ImagePullBackOff or something else? Image pulls but container will not run
+    I built the image with a plain docker build on my Apple Silicon laptop and pushed it to our registry. The pull completes, but the container exits at once and logs "exec format error". Same Dockerfile built by CI works on the same cluster. I assumed a bad registry layer and re-pushed twice.
+- id: imagepull-5t1
+  playbook: DBG-IMAGEPULL
+  cause: 5
+  kind: typed
+  platform: null
+  text: |
+    I built myapp:latest with docker build on my laptop and deployed it to minikube, but the pod shows ErrImagePull. Docker images lists it, so why can't Kubernetes find it?
+- id: imagepull-5t2
+  playbook: DBG-IMAGEPULL
+  cause: 5
+  kind: pasted
+  platform: null
+  text: |
+    Failed to pull image "myapp": rpc error: code = Unknown desc = Error response from daemon: pull access denied for myapp, repository does not exist or may require 'docker login'
+    Warning  Failed  kubelet  Error: ErrImagePull
+    $ docker images | grep myapp
+    myapp   latest   3f1c9a7be2d4   2 minutes ago   187MB
+- id: imagepull-5t3
+  playbook: DBG-IMAGEPULL
+  cause: 5
+  kind: post
+  platform: null
+  text: |
+    kind cluster ErrImagePull for an image that exists locally
+    Following a tutorial I ran docker build -t demo-api . and then kubectl create deployment demo --image=demo-api. The pod goes straight to ErrImagePull then ImagePullBackOff, saying the repository does not exist. I never pushed it anywhere because I thought local was enough. Where is the cluster even looking?
+- id: pullsecret-0t1
+  playbook: DBG-PULLSECRET
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    The event says FailedToRetrieveImagePullSecret for regcred, but kubectl get secret regcred -n default shows it sitting right there. My pod is in the staging namespace. What is going on?
+- id: pullsecret-0t2
+  playbook: DBG-PULLSECRET
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedToRetrieveImagePullSecret  12s (x4 over 70s)  kubelet  Unable to retrieve some image pull secrets (regcred); attempting to pull the image may not succeed.
+    $ kubectl get secret -A | grep regcred
+    shared-infra   regcred   kubernetes.io/dockerconfigjson   1   3d
+- id: pullsecret-0t3
+  playbook: DBG-PULLSECRET
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    One registry secret for the whole cluster, pods in other teams' namespaces can't see it
+    I created a dockerconfigjson secret once in a "platform" namespace and referenced it with imagePullSecrets in all our Deployments, across about ten namespaces. The pods outside platform show a warning that the pull secret can't be retrieved and then fall back to anonymous pulls and fail. kubectl get secret in platform proves it exists.
+- id: pullsecret-1t1
+  playbook: DBG-PULLSECRET
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My ServiceAccount app-sa lists imagePullSecrets gitlab-registry but pods warn that the secret can't be retrieved. I think I created it with a different name. How do I check what is actually there?
+- id: pullsecret-1t2
+  playbook: DBG-PULLSECRET
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get sa builder-sa -n ci -o jsonpath='{.imagePullSecrets}'
+    [{"name":"ecr-cred"}]
+    $ kubectl get secrets -n ci
+    NAME               TYPE                             DATA   AGE
+    ecr-credentials    kubernetes.io/dockerconfigjson   1      6d
+    Warning  FailedToRetrieveImagePullSecret  kubelet  Unable to retrieve some image pull secrets (ecr-cred)
+- id: pullsecret-1t3
+  playbook: DBG-PULLSECRET
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Helm chart renames my registry secret and now pulls warn about a missing secret
+    Our chart used to create a secret called regcred. After a refactor the secret template is named {{ .Release.Name }}-registry, but the Deployment (and the ServiceAccount we patch in a post-install hook) still point at the old name. The pod events complain it cannot retrieve the pull secret. The release itself installed cleanly.
+- id: pullsecret-2t1
+  playbook: DBG-PULLSECRET
+  cause: 2
+  kind: typed
+  platform: openshift
+  text: |
+    On OpenShift my deployment in project web pulls from image-registry.openshift-image-registry.svc:5000/builds/app and gets unauthorized. Do I need a pull secret for another project's internal registry images?
+- id: pullsecret-2t2
+  playbook: DBG-PULLSECRET
+  cause: 2
+  kind: pasted
+  platform: openshift
+  text: |
+    Failed to pull image "image-registry.openshift-image-registry.svc:5000/ci-builds/backend:1.4": rpc error: code = Unknown desc = reading manifest 1.4 in image-registry.openshift-image-registry.svc:5000/ci-builds/backend: unauthorized: authentication required
+    Warning  FailedToRetrieveImagePullSecret  kubelet  Unable to retrieve some image pull secrets (builds-pull)
+    $ oc project
+    Using project "prod" on server "https://api.cluster.example:6443".
+- id: pullsecret-2t3
+  playbook: DBG-PULLSECRET
+  cause: 2
+  kind: post
+  platform: openshift
+  text: |
+    Pull from ImageStream in a different project fails, I tried copying a pull secret
+    Our pipeline builds into the ci-builds project and I deploy from project prod using the same internal registry. The pod ends in ImagePullBackOff with unauthorized, and since the docs mention pull secrets I added an imagePullSecrets entry named after the secret that lives in ci-builds. Now the event also says the pull secret can't be retrieved. I would rather not hand out a user token.
+- id: oom-0t1
+  playbook: DBG-OOM
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My Java container gets OOMKilled at a 512Mi limit even though the app config says -Xmx2g from the old VM days. How do JVM heap settings and container limits interact?
+- id: oom-0t2
+  playbook: DBG-OOM
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Last State:     Terminated
+      Reason:       OOMKilled
+      Exit Code:    137
+    Limits:
+      memory:  512Mi
+    Requests:
+      memory:  256Mi
+    $ kubectl top pod inventory-5f8c-zx2k
+    inventory-5f8c-zx2k   310m   509Mi
+- id: oom-0t3
+  playbook: DBG-OOM
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    Node.js API killed with 137 on the cluster, fine on my 16GB laptop
+    No leaks as far as I can tell: RSS plateaus after a while and then the container dies with OOMKilled once traffic picks up. The pod has a 300Mi memory limit that I set to be safe. Process runs with default flags. Memory in `docker stats` locally peaks around 700MB on the same workload.
+- id: oom-1t1
+  playbook: DBG-OOM
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Memory of my pod climbs steadily for hours and then it gets OOMKilled, restart count goes up about every six hours. Grafana shows a sawtooth. Where do I look?
+- id: oom-1t2
+  playbook: DBG-OOM
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl top pod session-svc-7d9c5b6f4-lm8vn --containers
+    09:00  session-svc  41m   212Mi
+    12:00  session-svc  44m   604Mi
+    15:00  session-svc  47m   1011Mi
+    Last State: Terminated  Reason: OOMKilled  Exit Code: 137  (limit 1Gi)
+- id: oom-1t3
+  playbook: DBG-OOM
+  cause: 1
+  kind: post
+  platform: openshift
+  text: |
+    Python service on OpenShift gets OOMKilled every few hours, memory never goes down
+    Traffic is flat, but the working set grows by ~100Mi per hour until the pod hits its limit and restarts. The app keeps a dict of user lookups in memory to avoid hitting the database. I raised the limit from 1Gi to 2Gi and it simply took twice as long to die. Using the OpenShift console metrics tab to watch it.
+- id: oom-2t1
+  playbook: DBG-OOM
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    A worker node log shows "Out of memory: Killed process" for random containers, and several pods on it have no memory limits at all. The node even went NotReady for a bit. What should I look at?
+- id: oom-2t2
+  playbook: DBG-OOM
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    Warning  SystemOOM  node/ip-10-0-45-12.ec2.internal  System OOM encountered, victim process: java, pid: 28811
+    kernel: Out of memory: Killed process 28811 (java) total-vm:9437184kB, anon-rss:7340032kB, oom_score_adj:1000
+    $ kubectl get pods -A -o json | jq '.items[] | select(.spec.containers[].resources.limits==null) | .metadata.name' | wc -l
+    37
+- id: oom-2t3
+  playbook: DBG-OOM
+  cause: 2
+  kind: post
+  platform: openshift
+  text: |
+    OpenShift worker keeps flapping NotReady, dmesg full of oom-killer lines
+    On OCP 4.15 one of our workers goes NotReady every few hours and kernel logs show the oom killer shooting kubelet-adjacent processes and application containers. The containers killed are mixed (logging sidecars, a batch job, a cache). Nobody on the team set requests or limits on the batch namespace, the pods show QoS BestEffort. No single pod shows OOMKilled in its own status.
+- id: configerr-0t1
+  playbook: DBG-CONFIGERR
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Pod is stuck in CreateContainerConfigError and describe says secret "db-credentials" not found, but I'm sure I created it. What can cause that?
+- id: configerr-0t2
+  playbook: DBG-CONFIGERR
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Failed  4s (x5 over 52s)  kubelet  Error: couldn't find key DB_PASSWORD in Secret prod/db-credentials
+    NAME                  READY   STATUS                       RESTARTS   AGE
+    checkout-6c4d-9fkx2   0/1     CreateContainerConfigError   0          1m
+- id: configerr-0t3
+  playbook: DBG-CONFIGERR
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    CreateContainerConfigError after promoting from dev to prod project
+    I exported my Deployment from the dev project with oc get -o yaml and applied it in prod. The pod now sits in CreateContainerConfigError with Error: configmap "app-settings" not found. In dev everything is running and I can see the configmap there. oc get cm in prod shows only the ones OpenShift adds itself.
+- id: configerr-1t1
+  playbook: DBG-CONFIGERR
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    CreateContainerConfigError: "container has runAsNonRoot and image will run as root". The Dockerfile says USER appuser, so why does it think root?
+- id: configerr-1t2
+  playbook: DBG-CONFIGERR
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Failed  kubelet  Error: container has runAsNonRoot and image has non-numeric user (appuser), cannot verify user is non-root (pod: "reports-7bd9c8f5d-kq4tz_analytics(5a1e...)", container: reports)
+- id: configerr-1t3
+  playbook: DBG-CONFIGERR
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Hardened securityContext broke my pod: CreateContainerConfigError
+    Our security team asked for runAsNonRoot: true on every workload. I added it to the pod spec for a vendor image and now the pod never starts, with "image will run as root" in the events. I did not set any runAsUser. The vendor docs say nothing about users. Other apps with the same securityContext are fine.
+- id: configerr-2t1
+  playbook: DBG-CONFIGERR
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Pod fails with CreateContainerConfigError "failed to prepare subPath for volumeMount". I'm mounting one file from a ConfigMap into /etc/app/. What does that mean?
+- id: configerr-2t2
+  playbook: DBG-CONFIGERR
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Failed  7s (x3 over 30s)  kubelet  Error: failed to prepare subPath for volumeMount "nginx-conf" of container "web"
+    volumeMounts:
+    - name: nginx-conf
+      mountPath: /etc/nginx/conf.d/site.conf
+      subPath: site.conf
+    configMap:
+      name: web-config
+- id: configerr-2t3
+  playbook: DBG-CONFIGERR
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    subPath mount on a Secret key won't create the container
+    I want one file, tls.key, from a Secret to appear at /opt/app/certs/server.key without hiding the rest of the directory, so I used subPath. The pod now stays in CreateContainerConfigError. I may have renamed the key in the Secret last week when I regenerated it. The Secret itself exists and is in the same namespace.
+- id: invalid-utf8-0t1
+  playbook: DBG-INVALID-UTF8
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Pod sits in CreateContainerError with "string field contains invalid UTF-8" as soon as I expose a Secret value as an environment variable. Why would the runtime care what is in my secret?
+- id: invalid-utf8-0t2
+  playbook: DBG-INVALID-UTF8
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Failed  9s (x3 over 40s)  kubelet  Error: failed to create containerd task: rpc error: code = Internal desc = error unmarshalling request: string field contains invalid UTF-8
+    NAME                   READY   STATUS                 RESTARTS   AGE
+    gateway-5d6b8c-wq7tl   0/1     CreateContainerError   0          45s
+- id: invalid-utf8-0t3
+  playbook: DBG-INVALID-UTF8
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    Secret works when mounted as a file but not via envFrom
+    I put a JKS keystore password-protected blob into a Secret and pointed the container at it with env valueFrom secretKeyRef. The pod never gets past CreateContainerError and kubectl describe shows a gRPC unmarshalling error about invalid UTF-8. The same secret key mounted as a volume is readable. The value came out of a script that does base64 on an already encoded string, if that matters.
+- id: invalid-utf8-1t1
+  playbook: DBG-INVALID-UTF8
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    After we upgraded our node image, the same Secret that has worked for a year now gives an "invalid UTF-8" error on the new nodes only, and old nodes still run the pods. Did the container runtime change something?
+- id: invalid-utf8-1t2
+  playbook: DBG-INVALID-UTF8
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get nodes -o wide
+    NAME        STATUS  VERSION  CONTAINER-RUNTIME
+    node-a-01   Ready   v1.33.4  containerd://2.1.4
+    node-a-02   Ready   v1.33.4  containerd://2.1.4
+    node-b-01   Ready   v1.34.1  containerd://2.2.0
+    Pods with secretKeyRef on node-b-01: Error: error unmarshalling request: string field contains invalid UTF-8
+- id: invalid-utf8-1t3
+  playbook: DBG-INVALID-UTF8
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Same manifest, different result depending on which node the pod lands on
+    We are rolling a new managed node group. Pods scheduled on the new nodes fail to create the container with an unmarshalling error mentioning UTF-8; if I cordon the new nodes and delete the pod it starts fine on the old ones. The Secret is identical in both cases and nothing about the Deployment changed. Only difference I found is the runtime version in kubectl get nodes -o wide.
+- id: invalid-utf8-2t1
+  playbook: DBG-INVALID-UTF8
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Our RHACS collector pods are in CrashLoopBackOff and the log says String field 'storage.ProcessSignal.args' contains invalid UTF-8 data. Is this known?
+- id: invalid-utf8-2t2
+  playbook: DBG-INVALID-UTF8
+  cause: 2
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc logs ds/collector -c collector -n stackrox --previous
+    [ERROR] Failed to send message: String field 'storage.ProcessSignal.args' contains invalid UTF-8 data.
+    $ oc get pods -n stackrox | grep collector
+    collector-8m2xn   2/3   CrashLoopBackOff   17 (2m ago)   1h
+    RHACS 4.5.2
+- id: invalid-utf8-2t3
+  playbook: DBG-INVALID-UTF8
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Collector DaemonSet keeps dying on a couple of nodes after upgrading to 4.5
+    Since the upgrade of our secured cluster the collector pod on two worker nodes crashes every few minutes, while the rest are healthy. Logs show a protobuf complaint about process arguments not being valid UTF-8. These two nodes run a legacy batch service that passes odd binary arguments on the command line. I have not found a setting to ignore it.
+- id: pending-resources-0t1
+  playbook: DBG-PENDING-RESOURCES
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My pod stays Pending with "0/6 nodes are available: 6 Insufficient cpu". The cluster looks mostly idle on the dashboard. What does the scheduler actually compare?
+- id: pending-resources-0t2
+  playbook: DBG-PENDING-RESOURCES
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedScheduling  41s  default-scheduler  0/4 nodes are available: 2 Insufficient memory, 2 node(s) had untolerated taint {dedicated: gpu}. preemption: 0/4 nodes are available: 2 No preemption victims found for incoming pod, 2 Preemption is not helpful for scheduling.
+    Requests: cpu 2, memory 24Gi
+- id: pending-resources-0t3
+  playbook: DBG-PENDING-RESOURCES
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    New Elasticsearch statefulset pods Pending on OpenShift: Insufficient memory
+    Three workers with 16 GiB each. I asked for 12Gi memory per replica and the first replica scheduled, but the second and third are Pending with Insufficient memory on every node. oc adm top nodes shows each node using only around 5 GiB. Not using any quota in this project as far as I can see.
+- id: pending-resources-1t1
+  playbook: DBG-PENDING-RESOURCES
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    A tiny Go API pod is Pending with Insufficient cpu even though a similar pod in another namespace shows only about 20m CPU usage. I copied the resources block from a blog post. Why won't it schedule?
+- id: pending-resources-1t2
+  playbook: DBG-PENDING-RESOURCES
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedScheduling  default-scheduler  0/3 nodes are available: 3 Insufficient cpu.
+    resources:
+      requests:
+        cpu: "4"
+        memory: 8Gi
+    $ kubectl top pod healthz-echo
+    healthz-echo-7c5   18m   14Mi
+- id: pending-resources-1t3
+  playbook: DBG-PENDING-RESOURCES
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Dev cluster full of Pending pods but utilization is under 10%
+    Our little cluster has 3 nodes with 4 vCPU each. Nodes show barely any real load, but every new microservice we add goes Pending with Insufficient cpu. All the services were generated from a shared template that came with fixed numbers for requests. kubectl describe node says allocated resources are above 90% for CPU.
+- id: pending-resources-2t1
+  playbook: DBG-PENDING-RESOURCES
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Pods are Pending for lack of memory and I expected the cluster to add a node, but nothing is happening. How do I find out why it is not scaling up?
+- id: pending-resources-2t2
+  playbook: DBG-PENDING-RESOURCES
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    Normal   NotTriggerScaleUp  18s  cluster-autoscaler  pod didn't trigger scale-up: 1 max node group size reached
+    Warning  FailedScheduling   35s  default-scheduler   0/8 nodes are available: 8 Insufficient cpu.
+- id: pending-resources-2t3
+  playbook: DBG-PENDING-RESOURCES
+  cause: 2
+  kind: post
+  platform: openshift
+  text: |
+    OpenShift MachineAutoscaler not adding workers, pods Pending
+    We run OCP on AWS with a ClusterAutoscaler and a MachineAutoscaler on our worker MachineSet. A burst of pods came in, they stay Pending with Insufficient cpu, and oc get machineset shows the same number of replicas as before. I do not see any new Machine objects either. Not sure whether the autoscaler is even running.
+- id: pvc-pending-0t1
+  playbook: DBG-PVC-PENDING
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    My PVC asks for ReadWriteMany on gp3-csi and just stays Pending. The same claim with ReadWriteOnce binds right away. Why?
+- id: pvc-pending-0t2
+  playbook: DBG-PVC-PENDING
+  cause: 0
+  kind: pasted
+  platform: openshift
+  text: |
+    Warning  ProvisioningFailed  persistentvolumeclaim/shared-data  failed to provision volume with StorageClass "gp3-csi": rpc error: code = InvalidArgument desc = Volume capabilities not supported
+    $ oc get pvc shared-data
+    NAME          STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+    shared-data   Pending                                      gp3-csi        6m
+- id: pvc-pending-0t3
+  playbook: DBG-PVC-PENDING
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    Ceph RBD PVC with RWX never binds
+    Several replicas of our web app need to read and write the same uploads directory, so I requested a 20Gi claim with ReadWriteMany from the ceph-rbd storage class (filesystem mode). It has been Pending for an hour with a provisioning failure about unsupported capabilities. A ReadWriteOnce claim from the same class works fine.
+- id: pvc-pending-1t1
+  playbook: DBG-PVC-PENDING
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    PVC stuck Pending with 'storageclass.storage.k8s.io "fast-ssd" not found'. I copied the manifest from a colleague's cluster. What do I need?
+- id: pvc-pending-1t2
+  playbook: DBG-PVC-PENDING
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl describe pvc data-redis-0
+    Status:        Pending
+    Events:
+      Warning  ProvisioningFailed  persistentvolume-controller  no persistent volumes available for this claim and no storage class is set
+    $ kubectl get sc
+    No resources found
+- id: pvc-pending-1t3
+  playbook: DBG-PVC-PENDING
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Helm chart PVCs hang forever on my bare-metal cluster
+    I installed a Bitnami chart on kubeadm nodes in my homelab. All claims are Pending and describe says there is no storage class set, nothing to bind to. On cloud clusters I have used the same chart and it just worked without any storage settings. What is different here?
+- id: pvc-pending-2t1
+  playbook: DBG-PVC-PENDING
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    My PVC says "waiting for first consumer to be created before binding" and stays Pending. Is it broken?
+- id: pvc-pending-2t2
+  playbook: DBG-PVC-PENDING
+  cause: 2
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc get pvc
+    NAME        STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+    pg-data     Pending                                      gp3-csi        3m
+    Normal  WaitForFirstConsumer  persistentvolumeclaim/pg-data  waiting for first consumer to be created before binding
+- id: pvc-pending-2t3
+  playbook: DBG-PVC-PENDING
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Created a PVC to test the storage class, it just says Pending
+    I applied a 5Gi claim on a new EKS cluster using the default gp2 class, just to check provisioning works before deploying the app. Ten minutes later kubectl get pvc still shows Pending and the only event is a Normal one about a consumer. No pod exists yet. Should I be worried?
+- id: pvc-pending-3t1
+  playbook: DBG-PVC-PENDING
+  cause: 3
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    On ROSA HCP my PVC using an EFS storage class stays Pending and the event mentions it could not find the driver efs.csi.aws.com. Do I have to install something first?
+- id: pvc-pending-3t2
+  playbook: DBG-PVC-PENDING
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Warning  ProvisioningFailed  persistentvolumeclaim/media  failed to provision volume with StorageClass "efs-sc": rpc error: code = Unauthenticated desc = Access Denied: User: arn:aws:sts::123456789012:assumed-role/csi-controller-role/1700000000 is not authorized to perform: elasticfilesystem:CreateAccessPoint
+- id: pvc-pending-3t3
+  playbook: DBG-PVC-PENDING
+  cause: 3
+  kind: post
+  platform: null
+  text: |
+    PVC on a fresh cluster waits on "external provisioner" forever
+    The storage class names a CSI provisioner (ebs.csi.aws.com) but the claim just says "waiting for a volume to be created, either by external provisioner ebs.csi.aws.com or manually created by system administrator". I do not see any ebs-csi pods anywhere. I built the cluster with kubeadm on EC2 instances and added the storage class by hand.
+- id: mount-0t1
+  playbook: DBG-MOUNT
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Pod stuck in ContainerCreating with FailedMount saying secret "tls-certs" not found. What should I check?
+- id: mount-0t2
+  playbook: DBG-MOUNT
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedMount  14s (x7 over 2m)  kubelet  MountVolume.SetUp failed for volume "tls-certs" : secret "tls-certs" not found
+    Warning  FailedMount  8s                kubelet  Unable to attach or mount volumes: unmounted volumes=[tls-certs], unattached volumes=[tls-certs kube-api-access-x7g2h]: timed out waiting for the condition
+- id: mount-0t3
+  playbook: DBG-MOUNT
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    ContainerCreating forever after moving app to a new OpenShift project
+    I recreated the Deployment in a fresh project and the pod is stuck at ContainerCreating. oc describe pod lists FailedMount for a configmap volume called app-config: configmap "app-config" not found. The same manifest ran fine in the old project. I applied every file in the repo with oc apply -f deploy/.
+- id: mount-1t1
+  playbook: DBG-MOUNT
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My container gets "permission denied" writing to the mounted PVC at /data even though the volume mounts fine. Running as uid 1001. What decides who owns the volume files?
+- id: mount-1t2
+  playbook: DBG-MOUNT
+  cause: 1
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc logs mongodb-0
+    {"msg":"Error creating data directory","error":"mkdir /data/db: permission denied"}
+    $ oc rsh mongodb-0 id
+    uid=1000710000(1000710000) gid=0(root) groups=0(root),1000710000
+    $ oc rsh mongodb-0 ls -ld /data
+    drwxr-xr-x. 3 root root 4096 Oct 20 08:15 /data
+- id: mount-1t3
+  playbook: DBG-MOUNT
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Non-root app can't write to its persistent volume on plain Kubernetes
+    The image runs as user 1000 and mounts an EBS-backed PVC at /var/lib/app. At startup it gets EACCES creating files, and ls shows the mount point owned by root:root with mode 755. If I run the same image as root it works. Same chart on our old cluster with NFS did not have this problem, ownership was already right there.
+- id: mount-2t1
+  playbook: DBG-MOUNT
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    After I turned on readOnlyRootFilesystem in the securityContext my app crashes with "Read-only file system" writing to /tmp, even though a data volume is mounted elsewhere. How do I find which paths it writes?
+- id: mount-2t2
+  playbook: DBG-MOUNT
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    nginx: [emerg] mkdir() "/var/cache/nginx/client_temp" failed (30: Read-only file system)
+    securityContext:
+      readOnlyRootFilesystem: true
+    volumeMounts:
+    - name: html
+      mountPath: /usr/share/nginx/html
+- id: mount-2t3
+  playbook: DBG-MOUNT
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Hardened Spring Boot image fails with java.io.IOException: Read-only file system
+    Following our security baseline I set readOnlyRootFilesystem: true on the container and mounted an emptyDir at /var/log/app because that is where logs go. The pod starts but the first request throws a Tomcat error about creating a temp dir. Everything worked before the baseline change.
+- id: mount-3t1
+  playbook: DBG-MOUNT
+  cause: 3
+  kind: typed
+  platform: null
+  text: |
+    My pods using an EFS volume hang in ContainerCreating with "mount.nfs: Connection timed out". The file system exists and I can see it in the AWS console. Where do I look?
+- id: mount-3t2
+  playbook: DBG-MOUNT
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Warning  FailedMount  1m  kubelet  MountVolume.SetUp failed for volume "efs-pv" : rpc error: code = Internal desc = Could not mount "fs-0a1b2c3d:/" at "/var/lib/kubelet/pods/.../mount": mount failed: exit status 32
+    Output: Failed to resolve "fs-0a1b2c3d.efs.eu-west-1.amazonaws.com" - check that your file system ID is correct.
+- id: mount-3t3
+  playbook: DBG-MOUNT
+  cause: 3
+  kind: post
+  platform: null
+  text: |
+    NFS PV mounts from my laptop but not from the cluster nodes
+    The nfs-server is reachable from the office network and showmount works. In the cluster, pods that mount the PV stay in ContainerCreating, and kubelet logs say "mount.nfs: Connection timed out" after a couple of minutes. The cluster runs in a cloud VPC and the NFS server is an EC2 instance in a different subnet.
+- id: probe-0t1
+  playbook: DBG-PROBE
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Readiness probe keeps failing with "HTTP probe failed with statuscode: 404" but the app is clearly serving requests. What could be mismatched?
+- id: probe-0t2
+  playbook: DBG-PROBE
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  5s (x12 over 1m)  kubelet  Readiness probe failed: HTTP probe failed with statuscode: 404
+    readinessProbe:
+      httpGet:
+        path: /healthz
+        port: http
+    ports:
+    - name: web
+      containerPort: 8080
+- id: probe-0t3
+  playbook: DBG-PROBE
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    Pod never becomes Ready though curl from inside the pod returns 200
+    I exec into the container and curl localhost:3000/health returns {"status":"ok"} immediately. kubectl describe still lists Readiness probe failed with connection refused and the pod sits at 0/1. I recently changed the container's listen port from 8080 to 3000, and I think I updated the Service for it.
+- id: probe-1t1
+  playbook: DBG-PROBE
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Probe says "connection refused" on the pod IP but curl localhost inside the container works. Why would the kubelet not be able to reach it?
+- id: probe-1t2
+  playbook: DBG-PROBE
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  kubelet  Liveness probe failed: Get "http://10.244.1.17:5000/health": dial tcp 10.244.1.17:5000: connect: connection refused
+    $ kubectl exec api-7f9d-hk2q4 -- ss -ltn
+    LISTEN 0 128 127.0.0.1:5000  0.0.0.0:*
+- id: probe-1t3
+  playbook: DBG-PROBE
+  cause: 1
+  kind: post
+  platform: openshift
+  text: |
+    Dev server works in oc rsh but probes fail on OpenShift
+    My Node app was started with the framework's default dev settings and the deployment in my project keeps restarting due to failed liveness probes. From oc rsh I can wget http://localhost:8080/ok and get a 200. Using the pod IP from oc get pod -o wide gives connection refused.
+- id: probe-2t1
+  playbook: DBG-PROBE
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    My readiness probe flaps with "context deadline exceeded (Client.Timeout exceeded while awaiting headers)" under load, though the app is up. Why would it time out?
+- id: probe-2t2
+  playbook: DBG-PROBE
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  22s (x31 over 14m)  kubelet  Readiness probe failed: Get "http://10.0.3.41:8080/ready": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+    $ time curl -s localhost:8080/ready
+    {"db":"ok","redis":"ok","upstream":"ok"}
+    real 0m2.314s
+- id: probe-2t3
+  playbook: DBG-PROBE
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Pods drop out of the Service every few minutes, probe timeouts only
+    The /health route of our API runs a quick query against Postgres and calls a downstream payment service before it answers. Usually it replies in about 800ms. During busier periods the kubelet reports timeouts and the pod flips between Ready and NotReady, causing 503s. The default probe settings are still on the Deployment.
+- id: probe-3t1
+  playbook: DBG-PROBE
+  cause: 3
+  kind: typed
+  platform: null
+  text: |
+    My app needs about three minutes to load its cache at boot and the probes start failing before it is ready. Is there a proper way to give it time without making the regular probes sluggish?
+- id: probe-3t2
+  playbook: DBG-PROBE
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Unhealthy  2m10s (x6 over 3m)  kubelet  Startup probe failed: HTTP probe failed with statuscode: 503
+    Normal   Killing    1m40s              kubelet  Container indexer failed startup probe, will be restarted
+    startupProbe:
+      httpGet: {path: /ready, port: 8080}
+      failureThreshold: 3
+      periodSeconds: 10
+- id: probe-3t3
+  playbook: DBG-PROBE
+  cause: 3
+  kind: post
+  platform: openshift
+  text: |
+    Legacy WebSphere-ish app restarts forever on OpenShift, it just starts slowly
+    The container needs around 4 minutes before the HTTP port is open. I set initialDelaySeconds to 30 on the readiness and liveness checks but it still gets restarted on the third failure. Raising the delay to 240 would work but then a real hang takes ages to detect once the pod is up. Is there a better approach?
+- id: no-endpoints-0t1
+  playbook: DBG-NO-ENDPOINTS
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    kubectl get endpoints for my service shows <none>, but the pods are Running and Ready. What could make a Service not pick them up?
+- id: no-endpoints-0t2
+  playbook: DBG-NO-ENDPOINTS
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get svc web -o jsonpath='{.spec.selector}'
+    {"app":"web-frontend"}
+    $ kubectl get pods --show-labels
+    web-5c7d9b8f6-ab12c   1/1   Running   0   9m   app=webfrontend,pod-template-hash=5c7d9b8f6
+    $ kubectl get endpoints web
+    NAME   ENDPOINTS   AGE
+    web    <none>      9m
+- id: no-endpoints-0t3
+  playbook: DBG-NO-ENDPOINTS
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    Route returns "Application is not available" and the service has no endpoints
+    On OpenShift I exposed my service with oc expose and the Route gives the 503 error page. oc get endpoints shows nothing for the service, though the deployment has 2/2 pods up. I renamed some labels in the Deployment template last week to follow a company standard, but I didn't change anything about the service.
+- id: no-endpoints-1t1
+  playbook: DBG-NO-ENDPOINTS
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My Service shows no endpoints while the pods are Running but 0/1 READY. Does the Service ignore pods that are not ready?
+- id: no-endpoints-1t2
+  playbook: DBG-NO-ENDPOINTS
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl get pods -l app=cart
+    NAME                  READY   STATUS    RESTARTS   AGE
+    cart-6d5f8b9c7-8xk2p  0/1     Running   0          4m
+    $ kubectl get endpoints cart -o yaml
+    subsets:
+    - notReadyAddresses:
+      - ip: 10.128.2.31
+        targetRef: {kind: Pod, name: cart-6d5f8b9c7-8xk2p}
+- id: no-endpoints-1t3
+  playbook: DBG-NO-ENDPOINTS
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Service has no endpoints after enabling a readiness check
+    I added a readinessProbe against /ready to the Deployment, and since then the Service sends traffic nowhere and ingress returns 503. Labels and selector look the same as before, I diffed them. Pods are shown as Running. Deleting and recreating the Service made no difference.
+- id: no-endpoints-2t1
+  playbook: DBG-NO-ENDPOINTS
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Service has a targetPort of "http" but kubectl get endpoints is empty although labels match and the pod is Ready. Where does the name come from?
+- id: no-endpoints-2t2
+  playbook: DBG-NO-ENDPOINTS
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    spec:
+      ports:
+      - port: 80
+        targetPort: http
+      selector:
+        app: reports
+    containers:
+    - name: reports
+      ports:
+      - containerPort: 8080
+    $ kubectl get endpoints reports
+    NAME      ENDPOINTS   AGE
+    reports   <none>      14m
+- id: no-endpoints-2t3
+  playbook: DBG-NO-ENDPOINTS
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Switched Service to named targetPort and traffic stopped
+    I wanted the service to follow whatever the container exposes, so I changed targetPort from 8080 to the string metrics-api, which I thought I'd seen in the Deployment. Now the Service has an empty endpoint list even though pods are Running and Ready and the selector is identical. Curling the pod IP directly works.
+- id: stackrox-admission-0t1
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    kubectl apply is rejected with 'admission webhook "policyeval.stackrox.io" denied the request' and a policy name. Which policy is blocking my deployment?
+- id: stackrox-admission-0t2
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Error from server (Failed currently enforcing policies): error when creating "deploy.yaml": admission webhook "policyeval.stackrox.io" denied the request:
+    The attempted operation violated 1 enforced policy, described below:
+    Policy: Latest tag
+    - Description: Alert on deployments with images using the 'latest' tag
+    - Violations: Image 'docker.io/acme/api:latest' uses the tag 'latest'
+- id: stackrox-admission-0t3
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    RHACS blocks my new Deployment in OpenShift, "No resource requests or limits specified"
+    We just got RHACS on our OCP cluster. My pipeline's oc apply now fails with a long message about enforced policies and a violation that says the container has no CPU/memory requests or limits. The same YAML was accepted last week. I am not a RHACS admin, so I want to understand what exactly rejected it before I ask for changes.
+- id: stackrox-admission-1t1
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    After we switched on admission controller enforcement in the secured cluster settings, every deployment that breaks a policy gets denied, while before it only produced alerts. Where is that switch and why does it change behaviour?
+- id: stackrox-admission-1t2
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 1
+  kind: pasted
+  platform: openshift
+  text: |
+    SecuredCluster spec:
+      admissionControl:
+        enforce: true
+        bypass: BreakGlassAnnotation
+        timeoutSeconds: 10
+    $ oc apply -f pod.yaml
+    Error from server: admission webhook "policyeval.stackrox.io" denied the request: ... violated 2 enforced policies
+- id: stackrox-admission-1t3
+  playbook: DBG-STACKROX-ADMISSION
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Policies were "inform only" yesterday, today deployments are denied
+    Our RHACS policies have deploy-stage enforcement configured since months, and until this week violations only showed up in the violations dashboard. After a platform upgrade to 4.9 someone changed the Helm values of the secured cluster chart, and now workloads that match those policies are refused at create time. I did not touch any policy.
+- id: evicted-0t1
+  playbook: DBG-EVICTED
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Pods show Status Evicted with "The node was low on resource: memory". Why did mine get picked and not the others?
+- id: evicted-0t2
+  playbook: DBG-EVICTED
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Status:       Failed
+    Reason:       Evicted
+    Message:      The node was low on resource: memory. Container worker was using 3412Mi, which exceeds its request of 512Mi.
+    QoS Class:    Burstable
+    Warning  EvictionThresholdMet  node/ip-10-0-9-77  Attempting to reclaim memory
+- id: evicted-0t3
+  playbook: DBG-EVICTED
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    A pile of Evicted pods on a worker, node says MemoryPressure or DiskPressure
+    OpenShift 4.14, one worker has dozens of pods in Error/Evicted state in the batch project. oc describe node shows conditions flipping between MemoryPressure=True and False through the day. The evicted ones were mostly small request, big usage jobs, while the database pods on the same node kept running.
+- id: evicted-1t1
+  playbook: DBG-EVICTED
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    Pod was evicted with "Pod ephemeral local storage usage exceeds the total limit of containers". My app only writes logs to stdout and some files in /tmp. What counts toward that?
+- id: evicted-1t2
+  playbook: DBG-EVICTED
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Warning  Evicted  kubelet  Pod ephemeral local storage usage exceeds the total limit of containers 1Gi.
+    $ kubectl exec exporter-0 -- du -sh /tmp /var/log
+    5.8G	/tmp
+    120M	/var/log
+- id: evicted-1t3
+  playbook: DBG-EVICTED
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Pods get evicted nightly with DiskPressure when the ETL job runs
+    The ETL container unpacks several large archives to /data/work inside the container filesystem (no volume mounted for it) and writes verbose logs. By morning the pod is Evicted and the node had a taint for disk pressure. Resource requests only list cpu and memory, nothing for storage.
+- id: dns-0t1
+  playbook: DBG-DNS
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    After adding an egress NetworkPolicy to my namespace, every nslookup from the pods times out, even for services in the same namespace. How did a policy break DNS?
+- id: dns-0t2
+  playbook: DBG-DNS
+  cause: 0
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc rsh deploy/frontend nslookup kubernetes.default
+    ;; connection timed out; no servers could be reached
+    $ oc get networkpolicy -n shop
+    NAME             POD-SELECTOR   AGE
+    default-egress   <none>         20m
+    policyTypes: [Egress]
+    egress:
+    - to: [{podSelector: {matchLabels: {app: backend}}}]
+- id: dns-0t3
+  playbook: DBG-DNS
+  cause: 0
+  kind: post
+  platform: null
+  text: |
+    getaddrinfo EAI_AGAIN after we locked down egress
+    Our security team rolled out a default-deny egress policy plus allow rules per app to specific CIDRs and namespaces. Since then Node services log getaddrinfo EAI_AGAIN db.internal and Python ones say "Temporary failure in name resolution". Connecting by IP still works. CoreDNS pods look healthy.
+- id: dns-1t1
+  playbook: DBG-DNS
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    My app in namespace web can't reach "payments-api", it says "no such host". The service lives in namespace billing. What name should it use?
+- id: dns-1t2
+  playbook: DBG-DNS
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl exec -n web deploy/shop -- nslookup inventory
+    ** server can't find inventory.web.svc.cluster.local: NXDOMAIN
+    $ kubectl get svc -A | grep inventory
+    warehouse   inventory   ClusterIP   10.96.44.18   <none>   8080/TCP   3d
+- id: dns-1t3
+  playbook: DBG-DNS
+  cause: 1
+  kind: post
+  platform: openshift
+  text: |
+    Java client gets UnknownHostException for a Service in another project
+    I connect from a pod in project team-a to http://cache:6379 and get java.net.UnknownHostException: cache. The Service definitely exists, and works when called from pods in team-b where it is deployed. DNS to external sites works fine from team-a pods. I am wondering about search domains.
+- id: dns-2t1
+  playbook: DBG-DNS
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Pods resolve in-cluster service names fine but external names like api.github.com fail with SERVFAIL. How do I tell whether it's the cluster or upstream?
+- id: dns-2t2
+  playbook: DBG-DNS
+  cause: 2
+  kind: pasted
+  platform: rosa-hcp
+  text: |
+    $ oc rsh deploy/app nslookup registry.npmjs.org
+    Server: 172.30.0.10
+    ** server can't find registry.npmjs.org: SERVFAIL
+    $ oc rsh deploy/app nslookup kubernetes.default.svc.cluster.local
+    Name: kubernetes.default.svc.cluster.local Address: 172.30.0.1
+    (ROSA HCP private cluster in a custom VPC)
+- id: dns-2t3
+  playbook: DBG-DNS
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    External DNS lookups from pods time out only in the new VPC
+    We built the cluster in a VPC created by our network team with a custom DHCP option set. Cluster-internal names resolve, but anything outside (our SaaS vendors, the S3 endpoint hostname) never resolves from a pod. From an EC2 instance in the same subnet using the VPC resolver it also fails. Our old VPC did not have this problem.
+- id: dns-3t1
+  playbook: DBG-DNS
+  cause: 3
+  kind: typed
+  platform: null
+  text: |
+    No pod in the cluster can resolve anything and the CoreDNS pods are stuck Pending or crashing. Where do I start?
+- id: dns-3t2
+  playbook: DBG-DNS
+  cause: 3
+  kind: pasted
+  platform: null
+  text: |
+    [ERROR] plugin/kubernetes: pkg/mod/k8s.io/client-go/tools/cache/reflector.go:125: Failed to watch *v1.EndpointSlice: failed to list *v1.EndpointSlice: endpointslices.discovery.k8s.io is forbidden: User "system:serviceaccount:kube-system:coredns" cannot list resource "endpointslices" in API group "discovery.k8s.io" at the cluster scope
+    $ kubectl get endpoints kube-dns -n kube-system
+    kube-dns   <none>
+- id: dns-3t3
+  playbook: DBG-DNS
+  cause: 3
+  kind: post
+  platform: null
+  text: |
+    After a manual control plane upgrade DNS answers SERVFAIL for service names
+    We hand-upgraded a kubeadm cluster to a newer minor version and replaced the CoreDNS manifest with a newer image. Now lookups of cluster.local names return SERVFAIL while external names still work through the forward plugin. The coredns log is full of "forbidden" messages from the API server. Pods are Running 1/1.
+- id: netpol-0t1
+  playbook: DBG-NETPOL
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    We added a default-deny policy to the database namespace and now the app in another namespace times out connecting on 5432. What else do I have to configure?
+- id: netpol-0t2
+  playbook: DBG-NETPOL
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl exec -n shop deploy/cart -- nc -zv -w 3 postgres.data.svc 5432
+    nc: postgres.data.svc (10.96.12.80:5432): Operation timed out
+    $ kubectl get netpol -n data
+    NAME           POD-SELECTOR   AGE
+    default-deny   <none>         2d
+- id: netpol-0t3
+  playbook: DBG-NETPOL
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    Router can't reach my pods after I applied a deny-all policy in my project
+    I followed a hardening guide on OpenShift and created a NetworkPolicy with an empty podSelector and no rules. Now pods in the project can't talk to each other and my Route returns "Application is not available" although the pods are Ready. Deleting the policy brings everything back immediately.
+- id: netpol-1t1
+  playbook: DBG-NETPOL
+  cause: 1
+  kind: typed
+  platform: openshift
+  text: |
+    My pods in an OpenShift project can't reach any external site even though I added an Allow rule for github.com in the EgressFirewall. What decides which rule applies?
+- id: netpol-1t2
+  playbook: DBG-NETPOL
+  cause: 1
+  kind: pasted
+  platform: openshift
+  text: |
+    $ oc get egressfirewall default -n payments -o yaml
+    spec:
+      egress:
+      - type: Deny
+        to:
+          cidrSelector: 0.0.0.0/0
+      - type: Allow
+        to:
+          dnsName: api.partner.example.com
+    $ oc rsh deploy/billing curl -m 5 https://api.partner.example.com
+    curl: (28) Connection timed out after 5001 milliseconds
+- id: netpol-1t3
+  playbook: DBG-NETPOL
+  cause: 1
+  kind: post
+  platform: openshift
+  text: |
+    OVN egress restrictions: new allow entry has no effect
+    Our platform team set up an EgressFirewall in the project to limit outbound traffic. I asked for access to a SaaS API and they added it to the list, but calls from my pods still hang. Traffic to the cluster-internal services is fine, and the SaaS endpoint is reachable from my laptop. The object is called default and I can see it with oc get egressfirewall.
+- id: netpol-2t1
+  playbook: DBG-NETPOL
+  cause: 2
+  kind: typed
+  platform: null
+  text: |
+    Pods can't connect to our RDS instance (connection timed out). There are no NetworkPolicies in the cluster at all, and an EC2 box in the same VPC connects fine. Where else could it be blocked?
+- id: netpol-2t2
+  playbook: DBG-NETPOL
+  cause: 2
+  kind: pasted
+  platform: null
+  text: |
+    $ kubectl run -it --rm dbg --image=busybox -- nc -zv -w 5 10.20.31.7 5432
+    nc: 10.20.31.7 (10.20.31.7:5432): Connection timed out
+    $ kubectl get networkpolicy -A
+    No resources found
+    $ kubectl get nodes -o wide | head -2
+    ip-10-20-4-18.ec2.internal   Ready   10.20.4.18
+- id: netpol-2t3
+  playbook: DBG-NETPOL
+  cause: 2
+  kind: post
+  platform: null
+  text: |
+    Service reachable from one node but not from pods scheduled on another
+    A NodePort service answers if I curl node-a, but curling node-b hangs, and cross-node pod-to-pod traffic on certain ports drops as well. NetworkPolicy is not used in this cluster. The two nodes sit in different subnets in the cloud account, and I recently re-created the instance group with a new security group.
+- id: x509-0t1
+  playbook: DBG-X509
+  cause: 0
+  kind: typed
+  platform: null
+  text: |
+    Our ingress suddenly serves "NET::ERR_CERT_DATE_INVALID" and clients say x509 certificate has expired. Where do I check the validity dates?
+- id: x509-0t2
+  playbook: DBG-X509
+  cause: 0
+  kind: pasted
+  platform: null
+  text: |
+    Get "https://metrics-server.monitoring.svc:443/apis/metrics.k8s.io/v1beta1": tls: failed to verify certificate: x509: certificate has expired or is not yet valid: current time 2026-10-27T11:02:14Z is after 2026-10-26T23:59:59Z
+- id: x509-0t3
+  playbook: DBG-X509
+  cause: 0
+  kind: post
+  platform: openshift
+  text: |
+    x509: certificate signed by unknown authority when my pod calls an internal HTTPS API
+    From inside a pod in my OpenShift project curl against our corporate API gateway fails with "SSL certificate problem: unable to get local issuer certificate". From my laptop the browser trusts it. The gateway cert is issued by our internal CA, not a public one. Also noticed one worker has a clock a few minutes behind NTP, I do not know if that matters.
+- id: x509-1t1
+  playbook: DBG-X509
+  cause: 1
+  kind: typed
+  platform: null
+  text: |
+    I call my service by its cluster IP over HTTPS and get "x509: cannot validate certificate for 10.96.40.12 because it doesn't contain any IP SANs". Why does that fail when the cert is valid?
+- id: x509-1t2
+  playbook: DBG-X509
+  cause: 1
+  kind: pasted
+  platform: null
+  text: |
+    Post "https://auth.internal.example.com/token": tls: failed to verify certificate: x509: certificate is valid for auth.example.com, www.auth.example.com, not auth.internal.example.com
+- id: x509-1t3
+  playbook: DBG-X509
+  cause: 1
+  kind: post
+  platform: null
+  text: |
+    Webhook calls fail with x509 after I renamed the Service
+    I have a validating admission webhook served by a Deployment in the tools namespace. After moving it to a new namespace the API server logs "failed calling webhook ... x509: certificate is valid for webhook.tools.svc, not webhook.platform.svc". The certificate is not expired, the CA bundle in the webhook configuration is still the same as before.
+- id: rosa-hcp-nodes-0t1
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 0
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    I added a machine pool to my private ROSA HCP cluster, the EC2 instances are running, but they never show up as nodes. How do I tell if they can reach the control plane?
+- id: rosa-hcp-nodes-0t2
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 0
+  kind: pasted
+  platform: rosa-hcp
+  text: |
+    $ rosa list machinepools -c my-hcp
+    ID        AUTOSCALING  REPLICAS  INSTANCE TYPE  ...  SUBNET
+    workers-1 No           0/3       m5.xlarge           subnet-0a1b2c3d4e
+    Message: Waiting for nodes to join the cluster; instances are running but kubelet cannot connect to the API (i/o timeout)
+- id: rosa-hcp-nodes-0t3
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 0
+  kind: post
+  platform: rosa-hcp
+  text: |
+    ROSA HCP workers launched into custom private subnets never become Ready
+    I created a hosted control plane cluster with --subnet-ids pointing to our existing private subnets. The machine pool says 0/2 replicas, EC2 shows two healthy running instances. Our firewall team changed route tables and security groups for those subnets after the VPC was handed to us. Console logs on the instances show the kubelet retrying the API server endpoint.
+- id: rosa-hcp-nodes-1t1
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 1
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    My ROSA HCP machine pool is stuck at 0 replicas and the error says there are not enough free IP addresses in the subnet. Is my /27 too small?
+- id: rosa-hcp-nodes-1t2
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 1
+  kind: pasted
+  platform: rosa-hcp
+  text: |
+    $ rosa describe machinepool --cluster=prod-hcp --machinepool=batch
+    Replicas: 0/6
+    Message: InsufficientFreeAddressesInSubnet: There are not enough free addresses in subnet 'subnet-07f3e91c22' to satisfy the requested number of instances.
+- id: rosa-hcp-nodes-1t3
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 1
+  kind: post
+  platform: rosa-hcp
+  text: |
+    Scaled my ROSA HCP pool from 3 to 9 and half the nodes never appear
+    The HCP cluster uses three small private subnets I created manually via terraform. Machine pool scale-up creates some instances and then stalls with errors in the machine pool status. Another team shares those subnets for other workloads. I also noticed the subnet tags do not look like the ones the installer docs show for subnets of a cluster.
+- id: rosa-hcp-nodes-2t1
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 2
+  kind: typed
+  platform: rosa-hcp
+  text: |
+    Creating a ROSA HCP machine pool with g5.xlarge in one AZ never gets any nodes and the pool shows an error about the instance type not being supported there. What is happening?
+- id: rosa-hcp-nodes-2t2
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 2
+  kind: pasted
+  platform: rosa-hcp
+  text: |
+    $ rosa describe machinepool --cluster=ml-hcp --machinepool=gpu
+    Replicas: 0/4
+    Message: VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit of 128 allows for the instance bucket that the specified instance type belongs to.
+- id: rosa-hcp-nodes-2t3
+  playbook: DBG-ROSA-HCP-NODES
+  cause: 2
+  kind: post
+  platform: rosa-hcp
+  text: |
+    ROSA HCP nodes provisioning keeps failing, only for the large machine pool
+    Our standard pool of m5.xlarge came up fine on the HCP cluster, but a new pool with 8x m6i.4xlarge reports "InsufficientInstanceCapacity" for some AZs and it sits at 3/8. Retrying later sometimes adds one node. The AWS account is new and we have not asked for any quota changes yet.

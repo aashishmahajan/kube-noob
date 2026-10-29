@@ -78,7 +78,7 @@ def _walk(
     if budget[0] < 0:
         raise ManifestError("YAML is too complex to process safely (node budget exceeded; possible alias/anchor bomb).")
     if len(path) > MAX_DEPTH:
-        raise ManifestError(f"YAML nesting deeper than {MAX_DEPTH} levels; refusing to process.")
+        raise ManifestError(f"YAML nesting is too deep: more than {MAX_DEPTH} levels; refusing to process.")
     out.setdefault(path, line if line is not None else node.start_mark.line + 1)
     if isinstance(node, yaml.MappingNode):
         seen: set[str] = set()

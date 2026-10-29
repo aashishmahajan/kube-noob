@@ -1,0 +1,71 @@
+# One entry per outcome, checked as of 2026-10-28 (tests/test_exceptions.py).
+apiVersion: kube-noob.io/v1
+kind: ExceptionList
+exceptions:
+- id: ok-hostnet
+  rule: KN-S009
+  scope: {namespace: monitoring, kind: DaemonSet, name: node-exporter}
+  owner: team-observability
+  reason: Node metrics need the host network namespace
+  expires: 2027-01-31
+- id: expired-priv
+  rule: KN-S001
+  scope: {namespace: monitoring}
+  owner: team-observability
+  reason: Temporary while the agent drops privileged
+  expires: 2026-09-30
+- id: no-owner
+  rule: KN-S007
+  scope: {namespace: shop}
+  owner: ""
+  reason: The legacy app writes to /var/cache
+  expires: 2027-01-31
+- id: too-broad
+  rule: KN-S002
+  scope: {kind: Deployment}
+  owner: platform
+  reason: Everything everywhere, for now
+  expires: 2027-01-31
+- id: star-namespace
+  rule: KN-S002
+  scope: {namespace: "*"}
+  owner: platform
+  reason: Everything everywhere, for now
+  expires: 2027-01-31
+- id: unknown-rule
+  rule: KN-X999
+  scope: {namespace: shop}
+  owner: platform
+  reason: A rule that does not exist
+  expires: 2027-01-31
+- id: forever
+  rule: KN-S012
+  scope: {namespace: shop}
+  owner: platform
+  reason: Tags are fine for this team
+  expires: 2030-01-01
+- id: no-reason
+  rule: KN-S012
+  scope: {namespace: shop}
+  owner: platform
+  reason: ok
+  expires: 2027-01-31
+- id: extra-field
+  rule: KN-S012
+  scope: {namespace: shop}
+  owner: platform
+  reason: Has a field the format does not know
+  expires: 2027-01-31
+  approvedBy: someone
+- id: cluster-role
+  rule: KN-S015
+  scope: {kind: ClusterRole, name: monitoring-reader}
+  owner: team-observability
+  reason: The reader aggregates every monitoring API group
+  expires: 2027-01-31
+- id: unused
+  rule: KN-S020
+  scope: {namespace: shop}
+  owner: platform
+  reason: Nothing in the bundle unmasks /proc any more
+  expires: 2027-01-31

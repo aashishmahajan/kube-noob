@@ -1,0 +1,6 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] warning: unused import: `std::fmt`
+[build : build] + oc set image deployment/api api=quay.io/acme/api:1.8.0 -n prod
+[build : build] Error from server (Forbidden): deployments.apps "api" is forbidden: User "system:serviceaccount:ci:pipeline" cannot patch resource "deployments" in API group "apps" in the namespace "prod"
+task build failed: "step-build" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-03-build for more details

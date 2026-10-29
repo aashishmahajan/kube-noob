@@ -1,0 +1,14 @@
+rule: KN-V004
+platform: kubernetes
+good: |
+  apiVersion: v1
+  kind: ConfigMap
+  metadata: {name: c, namespace: shop}
+  data: {a: b}
+bad: |
+  apiVersion: monitoring.coreos.com/v1
+  kind: ServiceMonitor
+  metadata: {name: web, namespace: shop}
+  spec:
+    selector: {matchLabels: {app: web}}
+    endpoints: [{port: http}]

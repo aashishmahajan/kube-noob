@@ -1,0 +1,15 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] npm WARN config production Use `--omit=dev` instead.
+[build : build] + ./gradlew build
+[build : build] > Task :app:compileJava FAILED
+[build : build] 
+[build : build] FAILURE: Build failed with an exception.
+[build : build] 
+[build : build] * What went wrong:
+[build : build] Execution failed for task ':app:compileJava'.
+[build : build] > Could not resolve all files for configuration ':app:compileClasspath'.
+[build : build]    > Could not find com.acme:shared:2.0.0.
+[build : build] 
+[build : build] BUILD FAILED in 14s
+task build failed: "step-build" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-05-build for more details

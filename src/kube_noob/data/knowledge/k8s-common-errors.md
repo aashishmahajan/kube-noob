@@ -3,14 +3,18 @@ id: k8s-common-errors
 title: Everyday Kubernetes errors and what they mean
 tags: [kubernetes, openshift, troubleshooting, deployments, configmap, finalizers, storage]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
-updated: 2026-10-27
+updated: 2026-10-28
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm]
 sources:
   - {title: "Kubernetes: Deployments", url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/", license: CC-BY-4.0}
   - {title: "Kubernetes: ConfigMaps", url: "https://kubernetes.io/docs/concepts/configuration/configmap/", license: CC-BY-4.0}
   - {title: "Kubernetes: Finalizers", url: "https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/", license: CC-BY-4.0}
   - {title: "Kubernetes: Storage Classes (volume binding mode)", url: "https://kubernetes.io/docs/concepts/storage/storage-classes/", license: CC-BY-4.0}
   - {title: "Kubernetes: Force delete StatefulSet pods", url: "https://kubernetes.io/docs/tasks/run-application/force-delete-stateful-set-pod/", license: CC-BY-4.0}
+  - {title: "Kubernetes: Configure a Security Context for a Pod or Container", url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/", license: CC-BY-4.0}
 ---
 # Everyday Kubernetes errors
 
@@ -60,3 +64,21 @@ Follow it with `kubectl rollout status deployment/<name> -n <ns>`.
 That is expected with `volumeBindingMode: WaitForFirstConsumer`: the volume is provisioned only when a pod that
 uses the claim is scheduled, so it lands in that pod's zone. If the pod is also Pending, debug the pod's scheduling
 first (`kubectl describe pod`); see [kn:storage-access-modes#0] for access modes per StorageClass.
+
+## A non-root container cannot write to its volume
+
+`chown` in the Dockerfile does not reach a volume: the volume is mounted over the image's directory at run time.
+Set the pod's `securityContext` instead: `runAsUser` (and `runAsGroup`) pick the process's IDs, and `fsGroup`
+makes every process a member of that group and, on volume types that support ownership management, makes the
+volume's files group-owned and writable by it. For large volumes add `fsGroupChangePolicy: "OnRootMismatch"`, so
+Kubernetes changes ownership only when the volume's root does not already match (it has no effect on `secret`,
+`configMap` and `emptyDir` volumes). On OpenShift the SCC assigns the UID and groups; see [kn:ocp-arbitrary-uid#1].
+
+```yaml
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 3000
+  fsGroup: 2000
+  fsGroupChangePolicy: "OnRootMismatch"
+```
+

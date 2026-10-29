@@ -79,7 +79,9 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
     import shutil
     import tarfile
 
-    with tempfile.TemporaryDirectory() as tmp:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    # extract next to the data, not in /tmp: a Jira snapshot is gigabytes and the chart's /tmp holds 256 MiB
+    with tempfile.TemporaryDirectory(dir=data_dir, prefix=".import-") as tmp:
         root = source
         if source.is_file():
             with tarfile.open(source, "r:gz") as tf:
@@ -92,10 +94,14 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
         if not manifest_file.is_file():
             raise ValueError(f"{root}: MANIFEST.json not found")
         manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        from kube_noob.sources.jira_snapshot import check_extras, restore_extras
+
+        checked = check_extras(root, manifest, data_dir)  # a Jira snapshot: validated before anything is copied
         target = corpus_dir(data_dir)
         current = read_manifest(data_dir)
         imported: list[str] = []
-        for name, entry in manifest.get("shards", {}).items():
+        ready: list[tuple[str, dict[str, Any], Path]] = []
+        for name, entry in manifest.get("shards", {}).items():  # every shard checked before any is copied
             fname = str(entry.get("file", ""))
             if not fname.endswith(".jsonl") or "/" in fname or "\\" in fname or fname.startswith("."):
                 raise ValueError(f"refusing suspicious shard file name {fname!r}")
@@ -110,16 +116,31 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
                         continue
                     try:
                         rec = json.loads(line)
-                    except json.JSONDecodeError as exc:
-                        raise ValueError(f"{fname} line {lineno}: invalid JSON ({exc.msg})") from exc
+                    except (json.JSONDecodeError, RecursionError) as exc:
+                        raise ValueError(f"{fname} line {lineno}: invalid JSON") from exc
                     if not isinstance(rec, dict):
                         raise ValueError(f"{fname} line {lineno}: record must be a JSON object")
                     _validate(rec)
-            shutil.copyfile(src, target / fname)
+            ready.append((name, entry, src))
+        staged: list[tuple[Path, Path]] = []
+        try:
+            for _name, _entry, src in ready:
+                fd, tmp_name = tempfile.mkstemp(dir=target, prefix=f".import-{src.name}.", suffix=".tmp")
+                os.close(fd)
+                shutil.copyfile(src, tmp_name)
+                staged.append((Path(tmp_name), target / src.name))
+            for tmp_path, final in staged:
+                os.replace(tmp_path, final)
+        except BaseException:
+            for tmp_path, _ in staged:
+                tmp_path.unlink(missing_ok=True)
+            raise
+        for name, entry, _src in ready:
             current.setdefault("shards", {})[name] = entry
             imported.append(name)
         (target / "MANIFEST.json").write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"imported": imported, "dataDir": str(data_dir)}
+        extras = restore_extras(checked, data_dir) if checked else {}  # its sync state and change log
+    return {"imported": imported, "dataDir": str(data_dir), **({"jira": extras} if extras else {})}
 
 
 def verify(data_dir: Path) -> list[str]:

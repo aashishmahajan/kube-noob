@@ -5,6 +5,10 @@ tags: [kubernetes, openshift, tls, x509, certificates, troubleshooting]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [x509, tls, certificate, certificates, cert, certs, ssl, ca]
+  - [pod, pods, kubectl, oc, kubernetes, k8s, openshift, ocp, rosa, kubelet, kubeadm, deployment, deployments, statefulset, statefulsets, daemonset, daemonsets, replicaset, replicasets, namespace, namespaces, crashloopbackoff, configmap, configmaps, pvc, persistentvolumeclaim, helm, route, routes, registry]
 sources:
   - {title: "Kubernetes: Configure Access to Multiple Clusters", url: "https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/", license: CC-BY-4.0}
   - {title: "Kubernetes: Certificates", url: "https://kubernetes.io/docs/tasks/administer-cluster/certificates/", license: CC-BY-4.0}

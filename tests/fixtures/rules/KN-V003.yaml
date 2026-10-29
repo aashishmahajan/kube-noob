@@ -1,0 +1,16 @@
+rule: KN-V003
+platform: kubernetes
+good: |
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata: {name: web, namespace: shop}
+  spec:
+    tls: [{hosts: [web.example.com], secretName: web-tls}]
+    rules: [{host: web.example.com}]
+bad: |
+  apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata: {name: web, namespace: shop}
+  spec:
+    to: {kind: Service, name: web}
+    tls: {termination: edge}

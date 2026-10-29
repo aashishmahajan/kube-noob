@@ -4,7 +4,7 @@
 #
 # Usage: demos/video/stage/build.sh <out-dir> [teaser|sidecar|mcp|all] [--voice af_heart] [--music-db -12]
 #        (also --engine piper, --speed, --speaker; see voiceover.py)
-# Writes <out-dir>/<video>/kube-noob-<video>.mp4 (3840x2160, 30 fps, AAC 320k at -16 LUFS) and the stems voice.wav
+# Writes <out-dir>/<video>/kube-noob-<video>.mp4 (3840x2160, 30 fps, AAC 320k at -16 LUFS; KN_SCALE=1 for 1920x1080) and the stems voice.wav
 # and music.wav. Change only the music level afterwards, without rendering again:
 #   python3 demos/video/audio_kit.py remix <out-dir>/<video> --music-db -18 --video <out-dir>/<video>/kube-noob-<video>.mp4
 # Needs: python3 with numpy and kokoro-onnx (pip install kokoro-onnx numpy), Node with the playwright package and
@@ -24,5 +24,5 @@ for v in teaser sidecar mcp; do
     continue
   fi
   "${PYTHON:-python3}" "$here/voiceover.py" "$v" "$out/$v" "$@"
-  node "$here/capture.js" "$out/$v"
+  node "$here/capture.js" "$out/$v" --scale "${KN_SCALE:-2}"
 done

@@ -60,6 +60,12 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     "clusteroperators": ResourceDef("config.openshift.io/v1", "clusteroperators", False),
     "clusterversions": ResourceDef("config.openshift.io/v1", "clusterversions", False),
     "securitycontextconstraints": ResourceDef("security.openshift.io/v1", "securitycontextconstraints", False),
+    "deploymentconfigs": ResourceDef("apps.openshift.io/v1", "deploymentconfigs", True),
+    # RBAC objects (who may do what; no credentials): read by the attack-path scan (kube_noob.attack_paths)
+    "roles": ResourceDef("rbac.authorization.k8s.io/v1", "roles", True),
+    "rolebindings": ResourceDef("rbac.authorization.k8s.io/v1", "rolebindings", True),
+    "clusterroles": ResourceDef("rbac.authorization.k8s.io/v1", "clusterroles", False),
+    "clusterrolebindings": ResourceDef("rbac.authorization.k8s.io/v1", "clusterrolebindings", False),
     "egressfirewalls": ResourceDef("k8s.ovn.org/v1", "egressfirewalls", True),
     "centrals": ResourceDef("platform.stackrox.io/v1alpha1", "centrals", True),
     "securedclusters": ResourceDef("platform.stackrox.io/v1alpha1", "securedclusters", True),
@@ -109,12 +115,18 @@ ALIASES = {
     "egressfirewall": "egressfirewalls",
     "central": "centrals",
     "securedcluster": "securedclusters",
+    "dc": "deploymentconfigs",
+    "deploymentconfig": "deploymentconfigs",
+    "role": "roles",
+    "rolebinding": "rolebindings",
+    "clusterrole": "clusterroles",
+    "clusterrolebinding": "clusterrolebindings",
 }
 
-_NAME = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$")
-_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,() ]{1,512}$")
-_FIELD_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,]{1,512}$")
-_CONTAINER = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+_NAME = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?\Z")
+_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,() ]{1,512}\Z")
+_FIELD_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,]{1,512}\Z")
+_CONTAINER = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\Z")
 
 _LOG_REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]+"), r"\1***"),
@@ -129,7 +141,11 @@ _LOG_REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhv[sbr]\.[A-Za-z0-9_-]{20,}"), "***vault-token***"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), "***github-token***"),
     (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "***slack-token***"),
-    (re.compile(r"(?i)(--?[a-z0-9_.-]*(?:password|passwd|secret|token|api[-_]?key)[=\s]+)[^\s\"',;]+"), r"\1***"),
+    # The flag-name prefix is bounded: unbounded, a long "a-a-a-..." token made this quadratic (minutes per 200 KB).
+    (
+        re.compile(r"(?i)(--?[a-z0-9_.-]{0,64}(?:password|passwd|secret|token|api[-_]?key)[=\s]+)[^\s\"',;]+"),
+        r"\1***",
+    ),
 ]
 
 

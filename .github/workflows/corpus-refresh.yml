@@ -1,14 +1,29 @@
 name: corpus-refresh
 
-# Builds the kube-noob corpus in the cloud: public Git docs (with licenses), release history and a copy of Red Hat's
-# public Jira (every ticket of the default projects, any status) through its REST API, one request per second or
-# slower within a request budget. Jira content is not redistributable, so it is uploaded only encrypted
-# (CORPUS_PASSPHRASE secret); everything else is uploaded as a plain artifact. Import either with
-# kube-noob corpus import <dir-or-tgz>.
+# Keeps the organisation's main copy of Red Hat's public Jira current and builds the kube-noob corpus in the cloud.
+#
+# Every day (or every JIRA_EVERY_DAYS days, a repository variable: 1 or 2): restore the previous main copy (encrypted
+# artifact), sync only what changed through Jira's REST API (one request per second or slower, within a budget), record
+# what was fixed, closed, reopened or opened for reconciliation, and upload the new main copy encrypted. A brand-new
+# copy fetches the open tickets of each project first. Every Sunday (and on dispatch with scope full): also public Git
+# docs (with licenses) and release history, uploaded as a plain artifact.
+#
+# Jira content is not redistributable, so it is uploaded only encrypted (CORPUS_PASSPHRASE secret); without the secret
+# nothing is kept between runs and each run starts a new copy. Import with kube-noob corpus import <tgz>, or put the
+# snapshot in a private seed image (jira.seed in the Helm chart) so new pods start from it.
 
 on:
   workflow_dispatch:
     inputs:
+      scope:
+        description: "jira = main copy only; full = also Git docs and release history"
+        type: choice
+        options: [full, jira]
+        default: full
+      fresh:
+        description: "Start a new Jira copy instead of continuing the previous main copy"
+        type: boolean
+        default: false
       jira_projects:
         description: "Jira projects: default, all, or keys such as OCPBUGS,ROX"
         default: "default"
@@ -19,10 +34,16 @@ on:
         description: "Git sources (comma separated ids or 'all')"
         default: "all"
   schedule:
-    - cron: "17 5 * * 0"
+    - cron: "17 5 * * *"     # the Jira main copy: daily (JIRA_EVERY_DAYS=2 skips every other day)
+    - cron: "41 3 * * 0"     # weekly: also Git docs and release history
 
 permissions:
   contents: read
+  actions: read              # find and download the previous run's encrypted main copy
+
+concurrency:
+  group: corpus-refresh      # one writer of the main copy at a time
+  cancel-in-progress: false
 
 jobs:
   corpus:
@@ -30,15 +51,65 @@ jobs:
     timeout-minutes: 240
     env:
       KUBE_NOOB_DATA_DIR: ${{ github.workspace }}/corpus-out
+      FULL: ${{ (github.event_name == 'workflow_dispatch' && inputs.scope == 'full') || github.event.schedule == '41 3 * * 0' }}
     steps:
+      - name: Decide whether this run is due
+        id: due
+        env:
+          EVERY: ${{ vars.JIRA_EVERY_DAYS || '1' }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          case "$EVERY" in 1|2) ;; *) echo "::error title=JIRA_EVERY_DAYS::must be 1 or 2, not $EVERY"; exit 1 ;; esac
+          day=$(( $(date -u +%s) / 86400 ))
+          if [ "$EVENT" = "schedule" ] && [ "$FULL" != "true" ] && [ $(( day % EVERY )) -ne 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Jira main copy::not due today (every $EVERY days)"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT" = "schedule" ]; then
+              wait=$(( $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 900 ))
+              echo "::notice title=Jitter::starting in $wait s"
+              sleep "$wait"
+            fi
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.due.outputs.run == 'true'
         with:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: steps.due.outputs.run == 'true'
         with:
           python-version: "3.12"
       - run: pip install -e .
+        if: steps.due.outputs.run == 'true'
+      - name: Restore the previous main copy (encrypted artifact of the last successful run)
+        if: steps.due.outputs.run == 'true' && !inputs.fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
+        run: |
+          if [ -z "${CORPUS_PASSPHRASE}" ]; then
+            echo "::warning title=Jira main copy::CORPUS_PASSPHRASE is not set: nothing is kept between runs, so each run starts a new copy"
+            exit 0
+          fi
+          ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow corpus-refresh.yml --status success --limit 20 \
+            --json databaseId --jq '.[].databaseId')
+          for id in $ids; do
+            if gh run download "$id" --repo "$GITHUB_REPOSITORY" -n jira-main-copy-encrypted -D previous 2>/dev/null; then
+              echo "::notice title=Jira main copy::continuing the copy from run $id"
+              break
+            fi
+          done
+          if [ ! -f previous/jira-snapshot.tgz.enc ]; then
+            echo "::notice title=Jira main copy::no previous main copy: starting a new one (open tickets first)"
+            exit 0
+          fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in previous/jira-snapshot.tgz.enc \
+            -out previous/jira-snapshot.tgz -pass env:CORPUS_PASSPHRASE
+          kube-noob corpus import previous/jira-snapshot.tgz --format json | tee import-summary.json
+          rm -f previous/jira-snapshot.tgz
       - name: Red Hat Jira copy (paced, budgeted)
+        if: steps.due.outputs.run == 'true'
         env:
           JIRA_PROJECTS: ${{ inputs.jira_projects || 'default' }}
           JIRA_MAX_REQUESTS: ${{ inputs.jira_max_requests || '3000' }}
@@ -68,8 +139,11 @@ jobs:
           for p in s["projects"]:
               if p.get("error"):
                   print(f"::warning title=Jira {p['project']}::" + p["error"][:900].replace("%", "%25").replace("\n", " "))
-          if fetched == 0 or not idx.get("tickets"):
-              print("::error title=Jira sync::no tickets fetched or indexed")
+          if not idx.get("tickets"):
+              print("::error title=Jira sync::no tickets indexed")
+              raise SystemExit(1)
+          if fetched == 0 and s["requests"] == 0:
+              print("::error title=Jira sync::no request reached Jira")
               raise SystemExit(1)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
               fh.write(f"### Red Hat Jira copy: {idx.get('tickets')} tickets, {s['requests']} requests\n")
@@ -78,6 +152,7 @@ jobs:
                   fh.write(f"| {p['project']} | {p['total']} | {p.get('complete', False)} |\n")
           PY
       - name: Resume pass (changes since the first pass, then older tickets by key)
+        if: steps.due.outputs.run == 'true'
         run: |
           first=$(python -c "import json; print(json.load(open('jira-summary.json'))['selected'][0])")
           kube-noob corpus jira --online --projects "$first" --max-requests 8 --format json > jira-resume.json
@@ -89,7 +164,54 @@ jobs:
               print("::error title=Jira resume::" + r["error"][:900])
               raise SystemExit(1)
           PY
+      - name: Audit the copy (comments kept, cut or older tickets, no people left)
+        if: steps.due.outputs.run == 'true'
+        run: |
+          kube-noob corpus jira-audit
+          kube-noob corpus jira-audit --format json > jira-audit.json
+          python - <<'PY'
+          import json, os
+          a = json.load(open("jira-audit.json"))
+          check = a["selfCheck"]
+          print(f"::notice title=Jira audit::{a['tickets']} tickets, {a['bytes'] // 1_000_000} MB, comments kept {a['commentCompleteness']}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(f"### Jira copy audit: {a['tickets']} tickets, comments kept {a['commentCompleteness']}\n")
+              fh.write("| project | tickets | missing comments | cut | older format | key coverage |\n|---|---|---|---|---|---|\n")
+              for k, p in a["projects"].items():
+                  fh.write(f"| {k} | {p['tickets']} | {p['ticketsMissingComments']} | {p['textCut']} | {p['olderFormat']} | {p['keyCoverage']} |\n")
+          if check["personShapedFindings"]:
+              print(f"::error title=Jira audit::{check['personShapedFindings']} person-shaped findings: {check['examples']}")
+              raise SystemExit(1)
+          PY
+      - name: Reconciliation (what changed in the last two days, and what is open)
+        if: steps.due.outputs.run == 'true'
+        run: |
+          kube-noob corpus jira-changes --since 2d --limit 200 --format json > jira-changes.json
+          kube-noob corpus jira-changes --since 2d --limit 30
+          python - <<'PY'
+          import json, os
+          r = json.load(open("jira-changes.json"))
+          counts = ", ".join(f"{n} {k}" for k, n in r["counts"].items()) or "none"
+          opened = r["openTickets"]
+          print(f"::notice title=Jira changes since {r['since']}::{counts}")
+          if opened.get("available"):
+              print(f"::notice title=Jira open tickets::{opened['open']} {opened['byProject']}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(f"### Jira changes since {r['since']}: {counts}\n")
+              if r["changes"]:
+                  fh.write("| ticket | change | now | fix versions |\n|---|---|---|---|\n")
+                  for c in r["changes"][:100]:
+                      to = c.get("to") or {}
+                      fix = ", ".join(to.get("fixVersions") or [])
+                      fh.write(f"| [{c['key']}]({c['url']}) | {c['kind']} | {to.get('status')} | {fix} |\n")
+              if opened.get("available"):
+                  fh.write(f"\n**Open tickets:** {opened['open']}\n\n| project | verdict | tickets |\n|---|---|---|\n")
+                  for proj, verdicts in opened["byProject"].items():
+                      for v, n in sorted(verdicts.items()):
+                          fh.write(f"| {proj} | {v} | {n} |\n")
+          PY
       - name: Known bugs found on real tickets (each ticket's own error line finds it)
+        if: steps.due.outputs.run == 'true'
         run: |
           python - <<'PY'
           import json, os, random, sqlite3
@@ -132,17 +254,21 @@ jobs:
               raise SystemExit(1)
           PY
       - name: Git documentation sources
+        if: steps.due.outputs.run == 'true' && env.FULL == 'true'
         run: |
           kube-noob corpus build --online --sources "${{ inputs.git_sources || 'all' }}" --format json | tee git-summary.json
           python -c "import json; s=json.load(open('git-summary.json'))['sources']; print('::notice title=Git sources::' + ', '.join(f'{k}={v}' for k, v in s.items()))"
       - name: Release history
+        if: steps.due.outputs.run == 'true' && env.FULL == 'true'
         run: kube-noob corpus history --online --format json | tee history-summary.json
       - name: Verify corpus integrity
+        if: steps.due.outputs.run == 'true'
         run: |
           kube-noob corpus verify
           kube-noob corpus stats --format json | tee stats.json
           python -c "import json; s=json.load(open('stats.json'))['index']; print(f'::notice title=Corpus index::chunks={s[\"chunks\"]} documents={s[\"documents\"]} bySource={s[\"bySource\"]}')"
       - name: Package redistributable corpus
+        if: steps.due.outputs.run == 'true' && env.FULL == 'true'
         run: |
           mkdir -p public
           python - <<'PY'
@@ -156,6 +282,7 @@ jobs:
           PY
           ls -la public
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.due.outputs.run == 'true' && env.FULL == 'true'
         with:
           name: corpus-redistributable
           path: |
@@ -163,17 +290,33 @@ jobs:
             *-summary.json
             stats.json
           retention-days: 30
-      - name: Encrypt full corpus (includes non-redistributable Jira data)
+      - name: Encrypt the Jira main copy and the full corpus (non-redistributable Jira data)
+        if: steps.due.outputs.run == 'true'
         env:
           CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
         run: |
           if [ -z "${CORPUS_PASSPHRASE}" ]; then
-            echo "CORPUS_PASSPHRASE not set - skipping encrypted full-corpus artifact"; exit 0; fi
-          tar -C corpus-out -czf corpus-full.tgz corpus
-          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -in corpus-full.tgz -out corpus-full.tgz.enc \
+            echo "CORPUS_PASSPHRASE not set - skipping the encrypted main copy and full corpus"; exit 0; fi
+          umask 077
+          kube-noob corpus jira-snapshot -o jira-snapshot.tgz
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -in jira-snapshot.tgz -out jira-snapshot.tgz.enc \
             -pass env:CORPUS_PASSPHRASE
-          rm corpus-full.tgz
+          rm jira-snapshot.tgz
+          if [ "$FULL" = "true" ]; then
+            tar -C corpus-out -czf corpus-full.tgz corpus
+            openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -in corpus-full.tgz -out corpus-full.tgz.enc \
+              -pass env:CORPUS_PASSPHRASE
+            rm corpus-full.tgz
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.due.outputs.run == 'true'
+        with:
+          name: jira-main-copy-encrypted
+          path: jira-snapshot.tgz.enc
+          if-no-files-found: ignore
+          retention-days: 35
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.due.outputs.run == 'true' && env.FULL == 'true'
         with:
           name: corpus-full-encrypted
           path: corpus-full.tgz.enc

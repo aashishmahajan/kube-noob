@@ -1,0 +1,23 @@
+rule: KN-S019
+platform: openshift
+version: '4.20'
+good: |
+  apiVersion: security.openshift.io/v1
+  kind: SecurityContextConstraints
+  metadata: {name: custom}
+  allowPrivilegedContainer: false
+  runAsUser: {type: MustRunAsRange}
+  seLinuxContext: {type: MustRunAs}
+  fsGroup: {type: MustRunAs}
+  supplementalGroups: {type: RunAsAny}
+  volumes: [configMap, secret, emptyDir]
+bad: |
+  apiVersion: security.openshift.io/v1
+  kind: SecurityContextConstraints
+  metadata: {name: custom}
+  allowPrivilegedContainer: true
+  runAsUser: {type: MustRunAsRange}
+  seLinuxContext: {type: MustRunAs}
+  fsGroup: {type: MustRunAs}
+  supplementalGroups: {type: RunAsAny}
+  volumes: [configMap, secret, emptyDir]

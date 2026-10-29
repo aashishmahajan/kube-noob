@@ -29,7 +29,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -60,13 +60,50 @@ _ACCOUNT = re.compile(
     r"|https?://[^\s/]+/(?:jira/)?(?:people|secure/ViewProfile\.jspa\?name=)[^\s)\]>\"']*",  # profile links
     re.IGNORECASE,
 )
-MAX_COMMENTS = 20
+MAX_COMMENTS = 2_000  # comments kept per ticket: in practice every one
 MAX_TEXT = 20_000
-SYNC_MAX_TEXT = 12_000  # per issue in a full-project copy: description and the latest comments carry the signal
+SYNC_MAX_TEXT = 1_000_000  # characters per ticket in the copy: the full anonymised text; a longer one keeps its end
+TEXT_VERSION = 2  # 2: every comment, authors as pseudonyms; a copy made before refetches its tickets once
+SCRUB_VERSION = 2  # 2: spelled-out and suffix-less emails, international phones, handles, profiles, signatures
+COMMENT_PAGE = 100
+_PHONE = re.compile(r"(?<![\w.])\+?\(?\d{1,4}\)?[ -]\d{2,4}[ -]\d{3,4}(?:[ -]\d{2,4})?(?!\w|\.\d)")
+_PHONE_INTL = re.compile(r"(?<![\w.+])\+\d{1,3}(?:[ .-]?\(?\d{1,5}\)?){2,6}(?![\w.]?\d)")  # +1.415..., +33 1 23 ...
+_EMAIL_SPELLED = re.compile(
+    r"\b[A-Za-z0-9._%+-]{1,64}\s*(?:\(at\)|\[at\]|\{at\}|\s+at\s+)\s*[A-Za-z0-9-]{1,63}"
+    r"(?:\s*(?:\.|\(dot\)|\[dot\]|\{dot\}|\s+dot\s+)\s*[A-Za-z0-9-]{1,63}){1,4}\b(?<=[A-Za-z]{2})",
+    re.IGNORECASE,
+)
+_EMAIL_LOCAL = re.compile(  # user@host with no suffix, or URL-encoded; never image@sha256:..., pkg@1.2.3
+    r"(?<![\w.%+-])[A-Za-z0-9._%+-]{1,64}(?:@|%40)(?!sha\d{3}:)[A-Za-z][A-Za-z0-9-]{0,62}(?:\.[A-Za-z0-9-]{1,63})*\b(?!:)"
+)
+_HANDLE = re.compile(
+    r"(?<![\w@/.])@(?!(?:property|staticmethod|classmethod|Override|Test|Before|After|Autowired|Bean|Component|"
+    r"Deprecated|SuppressWarnings|FunctionalInterface|dataclass|pytest|user|Commenter)\b)[A-Za-z][\w.-]{1,38}\w(?![\w/:@])"
+)
+_PROFILE_URL = re.compile(
+    r"https?://(?:www\.)?(?:github\.com|gitlab\.com|twitter\.com|x\.com|bsky\.app/profile|keybase\.io)/"
+    r"[A-Za-z0-9_.-]{1,60}/?(?=[\s)\]>\"',.;]|$)"
+    r"|https?://(?:[a-z]{2,3}\.|www\.)?linkedin\.com/(?:in|pub)/[^\s)\]>\"']{1,100}"
+    r"|https?://[^\s/]+/wiki/people/[^\s)\]>\"']{1,100}",
+    re.IGNORECASE,
+)
+_QUOTE_HEADER = re.compile(r"^(>?[ \t]*On [^\n]{0,60}?,)[^\n<]{1,80}?(?:<+[^\n]{0,120}?>+)?[ \t]*wrote:", re.MULTILINE)
+_CLOSING = re.compile(
+    r"^((?:Thanks|Thank you|Cheers|Regards|Best regards|Best|BR|Kind regards)[ \t]*,?[ \t]*\n?[ \t]*)"
+    r"[A-Z][a-z]{1,20}(?:[ \t]+[A-Z][a-z]{1,20}){0,2}[ \t]*$",
+    re.MULTILINE,
+)
+_SIGNATURE = re.compile(r"^-- ?\n[^\n]{1,120}$", re.MULTILINE)  # the delimiter and the name line under it
+_ADDRESS = r"(?:Hi|Hello|Hey|Thanks|Thank you|Thx|cc|CC|Cc|Dear|ping|@)[ ,]{1,2}"
 LONG_JQL = 1500  # characters; above this the search request is sent as POST
 MAX_RETRY_AFTER = 120.0  # seconds; a larger Retry-After is capped so a pull cannot hang for hours
 CRAWL_DELAY = 1.0  # robots.txt on redhat.atlassian.net: "Crawl-delay: 1" for every crawler (checked 2026-10-28)
 OVERLAP_MINUTES = 10  # forward syncs reach this far before the last run, so clock skew cannot lose an update
+# Open tickets first on a new copy, so the tickets people reconcile are there within minutes; the JQL form is the one
+# Atlassian documents (https://support.atlassian.com/jira/kb/how-to-search-using-statuscategory-statuscategorychangeddate-function-with-jql/).
+OPEN_JQL = 'statusCategory in ("To Do", "In Progress")'
+TRACKED = ("status", "statusCategory", "resolution", "fixVersions")
+MAX_CHANGES = 200_000  # lines kept in jira/changes.jsonl, newest last
 
 
 class JiraError(KubeNoobError):
@@ -78,18 +115,98 @@ class BudgetExhausted(JiraError):
 
 
 def scrub(text: str) -> str:
+    """Emails (also spelled out, URL-encoded or without a domain suffix), phone numbers (also international forms),
+    account ids, profile links on Jira, GitHub, GitLab, LinkedIn and social sites, @handles that are not a known
+    the name in a quoted reply's "On ..., Name wrote:" line, and signatures after "-- " (``scrub_handles`` then
+    replaces the @handles ``unname`` did not label)."""
+    import unicodedata
+
+    if not text.isascii():
+        text = unicodedata.normalize("NFKC", text)  # a full-width at sign is an at sign
     text = _EMAIL.sub("<email>", text)
-    return _ACCOUNT.sub("<account>", text)
+    text = _EMAIL_LOCAL.sub("<email>", text)
+    text = _EMAIL_SPELLED.sub("<email>", text)
+    text = _PROFILE_URL.sub("<profile>", text)
+    text = _PHONE_INTL.sub(lambda m: "<phone>" if sum(c.isdigit() for c in m.group(0)) >= 8 else m.group(0), text)
+    text = _PHONE.sub("<phone>", text)
+    text = _ACCOUNT.sub("<account>", text)
+    text = _QUOTE_HEADER.sub(lambda m: f"{m.group(1)} someone wrote:", text)
+    text = _CLOSING.sub(lambda m: f"{m.group(1)}someone", text)
+    return _SIGNATURE.sub("-- \n<signature>", text)
 
 
-def adf_to_text(node: Any) -> str:
-    """Atlassian Document Format -> plain text (Markdown-ish)."""
+def scrub_handles(text: str) -> str:
+    """@handles left after the commenters' own were labelled (``unname`` runs first)."""
+    return _HANDLE.sub("@user", text)
+
+
+def _label(i: int) -> str:
+    """A, B, ... Z, AA, AB, ...: the i-th commenter on a ticket."""
+    out = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        out = chr(65 + r) + out
+    return out
+
+
+def pseudonyms(comments: list[Any]) -> tuple[dict[str, str], dict[str, str]]:
+    """Per ticket, in order of first comment: account id -> "Commenter A", and display name -> the same label. Neither
+    the id nor the name is stored; the maps only replace them in the text."""
+    by_id: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    for c in comments:
+        author = c.get("author") if isinstance(c, dict) else None
+        if not isinstance(author, dict):
+            continue
+        ident = str(author.get("accountId") or author.get("name") or author.get("displayName") or "")
+        if not ident:
+            continue
+        label = by_id.setdefault(ident, f"Commenter {_label(len(by_id))}")
+        name = str(author.get("displayName") or "").strip()
+        if len(name) >= 3:
+            by_name.setdefault(name, label)
+    return by_id, by_name
+
+
+def _fold(name: str) -> str:
+    import unicodedata
+
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+
+
+def unname(text: str, by_name: dict[str, str]) -> str:
+    """Replace each commenter's display name in any letter case, with or without accents, and their first name
+    where it addresses or thanks them ("Hi Jane", "cc Jane", "@Jane", "Thanks,\nJane"), with the commenter's
+    label."""
+    for name in sorted(by_name, key=len, reverse=True):
+        label = by_name[name]
+        forms = [name, _fold(name)]
+        if name.count(",") == 1:  # "Doe, Sam" is written "Sam Doe" in the text
+            last, first_name = (x.strip() for x in name.split(","))
+            forms += [f"{first_name} {last}", _fold(f"{first_name} {last}")]
+        for form in dict.fromkeys(forms):
+            text = re.sub(rf"(?<!\w){re.escape(form)}(?!\w)", label, text, flags=re.IGNORECASE)
+        first = name.split()[0]
+        if len(name.split()) > 1 and len(first) >= 3 and first.isalpha():
+            for form in dict.fromkeys((first, _fold(first))):
+                address = re.compile(
+                    rf"\b({_ADDRESS}|(?:Thanks|Thank you|Cheers|Regards|Best),?\s*\n){re.escape(form)}(?!\w)"
+                )
+                text = address.sub(rf"\g<1>{label}", text)
+                text = re.sub(rf"@{re.escape(form)}(?!\w)", f"@{label}", text, flags=re.IGNORECASE)
+    return text
+
+
+def adf_to_text(node: Any, people: dict[str, str] | None = None) -> str:
+    """Atlassian Document Format -> plain text (Markdown-ish). A mention of a known commenter becomes their label,
+    any other mention ``@user``."""
     if node is None:
         return ""
     if isinstance(node, str):
         return node
     if isinstance(node, list):
-        return "".join(adf_to_text(n) for n in node)
+        return "".join(adf_to_text(n, people) for n in node)
     if not isinstance(node, dict):
         return ""
     t = node.get("type")
@@ -99,35 +216,36 @@ def adf_to_text(node: Any) -> str:
     if t == "hardBreak":
         return "\n"
     if t == "mention":
-        return "@user"
+        ident = str(_obj(node.get("attrs")).get("id") or "")
+        return "@" + people[ident] if people and ident in people else "@user"
     if t == "emoji":
-        return str((node.get("attrs") or {}).get("text", ""))
+        return str(_obj(node.get("attrs")).get("text", ""))
     if t in {"inlineCard", "blockCard", "embedCard"}:
-        return str((node.get("attrs") or {}).get("url", ""))
+        return str(_obj(node.get("attrs")).get("url", ""))
     if t == "paragraph":
-        return adf_to_text(content) + "\n\n"
+        return adf_to_text(content, people) + "\n\n"
     if t == "heading":
-        level = int((node.get("attrs") or {}).get("level", 2))
-        return "#" * min(max(level, 1), 6) + " " + adf_to_text(content) + "\n\n"
+        level = int(_obj(node.get("attrs")).get("level", 2))
+        return "#" * min(max(level, 1), 6) + " " + adf_to_text(content, people) + "\n\n"
     if t == "codeBlock":
-        return "```\n" + adf_to_text(content) + "\n```\n\n"
+        return "```\n" + adf_to_text(content, people) + "\n```\n\n"
     if t == "blockquote":
-        return "".join("> " + ln + "\n" for ln in adf_to_text(content).strip().splitlines()) + "\n"
+        return "".join("> " + ln + "\n" for ln in adf_to_text(content, people).strip().splitlines()) + "\n"
     if t in {"bulletList", "orderedList"}:
         items = []
         for i, li in enumerate(content):
             prefix = f"{i + 1}. " if t == "orderedList" else "- "
-            items.append(prefix + adf_to_text(li).strip().replace("\n\n", "\n"))
+            items.append(prefix + adf_to_text(li, people).strip().replace("\n\n", "\n"))
         return "\n".join(items) + "\n\n"
     if t == "listItem":
-        return adf_to_text(content)
+        return adf_to_text(content, people)
     if t == "table":
         rows = []
         for row in content:
-            cells = [adf_to_text(c).strip().replace("\n", " ") for c in (row.get("content") or [])]
+            cells = [adf_to_text(c, people).strip().replace("\n", " ") for c in (row.get("content") or [])]
             rows.append("| " + " | ".join(cells) + " |")
         return "\n".join(rows) + "\n\n"
-    return adf_to_text(content)
+    return adf_to_text(content, people)
 
 
 @dataclass
@@ -135,10 +253,17 @@ class PullStats:
     requests: int = 0
     retries: int = 0
     pages: int = 0
+    comment_pages: int = 0
     scanned: int = 0
     kept: int = 0
     strategy: str = ""
     errors: list[str] = field(default_factory=list)
+
+
+def _obj(value: Any) -> dict[str, Any]:
+    """``value`` when it is a JSON object, else an empty one: a field that is null, a string or a list never breaks
+    a sync."""
+    return value if isinstance(value, dict) else {}
 
 
 class JiraClient:
@@ -314,19 +439,30 @@ def issue_to_record(
     target = _names(f.get(target_field)) if isinstance(f.get(target_field), list) else []
     key = issue.get("key", "")
     desc = f.get("description")
-    desc_text = adf_to_text(desc) if isinstance(desc, dict | list) else str(desc or "")
-    comments = ((f.get("comment") or {}).get("comments") or [])[-MAX_COMMENTS:]
+    comment_field = f.get("comment") or {}
+    all_comments = [c for c in comment_field.get("comments") or [] if isinstance(c, dict)]
+    comments = all_comments[-MAX_COMMENTS:]
+    by_id, by_name = pseudonyms(comments)
+    desc_text = adf_to_text(desc, by_id) if isinstance(desc, dict | list) else str(desc or "")
     comment_text = "\n".join(
-        f"Comment ({str(c.get('created', ''))[:10]}): "
-        + (adf_to_text(c.get("body")) if isinstance(c.get("body"), dict | list) else str(c.get("body") or "")).strip()
+        f"Comment ({str(c.get('created', ''))[:10]}) by "
+        + by_id.get(
+            str(_obj(c.get("author")).get("accountId") or _obj(c.get("author")).get("name") or ""),
+            by_id.get(str(_obj(c.get("author")).get("displayName") or ""), "a commenter"),
+        )
+        + ": "
+        + (
+            adf_to_text(c.get("body"), by_id) if isinstance(c.get("body"), dict | list) else str(c.get("body") or "")
+        ).strip()
         for c in comments
     )
+    comments_total = max(int(comment_field.get("total") or 0), len(all_comments))
     fix, aff = _names(f.get("fixVersions")), _names(f.get("versions"))
     comps, labels = _names(f.get("components")), [str(x) for x in f.get("labels") or []]
-    status = (f.get("status") or {}).get("name")
-    itype = (f.get("issuetype") or {}).get("name")
-    prio = (f.get("priority") or {}).get("name")
-    resolution = (f.get("resolution") or {}).get("name")
+    status = _obj(f.get("status")).get("name")
+    itype = _obj(f.get("issuetype")).get("name")
+    prio = _obj(f.get("priority")).get("name")
+    resolution = _obj(f.get("resolution")).get("name")
     header = [
         f"# {key}: {f.get('summary', '')}",
         f"Type: {itype} | Status: {status} | Priority: {prio} | Resolution: {resolution or 'Unresolved'}",
@@ -335,20 +471,29 @@ def issue_to_record(
         f"Components: {', '.join(comps) or '-'} | Labels: {', '.join(labels) or '-'}",
         f"Created: {str(f.get('created', ''))[:10]} | Updated: {str(f.get('updated', ''))[:10]}",
     ]
+    cut = False
     if comment_text and len(desc_text) + len(comment_text) > max_text:
         # keep the latest comments (where fixes, workarounds and "not a bug" verdicts are written) within budget
         room = max(max_text // 2, max_text - len(desc_text) - 600)
         comment_text = "...\n" + comment_text[-room:].split("\n", 1)[-1]
-    text = scrub(
-        "\n".join(header)
-        + "\n\n## Description\n\n"
-        + desc_text.strip()
-        + ("\n\n## Comments\n\n" + comment_text if comment_text else "")
-    )[:max_text]
-    status_category = ((f.get("status") or {}).get("statusCategory") or {}).get("key")
+        cut = True
+    full = scrub_handles(
+        unname(
+            scrub(
+                "\n".join(header)
+                + "\n\n## Description\n\n"
+                + desc_text.strip()
+                + ("\n\n## Comments\n\n" + comment_text if comment_text else "")
+            ),
+            by_name,
+        )
+    )
+    text = full[:max_text]
+    cut = cut or len(full) > max_text
+    status_category = _obj(_obj(f.get("status")).get("statusCategory")).get("key")
     return {
         "id": f"jira-{key}",
-        "title": scrub(f"{key}: {f.get('summary', '')}"),
+        "title": scrub_handles(unname(scrub(f"{key}: {f.get('summary', '')}"), by_name)),
         "text": text,
         "url": f"{base_url.rstrip('/')}/browse/{key}",
         "sourceId": f"jira:{project}",
@@ -371,6 +516,9 @@ def issue_to_record(
         "links": _links(f.get("issuelinks")),
         "version": ",".join(matched) or None,
         "versionBasis": basis,
+        "comments": len(comments),
+        "commentsTotal": comments_total,
+        **({"textCut": True} if cut else {}),
     }
 
 
@@ -658,7 +806,10 @@ def state_from_records(records: dict[str, dict[str, Any]], project: str) -> dict
     times = [t for r in recs if (t := _parse_iso(r.get("retrievedAt")))]
     if not keys or not times:
         return {}
-    return {"complete": False, "lowestKey": min(keys, key=key_number), "lastSyncAt": _iso(min(times))}
+    out: dict[str, Any] = {"complete": False, "lowestKey": min(keys, key=key_number), "lastSyncAt": _iso(min(times))}
+    if all("commentsTotal" in r for r in recs):  # written with every comment: no need to fetch the tickets again
+        out["textVersion"] = TEXT_VERSION
+    return out
 
 
 @dataclass
@@ -674,6 +825,43 @@ class ProjectSync:
         return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
+def change_event(
+    prev: dict[str, Any] | None, rec: dict[str, Any], phase: str, since: datetime | None
+) -> dict[str, Any] | None:
+    """What changed for one ticket between the copy and the server: status, status category, resolution or fix
+    versions, as a verdict ("fixed", "not-a-bug", "reopened", "fix-version", ...). A ticket the copy did not hold is
+    "opened" only when the forward pass finds it created since the last sync; the backfill only fills history."""
+    from kube_noob.tickets import verdict
+
+    key = str(rec["id"]).removeprefix("jira-")
+    to = {k: rec.get(k) for k in TRACKED}
+    to["verdict"] = verdict(rec.get("issueType"), rec.get("status"), rec.get("resolution"))
+    base = {
+        "key": key,
+        "project": str(rec.get("sourceId", "")).removeprefix("jira:"),
+        "at": rec.get("retrievedAt"),
+        "type": rec.get("issueType"),
+    }
+    if prev is None:
+        created = _parse_iso(rec.get("created"))
+        if phase == "forward" and since is not None and created is not None and created >= since:
+            return {**base, "kind": "opened", "to": to}
+        return None
+    before = {k: prev.get(k) for k in TRACKED}
+    if before == {k: to[k] for k in TRACKED}:
+        return None
+    before["verdict"] = verdict(prev.get("issueType"), prev.get("status"), prev.get("resolution"))
+    if before.get("statusCategory") == "done" and to.get("statusCategory") != "done":
+        kind = "reopened"
+    elif before["verdict"] != to["verdict"]:
+        kind = str(to["verdict"])
+    elif before.get("fixVersions") != to.get("fixVersions"):
+        kind = "fix-version"
+    else:
+        kind = "status"
+    return {**base, "kind": kind, "from": before, "to": to}
+
+
 def sync_project(
     client: JiraClient,
     project: str,
@@ -682,13 +870,16 @@ def sync_project(
     base_url: str,
     now: datetime | None = None,
     target_field: str = DEFAULT_TARGET_FIELD,
+    changes: list[dict[str, Any]] | None = None,
 ) -> ProjectSync:
-    """Update ``records`` (id -> record) and ``state`` for one project, in place.
+    """Update ``records`` (id -> record) and ``state`` for one project, in place; append what changed to ``changes``.
 
     1. Forward: issues updated since the last completed forward pass. The window ``updated >= -Nm`` is relative to the
        server's clock, and N comes from this machine's clock read just before the search, so time zones and a steady
        clock offset never matter; ``OVERLAP_MINUTES`` covers drift. ``lastSyncAt`` only moves when the pass finished.
-    2. Backfill: issues below the lowest key held, newest first, until the project is complete.
+    2. Open tickets, once per copy: every ticket still to do or in progress, newest first, so the tickets people
+       reconcile are in a new copy first.
+    3. Backfill: issues below the lowest key held, newest first, until the project is complete.
     """
     if not PROJECT_KEY.fullmatch(project):
         raise JiraError(f"not a Jira project key: {project!r}")
@@ -696,27 +887,68 @@ def sync_project(
     retrieved = _iso(started)
     fields = f"{SYNC_FIELDS},{target_field}" if target_field else SYNC_FIELDS
     res = ProjectSync(project)
+    phase = "forward"
+    since: datetime | None = None
 
     def keep(issue: dict[str, Any]) -> str:
         key = str(issue.get("key") or "")
         if not ISSUE_KEY.fullmatch(key) or not key.startswith(project + "-"):
             return ""
+        prev = records.get(f"jira-{key}")
+        fields_now = issue.get("fields") or {}
+        total_now = int(
+            (_obj(fields_now.get("comment")) if isinstance(fields_now.get("comment"), dict) else {}).get("total") or 0
+        )
+        if (
+            prev
+            and prev.get("updated") == fields_now.get("updated")
+            and prev.get("status") == _obj(fields_now.get("status")).get("name")
+            and prev.get("resolution") == _obj(fields_now.get("resolution")).get("name")
+            and prev.get("fixVersions") == _names(fields_now.get("fixVersions"))
+            and prev.get("comments") == prev.get("commentsTotal")
+            and int(prev.get("commentsTotal") or 0) >= total_now
+        ):
+            res.fetched += 1  # unchanged since it was kept whole (the open pass and the backfill both meet it)
+            return key
+        # a budget that runs out here raises before the ticket is kept, so the next run fetches it whole
+        issue = with_all_comments(client, key, issue)
         rec = issue_to_record(issue, base_url, project, [], "sync", retrieved, target_field, SYNC_MAX_TEXT)
+        if changes is not None:
+            event = change_event(records.get(rec["id"]), rec, phase, since)
+            if event:
+                changes.append(event)
         records[rec["id"]] = rec
         res.fetched += 1
         return key
 
+    if int(state.get("scrubVersion") or 1) < SCRUB_VERSION:  # offline: what the newer anonymiser finds goes now
+        for rec in records.values():
+            rec["text"] = scrub_handles(scrub(str(rec.get("text") or "")))
+            rec["title"] = scrub_handles(scrub(str(rec.get("title") or "")))
+        state["scrubVersion"] = SCRUB_VERSION
+    if int(state.get("textVersion") or 1) < TEXT_VERSION:
+        if state.get("lowestKey") or state.get(
+            "complete"
+        ):  # a copy made before: refetch every ticket once, newest first
+            state["complete"] = False
+            state.pop("lowestKey", None)
+        state["textVersion"] = TEXT_VERSION
     lowest = str(state.get("lowestKey") or "")
     if not (ISSUE_KEY.fullmatch(lowest) and lowest.startswith(project + "-")):
         state.pop("lowestKey", None)  # foreign or malformed: restart the backfill from the top
     last = _parse_iso(state.get("lastSyncAt")) if state.get("lastSyncAt") else None
     try:
         if last is not None:
+            since = last - timedelta(minutes=OVERLAP_MINUTES)
             minutes = max(0, -int(-(started - last).total_seconds() // 60)) + OVERLAP_MINUTES  # rounded up
             for issue in client.search(f"project = {project} AND updated >= -{minutes}m ORDER BY updated ASC", fields):
                 keep(issue)
         state["lastSyncAt"] = retrieved  # the forward pass finished (or this is the first run): changes from here on
+        if not state.get("complete") and not state.get("openDone"):
+            phase = "open"
+            _open_pass(client, project, fields, state, keep)
         if not state.get("complete"):
+            phase = "backfill"
             _backfill(client, project, fields, records, state, keep, res)
     except BudgetExhausted:
         res.stopped = "budget"
@@ -725,6 +957,63 @@ def sync_project(
     res.complete = bool(state.get("complete"))
     res.total = len(records)
     return res
+
+
+def with_all_comments(client: JiraClient, key: str, issue: dict[str, Any]) -> dict[str, Any]:
+    """The issue with every comment (up to ``MAX_COMMENTS``): a search returns a ticket's latest comments only, so
+    when its ``total`` is larger the rest come from the issue's paged comment endpoint, oldest first."""
+    fields = issue.get("fields") or {}
+    raw = fields.get("comment")
+    field: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    got = [c for c in field.get("comments") or [] if isinstance(c, dict)]
+    total = int(field.get("total") or len(got))
+    if total <= len(got) or not ISSUE_KEY.fullmatch(key):
+        return issue
+    comments: list[dict[str, Any]] = []
+    start = 0
+    while start < min(total, MAX_COMMENTS):
+        page = client.get(
+            f"/rest/api/3/issue/{key}/comment", {"startAt": start, "maxResults": COMMENT_PAGE, "orderBy": "created"}
+        )
+        client.stats.comment_pages += 1
+        batch = [c for c in (page.get("comments") or []) if isinstance(c, dict)] if isinstance(page, dict) else []
+        if not batch:
+            break
+        comments.extend(batch)
+        start += len(batch)
+        total = max(total, int(page.get("total") or 0)) if isinstance(page, dict) else total
+    seen = {str(c.get("id")) for c in comments if c.get("id") is not None}
+    comments += [c for c in got if c.get("id") is None or str(c.get("id")) not in seen]  # newer than the paging
+    comments.sort(key=lambda c: str(c.get("created") or ""))
+    return {**issue, "fields": {**fields, "comment": {**field, "comments": comments[-MAX_COMMENTS:], "total": total}}}
+
+
+def _open_pass(
+    client: JiraClient,
+    project: str,
+    fields: str,
+    state: dict[str, Any],
+    keep: Callable[[dict[str, Any]], str],
+) -> None:
+    """Every open ticket, newest first, resuming below the lowest key fetched when a budget stopped the last run."""
+    anchor = str(state.get("openLowestKey") or "")
+    if not (ISSUE_KEY.fullmatch(anchor) and anchor.startswith(project + "-")):
+        anchor = ""
+    below = f" AND key < {anchor}" if anchor else ""
+    try:
+        for issue in client.search(f"project = {project} AND {OPEN_JQL}{below} ORDER BY key DESC", fields):
+            key = keep(issue)
+            low = str(state.get("openLowestKey") or "")
+            if key and (not low or key_number(key) < key_number(low)):
+                state["openLowestKey"] = key
+    except BudgetExhausted:
+        raise
+    except JiraError as exc:
+        if not (anchor and "400" in str(exc)):
+            raise
+        # the key is gone (moved or deleted): the backfill reaches every ticket anyway, so the open pass ends here
+    state["openDone"] = True
+    state.pop("openLowestKey", None)
 
 
 def _backfill(
@@ -849,13 +1138,19 @@ def sync_projects_locked(
     state["baseUrl"] = base_url
     results: list[dict[str, Any]] = []
     all_records: list[dict[str, Any]] = []
+    changed: dict[str, int] = {}
     for project in projects:
         records = load_shard(data_dir, project)
         current = per.get(project)
         if not isinstance(current, dict) or current.get("shardSha256") != _shard_sha(data_dir, project):
             # no state, or the shard was replaced since (corpus import, an older kube-noob): derive it from the copy
             per[project] = state_from_records(records, project) if records else {}
-        res = sync_project(client, project, records, per[project], base_url, now, target_field)
+        changes: list[dict[str, Any]] = []
+        res = sync_project(client, project, records, per[project], base_url, now, target_field, changes)
+        if changes:
+            append_changes(data_dir, changes)
+            for c in changes:
+                changed[c["kind"]] = changed.get(c["kind"], 0) + 1
         if records:
             ordered = sorted(records.values(), key=lambda r: -key_number(str(r["id"]).removeprefix("jira-")))
             entry = write_shard(data_dir, shard_name(project), ordered)
@@ -872,10 +1167,39 @@ def sync_projects_locked(
         "projects": results,
         "skipped": skipped,
         "requests": client.stats.requests,
+        "commentRequests": client.stats.comment_pages,
         "retries": client.stats.retries,
         "stoppedBy": "budget" if any(r.get("stopped") == "budget" for r in results) else None,
+        "changes": dict(sorted(changed.items())),
         "records": all_records,
     }
+
+
+def changes_path(data_dir: Path) -> Path:
+    from kube_noob.ticket_changes import changes_path as path
+
+    return path(data_dir)
+
+
+def append_changes(data_dir: Path, events: list[dict[str, Any]]) -> None:
+    """Add change events to ``jira/changes.jsonl`` (owner-only; newest last; at most ``MAX_CHANGES`` lines)."""
+    path = changes_path(data_dir)
+    jira_dir(data_dir)
+    lines: list[str] = []
+    if path.is_file():
+        with path.open(encoding="utf-8") as fh:
+            lines = fh.readlines()
+    lines += [json.dumps(e, sort_keys=True) + "\n" for e in events]
+    lines = lines[-MAX_CHANGES:]
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".changes.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -968,15 +1292,22 @@ def run_sync(
     return out
 
 
-def start_background(settings: Any) -> Any:
-    """Keep the copy current from ``kube-noob serve``: one run now, then every ``jira.interval_hours``."""
+def start_background(settings: Any, rng: random.Random | None = None) -> Any:
+    """Keep the copy current from ``kube-noob serve``: a first run after a random 30 s to 10 min (pods that start
+    together do not reach Jira together), then every ``jira.interval_hours`` +/- 10%."""
     import logging
     import threading
 
+    from kube_noob.sources.pacing import jittered_interval, start_delay
+
     log = logging.getLogger("kube_noob.jira")
     stop = threading.Event()
+    r = rng or random.Random()  # noqa: S311 - pacing, not crypto
+    first = start_delay(r)
 
     def loop() -> None:
+        if stop.wait(first):
+            return
         while not stop.is_set():
             try:
                 out = run_sync(settings)
@@ -989,7 +1320,9 @@ def start_background(settings: Any) -> Any:
                 )
             except Exception:  # one failed run must not stop the service
                 log.exception("jira sync failed")
-            stop.wait(settings.jira.interval_hours * 3600)
+            stop.wait(jittered_interval(settings.jira.interval_hours * 3600, r))
 
+    log.debug("jira sync: first run in %d s, then every %s h +/- 10%%", first, settings.jira.interval_hours)
     threading.Thread(target=loop, name="kube-noob-jira-sync", daemon=True).start()
+    stop.first_delay = first  # type: ignore[attr-defined]  # for the operator log and tests
     return stop

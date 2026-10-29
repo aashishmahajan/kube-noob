@@ -5,7 +5,11 @@ tags: [storage, pvc, rwx, rwo]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question has to be about this document's subject: generic words (container, volume, exit) are not enough.
+requires:
+  - [pvc, pvcs, persistentvolumeclaim, persistentvolumeclaims, pv, pvs, persistentvolume, persistentvolumes, storageclass, storageclasses, accessmodes, readwriteonce, readwritemany, readonlymany, readwriteoncepod, rwo, rwx, multi-attach, csi, volumeattachment]
 sources:
+  - {title: "OpenShift docs: Resolve multi-attach errors", url: "https://github.com/openshift/openshift-docs/blob/1400f2c8ebe0f2ec66005ecef2bd720cf4c97cad/modules/storage-multi-attach-error.adoc", license: Apache-2.0}
   - {title: "Kubernetes Persistent Volumes - access modes", url: "https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes", license: CC-BY-4.0}
   - {title: "OpenShift - understanding persistent storage", url: "https://docs.redhat.com/en/documentation/openshift_container_platform/", license: CC-BY-SA-3.0}
 ---
@@ -36,6 +40,10 @@ The access mode is a **request**; the provisioner behind the StorageClass decide
 - A Deployment with several replicas (or a RollingUpdate surge pod) sharing one RWO claim: pods on other nodes hang in
   ContainerCreating with `Multi-Attach error`. Use a StatefulSet with `volumeClaimTemplates`, or `strategy: Recreate`
   with one replica. Rule KN-ST002.
+- `Multi-Attach error ... Volume is already used by pod(s)` after a node crashed or shut down abruptly: the dead node
+  cannot unmount its ReadWriteOnce volume. Use ReadWriteMany where the storage supports it; with RWO, once the node
+  is confirmed down, force delete the old pod: `oc delete pod <old_pod> --force=true --grace-period=0`. The volume
+  stuck on that node is released after six minutes.
 - Zonal block storage with `volumeBindingMode: Immediate` can create the volume in a zone where the pod cannot run.
   Use `WaitForFirstConsumer`. Rule KN-ST003.
 - `storageClassName` is immutable on a PVC: fixing it means creating a new claim and migrating data.

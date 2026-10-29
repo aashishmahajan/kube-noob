@@ -18,7 +18,7 @@ _DECIMAL = {
     "P": Decimal("1e15"),
     "E": Decimal("1e18"),
 }
-_RE = re.compile(r"^([+-]?(?:\d+\.?\d*|\.\d+))(?:[eE]([+-]?\d+))?(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$")
+_RE = re.compile(r"^([+-]?(?:\d+\.?\d*|\.\d+))(?:[eE]([+-]?\d+))?(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?\Z")
 
 
 def parse_quantity(value: str | int | float) -> Decimal:

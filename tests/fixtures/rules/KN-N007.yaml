@@ -1,0 +1,15 @@
+rule: KN-N007
+good: |
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata: {name: web, namespace: shop}
+  spec:
+    podSelector: {matchLabels: {app: web}}
+    ingress: [{from: [{podSelector: {matchLabels: {app: front}}}]}]
+bad: |
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata: {name: all, namespace: shop}
+  spec:
+    podSelector: {}
+    ingress: [{}]

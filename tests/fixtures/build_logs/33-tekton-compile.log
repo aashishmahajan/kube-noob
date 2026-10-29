@@ -1,0 +1,10 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] npm WARN config production Use `--omit=dev` instead.
+[build : build] + cargo build --release
+[build : build]    Compiling serde v1.0.210
+[build : build]    Compiling acme-agent v0.3.1 (/workspace/source)
+[build : build] error[E0425]: cannot find value `config_path` in this scope
+[build : build]   --> src/main.rs:22:31
+[build : build] error: could not compile `acme-agent` (bin "acme-agent") due to 1 previous error
+task build failed: "step-build" exited with code 101. Run tkn tr desc app-ci-run-x7k2p-05-build for more details

@@ -1,0 +1,202 @@
+id,change,date
+1455,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+3286,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
+3294,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+3475,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+3514,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7419,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7445,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7488,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7563,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7574,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7605,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7606,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7607,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7613,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7654,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7655,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7659,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7670,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+7683,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+8153,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+8194,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+8283,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+8369,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
+8403,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
+8450,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
+8490,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+8558,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+10524,DBG-IMAGEPULL local-image cause and minikube fix (QA5),2026-10-28
+13615,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13694,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13807,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13820,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13850,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13933,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+13975,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14042,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14087,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14228,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14941,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14942,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+14975,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+15070,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+15218,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+15273,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+18014,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+18223,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
+18610,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+18919,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
+18994,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+19008,DBG-SCC matches a mangled security context constraint line (QA5),2026-10-28
+19091,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+19231,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+19380,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+19397,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
+19488,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+19518,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+20936,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+20998,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+21195,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+21401,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+21490,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+22068,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+22693,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+22724,GENERAL_MAX_CHUNKS: count-based rarity for the reported-issue matcher (QA6),2026-10-28
+23083,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+23099,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+23129,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+23143,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+23144,helm-templates-values document (QA5): Helm rows read to choose its sections,2026-10-28
+24393,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+24401,GENERAL_MAX_CHUNKS kept: a count of documents measured worse (QA6),2026-10-28
+10566,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+10617,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+11054,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+11343,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+16888,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+16918,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+16921,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+16937,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+16955,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+24668,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+24683,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+24694,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+24776,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+24867,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+24970,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25121,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25169,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25173,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25175,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25180,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25195,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25201,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+25213,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30010,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30012,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30026,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30028,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30038,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30042,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30106,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30134,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30156,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30174,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30284,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30317,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30334,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30390,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30391,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30398,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30406,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30481,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30525,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30574,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30589,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30593,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30602,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30807,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30812,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30826,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30838,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30852,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30857,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30859,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30919,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30945,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30950,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30965,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+30990,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31044,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31065,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31073,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31083,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31085,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31132,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31170,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31173,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31185,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31195,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31217,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31226,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31240,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31241,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31277,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31285,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31287,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31291,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31301,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31320,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31321,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31327,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31335,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31338,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31341,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31373,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31382,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31395,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31403,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31406,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31411,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31420,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31432,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31434,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31444,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31450,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31457,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31464,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31468,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31474,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31478,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+31479,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32019,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32042,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32110,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32122,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32133,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32167,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32198,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32213,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32233,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32273,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32331,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32333,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32361,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32381,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32400,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32402,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32420,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32433,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32435,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32438,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+32461,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+4457,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+4685,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+6335,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+7449,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+7570,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+7627,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+8390,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+8459,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29
+9076,QA9 documents: test-half grading chose which new documents ship (Rook-Ceph and Jobs/kustomize and Kyverno usage held back),2026-10-29

@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
+import pkgutil
 import random
+import re
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+import kube_noob
 from kube_noob import toolkit as tk
 from kube_noob.config import load_settings
 from kube_noob.debug import cluster
@@ -173,3 +177,43 @@ def test_unreachable_local_model_fails_cleanly() -> None:
     provider = build_provider(s.llm, s)
     with pytest.raises(ProviderError, match="Cannot reach the model endpoint"):
         provider.turn("system", [{"role": "user", "content": "hi"}], [])
+
+
+# Patterns that parse one line of a log or file at a time; everything else anchored with ^ is a validator.
+_LINE_PARSERS = {
+    "kube_noob.build.containerfile._DIRECTIVE",
+    "kube_noob.build.containerfile._HEREDOC",
+    "kube_noob.build.logs._GHA_STEP",
+    "kube_noob.build.logs._JENKINS_END",
+    "kube_noob.build.logs._JENKINS_EXIT",
+    "kube_noob.build.logs._JENKINS_FREESTYLE",
+    "kube_noob.build.logs._JENKINS_FREESTYLE_FAIL",
+    "kube_noob.build.logs._JENKINS_STAGE",
+    "kube_noob.build.logs._OCP_ERROR",
+    "kube_noob.build.logs._OCP_PUSH",
+    "kube_noob.build.logs._OCP_STEP",
+    "kube_noob.build.logs._TEKTON_PREFIX",
+    "kube_noob.debug.policy._GK_LINE",
+    "kube_noob.debug.policy._KYV_POLICY_LINE",
+    "kube_noob.debug.policy._KYV_RULE_LINE",
+    "kube_noob.debug.policy._SCC_ERROR",
+    "kube_noob.gate._SOURCE",
+    "kube_noob.signals.core._CO_ROW",
+}
+
+
+def test_validators_end_with_backslash_z_not_dollar() -> None:
+    """``re.match("^[a-z]+$", "env\\n")`` succeeds: ``$`` also matches before a final newline. A validator that
+    lets a newline through can split a printed command into two shell lines, so validators end with ``\\Z``."""
+    loose: list[str] = []
+    for mod in pkgutil.walk_packages(kube_noob.__path__, "kube_noob."):
+        if mod.name.endswith("__main__"):
+            continue
+        for name, value in vars(importlib.import_module(mod.name)).items():
+            if not isinstance(value, re.Pattern) or not isinstance(value.pattern, str) or value.flags & re.MULTILINE:
+                continue
+            pattern = value.pattern
+            anchored = pattern.startswith("^") and pattern.endswith("$") and not pattern.endswith("\\$")
+            if anchored and f"{mod.name}.{name}" not in _LINE_PARSERS:
+                loose.append(f"{mod.name}.{name}")
+    assert loose == []
