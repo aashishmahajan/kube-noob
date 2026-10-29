@@ -94,3 +94,21 @@ def test_normalise_keeps_the_whole_headroom(tmp_path: Path, monkeypatch: pytest.
     wav.write_bytes(b"RIFF")
     result = loudness.normalize(wav, voiced=True)
     assert result["TP"] <= ceiling and len(filters) == 2 and "alimiter" in filters[1]
+
+
+def test_mux_keeps_the_whole_picture(tmp_path: Path) -> None:
+    # The mux keeps every frame of the picture. With -shortest, the 4K walkthrough's capture lost its last two frames
+    # (video 150.167 s against audio 150.233 s) and verify() refused it; this synthetic picture does not reproduce
+    # that cut, so the test holds the contract: the picture's length unchanged, the sound within a frame of it.
+    import audio_kit
+
+    video = tmp_path / "pic.mp4"
+    _ff("-f", "lavfi", "-i", "color=c=black:s=320x180:r=30", "-frames:v", "157", "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", str(video))  # fmt: skip
+    picture = loudness.streams(video)["video"]
+    wav = tmp_path / "mix.wav"
+    _ff("-f", "lavfi", "-i", PEAKY, "-t", f"{picture:.6f}", "-ac", "2", "-c:a", "pcm_s24le", str(wav))
+    loudness.normalize(wav, voiced=True)
+    audio_kit.mux(video, wav, voiced=True)
+    d = loudness.streams(video)
+    assert d["video"] == pytest.approx(picture, abs=1e-6) and abs(d["video"] - d["audio"]) <= 1 / 30 + 0.03

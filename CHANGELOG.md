@@ -128,6 +128,11 @@
     lighting its line and a ring counting to the score. Then the fix's diff appears, the fixed lines turn green, the
     ring climbs to the score after the fixes, and the changes left for a person are named. The MCP terminal now uses
     31 px type in a box as tall as its lines.
+  - The voice says "2 a.m." as "2 AM": Kokoro took the periods of "a.m." as sentence breaks ("two A. M.") and paused
+    twice. RHACS is "RH ACS", because "R H A C S" made the A sound like "uh". `tests/test_video_voice.py` fails any
+    spoken line that still has an abbreviation with periods or a lone spelled-out "A".
+  - The mux cuts the sound to the picture's own length instead of using `-shortest`. On the walkthrough, `-shortest`
+    dropped the last two frames (video 150.167 s against audio 150.233 s), and the loudness check refused the file.
 - `corpus-refresh`: a saved Jira copy that no longer decrypts (CORPUS_PASSPHRASE changed since it was saved) starts
   a new copy with a warning instead of failing the daily run ("bad decrypt" on 2026-10-29).
 

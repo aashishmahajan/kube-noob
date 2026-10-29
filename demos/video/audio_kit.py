@@ -57,7 +57,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import captions  # noqa: E402
-from loudness import normalize, verify  # noqa: E402
+from loudness import normalize, streams, verify  # noqa: E402
 
 RATE = 48_000
 DEFAULT_MUSIC_DB = -12.0
@@ -84,13 +84,13 @@ SILENT_CPS = 16.0  # characters a second the Kokoro voice speaks, for --engine s
 # Words the voice models say wrongly, checked against the phonemes Kokoro produces.
 PRONOUNCE = [
     (r"\bkube-noob\b", "kube noob"),
-    (r"\bRHACS\b", "R H A C S"),
+    (r"\bRHACS\b", "RH ACS"),  # "R H A C S" says the A as "uh"
     (r"\bUID\b", "U I D"),
     (r"\boc\b", "O C"),
     (r"\bkubectl\b", "kube control"),
     (r"\bexit code 137\b", "exit code one thirty-seven"),
     (r"\b(\d)\.(\d\d)\b", r"\1 \2"),  # OpenShift 4.22 -> "four twenty-two"
-    (r"\b2 a\.m\.", "two a.m."),
+    (r"\b2 a\.m\.", "2 AM"),  # "a.m." keeps its periods as sentence breaks: "two A. M."
 ]
 
 
@@ -487,7 +487,9 @@ def remix(folder: Path, music_db: float | None) -> Path:
 
 def mux(video: Path, audio: Path, voiced: bool) -> None:
     """Replace video's sound with audio (already normalised by write_stems/remix; AAC 320k), copying the picture, and
-    check the result against the brand's sound spec before it replaces the video."""
+    check the result against the brand's sound spec before it replaces the video. The output is cut to the picture's
+    own length, never shorter: -shortest drops the last frames to AAC's priming and fails verify()'s one-frame check."""
+    picture = streams(video).get("video") or duration(video)
     with tempfile.TemporaryDirectory(dir=video.parent) as tmp:
         out = Path(tmp) / video.name
         subprocess.run(
@@ -512,7 +514,8 @@ def mux(video: Path, audio: Path, voiced: bool) -> None:
                 "320k",
                 "-ar",
                 "48000",
-                "-shortest",
+                "-t",
+                f"{picture:.6f}",
                 "-movflags",
                 "+faststart",
                 str(out),
@@ -580,7 +583,9 @@ def narrate(folder: Path, voice: Voice) -> dict[str, Any]:
 
 def score(folder: Path, page: str, music_db: float | None) -> Path:
     video = folder / f"kube-noob-{page}.mp4"
-    total = duration(video)
+    # The picture's own length: the container's can run a frame or two past it (the capture's last frame timing), and
+    # a sound track built to that would fail verify()'s one-frame check.
+    total = streams(video).get("video") or duration(video)
     n = int(total * RATE)
     voice = np.zeros((n, 2))
     marks_file = folder / f"{page}-marks.json"
