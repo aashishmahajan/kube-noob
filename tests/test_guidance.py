@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-ROW = re.compile(r"^\| (G\d{2}) \| (.+?) \| (.+) \|$")
+ROW = re.compile(r"^\| (G\d{2,3}) \| (.+?) \| (.+) \|$")
 REF = re.compile(r"`([^`]+)`")
 
 

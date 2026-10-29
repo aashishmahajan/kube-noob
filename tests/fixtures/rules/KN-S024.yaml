@@ -1,0 +1,59 @@
+rule: KN-S024
+good: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: ingress-nginx-controller
+    namespace: ingress-nginx
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app.kubernetes.io/name: ingress-nginx}
+    template:
+      metadata:
+        labels: {app.kubernetes.io/name: ingress-nginx}
+      spec:
+        containers:
+        - name: controller
+          image: registry.k8s.io/ingress-nginx/controller:v1.15.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          args: [/nginx-ingress-controller, --enable-annotation-validation]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe: {httpGet: {path: /healthz, port: 10254}}
+          livenessProbe: {httpGet: {path: /healthz, port: 10254}, periodSeconds: 10, failureThreshold: 3}
+bad: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: ingress-nginx-controller
+    namespace: ingress-nginx
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app.kubernetes.io/name: ingress-nginx}
+    template:
+      metadata:
+        labels: {app.kubernetes.io/name: ingress-nginx}
+      spec:
+        containers:
+        - name: controller
+          image: registry.k8s.io/ingress-nginx/controller:v1.11.4@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          args: [/nginx-ingress-controller, --validating-webhook=:8443]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe: {httpGet: {path: /healthz, port: 10254}}
+          livenessProbe: {httpGet: {path: /healthz, port: 10254}, periodSeconds: 10, failureThreshold: 3}

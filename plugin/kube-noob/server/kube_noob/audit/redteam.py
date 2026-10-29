@@ -140,7 +140,9 @@ def rwx_split_brain(ctx: AuditContext, findings: list[Finding]) -> RedTeamScenar
 def exposure(ctx: AuditContext, findings: list[Finding]) -> RedTeamScenario | None:
     if not ctx.by_kind("Route", "Ingress", "Service", "Gateway", "HTTPRoute"):
         return None
-    fs = _ids(findings, "KN-N002", "KN-N003", "KN-N004", "KN-N005", "KN-N001", "KN-N007")
+    fs = _ids(
+        findings, "KN-N002", "KN-N003", "KN-N004", "KN-N005", "KN-N001", "KN-N007", "KN-N008", "KN-N009", "KN-N010"
+    )
     verdict, sev = _verdict(fs)
     return RedTeamScenario(
         "RT-EXPOSURE",
@@ -176,6 +178,9 @@ def privilege_escalation(ctx: AuditContext, findings: list[Finding]) -> RedTeamS
         "KN-S017",
         "KN-S019",
         "KN-S020",
+        "KN-S021",
+        "KN-S022",
+        "KN-S023",
         "KN-S002",
         "KN-S003",
     )

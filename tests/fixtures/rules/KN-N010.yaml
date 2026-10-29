@@ -1,0 +1,20 @@
+rule: KN-N010
+good: |
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: ingress-nginx-controller
+    namespace: ingress-nginx
+  data:
+    allow-snippet-annotations: "false"
+    annotations-risk-level: High
+    strict-validate-path-type: "true"
+bad: |
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: ingress-nginx-controller
+    namespace: ingress-nginx
+  data:
+    allow-snippet-annotations: "true"
+    annotations-risk-level: Critical

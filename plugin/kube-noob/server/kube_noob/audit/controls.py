@@ -67,6 +67,10 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S018": ("IA-5(7)", "SC-28"),
     "KN-S019": ("AC-6", "CM-7", "SC-39"),
     "KN-S020": ("SC-39", "CM-7"),
+    "KN-S021": ("SI-2", "CM-7", "SC-39"),  # a deprecated volume driver with a published breakout
+    "KN-S022": ("SI-2", "SC-39", "CM-7"),
+    "KN-S023": ("SI-2", "SC-39"),
+    "KN-S024": ("SI-2", "SA-22"),  # a component below its fixed releases, from a retired project
     # Network exposure
     "KN-N001": ("SC-7", "SC-7(5)", "AC-4"),
     "KN-N002": ("SC-8", "SC-8(1)"),
@@ -75,6 +79,9 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-N005": ("SC-7", "CM-7"),
     "KN-N006": ("SC-7", "SC-7(5)", "AC-4"),
     "KN-N007": ("SC-7", "SC-7(5)", "AC-4"),
+    "KN-N008": ("SC-7", "SC-8", "AC-4"),  # externalIPs let a Service intercept traffic in transit
+    "KN-N009": ("CM-7", "SI-2", "SC-7"),
+    "KN-N010": ("CM-6", "CM-7", "SI-2"),
     # Storage
     "KN-ST001": ("CM-6",),
     "KN-ST002": ("CM-6", "CP-10"),
@@ -112,6 +119,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-V016": ("SC-8", "CM-6"),
     "KN-V017": ("CM-6",),
     "KN-V018": _VALIDATION,
+    "KN-V019": ("SA-22",),  # the retired ingress-nginx receives no fixes
 }
 
 

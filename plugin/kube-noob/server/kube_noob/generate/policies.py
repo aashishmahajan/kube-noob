@@ -42,11 +42,16 @@ from kube_noob.audit.rules import (
     CREDENTIAL_FLAG_NAME,
     EMBEDDED_CREDENTIAL,
     ESCALATION_VERBS,
+    INGRESS_NGINX_ANNOTATION_PREFIX,
+    INGRESS_NGINX_CLASS,
+    INGRESS_NGINX_CONFIGMAP_KEYS,
+    INGRESS_NGINX_RISKY_ANNOTATIONS,
     INTERNAL_LB_ANNOTATIONS,
     RULES,
     SENSITIVE_ENV,
     WORKLOAD_RESOURCES,
     Rule,
+    ingress_nginx_vulnerable_tag_regex,
 )
 from kube_noob.catalog import OPENSHIFT_FAMILY, PROVISIONERS, ROSA_FAMILY, SOURCES, parse_minor
 
@@ -96,6 +101,7 @@ TARGETS: dict[str, Target] = {
         Target("Route", "route.openshift.io", "v1", "routes"),
         Target("Ingress", "networking.k8s.io", "v1", "ingresses"),
         Target("Service", "", "v1", "services"),
+        Target("ConfigMap", "", "v1", "configmaps"),
         Target("EgressFirewall", "k8s.ovn.org", "v1", "egressfirewalls"),
         Target("NetworkPolicy", "networking.k8s.io", "v1", "networkpolicies"),
         Target("StorageClass", "storage.k8s.io", "v1", "storageclasses", namespaced=False),
@@ -237,6 +243,29 @@ _EGRESS = "(has(object.spec) && has(object.spec.egress) ? object.spec.egress : [
 _EMPTY_SELECTOR = "(!has({s}.matchLabels) && !has({s}.matchExpressions))"
 _ZONAL = sorted(name for name, p in PROVISIONERS.items() if p.zonal)
 _REPLICAS = "(has(object.spec.replicas) ? object.spec.replicas : 1)"
+# CVE signatures (kube_noob.audit.rules KN-S021..S024, KN-N008..N010, KN-V019), the same tables as the audit.
+_SYSCTL_META = r"[+=]"
+_PROC_WORKDIR = r"^\s*/proc(/|\s*$)"
+_NGINX_IMAGE = (
+    r"^(?:[^@]*/)?ingress-nginx/controller(?:-chroot)?:v?" + ingress_nginx_vulnerable_tag_regex() + r"(?:@.*)?$"
+)
+_NGINX_CLASS = r"^\s*" + re.escape(INGRESS_NGINX_CLASS) + r"\s*$"
+_NGINX_RISKY = " || ".join(
+    f"'{INGRESS_NGINX_ANNOTATION_PREFIX}{a}' in object.metadata.annotations"
+    for a in sorted(INGRESS_NGINX_RISKY_ANNOTATIONS)
+)
+_NON_BLANK = _raw(r"\S")
+
+
+def _configmap_value(key: str, unsafe: str) -> str:
+    """CEL: the ConfigMap's ``key`` holds ``unsafe`` (whatever the case and the surrounding blanks)."""
+    pattern = r"(?i)^\s*" + re.escape(unsafe) + r"\s*$"
+    return f"('{key}' in object.data && string(object.data['{key}']).matches({_raw(pattern)}))"
+
+
+_NGINX_CONFIGMAP = " || ".join(
+    _configmap_value(k, unsafe) for k, (unsafe, _, _) in sorted(INGRESS_NGINX_CONFIGMAP_KEYS.items())
+)
 
 
 @dataclass(frozen=True)
@@ -308,6 +337,17 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
         "(has(variables.podSC.seccompProfile) && has(variables.podSC.seccompProfile.type) ? "
         "variables.podSC.seccompProfile.type : ''))"
     )
+    # A Localhost profile whose localhostProfile is missing or blank (CVE-2023-2431), at whichever level sets the type.
+    empty_localhost = (
+        f"(({_sc('seccompProfile.type')} && c.securityContext.seccompProfile.type == 'Localhost' && "
+        "!(has(c.securityContext.seccompProfile.localhostProfile) && "
+        f"string(c.securityContext.seccompProfile.localhostProfile).matches({_NON_BLANK}))) || "
+        f"(!({_sc('seccompProfile.type')} && c.securityContext.seccompProfile.type != '') && "
+        "has(variables.podSC.seccompProfile) && has(variables.podSC.seccompProfile.type) && "
+        "variables.podSC.seccompProfile.type == 'Localhost' && "
+        "!(has(variables.podSC.seccompProfile.localhostProfile) && "
+        f"string(variables.podSC.seccompProfile.localhostProfile).matches({_NON_BLANK}))))"
+    )
     image_ok = (
         "has(c.image) && c.image != '' && (c.image.matches(r'@sha256:[0-9a-f]{64}$') || "
         "(c.image.matches(r'^([^@]*/)?[^/@]*:[^/@]*(@.*)?$') && "
@@ -376,7 +416,7 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
         Check(
             "KN-S008",
             _POD_KINDS,
-            (f"variables.containers.all(c, {seccomp} in ['RuntimeDefault', 'Localhost'])",),
+            (f"variables.containers.all(c, {seccomp} in ['RuntimeDefault', 'Localhost'] && !{empty_localhost})",),
             pod=True,
         ),
         Check(
@@ -455,6 +495,37 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
             pod=True,
         ),
         Check(
+            "KN-S021",
+            _POD_KINDS,
+            ("!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.gitRepo))",),
+            pod=True,
+        ),
+        Check(
+            "KN-S022",
+            _POD_KINDS,
+            (
+                "!has(variables.podSC.sysctls) || variables.podSC.sysctls.all(s, "
+                f"!((has(s.name) && string(s.name).matches({_raw(_SYSCTL_META)})) || "
+                f"(has(s.value) && string(s.value).matches({_raw(_SYSCTL_META)}))))",
+            ),
+            pod=True,
+        ),
+        Check(
+            "KN-S023",
+            _POD_KINDS,
+            (
+                "variables.containers.all(c, !has(c.workingDir) || "
+                f"!string(c.workingDir).matches({_raw(_PROC_WORKDIR)}))",
+            ),
+            pod=True,
+        ),
+        Check(
+            "KN-S024",
+            _POD_KINDS,
+            (f"variables.containers.all(c, !has(c.image) || !string(c.image).matches({_raw(_NGINX_IMAGE)}))",),
+            pod=True,
+        ),
+        Check(
             "KN-N002",
             ("Route",),
             (
@@ -475,6 +546,9 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
             ),
         ),
         Check("KN-N005", ("Service",), ("!(has(object.spec.type) && object.spec.type == 'NodePort')",)),
+        Check("KN-N008", ("Service",), ("!has(object.spec.externalIPs) || object.spec.externalIPs.size() == 0",)),
+        Check("KN-N009", ("Ingress",), (f"!has(object.metadata.annotations) || !({_NGINX_RISKY})",)),
+        Check("KN-N010", ("ConfigMap",), (f"!has(object.data) || !({_NGINX_CONFIGMAP})",)),
         Check(
             "KN-N006",
             ("EgressFirewall",),
@@ -628,6 +702,20 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
             ),
         ),
         Check("KN-V017", ("MachineConfig", "MachineConfigPool"), ("false",)),
+        Check(
+            "KN-V019",
+            ("Ingress",),
+            (
+                "!has(object.metadata.annotations) || !object.metadata.annotations.exists(k, "
+                f"k.startsWith('{INGRESS_NGINX_ANNOTATION_PREFIX}'))",
+                "!(has(object.spec.ingressClassName) && "
+                f"string(object.spec.ingressClassName).matches({_raw(_NGINX_CLASS)}))",
+                "!has(object.metadata.annotations) || !('kubernetes.io/ingress.class' in object.metadata.annotations "
+                f"&& string(object.metadata.annotations['kubernetes.io/ingress.class']).matches({_raw(_NGINX_CLASS)}))",
+            ),
+            coverage="partial",
+            limitation="a workload that runs the ingress-nginx controller image is left to `kube-noob audit`",
+        ),
     ]
     out: dict[str, Check] = {}
     skipped: dict[str, str] = {}

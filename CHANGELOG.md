@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- CVE signatures in the audit (G105): KN-S021 gitRepo volume (CVE-2024-10220, CVE-2025-1767; deprecated since 1.11,
+  off by default from 1.33, gone after 1.35: clone with an init container into an emptyDir), KN-N008 Service
+  externalIPs (CVE-2020-8554, no patch; DenyServiceExternalIPs), KN-N009 risky ingress-nginx annotations (the Critical
+  and High lists plus the annotations behind CVE-2021-25742, CVE-2023-5043/5044, CVE-2025-24514/1097/1098,
+  CVE-2025-15566, CVE-2026-1580, CVE-2026-24513 and CVE-2026-3288), KN-N010 a controller ConfigMap that enables
+  snippets, Critical-risk annotations or unvalidated paths, KN-S022 '+' or '=' in a pod sysctl (CVE-2022-0811,
+  cr8escape, CRI-O), KN-S023 workingDir under /proc and KN-B011 Containerfile WORKDIR under /proc (CVE-2024-21626,
+  Leaky Vessels, runc 1.1.12), KN-S024 an ingress-nginx controller image below the releases that fix CVE-2025-1974 and
+  the later advisories (critical when the validating webhook is on), KN-V019 the retired ingress-nginx (archived
+  2026-03-24; move to a Gateway API implementation), and KN-S008 now flags a Localhost seccomp profile with no file
+  (CVE-2023-2431). Each cites the Kubernetes CVE feed issue or the GitHub advisory, ships fixtures and an admission
+  policy, and feeds the red team (RT-PRIVESC, RT-EXPOSURE) and the threat model (TM-E02, TM-S03, TM-E04).
+
 - kube-noob.com: a static site generated from the repository by `scripts/build_site.py` and deployed to GitHub Pages
   by the `site` workflow (setup and DNS: `site/README.md`). Docs; references generated from the code (MCP tools and
   their schemas, CLI, rules, playbooks, knowledge base, release-note issue index, Helm values); the product journey

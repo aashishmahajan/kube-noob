@@ -11,6 +11,7 @@ Checks, each with a good and a bad fixture in ``tests/fixtures/containerfile/``:
 - KN-B006 package manager cache left in the final image (apt lists, dnf/yum/microdnf, apk, pip, zypper)
 - KN-B007 no ``HEALTHCHECK`` and no probes (Kubernetes ignores HEALTHCHECK: probes in the pod spec pass the check)
 - KN-B008 a single-stage build that ships its build tools (use a multi-stage build)
+- KN-B011 ``WORKDIR`` under ``/proc`` (the CVE-2024-21626 "Leaky Vessels" runc breakout pattern)
 
 ``kube_noob.build.oci`` adds what only the built image shows: KN-B009 (a credential in a layer, including one
 deleted by a later layer) and KN-B010 (one in the image config or history), and the image's real user for KN-B002.
@@ -129,6 +130,16 @@ CHECKS: dict[str, Check] = {
             "high",
             "Rebuild without the credential in ENV, ARG or LABEL (build arguments show in the history), and rotate it",
             ("docker-secrets-arg-env",),
+        ),
+        Check(
+            "KN-B011",
+            "WORKDIR under /proc",
+            "high",
+            "Set WORKDIR to a directory inside the image (/app, /opt/app-root/src): CVE-2024-21626 ('Leaky Vessels', "
+            "runc 1.0.0-rc93 to 1.1.11, fixed in 1.1.12) turned a working directory under /proc/self/fd/ into a "
+            "breakout to the host filesystem through a leaked file descriptor, for the build and for every container "
+            "started from the image; run builders and nodes with runc 1.1.12 or later",
+            ("ghsa-cve-2024-21626",),
         ),
     )
 }
@@ -391,6 +402,7 @@ _BUILD_CMD = re.compile(
     r"build|dotnet\s{1,5}publish|tsc\b|make(?:\s{1,5}-j\s{0,2}\d{0,3})?(?:\s{1,5}all)?\s{0,5}(?:$|&&|;))"
 )
 ROOT_USERS = frozenset({"root", "0", "0:0", "root:root", "root:0", "0:root"})
+_PROC_WORKDIR = re.compile(r"^/proc(?:/|\Z)")
 
 
 def _from_base(parsed: Parsed, st: Stage) -> tuple[str, str | None]:
@@ -629,6 +641,18 @@ def audit(
                             )
                         if truncated:
                             not_checked.append(f"the build context has more than {MAX_CONTEXT_FILES} files")
+            if ins.cmd == "WORKDIR":
+                target = _expand(ins.body.strip().strip("\"'"), {**parsed.global_args, **env})
+                if _PROC_WORKDIR.match(target):
+                    findings.append(
+                        Finding(
+                            "KN-B011",
+                            ins.line,
+                            f"WORKDIR {target}: a working directory under /proc is the CVE-2024-21626 (Leaky Vessels) "
+                            "pattern, a container breakout on runc before 1.1.12",
+                            _label(st),
+                        )
+                    )
             if ins.cmd == "RUN":
                 body = "\n".join(x for x in (ins.body, ins.heredoc) if x)
                 if _PIPE_SHELL.search(body):
