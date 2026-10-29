@@ -159,6 +159,8 @@ which ships tested and documented on its own.
 - kube-noob.com (source in the private kube-noob-site repository, setup in its README): add the deploy key and the
   `DEPLOY_KEY` secret, enable Pages on kube-noob-www (branch main), verify the domain (TXT record), add the A, AAAA and
   `www` CNAME records at Network Solutions, set the custom domain and enforce HTTPS.
+- Videos for 0.6.0: once this branch is on main, run the `videos` workflow by hand with tag `v0.6.0` and
+  pipeline_ref `main` (0.6.0's own tag predates the pipeline); later releases get them from `release.yml`.
 - `CORPUS_PASSPHRASE` repository secret: set by the owner on 2026-10-28 (a random passphrase; keep the local file in a
   password manager). Still open: optionally `JIRA_EVERY_DAYS=2`, and build the private seed image from the decrypted
   snapshot (docs/use-cases.md, "One main copy for the whole organisation").
