@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BRAND = ROOT / "docs" / "brand"
 VIDEO = ROOT / "demos" / "video"
 PAGES = [VIDEO / "player.html", VIDEO / "thumbnail.html", VIDEO / "stage" / "stage.html"]
+IMAGES = [BRAND / "social-preview.html", *sorted((BRAND / "linkedin").glob("*.html"))]
 SCRIPTS = [
     VIDEO / "stage" / "videos.json",
     ROOT / "demos" / "youtube-walkthrough.md",
@@ -86,15 +87,66 @@ def test_video_scripts_use_the_brand_call_to_action() -> None:
     assert sum(spoken in s.get("vo", "") for v in spec["videos"].values() for s in v["scenes"]) >= 3
 
 
+HEADLINE_UNDER_TEST = "ground truth your AI SRE checks against"  # docs/roadmap.md, the A/B test against the tagline
+
+
 def test_tagline_never_sits_next_to_the_headline_under_test() -> None:
-    sources = [*PAGES, VIDEO / "stage" / "videos.json", VIDEO / "build_scenes.py"]
+    assert HEADLINE_UNDER_TEST in (ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8")
+    assert f'"The {HEADLINE_UNDER_TEST}"' in (BRAND / "BRAND.md").read_text(encoding="utf-8")
+    sources = [*PAGES, VIDEO / "stage" / "videos.json", VIDEO / "build_scenes.py", ROOT / "README.md", *IMAGES]
     for f in sources:
-        assert "rulebook your AI is missing" not in f.read_text(encoding="utf-8"), f
+        assert HEADLINE_UNDER_TEST.lower() not in f.read_text(encoding="utf-8").lower(), f
     desc = (ROOT / "demos" / "youtube-walkthrough.md").read_text(encoding="utf-8").split("**Description:**", 1)[1]
     desc = desc.split("```", 2)[1]
     lower = desc.lower()
-    assert _tokens()["tagline"].lower().rstrip(".") in lower and "rulebook your ai is missing" not in lower
+    assert _tokens()["tagline"].lower().rstrip(".") in lower and HEADLINE_UNDER_TEST.lower() not in lower
     assert _tokens()["trademarks"] in desc
+
+
+def _protocol_steps() -> int:
+    from kube_noob.config import load_settings
+    from kube_noob.toolkit import ProtocolIn, Toolkit
+
+    blueprint = __import__("yaml").safe_load((ROOT / "examples" / "blueprint.yaml").read_text(encoding="utf-8"))
+    kit = Toolkit(load_settings(overrides={"offline": True}))
+    return len(kit.run_protocol(ProtocolIn(request="Deploy orders-api on ROSA HCP", blueprint=blueprint))["steps"])
+
+
+def test_public_copy_counts_match_the_code() -> None:
+    import yaml
+
+    from kube_noob.audit.engine import list_rules
+    from kube_noob.audit.redteam import SCENARIOS
+    from kube_noob.debug.playbooks import PLAYBOOKS
+
+    readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+    tracks = yaml.safe_load((ROOT / "src" / "kube_noob" / "data" / "curriculum.yaml").read_text())["tracks"]
+    for phrase in (
+        f"{len(list_rules())} rules",
+        f"{len(PLAYBOOKS)} offline playbooks",
+        f"{len(SCENARIOS)} red-team scenarios",
+        f"{len(tracks)} tracks, {sum(len(t.get('lessons', [])) for t in tracks)} lessons",
+        f"{_protocol_steps()}-step protocol",
+    ):
+        assert phrase in readme, f"README.md should say {phrase!r}"
+    assert _tokens()["trademarks"] in readme  # every name the README uses, on every public page
+
+
+def test_brand_images_take_fonts_colours_and_claims_from_the_brand() -> None:
+    colors = _tokens()["colors"]
+    for page in IMAGES:
+        text = page.read_text(encoding="utf-8")
+        assert "brand-page.js" in text and "var(--sans)" in text, page  # filled from the brand, refuses without it
+        for system_font in ("DejaVu", "system-ui", '"Inter"', '"Inter Display"'):
+            assert system_font not in text, (page, system_font)
+        lower = text.lower()
+        for name, hex_ in colors.items():
+            assert hex_.lower() not in lower, f"{page.name} hard-codes {name} {hex_}"
+        assert "cited, offline" not in text and "pipx install" not in text, page  # claims and CTA from BRAND.md
+        assert not re.search(r"\b\d+ (audit )?rules\b", text), page  # a static image cannot keep a count true
+    assert "window.__KN_BRAND__" in (BRAND / "brand-page.js").read_text(encoding="utf-8")
+    render = (BRAND / "render.js").read_text(encoding="utf-8")
+    assert "applyBrand" in render and "verifyBrand" in render
 
 
 def test_walkthrough_cards_carry_no_hard_coded_repository_url() -> None:

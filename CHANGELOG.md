@@ -37,6 +37,12 @@
   on every frame and stills of every scene, with `--engine silent` (no voice model; the same timing). Playwright is
   pinned in `demos/video/package-lock.json`.
 - `tests/test_guidance.py` checks rows G100 and later too (it matched only two-digit ids).
+- Brand review: the social preview, LinkedIn banner, post and profile images are rendered in the bundled fonts and
+  the brand colours (`docs/brand/render.js` through `brand.js`) and carry kube-noob.com; the banner no longer says
+  "cited" or "pipx install" and the post no longer says "60 audit rules" (61, and a static image now carries no
+  count). BRAND.md names the roadmap's headline under test ("The ground truth your AI SRE checks against"). The
+  README's trademark line names every product it mentions, and `tests/test_brand.py` checks its counts (rules,
+  playbooks, red-team scenarios, tracks and lessons, protocol steps) against the code.
 
 ## 0.6.0 - 2026-10-29
 

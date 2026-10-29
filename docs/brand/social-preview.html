@@ -3,33 +3,37 @@
 <head>
 <meta charset="utf-8">
 <title>kube-noob social preview</title>
-<!-- README hero and GitHub social preview. Rendered by docs/brand/render.js at 2x (2560x1280) and 1x (1280x640). -->
+<!-- README hero and GitHub social preview. Rendered by docs/brand/render.js at 2x (2560x1280) and 1x (1280x640);
+     fonts, colours, the icon and the words come from tokens.json through demos/video/brand.js. -->
 <style>
   * { box-sizing: border-box; margin: 0; }
   html, body { width: 1280px; height: 640px; overflow: hidden; }
-  body { font-family: "Inter", "Inter Display", system-ui, sans-serif; color: #f3f7ff;
-    background: radial-gradient(ellipse 1000px 620px at 30% 35%, #17386a 0%, #0d2245 52%, #081631 100%); }
+  body { font-family: var(--sans); color: var(--kn-ink);
+    background: radial-gradient(ellipse 1000px 620px at 30% 35%, var(--kn-navy) 0%, var(--kn-navy-deep) 52%, var(--kn-navy-night) 100%); }
   .glow { position: absolute; left: 70px; top: 150px; width: 360px; height: 360px; border-radius: 50%;
-    background: radial-gradient(closest-side, rgba(67, 233, 123, .22), transparent); }
+    background: radial-gradient(closest-side, rgba(var(--kn-green-rgb), .22), transparent); }
   .wrap { position: absolute; left: 92px; top: 0; height: 640px; display: flex; align-items: center; gap: 58px; }
   img { width: 300px; height: 300px; filter: drop-shadow(0 18px 40px rgba(0, 0, 0, .45)); }
-  .wm { font: 800 142px/0.95 "Inter Display", "Inter", sans-serif; letter-spacing: -0.035em; padding-bottom: 10px;
-    background: linear-gradient(90deg, #43e97b, #22b8cf 55%, #2f6fed); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .wm { font: 800 142px/0.95 var(--sans); letter-spacing: -0.035em; padding-bottom: 10px;
+    background: linear-gradient(90deg, var(--kn-green), var(--kn-teal) 55%, var(--kn-blue)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .tag { font-weight: 700; font-size: 40px; letter-spacing: -0.01em; margin-top: 18px; }
-  .plat { font-weight: 500; font-size: 27px; color: #bcd3f2; margin-top: 22px; }
-  .surf { font-weight: 600; font-size: 24px; color: #4ade80; margin-top: 14px; }
+  .plat { font-weight: 500; font-size: 27px; color: var(--kn-ink-soft); margin-top: 22px; }
+  .surf { font-weight: 600; font-size: 24px; color: var(--kn-green); margin-top: 14px; }
+  .url { font-weight: 600; font-size: 26px; color: var(--kn-sky); margin-top: 18px; }
 </style>
 </head>
 <body>
   <div class="glow"></div>
   <div class="wrap">
-    <img src="kube-noob-icon.svg" alt="">
+    <img alt="">
     <div>
       <div class="wm">kube-noob</div>
-      <div class="tag">No AI inside. Works with yours.</div>
-      <div class="plat">Kubernetes · OpenShift · ROSA HCP · Helm · RHACS</div>
-      <div class="surf">CLI · Claude plugin · MCP server · OpenShift sidecar</div>
+      <div class="tag" data-kn="tagline"></div>
+      <div class="plat" data-kn="platforms"></div>
+      <div class="surf" data-kn="surfaces"></div>
+      <div class="url" data-kn="url"></div>
     </div>
   </div>
+<script src="brand-page.js"></script>
 </body>
 </html>

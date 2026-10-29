@@ -3,11 +3,14 @@
 //
 // Each page is laid out at the size the platform recommends and rendered at 2x or 3x that, so it stays sharp on
 // high-density screens; platforms scale it down themselves. Uploads with a size cap get their own copy.
-// Needs: Node with the `playwright` package and Chromium.
+// Fonts, colours, the icon and the words come from tokens.json through demos/video/brand.js (and brand-page.js), as
+// in the videos; a render stops if a brand font did not load.
+// Needs: Node with the `playwright` package and Chromium (demos/video/package.json pins it).
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const { applyBrand, verifyBrand } = require('../../demos/video/brand');
 
 const HERE = __dirname;
 const JOBS = [
@@ -26,9 +29,13 @@ async function main() {
   const browser = await chromium.launch();
   for (const [src, [w, h], scale, name] of JOBS) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: scale });
+    const errors = [];
+    page.on('pageerror', e => errors.push(String(e)));
+    await applyBrand(page); // fonts, colours, the icon and the words from tokens.json
     await page.goto('file://' + path.join(HERE, src));
-    await page.evaluate(() => document.fonts.ready);
-    await page.waitForFunction(() => [...document.images].every(i => i.complete));
+    await page.evaluate(() => window.__ready);
+    await verifyBrand(page); // stops if a brand font did not load
+    if (errors.length) throw new Error(`${src}: ${errors[0]}`);
     const file = path.join(out, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     await page.screenshot({ path: file });

@@ -9,8 +9,9 @@ keeps the two in step.
 - **kube-noob**: always lowercase and hyphenated, also at the start of a sentence. Short form for the command: `noob`.
 - **Tagline: "No AI inside. Works with yours."** Locked. kube-noob is the rulebook your AI calls as tools; copy never
   calls kube-noob an AI, assistant, chatbot or agent (`tests/test_guidance.py` enforces this in the docs).
-- The second headline under test, "The Kubernetes rulebook your AI is missing", is never shown next to the tagline:
-  the A/B test in the roadmap decides between them.
+- The headline under test, "The ground truth your AI SRE checks against" ([roadmap](../roadmap.md)), is never shown
+  next to the tagline: the A/B test decides between them. "The Kubernetes rulebook your AI calls" may describe the
+  product under the tagline; say "rulebook", never "AI", for kube-noob itself.
 - Call to action: `uv tool install kube-noob` and **kube-noob.com**. Spoken: "Get it at kube-noob dot com." Never "link
   below": the same video plays on the website, YouTube and LinkedIn.
 

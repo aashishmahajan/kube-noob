@@ -49,7 +49,7 @@ kube-noob doctor
 kube-noob selftest
 ```
 
-No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+No Homebrew: `uv tool install kube-noob` (Python 3.11+). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 
 ## Use with Claude or any MCP client
 
@@ -70,7 +70,7 @@ Any MCP client:
 
 ## Run on OpenShift
 
-As a token-protected service, loopback-only sidecar, or OpenShift Lightspeed tool:
+As a token-protected service, loopback-only sidecar or Lightspeed tool:
 [docs/openshift.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/openshift.md). The chart ships
 NetworkPolicies and runs under `restricted-v2`.
 
@@ -98,6 +98,7 @@ NetworkPolicies and runs under `restricted-v2`.
 
 ## Credits
 
-Credited sources: [THIRD_PARTY_NOTICES.md](https://github.com/aashishmahajan/kube-noob/blob/main/THIRD_PARTY_NOTICES.md). Kubernetes, OpenShift, Helm,
-ROSA, RHACS and StackRox are trademarks of their owners; kube-noob is independent and not endorsed by them.
-Licensed under [Apache-2.0](https://github.com/aashishmahajan/kube-noob/blob/main/LICENSE).
+Notices: [THIRD_PARTY_NOTICES.md](https://github.com/aashishmahajan/kube-noob/blob/main/THIRD_PARTY_NOTICES.md).
+Kubernetes, Helm, OpenShift, ROSA, RHACS, StackRox, OpenShift Lightspeed, Claude, Anthropic, GitHub and AWS are
+trademarks of their respective owners; kube-noob is independent and not endorsed by them.
+License: [Apache-2.0](https://github.com/aashishmahajan/kube-noob/blob/main/LICENSE).
