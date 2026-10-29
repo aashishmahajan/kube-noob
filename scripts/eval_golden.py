@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STATUSES = ("pass", "abstain", "miss")
 KEYS = {"id", "technology", "kind", "question", "answer", "source", "outOfScope", "status"}
 OPTIONAL = {"expect", "expectAny", "gap", "platform"}
-ANSWER_SOURCES = ("playbook", "reported-issue", "doc", "team-memory", "policy", "rule", "build")
+ANSWER_SOURCES = ("playbook", "reported-issue", "doc", "team-memory", "policy", "rule", "build", "ceph-health")
 MAX_ITEMS = 2000
 
 

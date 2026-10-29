@@ -1,0 +1,29 @@
+# Original fixture for kube-noob (Apache-2.0). The deny rule follows the "ClusterPolicy validate deny" example of
+# kyverno/website (Apache-2.0) src/content/docs/docs/guides/migration-to-cel.md
+# @b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89, whose CEL form inverts the logic to object.spec.replicas <= 10.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: replica-limit
+spec:
+  rules:
+  - name: max-ten-replicas
+    match:
+      any:
+      - resources:
+          kinds:
+          - apps/v1/Deployment
+    exclude:
+      any:
+      - resources:
+          kinds:
+          - StatefulSet
+    validate:
+      failureAction: Enforce
+      message: "Replica count cannot exceed 10"
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.replicas }}"
+            operator: GreaterThan
+            value: 10

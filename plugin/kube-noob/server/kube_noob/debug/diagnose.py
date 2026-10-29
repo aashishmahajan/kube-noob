@@ -16,6 +16,7 @@ from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Cause, Playbook
 from kube_noob.debug.steps import classify_step, split_comment
 from kube_noob.errors import ClusterAccessError
 from kube_noob.signals import Signal, for_text, playbooks_for
+from kube_noob.signals.ceph import advice as ceph_advice
 
 MAX_INPUT = 400_000
 SIGNAL_WEIGHT = 1.0  # a playbook that catalogued signals point at gains this much, once: CrashLoopBackOff and
@@ -137,6 +138,7 @@ class DiagnoseResult:
     exit_codes: dict[int, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     signals: list[Signal] = field(default_factory=list)
+    ceph: dict[str, Any] | None = None  # Ceph health codes and Rook/ODF alerts explained (kube_noob.signals.ceph)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -147,6 +149,7 @@ class DiagnoseResult:
             "context": self.context,
             "signals": [x.as_dict() for x in self.signals[:MAX_SIGNALS_SHOWN]],
             "exitCodes": {str(k): v for k, v in self.exit_codes.items()},
+            **({"cephHealth": self.ceph} if self.ceph else {}),
             "diagnoses": [d.as_dict() for d in self.diagnoses],
             "notes": self.notes,
         }
@@ -480,14 +483,16 @@ def diagnose(
     results.sort(key=lambda d: (-d.score, d.playbook.pid))
     codes = {int(c) for c in _EXIT_PATTERN.findall(text)}
     exit_info = {c: EXIT_CODES[c] for c in sorted(codes) if c in EXIT_CODES}
+    # Ceph health codes and Rook/ODF alerts: what each means, read-only steps for the platform, and when to stop.
+    ceph = ceph_advice(signals, text, platform, openshift or rosa)
     notes: list[str] = []
-    if not results:
+    if not results and not ceph:
         cli = "kubectl" if steps_platform == "kubernetes" else "oc"
         notes.append(
             f"No playbook matched. Paste `{cli} describe pod`, `{cli} get events --sort-by=.lastTimestamp` and "
             f"`{cli} logs --previous` output for a better diagnosis."
         )
-    return DiagnoseResult(results[:limit], ctx, exit_info, notes, signals)
+    return DiagnoseResult(results[:limit], ctx, exit_info, notes, signals, ceph)
 
 
 # --- live collection ---------------------------------------------------------------------------------------
@@ -684,6 +689,16 @@ def bundle_markdown(result: dict[str, Any]) -> str:
         lines += [
             f"- {x['kind']} {x['name']}" + (f" ({x['detail']})" if x.get("detail") else "") for x in result["signals"]
         ]
+    ceph = result.get("cephHealth") or {}
+    if ceph.get("stop"):
+        lines += ["", f"**{ceph['stop']}**"]
+    for e in ceph.get("entries", []):
+        lines += ["", f"## Ceph {e['code']}" + (f" ({e['severity']})" if e.get("severity") else ""), "", e["meaning"]]
+        lines += ["", "Likely causes:", *(f"- {c}" for c in e["likelyCauses"]), "", f"Fix: {e['fix']}"]
+        lines += [f"Escalate: {e['escalate']}"] if e.get("escalate") else []
+        lines += ["", "Read-only next steps:", *(_step_line(s) for s in e["readOnlyNextSteps"])]
+        if e["diagnosticCommands"]:
+            lines += ["", "In the Rook toolbox (require approval):", *(_step_line(c) for c in e["diagnosticCommands"])]
     for m in result.get("memory", []):
         state_label = {
             "fix": "fix",

@@ -2,11 +2,12 @@
 
 ``recognise`` names what the input is (several kinds at once are normal: events next to a denial next to a manifest)
 by rules, with the evidence for each kind. ``insight`` then runs every analyser that applies, each on its own size
-budget: diagnosis with reported issues, team memory and policy denials (events, pod status, logs, alerts, build
-logs, tickets, questions), the audit with its schema and removed-API checks (manifests), the documentation index
-(questions) and the denial explainer. Kinds whose analyser is still to come (Containerfile, SBOM and scanner reports,
-packet captures, must-gather paths) are named with what to run today. The answer merges every finding with its
-source, the read-only next steps, and what was skipped and why. Rules only: no model, deterministic.
+budget: diagnosis with reported issues, team memory, policy denials and Ceph health codes (events, pod status, logs,
+alerts, Ceph health output, build logs, tickets, questions), the audit with its schema and removed-API checks
+(manifests), the documentation index (questions) and the denial explainer. Kinds whose analyser is still to come
+(Containerfile, SBOM and scanner reports, packet captures, must-gather paths) are named with what to run today. The
+answer merges every finding with its source, the read-only next steps, and what was skipped and why. Rules only: no
+model, deterministic.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ ANALYSER_TEXT = 200_000  # characters each text analyser reads (the end of the i
 
 KINDS = (
     "alert-payload",
+    "ceph-health",
     "events",
     "pod-status",
     "logs",
@@ -278,12 +280,14 @@ def recognise(text: str) -> list[Kind]:
             and all(isinstance(i, dict) and (i.get("kind") == "Event" or "involvedObject" in i) for i in items[:50])
         ):
             found["events"] = f"{len(items)} events (JSON list)"
-    from kube_noob.signals import alertmanager
+    from kube_noob.signals import alertmanager, ceph
 
     if alertmanager.parse(text) is not None or (
         isinstance(doc, (dict, list)) and alertmanager._alerts(doc) is not None
     ):
         found["alert-payload"] = "Alertmanager webhook or API alerts"
+    if isinstance(doc, dict) and ceph.json_checks(doc):
+        found["ceph-health"] = "Ceph health JSON (ceph health detail, ceph status or a CephCluster's details)"
     docs = _yaml_docs(text) if not found else []
     whole = bool(docs) and all("apiVersion" in d and "kind" in d for d in docs)
     if not whole and not found:
@@ -304,9 +308,14 @@ def recognise(text: str) -> list[Kind]:
             found["pod-status"] = "Pod with status"
         if any(d.get("kind") == "EventList" for d in docs):
             found["events"] = "EventList"
+        if any(d.get("kind") == "CephCluster" and ceph.json_checks(d) for d in docs):
+            found["ceph-health"] = "a Rook CephCluster with health codes in its status"
     whole_text = text
     if len(text) > 2 * SAMPLE:
         text = text[:SAMPLE] + "\n" + text[-SAMPLE:]
+    health_output = ceph.looks_like_health_output(text)
+    if health_output:
+        found.setdefault("ceph-health", health_output)
     if _HELM.search(text):
         found["helm-chart"] = "Helm template or Chart.yaml"
         found.pop("manifests", None)
@@ -448,6 +457,42 @@ class _Budget:
             pool.shutdown(wait=False, cancel_futures=True)
         self.ran.append(name)
         return out
+
+
+MAX_CEPH_FINDINGS = 10
+
+
+def _ceph_findings(health: dict[str, Any]) -> list[dict[str, Any]]:
+    """One finding per Ceph health code (cause first, then errors before warnings, as ``signals.ceph`` orders them)
+    and per alert that names no single code. They rank after policy, build and team memory findings and before
+    playbooks: the code is the cluster's own word for what is wrong. Toolbox commands stay with their finding, marked as
+    needing approval; the answer's read-only steps never include them."""
+    out: list[dict[str, Any]] = []
+    for i, e in enumerate(health.get("entries", [])[:MAX_CEPH_FINDINGS]):
+        out.append(
+            {
+                "source": "ceph-health",
+                "id": e["code"],
+                "title": e["meaning"],
+                **({"severity": e["severity"]} if e.get("severity") else {}),
+                "cause": e["likelyCauses"][0],
+                "fix": e["fix"],
+                **({"escalate": e["escalate"]} if e.get("escalate") else {}),
+                "diagnosticCommands": e.get("diagnosticCommands", [])[:3],
+                "rank": 6 + i / 100,
+            }
+        )
+    for i, a in enumerate(health.get("alerts", [])[:3]):
+        out.append(
+            {
+                "source": "ceph-health",
+                "id": a["alert"],
+                "title": a["meaning"],
+                "diagnosticCommands": a.get("diagnosticCommands", [])[:3],
+                "rank": 6.5 + i / 100,
+            }
+        )
+    return out
 
 
 def _ticket_keys(text: str) -> list[str]:
@@ -732,7 +777,17 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
     ran: list[str] = []
     budget = _Budget(skipped, ran)
     tail = text[-ANALYSER_TEXT:]
-    textual = {"alert-payload", "events", "pod-status", "logs", "ticket", "build-log", "question", "policy-denial"}
+    textual = {
+        "alert-payload",
+        "ceph-health",
+        "events",
+        "pod-status",
+        "logs",
+        "ticket",
+        "build-log",
+        "question",
+        "policy-denial",
+    }
     context: dict[str, Any] = {}
     signals: list[Any] = []
 
@@ -802,6 +857,11 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                 }
             )
             steps = [*den.get("readOnlyNextSteps", [])[:3], *steps]
+        findings += _ceph_findings(d.get("cephHealth") or {})
+        if d.get("cephHealth"):
+            # The CephCluster status (codes without a shell in the toolbox), then the first code's own reads.
+            first = (d["cephHealth"].get("entries") or [{}])[0]
+            steps = [*d["cephHealth"].get("readOnlyNextSteps", []), *first.get("readOnlyNextSteps", [])[:3], *steps]
         context = d.get("context") or {}
     if "build-log" in names:
         b = budget.run(
@@ -1029,6 +1089,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
     evidence = {
         "playbook",
         "policy",
+        "ceph-health",
         "rule",
         "ticket",
         "reported-issue",

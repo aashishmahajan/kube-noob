@@ -1,0 +1,27 @@
+# Adapted from kyverno/policies (Apache-2.0) best-practices/require-labels/require-labels.yaml
+# @282e77f6d54e1e1a636190ff2dacc3d02c2d689c (branch release-1.19); description trimmed and validationFailureAction set
+# to Enforce so the test covers Enforce -> validationActions [Deny].
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-labels
+  annotations:
+    policies.kyverno.io/title: Require Labels
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: check-for-labels
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "The label `app.kubernetes.io/name` is required."
+      pattern:
+        metadata:
+          labels:
+            app.kubernetes.io/name: "?*"

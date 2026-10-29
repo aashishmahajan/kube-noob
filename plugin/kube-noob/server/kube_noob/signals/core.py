@@ -1,8 +1,10 @@
-"""Extract signals from free text, an Alertmanager webhook payload, events, ClusterOperators or pod status.
+"""Extract signals from free text, an Alertmanager webhook payload, events, ClusterOperators or pod status, and Ceph
+health output (``ceph health detail``, ``ceph status``, their JSON, a Rook CephCluster's status).
 
-Every name comes from a vocabulary checked against its upstream source (``kube_noob.signals.vocab``) or from the
-structured field that carries it (``labels.alertname``, ``reason``, ``status.conditions``). Output is deterministic:
-the same input gives the same signals in the same order. Input is bounded in size, lines, items and signals.
+Every name comes from a vocabulary checked against its upstream source (``kube_noob.signals.vocab``,
+``kube_noob.signals.ceph``) or from the structured field that carries it (``labels.alertname``, ``reason``,
+``status.conditions``, Ceph's ``checks``). Output is deterministic: the same input gives the same signals in the same
+order. Input is bounded in size, lines, items and signals.
 """
 
 from __future__ import annotations
@@ -23,7 +25,16 @@ from kube_noob.signals.vocab import (
     STRUCTURED_ONLY,
 )
 
-KINDS = ("alert", "co_condition", "event_reason", "pod_reason", "admission", "component", "error_template")
+KINDS = (
+    "alert",
+    "ceph_health",
+    "co_condition",
+    "event_reason",
+    "pod_reason",
+    "admission",
+    "component",
+    "error_template",
+)
 MAX_INPUT = 2_000_000  # characters
 MAX_LINES = 20_000
 MAX_LINE = 4_000
@@ -161,6 +172,14 @@ def _parse(text: str) -> list[Any] | None:
 def _structured(doc: Any, out: _Collector, where: str) -> None:
     if not isinstance(doc, dict):
         return
+    from kube_noob.signals.ceph import json_checks
+
+    checks = json_checks(doc)  # ceph health detail / ceph status -f json, or a CephCluster's status
+    if checks is not None:
+        for code, detail, path in checks:
+            out.add("ceph_health", code, f"{where}.{path}", detail)
+        if doc.get("kind") != "CephCluster":
+            return
     if isinstance(doc.get("alerts"), list):  # Alertmanager webhook payload (version 4)
         for i, alert in enumerate(doc["alerts"][:MAX_ITEMS]):
             _alert(alert, out, f"{where}.alerts[{i}]")
@@ -292,6 +311,10 @@ def _text(text: str, out: _Collector, where: str) -> None:
 
     for d in explain_denials(text[:200_000])["denials"]:
         out.add("admission", admission_signal(d), where)
+    from kube_noob.signals.ceph import text_signals
+
+    for code, detail, n in text_signals(text, MAX_LINES, MAX_LINE):
+        out.add("ceph_health", code, f"{where} line {n}", detail)
     from kube_noob.signals.catalogue import _alert_names
 
     known_alerts = _alert_names()

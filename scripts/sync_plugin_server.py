@@ -52,6 +52,11 @@ GUARDED_IMPORTS = frozenset(
         "kube_noob.rhacs_central",
         "kube_noob.build.containerfile",
         "kube_noob.build.image",
+        # SAST assessment follows findings into images with the Containerfile parser above, so it goes with it
+        # (the plugin then does not offer code_report rather than offering a tool that cannot import).
+        "kube_noob.code.assess",
+        "kube_noob.code.ship",
+        "kube_noob.code.builds",
         "kube_noob.sources.advisories",
         "kube_noob.host_fips",
         # Must-gather analysis reads paths on the user's machine: the CLI and the stdio server offer it; the Claude

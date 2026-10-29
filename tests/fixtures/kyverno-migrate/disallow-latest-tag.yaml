@@ -1,0 +1,41 @@
+# Adapted from kyverno/policies (Apache-2.0) best-practices/disallow-latest-tag/disallow-latest-tag.yaml
+# @282e77f6d54e1e1a636190ff2dacc3d02c2d689c (branch release-1.19); annotations and the ephemeralContainers entries
+# trimmed.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+  - name: require-image-tag
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "An image tag is required."
+      foreach:
+        - list: "request.object.spec.containers"
+          pattern:
+            image: "*:*"
+        - list: "request.object.spec.initContainers"
+          pattern:
+            image: "*:*"
+  - name: validate-image-tag
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "Using a mutable image tag e.g. 'latest' is not allowed."
+      foreach:
+        - list: "request.object.spec.containers"
+          pattern:
+            image: "!*:latest"
+        - list: "request.object.spec.initContainers"
+          pattern:
+            image: "!*:latest"

@@ -48,19 +48,6 @@ Clarify requirements. Check a (partial) generator blueprint and return blocking 
 
 - `blueprint`* (object): Partial blueprint; missing/invalid fields become questions.
 
-## code_report
-
-Assess SAST findings: where the code ships and who runs it. Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has no analysis engine of its own): one finding per file, line and CWE across tools, suppressed and fixed results excluded with the reason, lint kept apart. With Containerfiles, each file is followed into the images that ship it (copied or built; tests and tools are not shipped); with manifests, findings rank by exposure and privileges with the attack path. With scanner reports and dependency files, each language-package vulnerability points at the file and line to change. Local only.
-
-- `containerfiles` (array): Containerfiles, to know which images ship each file.
-- `dependency_files` (object): Dependency files by repository path (requirements.txt, package.json, package-lock.json, pom.xml, go.mod, ...), to find the line that declares a vulnerable package.
-- `include_quality` (boolean): Also list lint and quality results (never ranked).
-- `manifests` (null/string): YAML that runs the images: ranks by exposure and privileges.
-- `reports` (array): Trivy or Grype JSON or a CycloneDX report of an image: each language-package vulnerability points at the dependency file and line that declares it.
-- `sarif` (array): SARIF 2.1.0 as JSON text from Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL (any SARIF producer works). The same file, line and CWE from several tools become one finding.
-- `source_roots` (array): Absolute directories the scanners ran in (the CI checkout), so absolute paths map to the repository.
-- `top` (integer): How many ranked findings to return.
-
 ## config_status
 
 Show configuration. Effective configuration (webEnabled, cluster access, model), version and knowledge stats.
@@ -73,7 +60,7 @@ Diagnose symptoms offline. Match pasted events / describe output / logs / CLI er
 
 - `limit` (integer)
 - `platform` (null/string)
-- `text`* (string): Events, `describe` output, logs, CLI errors, status JSON or an Alertmanager webhook payload (its alerts are read as text; an `openshift_version` or `version` label gives the version).
+- `text`* (string): Events, `describe` output, logs, CLI errors, status JSON, Ceph health output (`ceph health detail`, `ceph status`, their JSON or a CephCluster) or an Alertmanager webhook payload (its alerts are read as text; an `openshift_version` or `version` label gives the version).
 - `version` (null/string): The cluster's OpenShift version (4.20 or 4.20.8): leaves out reported issues already fixed there.
 
 ## explain_denial
@@ -158,7 +145,7 @@ Incidents the watch has seen. Open (or resolved) incidents from the local incide
 What is this, and what does it say?. Start here for anything the user pastes. Names what the input is (events, pod status, logs, an Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at once) and runs every analyser that applies: diagnosis with reported issues and team memory, the denial explainer, the audit, the documentation. Returns every finding with its source, read-only next steps and what was not analysed and why. Read-only, local.
 
 - `platform` (null/string)
-- `text`* (string): Anything pasted: events, describe output, logs, an Alertmanager payload, a policy denial, a ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.
+- `text`* (string): Anything pasted: events, describe output, logs, an Alertmanager payload, Ceph health output (ceph health detail or ceph status, text or JSON), a policy denial, a ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.
 - `version` (null/string)
 
 ## known_issues
@@ -253,6 +240,13 @@ Turn audit rules into admission policies. Generate ValidatingAdmissionPolicy (wi
 - `platform` (string)
 - `rules` (array): Rule ids such as KN-S001 (default: every rule).
 - `version` (null/string): OpenShift (4.20) or Kubernetes (1.33)
+
+## policy_migrate_check
+
+Check legacy Kyverno policies for their CEL form. Kyverno 1.20 removes the kyverno.io ClusterPolicy, Policy, CleanupPolicy and legacy PolicyException. Lint them rule by rule against the policies.kyverno.io types: direct, inverted (a deny or a negated pattern: the CEL validation must state what is allowed), manual (JMESPath, API calls, anchors, strategic merge patches) or blocked (no documented CEL equivalent), each with the field path, the target kind, the reason and the Kyverno documentation section (pinned commit). Rules that map directly get a draft CEL policy and a kyverno test fixture skeleton to prove it. Nothing is applied or rewritten.
+
+- `drafts` (boolean): Include a draft CEL policy for each rule whose fields all map directly, and a kyverno test fixture skeleton per policy (good and bad resources run against the legacy rule and the draft).
+- `policies`* (string): One or more legacy Kyverno policies (YAML): kyverno.io ClusterPolicy, Policy, ClusterCleanupPolicy, CleanupPolicy or PolicyException. Other documents are listed and skipped; Secrets are not read.
 
 ## posture_report
 

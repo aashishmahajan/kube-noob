@@ -67,7 +67,7 @@ def test_recogniser_precision_and_recall_gate(seed: int) -> None:
     fp: Counter[str] = Counter()
     fn: Counter[str] = Counter()
     data = cases(seed=seed)
-    assert len(data) == 360 and {k for _, exp in data for k in exp} == set(ins.KINDS)
+    assert len(data) == 382 and {k for _, exp in data for k in exp} == set(ins.KINDS)
     for text, expect in data:
         got = _kinds(text)
         for k in got & expect:

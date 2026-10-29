@@ -151,8 +151,9 @@ class DiagnoseIn(_In):
         ...,
         min_length=3,
         max_length=MAX_DIAGNOSE_TEXT,
-        description="Events, `describe` output, logs, CLI errors, status JSON or an Alertmanager webhook payload "
-        "(its alerts are read as text; an `openshift_version` or `version` label gives the version).",
+        description="Events, `describe` output, logs, CLI errors, status JSON, Ceph health output (`ceph health "
+        "detail`, `ceph status`, their JSON or a CephCluster) or an Alertmanager webhook payload (its alerts are read "
+        "as text; an `openshift_version` or `version` label gives the version).",
     )
     platform: PlatformT | None = None
     version: str | None = Field(
@@ -274,8 +275,9 @@ class InsightIn(_In):
         ...,
         min_length=3,
         max_length=MAX_DIAGNOSE_TEXT,
-        description="Anything pasted: events, describe output, logs, an Alertmanager payload, a policy denial, a "
-        "ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.",
+        description="Anything pasted: events, describe output, logs, an Alertmanager payload, Ceph health output "
+        "(ceph health detail or ceph status, text or JSON), a policy denial, a ticket, manifests or a Helm template, a "
+        "build log, a Containerfile, an SBOM or scanner report, or a question.",
     )
     platform: PlatformT | None = None
     version: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")
@@ -352,6 +354,22 @@ class PolicyGenerateIn(_In):
         max_length=1_000_000,
         description="An exception list (YAML, kube-noob.io/v1 ExceptionList): active entries become exemptions in "
         "their rule's policy (with the ReplicaSets and pods their workloads make); expired or refused ones are listed.",
+    )
+
+
+class PolicyMigrateCheckIn(_In):
+    policies: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MANIFEST_CHARS,
+        description="One or more legacy Kyverno policies (YAML): kyverno.io ClusterPolicy, Policy, "
+        "ClusterCleanupPolicy, CleanupPolicy or PolicyException. Other documents are listed and skipped; Secrets are "
+        "not read.",
+    )
+    drafts: bool = Field(
+        True,
+        description="Include a draft CEL policy for each rule whose fields all map directly, and a kyverno test "
+        "fixture skeleton per policy (good and bad resources run against the legacy rule and the draft).",
     )
 
 
@@ -1113,6 +1131,13 @@ class Toolkit:
         )
         return {**g.summary(), "yaml": g.yaml(header)}
 
+    def policy_migrate_check(self, p: PolicyMigrateCheckIn) -> dict[str, Any]:
+        from kube_noob import kyverno_migrate
+
+        out = kyverno_migrate.check(p.policies, drafts=p.drafts)
+        self._observe([f"policy-migrate:{v}" for v, n in out["summary"]["verdicts"].items() if n])
+        return out
+
     def posture_scan(self, p: PostureScanIn) -> dict[str, Any]:
         from kube_noob import attack_paths
 
@@ -1785,6 +1810,19 @@ class Toolkit:
                 self.policy_generate,
             ),
             ToolSpec(
+                "policy_migrate_check",
+                "Check legacy Kyverno policies for their CEL form",
+                "Kyverno 1.20 removes the kyverno.io ClusterPolicy, Policy, CleanupPolicy and legacy PolicyException. "
+                "Lint them rule by rule against the policies.kyverno.io types: direct, inverted (a deny or a negated "
+                "pattern: the CEL validation must state what is allowed), manual (JMESPath, API calls, anchors, "
+                "strategic merge patches) or blocked (no documented CEL equivalent), each with the field path, the "
+                "target kind, the reason and the Kyverno documentation section (pinned commit). Rules that map "
+                "directly get a draft CEL policy and a kyverno test fixture skeleton to prove it. Nothing is applied "
+                "or rewritten.",
+                PolicyMigrateCheckIn,
+                self.policy_migrate_check,
+            ),
+            ToolSpec(
                 "posture_scan",
                 "Attack paths in manifests",
                 "Rank the paths from an exposure (Route, Ingress, LoadBalancer or NodePort Service) to what a "
@@ -1826,18 +1864,6 @@ class Toolkit:
                 "against Red Hat VEX. Local only.",
                 VulnReportIn,
                 self.vuln_report,
-            ),
-            ToolSpec(
-                "code_report",
-                "Assess SAST findings: where the code ships and who runs it",
-                "Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has no "
-                "analysis engine of its own): one finding per file, line and CWE across tools, suppressed and fixed "
-                "results excluded with the reason, lint kept apart. With Containerfiles, each file is followed into "
-                "the images that ship it (copied or built; tests and tools are not shipped); with manifests, findings "
-                "rank by exposure and privileges with the attack path. With scanner reports and dependency files, "
-                "each language-package vulnerability points at the file and line to change. Local only.",
-                CodeReportIn,
-                self.code_report,
             ),
             ToolSpec(
                 "threat_model",
@@ -2030,6 +2056,22 @@ class Toolkit:
                     open_world=True,
                 ),
             ]
+        if _has_module("kube_noob.code.ship"):  # not in the Claude plugin: it follows code into Containerfiles
+            s.append(
+                ToolSpec(
+                    "code_report",
+                    "Assess SAST findings: where the code ships and who runs it",
+                    "Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has "
+                    "no analysis engine of its own): one finding per file, line and CWE across tools, suppressed and "
+                    "fixed results excluded with the reason, lint kept apart. With Containerfiles, each file is "
+                    "followed into the images that ship it (copied or built; tests and tools are not shipped); with "
+                    "manifests, findings rank by exposure and privileges with the attack path. With scanner reports "
+                    "and dependency files, each language-package vulnerability points at the file and line to change. "
+                    "Local only.",
+                    CodeReportIn,
+                    self.code_report,
+                )
+            )
         if importlib.util.find_spec("kube_noob.build.containerfile") is not None:  # not in the Claude plugin
             s.append(
                 ToolSpec(

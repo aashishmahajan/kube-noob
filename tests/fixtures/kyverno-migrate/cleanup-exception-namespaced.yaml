@@ -1,0 +1,100 @@
+# The ClusterCleanupPolicy is adapted from kyverno/policies (Apache-2.0) cleanup/cleanup-bare-pods/cleanup-bare-pods.yaml
+# @282e77f6d54e1e1a636190ff2dacc3d02c2d689c (branch release-1.19), annotations trimmed. The CleanupPolicy, the
+# PolicyException, the namespaced Policy and the legacy CEL rule are original fixtures for kube-noob (Apache-2.0); the
+# CEL rule follows best-practices-cel/restrict-node-port/restrict-node-port.yaml at the same commit.
+apiVersion: kyverno.io/v2
+kind: ClusterCleanupPolicy
+metadata:
+  name: clean-bare-pods
+spec:
+  match:
+    any:
+    - resources:
+        kinds:
+          - Pod
+  conditions:
+    all:
+    - key: "{{ target.metadata.ownerReferences[] || `[]` }}"
+      operator: Equals
+      value: []
+  schedule: "*/5 * * * *"
+---
+apiVersion: kyverno.io/v2
+kind: CleanupPolicy
+metadata:
+  name: clean-scratch-configmaps
+  namespace: team-a
+spec:
+  match:
+    any:
+    - resources:
+        kinds:
+          - ConfigMap
+        selector:
+          matchLabels:
+            scratch: "true"
+  schedule: "0 1 * * *"
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: allow-debug-pods
+  namespace: team-a
+spec:
+  exceptions:
+  - policyName: require-labels
+    ruleNames:
+    - check-for-labels
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        names:
+        - "debug-*"
+        namespaces:
+        - team-a
+---
+apiVersion: kyverno.io/v1
+kind: Policy
+metadata:
+  name: team-owner
+  namespace: team-a
+spec:
+  validationFailureAction: Enforce
+  rules:
+  - name: owner-label
+    match:
+      any:
+      - resources:
+          kinds:
+          - Deployment
+    validate:
+      message: "Deployments in team-a need an owner label."
+      pattern:
+        metadata:
+          labels:
+            owner: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-node-port
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+  - name: validate-nodeport
+    match:
+      any:
+      - resources:
+          kinds:
+          - Service
+          operations:
+          - CREATE
+          - UPDATE
+    validate:
+      cel:
+        expressions:
+          - expression: "has(object.spec.type) ? (object.spec.type != 'NodePort') : true"
+            message: "Services of type NodePort are not allowed."

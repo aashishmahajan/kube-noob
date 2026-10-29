@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-29 (RT9 red team fixed, QA9 documents measured and partly shipped, 0.6.0 release prep; earlier: QA8 round 2 committed: triage tuned on a training set, plain-word signals kept only where blinded graders found real posts better, default causes, names in steps; row 20y waits for CI. Next: row 20w remaining ranking items).
+right now; STATE.md says what is done. Updated 2026-10-29 late (PR #6 merged: Agent Skill G108, CodeQL fixes G109; PR #7 open: red-team fixes, UPG1 G110, CEPH1 G111, safety contract G112-G113, scorecard G114, POL4 G115, 32 golden questions graded blind).
 
 ## Repository and branch
 
@@ -18,6 +18,14 @@ right now; STATE.md says what is done. Updated 2026-10-29 (RT9 red team fixed, Q
 - Commits: `git commit -s` with the attribution lines the session asks for; push to the work branch.
 
 ## Done in this stretch
+
+- 2026-10-29 late: PR #6 merged to main (4bd8903; CI, CodeQL, brew green; CodeQL "no new alerts"). PR #7 holds
+  the red-team fixes (seven findings, tests first), UPG1, CEPH1, SAFE1, TRUST1, POL4 and the blind-graded golden
+  questions; each agent's notes were folded into CHANGELOG, guidance (G110-G115) and use-cases and removed.
+  Next: insight should reach `upgrade_risks` and `policy_migrate_check` (golden upg-004/005 and pcel-* misses name
+  it), documents for conditional updates, the Kyverno CEL migration, the Rook toolbox and OSD purge (blinded
+  graders before shipping), stor-003 Ceph prose. Safety-contract findings left for the owner: seven local-state
+  writers without a tier; learn_* write on the shared HTTP server; chart grants `watch` the backend never uses.
 
 - VUL1: done after the independent red team (12 findings fixed, G72); CI 40676198576 green.
 

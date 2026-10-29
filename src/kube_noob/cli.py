@@ -80,6 +80,10 @@ def _print_insight(res: dict[str, Any]) -> None:
             _tprint(f"  {'':15} cause: {f['cause'][:150]}")
         if f.get("fix"):
             _tprint(f"  {'':15} fix: {f['fix'][:150]}")
+        if f.get("escalate"):
+            _tprint(f"  {'':15} escalate: {f['escalate'][:400]}")
+        for c in f.get("diagnosticCommands", [])[:2]:
+            _tprint(f"  {'':15} in the toolbox (needs approval): {c['command']}")
     if res.get("readOnlyNextSteps"):
         _tprint("read-only next steps:")
         for st in res["readOnlyNextSteps"]:
@@ -1244,8 +1248,8 @@ def build_parser() -> argparse.ArgumentParser:
         "policy",
         help="Why was this denied? Would a NetworkPolicy allow this traffic?",
         description="Explain admission denials (Kyverno, Gatekeeper, ValidatingAdmissionPolicy, Pod Security, "
-        "OpenShift SCC, RHACS, quota, LimitRange, RBAC) and check NetworkPolicy reachability. Read-only and offline "
-        "unless --live is given.",
+        "OpenShift SCC, RHACS, quota, LimitRange, RBAC), check NetworkPolicy reachability, generate admission policies "
+        "and check legacy Kyverno policies for their CEL form. Read-only and offline unless --live is given.",
     )
     psub = pol.add_subparsers(dest="policy_cmd", required=True)
     _patch(psub, common)
@@ -1305,6 +1309,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="exception list (kube-noob.io/v1 ExceptionList): active entries become exemptions in their rule's policy",
     )
     pgen.add_argument("-o", "--output", help="write the YAML here (default: stdout)")
+    pmc = psub.add_parser(
+        "migrate-check",
+        help="Lint legacy Kyverno policies (removed in Kyverno 1.20) rule by rule for their CEL policy form",
+        description="For each rule of a kyverno.io ClusterPolicy, Policy, ClusterCleanupPolicy, CleanupPolicy or "
+        "PolicyException: direct, inverted, manual or blocked, with the field path, the policies.kyverno.io target "
+        "kind, the reason and the Kyverno documentation section. Rules that map directly get a draft CEL policy and a "
+        "kyverno test fixture skeleton to prove it. Lint only: nothing is applied or rewritten. Example: kube-noob "
+        "policy migrate-check -f policies/ --fail-on blocked",
+    )
+    pmc.add_argument("-f", "--file", action="append", required=True, help="policy YAML, a directory or -; repeat")
+    pmc.add_argument(
+        "--fail-on",
+        default="never",
+        choices=["never", "manual", "blocked"],
+        help="exit 1 when a finding is at or above this verdict (default never)",
+    )
+    pmc.add_argument("--no-drafts", action="store_true", help="findings only: no draft policies or test fixtures")
+    pmc.add_argument(
+        "-o",
+        "--output-dir",
+        default=None,
+        help="write the drafts and kyverno test fixtures under this directory (refuses to overwrite a file)",
+    )
 
     pos = sub.add_parser(
         "posture",
@@ -2302,6 +2329,8 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
 
     if a.policy_cmd == "generate":
         return _policy_generate(a, s, fmt)
+    if a.policy_cmd == "migrate-check":
+        return _policy_migrate(a, fmt)
     if a.policy_cmd == "explain":
         if a.text and a.file is not None:
             raise ConfigError("pass the text or -f, not both")
@@ -2384,6 +2413,99 @@ def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     for line in lines:
         print(line, file=sys.stdout if a.output else sys.stderr)
     return 0
+
+
+def _migrate_finding(f: dict[str, Any], indent: str) -> str:
+    return f"{indent}{f['verdict']:8} {f['path']} (line {f['line']}) -> {f['mapsTo']}: {f['reason']} [{f['source']}]"
+
+
+def _print_migrate(report: dict[str, Any], show_files: bool) -> None:
+    for p in report["policies"]:
+        verdict = p["verdict"] or "nothing to migrate"
+        where = f"{p['file']} line {p['line']}" if p.get("file") else f"line {p['line']}"
+        _tprint(f"{p['policy']} ({where}): {verdict} -> {', '.join(p['targets'])}")
+        for f in p["findings"]:
+            _tprint(_migrate_finding(f, "  "))
+        for r in p["rules"]:
+            _tprint(f"  rule {r['rule']}: {r['verdict']} -> {r['target']}")
+            for f in r["findings"]:
+                _tprint(_migrate_finding(f, "    "))
+            if show_files and r.get("draft"):
+                for line in r["draft"].rstrip().splitlines():
+                    _tprint(f"      {line}")
+        if show_files and p.get("draft"):
+            for line in p["draft"].rstrip().splitlines():
+                _tprint(f"    {line}")
+        if show_files and p.get("fixture"):
+            _tprint(f"  kyverno test fixture ({len(p['fixture']['files'])} files):")
+            for path, text in p["fixture"]["files"].items():
+                _tprint(f"    --- {path}")
+                for line in text.rstrip().splitlines():
+                    _tprint(f"      {line}")
+        _tprint()
+    for s in report["skipped"]:
+        where = f"{s['file']} line {s['line']}" if s.get("file") else f"line {s['line']}"
+        _tprint(f"skipped {s['ref']} ({where}): {s['reason']}")
+    summary = report["summary"]
+    counts = ", ".join(f"{n} {v}" for v, n in summary["verdicts"].items())
+    _tprint(f"{summary['policies']} policies, {summary['rules']} rules: {counts}. {report['note']}")
+
+
+def _write_migration(report: dict[str, Any], out_dir: str) -> int:
+    from kube_noob import kyverno_migrate
+
+    root = Path(out_dir)
+    files = kyverno_migrate.output_files(report)
+    resolved_root = root.resolve()
+    targets: list[tuple[Path, str]] = []
+    for rel, text in files.items():
+        parts = Path(rel).parts
+        path = (root / rel).resolve()
+        if Path(rel).is_absolute() or ".." in parts or not path.is_relative_to(resolved_root):
+            raise ConfigError(f"refusing to write {rel!r} outside {out_dir}")
+        if path.exists():
+            raise ConfigError(f"{path} exists: pick a new --output-dir (nothing was written)")
+        targets.append((path, text))
+    try:
+        for path, text in targets:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("x", encoding="utf-8") as fh:  # "x": never replace a file that appeared meanwhile
+                fh.write(text)
+    except OSError as exc:
+        raise ConfigError(f"cannot write under {out_dir}: {exc}") from exc
+    return len(targets)
+
+
+def _yaml_files(paths: list[str]) -> list[tuple[str, str]]:
+    """(name, text) per file: '-' is stdin, a directory gives its *.yaml and *.yml files in order."""
+    out: list[tuple[str, str]] = []
+    for f in paths:
+        p = Path(f)
+        if f == "-":
+            out.append(("-", sys.stdin.read()))
+        elif p.is_dir():
+            out += [
+                (str(x), x.read_text(encoding="utf-8"))
+                for x in sorted(p.rglob("*"))
+                if x.suffix in {".yaml", ".yml"} and x.is_file()
+            ]
+        else:
+            out.append((str(p), p.read_text(encoding="utf-8")))
+    return out
+
+
+def _policy_migrate(a: argparse.Namespace, fmt: str) -> int:
+    from kube_noob import kyverno_migrate
+
+    report = kyverno_migrate.check_files(_yaml_files(a.file), drafts=not a.no_drafts)
+    written = _write_migration(report, a.output_dir) if a.output_dir else None
+    if a.format != "text":
+        _emit({**report, **({"output": {"directory": a.output_dir, "files": written}} if a.output_dir else {})}, fmt)
+    else:
+        _print_migrate(report, show_files=written is None)
+        if written is not None:
+            print(f"wrote {written} files under {a.output_dir}")
+    return 1 if kyverno_migrate.failing(report, a.fail_on) else 0
 
 
 def _snapshot_from_args(a: argparse.Namespace, s: Settings) -> dict[str, Any]:
