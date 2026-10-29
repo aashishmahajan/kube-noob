@@ -1,7 +1,8 @@
 """What kube-noob knows, and up to when: stamped on every tool result and printed by `doctor`.
 
 kube-noob ships with a fixed body of knowledge: audit rules and schemas for a Kubernetes version, playbooks and docs
-reviewed on a date, and a snapshot of the issues listed in the OpenShift release notes. Anything newer reaches it only
+reviewed on a date, a snapshot of the issues listed in the OpenShift release notes and one of the update risks in the
+public OpenShift update graph (kube_noob.upgrade_risks). Anything newer reaches it only
 through the opt-in web lookups (labelled as external) or a corpus you rebuild yourself.
 """
 
@@ -33,18 +34,25 @@ def _corpus_as_of(data_dir: Path | None) -> str | None:
 
 def status(data_dir: Path | None = None) -> dict[str, Any]:
     from kube_noob.known_issues import get_index
+    from kube_noob.upgrade_risks import get_index as upgrade_risk_index
 
     issues = get_index(data_dir).knowledge()
+    risks = upgrade_risk_index().knowledge()
     out: dict[str, Any] = {
         "asOf": KNOWLEDGE_REVIEWED,
         "kubernetes": DEFAULT_K8S_VERSION,
         "openshift": DEFAULT_OCP_VERSION,
         "knownIssuesAsOf": issues["knownIssuesAsOf"],
         "knownIssueReleases": issues["openshiftReleases"],
+        "upgradeRisksAsOf": risks["upgradeRisksAsOf"],
+        "upgradeRisksCommit": risks["commit"],
+        "upgradeRiskTargets": f"{risks['minTarget']} to {risks['newestTarget']}",
         "note": (
             f"Built-in knowledge reviewed {KNOWLEDGE_REVIEWED} (Kubernetes up to {DEFAULT_K8S_VERSION}, OpenShift up "
-            f"to {DEFAULT_OCP_VERSION}); release-note issues as of {issues['knownIssuesAsOf']}. Newer facts come "
-            "only from web lookups you enable, and those are marked as external."
+            f"to {DEFAULT_OCP_VERSION}); release-note issues as of {issues['knownIssuesAsOf']}; update risks as of "
+            f"{risks['upgradeRisksAsOf']} (cincinnati-graph-data {str(risks['commit'] or '')[:12]}, targets "
+            f"{risks['minTarget']} to {risks['newestTarget']}). Newer facts come only from web lookups you enable, and "
+            "those are marked as external."
         ),
     }
     corpus = _corpus_as_of(data_dir)
@@ -81,6 +89,6 @@ def line(data_dir: Path | None = None) -> str:
     tickets = f"; Red Hat Jira copy: {jira['tickets']} tickets retrieved {jira['asOf']}" if jira else ""
     return (
         f"knowledge as of {s['asOf']} (Kubernetes {s['kubernetes']}, OpenShift {s['openshift']}); "
-        f"release-note issues as of {s['knownIssuesAsOf']} for OpenShift {', '.join(s['knownIssueReleases'])}"
-        f"{tickets}"
+        f"release-note issues as of {s['knownIssuesAsOf']} for OpenShift {', '.join(s['knownIssueReleases'])}; "
+        f"update risks as of {s['upgradeRisksAsOf']} for targets {s['upgradeRiskTargets']}{tickets}"
     )

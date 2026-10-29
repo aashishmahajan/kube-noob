@@ -147,6 +147,50 @@ def _print_known_issues(out: dict[str, Any]) -> None:
         _tprint(f"index: no Red Hat Jira tickets: {out['ticketsNote']}")
 
 
+def _print_upgrade_risks(out: dict[str, Any]) -> None:
+    from kube_noob.upgrade_risks import CANNOT_EVALUATE
+
+    edge, counts = out["edge"], out["counts"]
+    arch = f" ({edge['architecture']})" if edge["architecture"] else ""
+    summary = ", ".join(f"{n} {v}" for v, n in counts.items() if n) or "none"
+    _tprint(f"Update {edge['from']} -> {edge['to']}{arch}: {len(out['risks'])} declared risks ({summary})")
+    for r in out["risks"]:
+        _tprint()
+        _tprint(f"{r['verdict'].upper()}  {r['name']}")
+        if r.get("message"):
+            _tprint(f"  {' '.join(str(r['message']).split())}")
+        if r.get("appliesWhen"):
+            _tprint(f"  applies when: {r['appliesWhen']}")
+            _tprint(f"  decided by: {r['decidedBy']}")
+        for c in r.get("readOnlyCommands", []):
+            _tprint(f"  check (read-only): {c}")
+        for path in r.get("mustGather", []):
+            _tprint(f"  in a must-gather: {path}")
+        if r["verdict"] != "check" and r.get("reason") and r["reason"] != CANNOT_EVALUATE:
+            _tprint(f"  why: {r['reason']}")
+        if r.get("promql") and r["verdict"] != "check":
+            _tprint("  promql:")
+            for q in str(r["promql"]).splitlines():
+                _tprint(f"    {q}")
+        if r.get("architectures"):
+            _tprint(f"  architectures: {', '.join(r['architectures'])}")
+        if r.get("fixedIn"):
+            _tprint(f"  fixed in: {r['fixedIn']}")
+        _tprint(f"  link: {r['url']}")
+        _tprint(f"  declared in: {r['source']}")
+    _tprint()
+    if any(r.get("reason") == CANNOT_EVALUATE for r in out["risks"]):
+        _tprint(f"cannot evaluate offline: {CANNOT_EVALUATE}")
+    if out.get("note"):
+        _tprint(out["note"])
+    _tprint(out["channelNote"])
+    k = out["knowledge"]
+    _tprint(
+        f"index: update risks as of {k['upgradeRisksAsOf']} (cincinnati-graph-data {str(k['commit'] or '')[:12]}) "
+        f"for targets {k['minTarget']} to {k['newestTarget']}"
+    )
+
+
 def _print_report(rep: dict[str, Any]) -> None:
     s = rep["summary"]
     print(
@@ -1161,6 +1205,23 @@ def build_parser() -> argparse.ArgumentParser:
     kis.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
     kis.add_argument("--limit", type=int, default=3)
 
+    upr = sub.add_parser(
+        "upgrade-risks",
+        help="Known risks for an OpenShift update, from the public update graph (offline)",
+        description="List the risks Red Hat declares for updating from one OpenShift version to another (conditional "
+        "updates in github.com/openshift/cincinnati-graph-data), from a bundled snapshot: whether each applies, the "
+        "read-only check that decides it, or its PromQL when that cannot be evaluated offline. "
+        "Example: kube-noob upgrade-risks --from 4.20.3 --to 4.21.4",
+    )
+    upr.add_argument("--from", dest="from_version", required=True, help="the version the cluster runs, e.g. 4.20.3")
+    upr.add_argument("--to", dest="to_version", required=True, help="the version to update to, e.g. 4.21.4")
+    upr.add_argument(
+        "--arch",
+        choices=["amd64", "arm64", "multi", "ppc64le", "s390x"],
+        default=None,
+        help="the release architecture; without it every architecture is checked",
+    )
+
     tik = sub.add_parser(
         "ticket",
         help="Look up a Red Hat Jira ticket in the local copy: what became of it, fix versions, workaround",
@@ -1813,6 +1874,26 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         out = kit.known_issues(tk.KnownIssuesIn(text=text, platform=a.platform, version=a.pversion, limit=a.limit))
         if a.format == "text":
             _print_known_issues(out)
+        else:
+            _emit(out, fmt)
+        return 0
+
+    if a.cmd == "upgrade-risks":
+        from pydantic import ValidationError
+
+        try:
+            req = tk.UpgradeRisksIn(current=a.from_version, target=a.to_version, arch=a.arch)
+        except ValidationError as exc:
+            flags = {"current": "--from", "target": "--to", "arch": "--arch"}
+            reasons = []
+            for e in exc.errors():
+                where = ", ".join(flags.get(str(x), str(x)) for x in e["loc"])
+                msg = str(e["msg"]).removeprefix("Value error, ")
+                reasons.append(f"{where}: {msg}" if where else msg)
+            raise ConfigError("; ".join(reasons)) from exc
+        out = kit.upgrade_risks(req)
+        if a.format == "text":
+            _print_upgrade_risks(out)
         else:
             _emit(out, fmt)
         return 0
