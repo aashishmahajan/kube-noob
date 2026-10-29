@@ -700,15 +700,19 @@ jobs:
           kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
           if tar -xzOf dist/kube-noob-db/kube-noob-db.tgz | grep -q PRIVATE; then
             echo "::error title=db::Jira text reached the public bundle"; exit 1; fi
-      - name: Live Red Hat VEX (three CVEs, one over the size cap) joins the bundle under CC BY 4.0
+      - name: Live Red Hat VEX (six CVEs, one over the size cap) joins the bundle under CC BY 4.0
+        # Several OpenShift CVEs, so one document Red Hat withdraws or moves (CVE-2024-21626 answered 404 on
+        # 2026-10-29) does not fail the check; it needs at least one published record that names OpenShift.
         env:
           KUBE_NOOB_DATA_DIR: /tmp/db-data
+          CVES: CVE-2023-44487,CVE-2024-3094,CVE-2024-21626,CVE-2024-7387,CVE-2024-45496,CVE-2022-0811
         run: |
           set -euo pipefail
-          kube-noob corpus advisories --online --cves CVE-2023-44487,CVE-2024-21626,CVE-2024-3094 --format json \
+          kube-noob corpus advisories --online --cves "$CVES" --format json \
             > /tmp/vex.json 2> /tmp/vex.err || { echo "::error title=Red Hat VEX live::$(tr '\n' ' ' < /tmp/vex.err | cut -c1-1500)"; exit 1; }
-          curl -s --max-time 120 -o /tmp/vex-raw.json \
-            https://security.access.redhat.com/data/csaf/v2/vex/2024/cve-2024-21626.json || true
+          raw=$(curl -s --max-time 120 -o /tmp/vex-raw.json -w '%{http_code}' \
+            https://security.access.redhat.com/data/csaf/v2/vex/2024/cve-2024-7387.json || true)
+          echo "::notice title=VEX raw document::2024/cve-2024-7387.json HTTP ${raw}"
           python scripts/vex_ci_check.py /tmp/vex.json /tmp/db-data/corpus/redhat-vex.jsonl /tmp/vex-raw.json
           code=$(curl -s -o /dev/null -w '%{http_code}' https://security.access.redhat.com/data/csaf/v2/vex/archive_latest.txt)
           echo "::notice title=VEX archive pointer::archive_latest.txt HTTP $code"
