@@ -36,6 +36,8 @@ TARGETS: dict[str, tuple[str, ...]] = {
     ),
     "deploy/gitlab/kube-noob-gate.gitlab-ci.yml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),
     "docs/install.md": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<m>\d+\.\d+)(?![.\d])",),
+    # the owner's commands for the OpenShift Helm catalog pull request: every version in it is the release's
+    "docs/openshift-catalog.md": (r"(?<![\d.])(?P<v>\d+\.\d+\.\d+)(?!\.?\d)",),
 }
 
 

@@ -45,6 +45,12 @@ label `risk-review`, plus `release-needed` when a patch release is recommended.
 Tags must be pushed by a person or the scheduled agent: tags pushed with the workflow `GITHUB_TOKEN` do not trigger
 other workflows.
 
+The Claude plugin directory reads the plugin (`.claude-plugin/marketplace.json` and `plugin/kube-noob/`) from `main`,
+and its review shows the commit it last checked. Work done on another branch reaches it only after that branch is
+merged to `main` and someone presses "Check for new commits" (or sets up push updates) in the plugin portal. A version
+that is bumped on `main` but never tagged never reaches PyPI, the image or the MCP Registry: 0.5.0 (073fe80) was
+bumped on `main` and not tagged, so PyPI stopped at 0.4.0.
+
 ## Rollback
 
 - PyPI versions are immutable. Yank the bad version (`pypi.org/manage/project/kube-noob/releases/`), fix forward, and

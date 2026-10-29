@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-10-29
 
 - New documents for the weakest technologies in the owner's by-technology file, written from each project's own
   docs by writers that never saw the test half, every claim checked against the cited lines: Helm template functions
@@ -29,7 +29,8 @@
   is told to paste `kubectl` output, not `oc`; plain Kubernetes and other clouds no longer get ROSA or OpenShift
   reading (a GKE PVC post cited the ROSA EFS doc), and the RWX fix starts with what any cloud needs (a file-storage
   class whose driver supports ReadWriteMany) before the AWS and ODF specifics: 4 community rows changed, all in that
-  fix's wording. `scripts/bump_version.py` now moves the `MAJOR.MINOR` image tag in `docs/install.md`.
+  fix's wording. `scripts/bump_version.py` now moves the `MAJOR.MINOR` image tag in `docs/install.md` and the versions in
+  `docs/openshift-catalog.md`.
 - A RHACS ticket (roxctl, Scanner, Central, the UI) that never says the cluster is OpenShift is no longer matched
   against the OpenShift release notes: the OCPBUGS items it got shared only words with it. Graders on the 10 community
   rows that changed: 10 better. Jira key recall unchanged.

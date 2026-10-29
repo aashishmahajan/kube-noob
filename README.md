@@ -65,7 +65,7 @@ In claude.ai or the desktop app: **Customize > Plugins > Add > Add marketplace**
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.5.0", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.6.0", "kube-noob", "mcp"]}}}
 ```
 
 ## Run on OpenShift

@@ -29,6 +29,7 @@ FILES = [
     "deploy/tekton/kube-noob-gate.yaml",
     "deploy/gitlab/kube-noob-gate.gitlab-ci.yml",
     "docs/install.md",
+    "docs/openshift-catalog.md",
     "CHANGELOG.md",
 ]
 MINOR_ONLY = {"docs/install.md"}  # names the image's MAJOR.MINOR tag, which a patch release does not change
