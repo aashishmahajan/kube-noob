@@ -227,9 +227,13 @@ def fetch(minors: Iterable[str], workdir: Path) -> tuple[list[dict[str, Any]], d
 
     records: list[dict[str, Any]] = []
     commits: dict[str, str] = {}
-    for minor in minors:
+    from kube_noob.sources.pacing import pause
+
+    for i, minor in enumerate(minors):
         dest = workdir / f"openshift-docs-{minor}"
         if not dest.exists():
+            if i:
+                pause()  # jittered gap between clones from the same host
             clone = ["clone", "--quiet", "--depth", "1", "--filter=blob:none", "--sparse", "--branch"]
             _git([*clone, f"enterprise-{minor}", f"https://github.com/{REPO}", str(dest)])
             dash = minor.replace(".", "-")

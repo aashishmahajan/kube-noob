@@ -56,6 +56,8 @@ dev = [
   "pip-audit>=2.7",
   "uv>=0.11",
   "markdown>=3.11,<4",
+  # Evaluates the generated admission policies' CEL in tests (tests/policy_cel.py); never imported by kube-noob.
+  "cel-python>=0.5,<0.6",
 ]
 
 [project.scripts]

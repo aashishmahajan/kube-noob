@@ -4,8 +4,36 @@
 {{- if and .Values.watch.enabled (gt (int .Values.replicaCount) 1) }}
 {{- fail "watch.enabled keeps one incident ledger: set replicaCount: 1" }}
 {{- end }}
+{{- if .Values.posture.report.enabled }}
+{{- if not .Values.config.clusterEnabled }}
+{{- fail "posture.report.enabled reads the cluster: set config.clusterEnabled too (read-only)" }}
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+{{- fail "posture.report.enabled compares today with yesterday's snapshot: set persistence.enabled: true" }}
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "posture.report.enabled writes one report a day from one pod: set replicaCount: 1" }}
+{{- end }}
+{{- end }}
+{{- if .Values.rhacs.enabled }}
+{{- if not .Values.rhacs.tokenSecret.name }}
+{{- fail "rhacs.enabled needs rhacs.tokenSecret.name: a Secret with an RHACS API token that can read policies" }}
+{{- end }}
+{{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$" .Values.rhacs.endpoint) }}
+{{- fail "rhacs.endpoint must be Central's root: https://host[:port] with no path" }}
+{{- end }}
+{{- if and (.Values.config.offline | default false) (not (regexMatch "\\.svc(\\.cluster\\.local)?(:[0-9]{1,5})?$" .Values.rhacs.endpoint)) }}
+{{- fail "config.offline allows only an in-cluster Central: rhacs.endpoint must be a *.svc host" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") (gt (int .Values.replicaCount) 1) }}
 {{- fail "persistence with a ReadWriteOnce volume attaches to one node: set replicaCount: 1 (or a ReadWriteMany accessMode)" }}
+{{- end }}
+{{- if and (or .Values.probe.enabled .Values.dryRun.enabled) (not .Values.config.clusterEnabled) }}
+{{- fail "probe.enabled and dryRun.enabled act on the cluster: set config.clusterEnabled too" }}
+{{- end }}
+{{- if and (.Values.config.offline | default false) (or .Values.itsm.writeEnabled .Values.notify.enabled) }}
+{{- fail "itsm.writeEnabled and notify.enabled send outside the cluster; config.offline forbids it" }}
 {{- end }}
 {{- if .Values.jira.sync.enabled }}
 {{- if (.Values.config.offline | default false) }}
@@ -20,6 +48,62 @@
 {{- end }}
 {{- if and (.Values.config.offline | default false) .Values.config.webEnabled }}
 {{- fail "config.offline locks web access off; unset config.webEnabled (the two contradict each other)" }}
+{{- end }}
+{{- $seedSource := include "kube-noob.seedSource" . }}
+{{- if eq $seedSource "image" }}
+{{- if not .Values.jira.seed.image.repository }}
+{{- fail "jira.seed.source image needs jira.seed.image.repository (a private image holding the snapshot and cp)" }}
+{{- end }}
+{{- if hasPrefix "/kube-noob-seed/" .Values.jira.seed.path }}
+{{- fail "jira.seed.path is the snapshot inside the seed image; /kube-noob-seed/ is where the chart copies it to" }}
+{{- end }}
+{{- if not (or .Values.jira.seed.image.tag .Values.jira.seed.image.digest) }}
+{{- fail "jira.seed.image needs a tag or a digest: the seed is the copy every new pod starts from, so pin it" }}
+{{- end }}
+{{- end }}
+{{- if and .Values.jira.seed.keySecret.name (eq $seedSource "none") }}
+{{- fail "jira.seed.keySecret opens a sealed seed; set jira.seed.source (image or pvc) too" }}
+{{- end }}
+{{- if and (eq $seedSource "pvc") (not .Values.jira.seed.pvc.claimName) }}
+{{- fail "jira.seed.source pvc needs jira.seed.pvc.claimName" }}
+{{- end }}
+{{- $db := include "kube-noob.dbEnabled" . }}
+{{- if $db }}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" (.Values.db.image.digest | default "")) }}
+{{- fail "db.enabled needs db.image.digest (sha256:...): the public kube-noob-db image is pinned by digest only" }}
+{{- end }}
+{{- if hasPrefix "/kube-noob-db-seed/" .Values.db.path }}
+{{- fail "db.path is the archive inside the image; /kube-noob-db-seed/ is where the chart copies it to" }}
+{{- end }}
+{{- end }}
+{{- $memSource := include "kube-noob.memorySource" . }}
+{{- $memSsh := false }}
+{{- if and (eq $memSource "configMap") (not .Values.memory.configMap.name) }}
+{{- fail "memory.source configMap needs memory.configMap.name (kubectl create configmap team-memory --from-file=entries/)" }}
+{{- end }}
+{{- if and (eq $memSource "pvc") (not .Values.memory.pvc.claimName) }}
+{{- fail "memory.source pvc needs memory.pvc.claimName" }}
+{{- end }}
+{{- if eq $memSource "git" }}
+{{- if not .Values.memory.git.url }}
+{{- fail "memory.source git needs memory.git.url (https:// or ssh://)" }}
+{{- end }}
+{{- if not .Values.memory.git.image.repository }}
+{{- fail "memory.source git needs memory.git.image.repository: an image with git (and sh and ssh for ssh:// URLs)" }}
+{{- end }}
+{{- if not (or .Values.memory.git.image.tag .Values.memory.git.image.digest) }}
+{{- fail "memory.git.image needs a tag or a digest" }}
+{{- end }}
+{{- $memSsh = eq (urlParse .Values.memory.git.url).scheme "ssh" }}
+{{- if and $memSsh (not .Values.memory.git.sshSecret) }}
+{{- fail "an ssh:// memory.git.url needs memory.git.sshSecret (a Secret with keys ssh-privatekey and known_hosts)" }}
+{{- end }}
+{{- if and (.Values.config.offline | default false) (not (include "kube-noob.memoryGitInCluster" .)) }}
+{{- fail "config.offline allows memory.git only from an in-cluster host (*.svc); use memory.source configMap or pvc" }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.egress.enabled (not .Values.memory.git.egressCIDRs) }}
+{{- fail "memory.source git needs memory.git.egressCIDRs: the NetworkPolicy cannot name the git host, only addresses" }}
+{{- end }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -53,8 +137,8 @@ spec:
         {{- if .Values.podSecurityContext.fsGroup }}
         fsGroup: {{ .Values.podSecurityContext.fsGroup }}
         fsGroupChangePolicy: OnRootMismatch
-        {{- else if and .Values.persistence.enabled (not $openshift) }}
-        # Vanilla Kubernetes: make the PVC writable for UID 1001 (OpenShift assigns fsGroup from the namespace range).
+        {{- else if and (or .Values.persistence.enabled $memSsh .Values.jira.seed.keySecret.name) (not $openshift) }}
+        # Vanilla Kubernetes: make the PVC (and the git and seed keys) usable by UID 1001; OpenShift assigns fsGroup.
         fsGroup: 1001
         fsGroupChangePolicy: OnRootMismatch
         {{- end }}
@@ -75,6 +159,77 @@ spec:
       {{- with .Values.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if or (eq $memSource "git") (eq $seedSource "image") $db }}
+      initContainers:
+      {{- end }}
+      {{- if $db }}
+        - name: kube-noob-db
+          image: "{{ .Values.db.image.repository }}@{{ .Values.db.image.digest }}"
+          imagePullPolicy: IfNotPresent
+          command: ["cp", "--", {{ .Values.db.path | quote }}, "/kube-noob-db-seed/kube-noob-db.tgz"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: kube-noob-db, mountPath: /kube-noob-db-seed}
+      {{- end }}
+      {{- if eq $seedSource "image" }}
+        - name: jira-seed
+          image: {{ include "kube-noob.seedImage" . | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["cp", "--", {{ .Values.jira.seed.path | quote }}, "/kube-noob-seed/jira-snapshot.tgz{{ if hasSuffix ".enc" .Values.jira.seed.path }}.enc{{ end }}"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: jira-seed, mountPath: /kube-noob-seed}
+      {{- end }}
+      {{- if eq $memSource "git" }}
+        - name: memory-clone
+          image: {{ include "kube-noob.memoryGitImage" . | quote }}
+          imagePullPolicy: IfNotPresent
+          {{- if $memSsh }}
+          command: ["sh", "-c"]
+          args:
+            - >-
+              umask 077 && cp /etc/kube-noob-git/ssh-privatekey /tmp/memory-key &&
+              exec git -c core.sshCommand="ssh -i /tmp/memory-key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+              -o UserKnownHostsFile=/etc/kube-noob-git/known_hosts" clone --depth=1 --branch "$MEMORY_REF" --
+              "$MEMORY_URL" /srv/kube-noob/memory
+          {{- else }}
+          command: ["git"]
+          args: ["clone", "--depth=1", "--branch", {{ .Values.memory.git.ref | quote }}, "--", {{ .Values.memory.git.url | quote }}, "/srv/kube-noob/memory"]
+          {{- end }}
+          env:
+            - {name: HOME, value: /tmp}
+            - {name: GIT_TERMINAL_PROMPT, value: "0"}
+            - {name: MEMORY_URL, value: {{ .Values.memory.git.url | quote }}}
+            - {name: MEMORY_REF, value: {{ .Values.memory.git.ref | quote }}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: memory, mountPath: /srv/kube-noob/memory}
+            - {name: tmp, mountPath: /tmp}
+            {{- if $memSsh }}
+            - {name: memory-ssh, mountPath: /etc/kube-noob-git, readOnly: true}
+            {{- end }}
+      {{- end }}
       containers:
         - name: kube-noob
           image: {{ include "kube-noob.image" . | quote }}
@@ -92,6 +247,15 @@ spec:
               value: {{ .Values.config.webEnabled | quote }}
             - name: KUBE_NOOB_CLUSTER_ENABLED
               value: {{ .Values.config.clusterEnabled | quote }}
+            {{- if .Values.jira.seed.keySecret.name }}
+            - name: KUBE_NOOB_SEED_KEY_FILE
+              value: /var/run/kube-noob/seed-key/{{ .Values.jira.seed.keySecret.key }}
+            {{- end }}
+            {{- if .Values.rhacs.enabled }}
+            - name: ROX_API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.rhacs.tokenSecret.name | quote }}, key: {{ .Values.rhacs.tokenSecret.key | quote }}}
+            {{- end }}
             {{- with (include "kube-noob.tokenSecret" .) }}
             - name: KUBE_NOOB_HTTP_TOKEN
               valueFrom:
@@ -123,6 +287,45 @@ spec:
             - {name: config, mountPath: /etc/kube-noob, readOnly: true}
             - {name: data, mountPath: /var/lib/kube-noob}
             - {name: tmp, mountPath: /tmp}
+            {{- if $db }}
+            - {name: kube-noob-db, mountPath: /var/lib/kube-noob/seed-db, readOnly: true}
+            {{- end }}
+            {{- if .Values.jira.seed.keySecret.name }}
+            - {name: seed-key, mountPath: /var/run/kube-noob/seed-key, readOnly: true}
+            {{- end }}
+            {{- if and .Values.rhacs.enabled .Values.rhacs.caConfigMap.name }}
+            - {name: rhacs-ca, mountPath: /etc/kube-noob-rhacs-ca, readOnly: true}
+            {{- end }}
+            {{- if eq $seedSource "image" }}
+            - {name: jira-seed, mountPath: /var/lib/kube-noob/seed, readOnly: true}
+            {{- else if eq $seedSource "pvc" }}
+            - name: jira-seed
+              mountPath: /var/lib/kube-noob/seed
+              readOnly: true
+              {{- with .Values.jira.seed.pvc.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
+            {{- end }}
+            {{- with .Values.mustGather.pvc.claimName }}
+            - name: must-gather
+              mountPath: /srv/kube-noob/must-gather
+              readOnly: true
+              {{- with $.Values.mustGather.pvc.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if eq $memSource "configMap" }}
+            - {name: memory, mountPath: /srv/kube-noob/memory/entries, readOnly: true}
+            {{- else if eq $memSource "pvc" }}
+            - name: memory
+              mountPath: /srv/kube-noob/memory
+              readOnly: true
+              {{- with .Values.memory.pvc.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
+            {{- else if eq $memSource "git" }}
+            - {name: memory, mountPath: /srv/kube-noob/memory, readOnly: true}
+            {{- end }}
       volumes:
         - name: config
           configMap: {name: {{ include "kube-noob.fullname" . }}}
@@ -132,5 +335,47 @@ spec:
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim: {claimName: {{ include "kube-noob.fullname" . }}-data}
           {{- else }}
-          emptyDir: {sizeLimit: 2Gi}
+          emptyDir: {sizeLimit: {{ if eq $seedSource "none" }}{{ if $db }}4Gi{{ else }}2Gi{{ end }}{{ else }}8Gi{{ end }}}
           {{- end }}
+        {{- if $db }}
+        - name: kube-noob-db
+          emptyDir: {sizeLimit: {{ .Values.db.sizeLimit }}}
+        {{- end }}
+        {{- if eq $seedSource "image" }}
+        - name: jira-seed
+          emptyDir: {sizeLimit: {{ .Values.jira.seed.sizeLimit }}}
+        {{- else if eq $seedSource "pvc" }}
+        - name: jira-seed
+          persistentVolumeClaim: {claimName: {{ .Values.jira.seed.pvc.claimName | quote }}, readOnly: true}
+        {{- end }}
+        {{- with .Values.mustGather.pvc.claimName }}
+        - name: must-gather
+          persistentVolumeClaim: {claimName: {{ . | quote }}, readOnly: true}
+        {{- end }}
+        {{- if eq $memSource "configMap" }}
+        - name: memory
+          configMap: {name: {{ .Values.memory.configMap.name | quote }}}
+        {{- else if eq $memSource "pvc" }}
+        - name: memory
+          persistentVolumeClaim: {claimName: {{ .Values.memory.pvc.claimName | quote }}, readOnly: true}
+        {{- else if eq $memSource "git" }}
+        - name: memory
+          emptyDir: {sizeLimit: 256Mi}
+        {{- if $memSsh }}
+        - name: memory-ssh
+          secret: {secretName: {{ .Values.memory.git.sshSecret | quote }}, defaultMode: 288}
+        {{- end }}
+        {{- end }}
+        {{- if and .Values.rhacs.enabled .Values.rhacs.caConfigMap.name }}
+        - name: rhacs-ca
+          configMap:
+            name: {{ .Values.rhacs.caConfigMap.name | quote }}
+            items: [{key: {{ .Values.rhacs.caConfigMap.key | quote }}, path: {{ .Values.rhacs.caConfigMap.key | quote }}}]
+        {{- end }}
+        {{- if .Values.jira.seed.keySecret.name }}
+        - name: seed-key
+          secret:
+            secretName: {{ .Values.jira.seed.keySecret.name | quote }}
+            defaultMode: 288
+            items: [{key: {{ .Values.jira.seed.keySecret.key | quote }}, path: {{ .Values.jira.seed.keySecret.key | quote }}}]
+        {{- end }}

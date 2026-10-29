@@ -13,18 +13,19 @@
 
 **No AI inside. Works with yours.** kube-noob is a Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox expert
 in a box: audit rules, read-only-first playbooks, cited docs and graded exercises. Claude, OpenShift Lightspeed or any
-MCP client calls it as tools; the CLI runs it with no AI at all. It makes no network calls unless you turn them on.
+MCP client calls it as tools; the CLI runs it with no AI at all. No network calls unless enabled.
 
-- **Audit**: 60 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
-  removed-API checks, safe auto-fixes, 9 red-team scenarios, RHACS policy mapping.
-- **Generate**: hardened manifests and Helm charts, re-audited before return.
-- **Debug**: 38 offline playbooks, read-only steps first; reported OpenShift bugs with their fix version; policy
-  denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy reachability; read-only cluster
-  evidence (never Secrets).
-- **Learn**: 5 tracks, 16 lessons, graded exercises; remembers confirmed fixes locally.
+- **Audit**: 61 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
+  removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles;
+  scanner and SAST findings ranked by reachability (VEX, KEV); STRIDE threat models.
+- **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno) and webhook; CI gate.
+- **Debug**: 67 offline playbooks, read-only steps first; must-gathers triaged into a case draft; OpenShift bugs
+  with fix versions; policy denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy
+  reachability; cluster evidence (never Secrets); CI build failures.
+- **Learn**: 5 tracks, 16 lessons, graded exercises; your team's fixes as code.
 - **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
 
-Every design request runs a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
+Design requests run a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
 
 ## Who does the thinking
 
@@ -43,14 +44,12 @@ brew trust --formula aashishmahajan/kube-noob/kube-noob
 brew install kube-noob
 kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
-kube-noob diagnose 'paste events or errors'
+kube-noob insight 'paste anything'
 kube-noob doctor
 kube-noob selftest
 ```
 
-Short form: `noob`. No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+, not macOS's
-built-in 3.9). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
-Roles, demos: [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md).
+No Homebrew: `uv tool install kube-noob` or `pipx install kube-noob` (Python 3.11+). Errors: [install](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 
 ## Use with Claude or any MCP client
 
@@ -66,14 +65,12 @@ In claude.ai or the desktop app: **Customize > Plugins > Add > Add marketplace**
 Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.5.0", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.6.0", "kube-noob", "mcp"]}}}
 ```
-
-Cluster and web tools appear when enabled.
 
 ## Run on OpenShift
 
-As a token-protected service, a loopback-only sidecar, or a tool for OpenShift Lightspeed:
+As a token-protected service, loopback-only sidecar, or OpenShift Lightspeed tool:
 [docs/openshift.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/openshift.md). The chart ships
 NetworkPolicies and runs under `restricted-v2`.
 
@@ -87,14 +84,14 @@ NetworkPolicies and runs under `restricted-v2`.
 | Local learning file (profile, confirmed notes) | on | `learningEnabled: false` |
 | Model for `kube-noob ask` only | none | `llm.provider: anthropic` (`kube-noob[ask]`) or `openai-compatible` |
 
-`kube-noob doctor` shows what it can reach. Config never comes from the current directory implicitly. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
+`kube-noob doctor` shows what it can reach. Config never comes from the current directory. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
 
 ## Docs
 
 - [Use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
 - [Enterprise roadmap](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md)
 - [Architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
-- [Training](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md)
+- [Training](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md) and [measured accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md)
 - [Operations](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
 - [Guidance traceability](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md) and [release readiness](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
 - [Privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security policy](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md) and [contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md)

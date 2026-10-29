@@ -7,8 +7,8 @@ from __future__ import annotations
 import re
 
 DEFAULT_BASE_URL = "https://redhat.atlassian.net"
-PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9_]{1,29}$")
-ISSUE_KEY = re.compile(r"^([A-Z][A-Z0-9_]{1,29})-(\d{1,9})$")
+PROJECT_KEY = re.compile(r"^[A-Z][A-Z0-9_]{1,29}\Z")
+ISSUE_KEY = re.compile(r"^([A-Z][A-Z0-9_]{1,29})-(\d{1,9})\Z")
 _VERSION_RE = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{1,2})(?:\.(\d{1,3}))?(?![\d])")
 
 # Projects on Red Hat's Jira that track OpenShift, ROSA, ACM, RHACS and the operators people run on them; keys checked

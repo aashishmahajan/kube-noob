@@ -1,0 +1,3757 @@
+{
+ "startAt": 0,
+ "maxResults": 100,
+ "total": 55,
+ "issues": [
+  {
+   "key": "OPS-100",
+   "fields": {
+    "summary": "orders-api pods OOMKilled during the nightly batch import (case 0)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-01T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-101",
+   "fields": {
+    "summary": "ImagePullBackOff for payments after the registry move (case 1)",
+    "description": "Caller: Raj Patel\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-02T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-102",
+   "fields": {
+    "summary": "etcd leader changes every few minutes after the 4.21.0 update (case 2)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-03T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-103",
+   "fields": {
+    "summary": "Route returns 503 for shop frontend (case 3)",
+    "description": "Caller: Jane Doe\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-04T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nCause: the Service selected no pods. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "The Service selector used app=front instead of app=frontend; corrected the selector.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-104",
+   "fields": {
+    "summary": "PVC stuck Pending for the reporting database (case 4)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-05T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Set storageClassName gp3-csi on the claim and recreated it."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-105",
+   "fields": {
+    "summary": "Pods rejected by SCC in the batch namespace (case 5)",
+    "description": "Caller: Ana Lima\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-06T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-106",
+   "fields": {
+    "summary": "DNS lookups time out from the analytics pods (case 6)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-07T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-107",
+   "fields": {
+    "summary": "Certificate expired on the internal API route (case 7)",
+    "description": "Caller: Raj Patel\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-08T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-108",
+   "fields": {
+    "summary": "Node NotReady after kubelet disk pressure (case 8)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-09T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Cleaned unused images and raised the image GC thresholds on the machine config pool."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-109",
+   "fields": {
+    "summary": "Quota exceeded when scaling the checkout service (case 9)",
+    "description": "Caller: Jane Doe\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-10T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-110",
+   "fields": {
+    "summary": "HAProxy router pods restart at maxconn (case 10)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-11T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised maxConnections in the IngressController tuningOptions to 40000."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-111",
+   "fields": {
+    "summary": "orders-api pods OOMKilled during the nightly batch import (case 11)",
+    "description": "Caller: Ana Lima\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-12T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-112",
+   "fields": {
+    "summary": "ImagePullBackOff for payments after the registry move (case 12)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-13T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-113",
+   "fields": {
+    "summary": "etcd leader changes every few minutes after the 4.21.0 update (case 13)",
+    "description": "Caller: Raj Patel\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-14T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-114",
+   "fields": {
+    "summary": "Route returns 503 for shop frontend (case 14)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-15T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nCause: the Service selected no pods. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "The Service selector used app=front instead of app=frontend; corrected the selector."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-115",
+   "fields": {
+    "summary": "PVC stuck Pending for the reporting database (case 15)",
+    "description": "Caller: Jane Doe\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-16T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Set storageClassName gp3-csi on the claim and recreated it.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-116",
+   "fields": {
+    "summary": "Pods rejected by SCC in the batch namespace (case 16)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-17T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-117",
+   "fields": {
+    "summary": "DNS lookups time out from the analytics pods (case 17)",
+    "description": "Caller: Ana Lima\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-18T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-118",
+   "fields": {
+    "summary": "Certificate expired on the internal API route (case 18)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-19T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-119",
+   "fields": {
+    "summary": "Node NotReady after kubelet disk pressure (case 19)",
+    "description": "Caller: Raj Patel\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-20T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "Cleaned unused images and raised the image GC thresholds on the machine config pool.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-120",
+   "fields": {
+    "summary": "Quota exceeded when scaling the checkout service (case 20)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-21T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised the namespace quota after the capacity review and set requests to match real usage."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-121",
+   "fields": {
+    "summary": "HAProxy router pods restart at maxconn (case 21)",
+    "description": "Caller: Jane Doe\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-22T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Raised maxConnections in the IngressController tuningOptions to 40000.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-122",
+   "fields": {
+    "summary": "orders-api pods OOMKilled during the nightly batch import (case 22)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-23T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-123",
+   "fields": {
+    "summary": "ImagePullBackOff for payments after the registry move (case 23)",
+    "description": "Caller: Ana Lima\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-24T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-124",
+   "fields": {
+    "summary": "etcd leader changes every few minutes after the 4.21.0 update (case 24)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-25T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-125",
+   "fields": {
+    "summary": "Route returns 503 for shop frontend (case 25)",
+    "description": "Caller: Raj Patel\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-26T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause: the Service selected no pods. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "The Service selector used app=front instead of app=frontend; corrected the selector.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-126",
+   "fields": {
+    "summary": "PVC stuck Pending for the reporting database (case 26)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-27T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Set storageClassName gp3-csi on the claim and recreated it."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-127",
+   "fields": {
+    "summary": "Pods rejected by SCC in the batch namespace (case 27)",
+    "description": "Caller: Jane Doe\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-28T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-128",
+   "fields": {
+    "summary": "DNS lookups time out from the analytics pods (case 28)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-01T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-129",
+   "fields": {
+    "summary": "Certificate expired on the internal API route (case 29)",
+    "description": "Caller: Ana Lima\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-02T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-130",
+   "fields": {
+    "summary": "Node NotReady after kubelet disk pressure (case 30)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Workaround"
+    },
+    "resolutiondate": "2026-10-03T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Cleaned unused images and raised the image GC thresholds on the machine config pool."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-131",
+   "fields": {
+    "summary": "Quota exceeded when scaling the checkout service (case 31)",
+    "description": "Caller: Raj Patel\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Workaround"
+    },
+    "resolutiondate": "2026-10-04T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-132",
+   "fields": {
+    "summary": "HAProxy router pods restart at maxconn (case 32)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Workaround"
+    },
+    "resolutiondate": "2026-10-05T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised maxConnections in the IngressController tuningOptions to 40000."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-133",
+   "fields": {
+    "summary": "orders-api pods OOMKilled during the nightly batch import (case 33)",
+    "description": "Caller: Jane Doe\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Workaround"
+    },
+    "resolutiondate": "2026-10-06T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-134",
+   "fields": {
+    "summary": "ImagePullBackOff for payments after the registry move (case 34)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Workaround"
+    },
+    "resolutiondate": "2026-10-07T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-135",
+   "fields": {
+    "summary": "etcd leader changes every few minutes after the 4.21.0 update (case 35)",
+    "description": "Caller: Ana Lima\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Workaround"
+    },
+    "resolutiondate": "2026-10-08T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-136",
+   "fields": {
+    "summary": "Route returns 503 for shop frontend (case 36)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Open",
+     "statusCategory": {
+      "key": "new"
+     }
+    },
+    "resolution": null,
+    "resolutiondate": null,
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause: the Service selected no pods. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "The Service selector used app=front instead of app=frontend; corrected the selector."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-137",
+   "fields": {
+    "summary": "PVC stuck Pending for the reporting database (case 37)",
+    "description": "Caller: Raj Patel\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Open",
+     "statusCategory": {
+      "key": "new"
+     }
+    },
+    "resolution": null,
+    "resolutiondate": null,
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "Set storageClassName gp3-csi on the claim and recreated it.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-138",
+   "fields": {
+    "summary": "Pods rejected by SCC in the batch namespace (case 38)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Open",
+     "statusCategory": {
+      "key": "new"
+     }
+    },
+    "resolution": null,
+    "resolutiondate": null,
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-139",
+   "fields": {
+    "summary": "DNS lookups time out from the analytics pods (case 39)",
+    "description": "Caller: Jane Doe\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Open",
+     "statusCategory": {
+      "key": "new"
+     }
+    },
+    "resolution": null,
+    "resolutiondate": null,
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-140",
+   "fields": {
+    "summary": "Certificate expired on the internal API route (case 40)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Open",
+     "statusCategory": {
+      "key": "new"
+     }
+    },
+    "resolution": null,
+    "resolutiondate": null,
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-141",
+   "fields": {
+    "summary": "Node NotReady after kubelet disk pressure (case 41)",
+    "description": "Caller: Ana Lima\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Won't Do"
+    },
+    "resolutiondate": "2026-10-14T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Cleaned unused images and raised the image GC thresholds on the machine config pool.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-142",
+   "fields": {
+    "summary": "Quota exceeded when scaling the checkout service (case 42)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Won't Do"
+    },
+    "resolutiondate": "2026-10-15T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised the namespace quota after the capacity review and set requests to match real usage."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-143",
+   "fields": {
+    "summary": "HAProxy router pods restart at maxconn (case 43)",
+    "description": "Caller: Raj Patel\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Won't Do"
+    },
+    "resolutiondate": "2026-10-16T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": "Raised maxConnections in the IngressController tuningOptions to 40000.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-144",
+   "fields": {
+    "summary": "orders-api pods OOMKilled during the nightly batch import (case 44)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Cannot Reproduce"
+    },
+    "resolutiondate": "2026-10-17T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-145",
+   "fields": {
+    "summary": "ImagePullBackOff for payments after the registry move (case 45)",
+    "description": "Caller: Jane Doe\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Cannot Reproduce"
+    },
+    "resolutiondate": "2026-10-18T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-146",
+   "fields": {
+    "summary": "etcd leader changes every few minutes after the 4.21.0 update (case 46)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Cannot Reproduce"
+    },
+    "resolutiondate": "2026-10-19T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-147",
+   "fields": {
+    "summary": "Route returns 503 for shop frontend (case 47)",
+    "description": "Caller: Ana Lima\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-20T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause: the Service selected no pods. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-148",
+   "fields": {
+    "summary": "PVC stuck Pending for the reporting database (case 48)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-21T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-149",
+   "fields": {
+    "summary": "Pods rejected by SCC in the batch namespace (case 49)",
+    "description": "Caller: Raj Patel\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Raj Patel <raj.patel@example.org>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-22T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-150",
+   "fields": {
+    "summary": "DNS lookups time out from the analytics pods (case 50)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Ana Lima\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Ana Lima <ana.lima@example.net>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-23T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-01T09:12:41Z kubelet started\n2026-10-01T09:12:42Z kubelet ready"
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-151",
+   "fields": {
+    "summary": "Certificate expired on the internal API route (case 51)",
+    "description": "Caller: Jane Doe\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Jane Doe <jane.doe@example.com>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-24T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA. Rotated the token: password is S3cretValue51 and the API key is AKIAABCDEFGHIJKLMNOP.",
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-152",
+   "fields": {
+    "summary": "Node NotReady after kubelet disk pressure (case 52)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Raj Patel\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Raj Patel <raj.patel@example.org>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-25T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Raj Patel",
+     "emailAddress": "raj.patel@example.org"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Cleaned unused images and raised the image GC thresholds on the machine config pool. Rotated the token: password is S3cretValue52 and the API key is AKIAABCDEFGHIJKLMNOP."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Raj Patel"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-153",
+   "fields": {
+    "summary": "Quota exceeded when scaling the checkout service (case 53)",
+    "description": "Caller: Ana Lima\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Ana Lima <ana.lima@example.net>.",
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-26T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Ana Lima",
+     "emailAddress": "ana.lima@example.net"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      },
+      {
+       "body": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+       "author": {
+        "displayName": "Ana Lima"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "OPS-154",
+   "fields": {
+    "summary": "HAProxy router pods restart at maxconn (case 54)",
+    "description": {
+     "type": "doc",
+     "version": 1,
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Caller: Jane Doe\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Jane Doe <jane.doe@example.com>."
+        },
+        {
+         "type": "mention",
+         "attrs": {
+          "id": "557058:abc",
+          "text": "@Jane"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "status": {
+     "name": "Done",
+     "statusCategory": {
+      "key": "done"
+     }
+    },
+    "resolution": {
+     "name": "Done"
+    },
+    "resolutiondate": "2026-10-27T10:00:00.000+0000",
+    "assignee": {
+     "displayName": "Jane Doe",
+     "emailAddress": "jane.doe@example.com"
+    },
+    "comment": {
+     "comments": [
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      },
+      {
+       "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Raised maxConnections in the IngressController tuningOptions to 40000."
+           },
+           {
+            "type": "mention",
+            "attrs": {
+             "id": "557058:abc",
+             "text": "@Jane"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "author": {
+        "displayName": "Jane Doe"
+       }
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

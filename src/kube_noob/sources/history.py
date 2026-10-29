@@ -15,7 +15,7 @@ from typing import Any
 
 from kube_noob.sources.git_ingest import _git
 
-_SEMVER_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+_SEMVER_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)\Z")
 
 
 def tags_with_dates(repo: str, workdir: Path | None = None) -> list[tuple[str, str]]:

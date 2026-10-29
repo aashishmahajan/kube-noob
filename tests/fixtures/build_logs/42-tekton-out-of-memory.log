@@ -1,0 +1,12 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] found 0 vulnerabilities
+[build : build] + npm run build
+[build : build] > web@1.4.0 build
+[build : build] > vite build
+[build : build] <--- Last few GCs --->
+[build : build] [412:0x5f2c]    92310 ms: Mark-Compact 2046.2 (2081.1) -> 2045.9 (2082.3) MB
+[build : build] FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+[build : build]  1: 0xb7c3a0 node::Abort() [node]
+[build : build] Aborted (core dumped)
+task build failed: "step-build" exited with code 134. Run tkn tr desc app-ci-run-x7k2p-04-build for more details

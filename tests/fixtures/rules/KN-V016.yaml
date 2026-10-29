@@ -1,0 +1,17 @@
+rule: KN-V016
+platform: openshift
+version: '4.20'
+good: |
+  apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata: {name: web, namespace: shop}
+  spec:
+    to: {kind: Service, name: web}
+    tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}
+bad: |
+  apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata: {name: web, namespace: shop}
+  spec:
+    to: {kind: Service, name: web}
+    tls: {termination: edge-ish}

@@ -1,0 +1,456 @@
+# Signal catalogue: canonical alert names and reasons, the words people use for them, and what they point at.
+# Every name is copied from the upstream file in `sources` (checked 2026-10-28). Fields:
+#   id: <kind>:<name>         kind: alert | event_reason | pod_reason
+#   aliases: other names and the phrases people and logs use for it (lower case; matched as phrases)
+#   terms: words that expand a search for issues and fixes about it
+#   components: kube_noob.signals.vocab component names
+#   playbooks: DBG ids in kube_noob.debug.playbooks
+version: 1
+sources:
+  etcd-mixin: https://github.com/etcd-io/etcd/blob/main/contrib/mixin/alerts/alerts.libsonnet
+  etcd-openshift: https://github.com/openshift/cluster-etcd-operator/blob/master/manifests/0000_90_etcd-operator_03_prometheusrule.yaml
+  etcd-errors: https://github.com/etcd-io/etcd/blob/main/api/v3rpc/rpctypes/error.go
+  etcd-txn: https://github.com/etcd-io/etcd/blob/main/server/etcdserver/txn/util.go
+  k8s-apiserver: https://github.com/kubernetes-monitoring/kubernetes-mixin/blob/master/alerts/kube_apiserver.libsonnet
+  k8s-absent: https://github.com/kubernetes-monitoring/kubernetes-mixin/blob/master/lib/absent_alert.libsonnet
+  k8s-kubelet: https://github.com/kubernetes-monitoring/kubernetes-mixin/blob/master/alerts/kubelet.libsonnet
+  k8s-apps: https://github.com/kubernetes-monitoring/kubernetes-mixin/blob/master/alerts/apps_alerts.libsonnet
+  k8s-storage: https://github.com/kubernetes-monitoring/kubernetes-mixin/blob/master/alerts/storage_alerts.libsonnet
+  k8s-resource: https://github.com/kubernetes-monitoring/kubernetes-mixin/blob/master/alerts/resource_alerts.libsonnet
+  node-mixin: https://github.com/prometheus/node_exporter/blob/master/docs/node-mixin/alerts/alerts.libsonnet
+  kubelet-pleg: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/pleg/generic.go
+  cvo: https://github.com/openshift/cluster-version-operator/blob/master/install/0000_90_cluster-version-operator_02_servicemonitor.yaml
+  mco: https://github.com/openshift/machine-config-operator/blob/master/install/0000_90_machine-config_01_prometheus-rules.yaml
+  ingress: https://github.com/openshift/cluster-ingress-operator/blob/master/manifests/0000_90_ingress-operator_03_prometheusrules.yaml
+  ovn: https://github.com/openshift/cluster-network-operator/blob/master/bindata/network/ovn-kubernetes/common/alert-rules.yaml
+  ovn-cp: https://github.com/openshift/cluster-network-operator/blob/master/bindata/network/ovn-kubernetes/self-hosted/alert-rules-control-plane.yaml
+  kubelet-events: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/events/event.go
+  kubelet-main: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kubelet.go
+  scheduler: https://github.com/kubernetes/kubernetes/blob/master/pkg/scheduler/schedule_one.go
+  controllers: https://github.com/kubernetes/kubernetes/blob/master/pkg/controller/controller_utils.go
+  eviction: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/eviction/helpers.go
+  kubelet-sync: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/container/sync_result.go
+  kubelet-images: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/images/types.go
+  kuberuntime: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
+  crio: https://github.com/cri-o/cri-o/blob/main/server/container_status.go
+signals:
+  # --- etcd ---------------------------------------------------------------------------------------------------------
+  - id: alert:etcdHighNumberOfLeaderChanges
+    aliases: [leader changed, leader changes, leader election, leader elections, etcdserver leader changed]
+    terms: [etcd, leader, election, elections, changes, disk, fsync, latency, masters, control plane, high i/o]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift, etcd-errors]
+  - id: alert:etcdNoLeader
+    aliases: [no leader, etcdserver no leader, etcd has no leader]
+    terms: [etcd, leader, quorum, election]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift, etcd-errors]
+  - id: alert:etcdMembersDown
+    aliases: [etcd member down, etcd members down]
+    terms: [etcd, member, members, unreachable, quorum]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift]
+  - id: alert:etcdInsufficientMembers
+    aliases: [insufficient members, lost quorum, quorum lost]
+    terms: [etcd, quorum, member, members]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift]
+  - id: alert:etcdHighFsyncDurations
+    aliases: [wal fsync, slow fsync, fsync duration, slow disk]
+    terms: [etcd, fsync, wal, disk, latency, storage, high i/o]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift]
+  - id: alert:etcdHighCommitDurations
+    aliases: [backend commit, commit duration]
+    terms: [etcd, commit, disk, latency]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift]
+  - id: alert:etcdGRPCRequestsSlow
+    aliases: [apply request took too long, took too long, slow requests]
+    terms: [etcd, grpc, slow, latency, requests]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-txn]
+  - id: alert:etcdGRPCReadRequestsSlow
+    aliases: [slow read requests]
+    terms: [etcd, grpc, slow, read, latency]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-openshift]
+  - id: alert:etcdGRPCWriteRequestsSlow
+    aliases: [slow write requests]
+    terms: [etcd, grpc, slow, write, latency]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-openshift]
+  - id: alert:etcdDatabaseQuotaLowSpace
+    aliases: [database space exceeded, mvcc database space exceeded, etcd quota]
+    terms: [etcd, database, quota, space, defrag, defragmentation, compaction]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift, etcd-errors]
+  - id: alert:etcdExcessiveDatabaseGrowth
+    aliases: [etcd database growth]
+    terms: [etcd, database, growth, size, objects]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift]
+  - id: alert:etcdDatabaseHighFragmentationRatio
+    aliases: [etcd fragmentation]
+    terms: [etcd, defrag, defragmentation, fragmentation, database]
+    components: [etcd]
+    playbooks: [DBG-ETCD]
+    sources: [etcd-mixin, etcd-openshift]
+  # --- API server ---------------------------------------------------------------------------------------------------
+  - id: alert:KubeAPIErrorBudgetBurn
+    aliases: [error budget, apiserver timeouts, api server timeouts, apiserver errors, apiserver slow]
+    terms: [apiserver, kube-apiserver, latency, errors, timeout, timeouts, slow, requests]
+    components: [kube-apiserver]
+    sources: [k8s-apiserver]
+  - id: alert:KubeAPIDown
+    aliases: [apiserver down, api server down, api server unreachable]
+    terms: [apiserver, kube-apiserver, down, unreachable, connection refused]
+    components: [kube-apiserver]
+    sources: [k8s-apiserver, k8s-absent]
+  - id: alert:KubeAggregatedAPIDown
+    aliases: [aggregated api down, apiservice unavailable]
+    terms: [apiservice, aggregated, unavailable, metrics]
+    components: [kube-apiserver]
+    sources: [k8s-apiserver]
+  - id: alert:KubeAggregatedAPIErrors
+    aliases: [aggregated api errors]
+    terms: [apiservice, aggregated, errors]
+    components: [kube-apiserver]
+    sources: [k8s-apiserver]
+  - id: alert:KubeClientCertificateExpiration
+    aliases: [client certificate expiring, client certificate expiration]
+    terms: [certificate, expiration, expiring, client, rotation, x509]
+    components: [kube-apiserver]
+    playbooks: [DBG-X509]
+    sources: [k8s-apiserver]
+  # --- nodes and kubelet --------------------------------------------------------------------------------------------
+  - id: alert:KubeNodeNotReady
+    aliases: [node not ready, nodes not ready, notready]
+    terms: [node, notready, kubelet, ready, condition]
+    components: [kubelet]
+    sources: [k8s-kubelet]
+  - id: alert:KubeNodeUnreachable
+    aliases: [node unreachable]
+    terms: [node, unreachable, taint]
+    components: [kubelet]
+    sources: [k8s-kubelet]
+  - id: alert:KubeNodePressure
+    aliases: [memory pressure, disk pressure, pid pressure]
+    terms: [node, pressure, eviction, memory, disk]
+    components: [kubelet]
+    playbooks: [DBG-EVICTED]
+    sources: [k8s-kubelet]
+  - id: alert:KubeNodeEviction
+    aliases: [node eviction, evicting pods]
+    terms: [eviction, evicted, pressure]
+    components: [kubelet]
+    playbooks: [DBG-EVICTED]
+    sources: [k8s-kubelet]
+  - id: alert:KubeletDown
+    aliases: [kubelet down]
+    terms: [kubelet, down, node]
+    components: [kubelet]
+    sources: [k8s-kubelet]
+  - id: alert:KubeletPlegDurationHigh
+    aliases: [pleg was last seen active, pleg not healthy, pleg]
+    terms: [pleg, kubelet, relist, runtime, cri-o]
+    components: [kubelet, cri-o]
+    sources: [k8s-kubelet, kubelet-pleg]
+  - id: alert:KubeletTooManyPods
+    aliases: [too many pods]
+    terms: [kubelet, pods, maxpods, capacity]
+    components: [kubelet]
+    sources: [k8s-kubelet]
+  - id: alert:NodeFilesystemSpaceFillingUp
+    aliases: [filesystem filling up, disk filling up, no space left on device]
+    terms: [filesystem, disk, space, full, node]
+    components: []
+    sources: [node-mixin]
+  - id: alert:NodeFilesystemAlmostOutOfSpace
+    aliases: [out of disk space, disk almost full, no space left on device]
+    terms: [filesystem, disk, space, full, node]
+    components: []
+    sources: [node-mixin]
+  - id: alert:NodeClockNotSynchronising
+    aliases: [clock not synchronising, clock skew, ntp]
+    terms: [clock, ntp, chrony, time, skew]
+    components: []
+    sources: [node-mixin]
+  # --- workloads ----------------------------------------------------------------------------------------------------
+  - id: alert:KubePodCrashLooping
+    aliases: [crash looping, crashlooping]
+    terms: [crashloopbackoff, restart, restarts, crash]
+    components: []
+    playbooks: [DBG-CRASHLOOP]
+    sources: [k8s-apps]
+  - id: alert:KubePodNotReady
+    aliases: [pod not ready]
+    terms: [readiness, ready, probe]
+    components: []
+    playbooks: [DBG-PROBE, DBG-PENDING-RESOURCES]
+    sources: [k8s-apps]
+  - id: alert:KubeContainerWaiting
+    aliases: [container waiting]
+    terms: [waiting, containercreating, image, config]
+    components: []
+    playbooks: [DBG-IMAGEPULL, DBG-CONFIGERR, DBG-MOUNT]
+    sources: [k8s-apps]
+  - id: alert:KubeDeploymentReplicasMismatch
+    aliases: [replicas mismatch]
+    terms: [deployment, replicas, available, rollout]
+    components: []
+    sources: [k8s-apps]
+  - id: alert:KubeDeploymentRolloutStuck
+    aliases: [rollout stuck, progress deadline exceeded]
+    terms: [deployment, rollout, progressdeadlineexceeded]
+    components: []
+    sources: [k8s-apps]
+  - id: alert:KubeJobFailed
+    aliases: [job failed, backofflimitexceeded]
+    terms: [job, backofflimitexceeded, deadlineexceeded]
+    components: []
+    playbooks: [DBG-JOB]
+    sources: [k8s-apps]
+  - id: alert:KubeHpaMaxedOut
+    aliases: [hpa maxed out, max replicas]
+    terms: [hpa, horizontalpodautoscaler, maxreplicas, scaling]
+    components: []
+    playbooks: [DBG-HPA]
+    sources: [k8s-apps]
+  - id: alert:KubePdbNotEnoughHealthyPods
+    aliases: [pdb not enough healthy pods]
+    terms: [poddisruptionbudget, pdb, disruption, drain]
+    components: []
+    playbooks: [DBG-PDB-DRAIN]
+    sources: [k8s-apps]
+  - id: alert:KubePersistentVolumeFillingUp
+    aliases: [persistent volume filling up, volume full]
+    terms: [persistentvolume, pvc, volume, space, full]
+    components: [storage]
+    sources: [k8s-storage]
+  - id: alert:KubePersistentVolumeErrors
+    aliases: [persistent volume errors]
+    terms: [persistentvolume, provisioning, failed, pending]
+    components: [storage]
+    playbooks: [DBG-PVC-PENDING]
+    sources: [k8s-storage]
+  - id: alert:KubeQuotaExceeded
+    aliases: [quota exceeded]
+    terms: [resourcequota, quota, exceeded]
+    components: []
+    playbooks: [DBG-QUOTA]
+    sources: [k8s-resource]
+  - id: alert:KubeQuotaFullyUsed
+    aliases: [quota fully used]
+    terms: [resourcequota, quota]
+    components: []
+    playbooks: [DBG-QUOTA]
+    sources: [k8s-resource]
+  - id: alert:CPUThrottlingHigh
+    aliases: [cpu throttling]
+    terms: [cpu, throttling, limits, cfs]
+    components: []
+    sources: [k8s-resource]
+  # --- OpenShift platform -------------------------------------------------------------------------------------------
+  - id: alert:ClusterOperatorDown
+    aliases: [cluster operator down, clusteroperator unavailable]
+    terms: [clusteroperator, available, unavailable, operator]
+    components: [cluster-version]
+    playbooks: [DBG-CLUSTEROPERATOR]
+    sources: [cvo]
+  - id: alert:ClusterOperatorDegraded
+    aliases: [cluster operator degraded, clusteroperator degraded, operator degraded]
+    terms: [clusteroperator, degraded, operator]
+    components: [cluster-version]
+    playbooks: [DBG-CLUSTEROPERATOR]
+    sources: [cvo]
+  - id: alert:ClusterVersionOperatorDown
+    aliases: [cluster version operator down, cvo down]
+    terms: [cluster-version-operator, cvo, upgrade, update]
+    components: [cluster-version]
+    sources: [cvo]
+  - id: alert:ClusterNotUpgradeable
+    aliases: [not upgradeable, upgradeable false]
+    terms: [upgradeable, upgrade, update, clusterversion]
+    components: [cluster-version]
+    playbooks: [DBG-CLUSTEROPERATOR]
+    sources: [cvo]
+  - id: alert:MCCDrainError
+    aliases: [drain error, failed to drain node, drain failed]
+    terms: [drain, machineconfigpool, poddisruptionbudget, eviction, upgrade]
+    components: [machine-config]
+    playbooks: [DBG-PDB-DRAIN]
+    sources: [mco]
+  - id: alert:MCDPivotError
+    aliases: [pivot error, rpm-ostree]
+    terms: [machine-config-daemon, pivot, rpm-ostree, os update]
+    components: [machine-config]
+    sources: [mco]
+  - id: alert:MCDRebootError
+    aliases: [reboot error]
+    terms: [machine-config-daemon, reboot, node]
+    components: [machine-config]
+    sources: [mco]
+  - id: alert:HAProxyReloadFail
+    aliases: [haproxy reload failed, router reload failed]
+    terms: [haproxy, router, reload, route, ingress]
+    components: [ingress]
+    playbooks: [DBG-ROUTE-503]
+    sources: [ingress]
+  - id: alert:HAProxyDown
+    aliases: [haproxy down, router down]
+    terms: [haproxy, router, ingress, down]
+    components: [ingress]
+    playbooks: [DBG-ROUTE-503]
+    sources: [ingress]
+  - id: alert:IngressControllerDegraded
+    aliases: [ingress controller degraded, ingresscontroller degraded]
+    terms: [ingresscontroller, ingress, degraded, router]
+    components: [ingress]
+    sources: [ingress]
+  - id: alert:IngressControllerUnavailable
+    aliases: [ingress controller unavailable]
+    terms: [ingresscontroller, ingress, unavailable, router]
+    components: [ingress]
+    sources: [ingress]
+  - id: alert:NoRunningOvnControlPlane
+    aliases: [no running ovn control plane]
+    terms: [ovn, ovnkube, control plane, ovnkube-control-plane]
+    components: [ovn-kubernetes]
+    sources: [ovn-cp]
+  - id: alert:NoOvnClusterManagerLeader
+    aliases: [no ovn cluster manager leader]
+    terms: [ovn, cluster-manager, leader, ovnkube]
+    components: [ovn-kubernetes]
+    sources: [ovn-cp]
+  - id: alert:NodeWithoutOVNKubeNodePodRunning
+    aliases: [ovnkube-node not running]
+    terms: [ovnkube-node, ovn, node, daemonset]
+    components: [ovn-kubernetes]
+    sources: [ovn]
+  - id: alert:OVNKubernetesNodePodAddError
+    aliases: [pod add error, failed to add pod to network]
+    terms: [ovn, cni, sandbox, network, pod add]
+    components: [ovn-kubernetes]
+    sources: [ovn]
+  - id: alert:OVNKubernetesResourceRetryFailure
+    aliases: [resource retry failure]
+    terms: [ovn, retry, resource]
+    components: [ovn-kubernetes]
+    sources: [ovn]
+  - id: alert:NorthboundStale
+    aliases: [northbound stale]
+    terms: [ovn, northbound, database, nbdb]
+    components: [ovn-kubernetes]
+    sources: [ovn]
+  - id: alert:SouthboundStale
+    aliases: [southbound stale]
+    terms: [ovn, southbound, database, sbdb]
+    components: [ovn-kubernetes]
+    sources: [ovn]
+  # --- event reasons ------------------------------------------------------------------------------------------------
+  - id: event_reason:FailedScheduling
+    aliases: [failed scheduling, insufficient cpu, insufficient memory, untolerated taint, nodes are available]
+    terms: [scheduling, pending, insufficient, taint, affinity, nodeselector]
+    components: [kube-scheduler]
+    playbooks: [DBG-PENDING-RESOURCES, DBG-PENDING-PLACEMENT]
+    sources: [scheduler]
+  - id: event_reason:FailedMount
+    aliases: [failed mount, mountvolume.setup failed, unable to attach or mount volumes]
+    terms: [mount, volume, secret, configmap, permission]
+    components: [kubelet, storage]
+    playbooks: [DBG-MOUNT]
+    sources: [kubelet-events]
+  - id: event_reason:FailedAttachVolume
+    aliases: [failed attach volume, multi-attach error]
+    terms: [attach, volume, multi-attach, readwriteonce]
+    components: [storage]
+    playbooks: [DBG-MULTIATTACH]
+    sources: [kubelet-events]
+  - id: event_reason:FailedCreate
+    aliases: [failed create, error creating]
+    terms: [replicaset, admission, forbidden, quota, scc, pod security]
+    components: [kube-controller-manager]
+    playbooks: [DBG-SCC, DBG-PSA, DBG-QUOTA, DBG-WEBHOOK]
+    sources: [controllers]
+  - id: event_reason:FailedToRetrieveImagePullSecret
+    aliases: [unable to retrieve some image pull secrets, pull secret in another namespace, pull secret in a different namespace]
+    terms: [pullsecret, imagepullsecrets, secret, namespace, registry, serviceaccount]
+    components: [kubelet]
+    playbooks: [DBG-PULLSECRET, DBG-IMAGEPULL]
+    sources: [kubelet-main]
+  - id: event_reason:BackOff
+    aliases: [back-off restarting failed container, back-off pulling image]
+    terms: [backoff, restart, crash, image, pull]
+    components: [kubelet]
+    playbooks: [DBG-CRASHLOOP, DBG-IMAGEPULL]
+    sources: [kubelet-events]
+  - id: event_reason:Unhealthy
+    aliases: [readiness probe failed, liveness probe failed, startup probe failed]
+    terms: [probe, readiness, liveness, startup, health]
+    components: [kubelet]
+    playbooks: [DBG-PROBE]
+    sources: [kubelet-events]
+  - id: event_reason:Evicted
+    aliases: [the node was low on resource, evicted]
+    terms: [eviction, pressure, ephemeral-storage, memory]
+    components: [kubelet]
+    playbooks: [DBG-EVICTED]
+    sources: [eviction]
+  - id: event_reason:NodeNotReady
+    aliases: [node is not ready]
+    terms: [node, notready, kubelet]
+    components: [kubelet]
+    sources: [kubelet-events]
+  - id: event_reason:FailedCreatePodSandBox
+    aliases: [failed to create pod sandbox]
+    terms: [sandbox, cni, network, multus, ovn]
+    components: [cri-o, multus, ovn-kubernetes]
+    sources: [kubelet-events]
+  - id: event_reason:NetworkNotReady
+    aliases: [network is not ready, network plugin not ready]
+    terms: [cni, network, ready, plugin]
+    components: [ovn-kubernetes, multus]
+    sources: [kubelet-events]
+  # --- container reasons --------------------------------------------------------------------------------------------
+  - id: pod_reason:CrashLoopBackOff
+    aliases: [crash loop, crashloop]
+    terms: [crashloopbackoff, restart, exit code, logs]
+    playbooks: [DBG-CRASHLOOP]
+    sources: [kubelet-sync]
+  - id: pod_reason:OOMKilled
+    aliases: [out of memory, exit code 137, oom killed]
+    terms: [oomkilled, memory, limit, 137]
+    playbooks: [DBG-OOM]
+    sources: [crio]
+  - id: pod_reason:ImagePullBackOff
+    aliases: [image pull back-off]
+    terms: [image, pull, registry, pullsecret, manifest unknown]
+    playbooks: [DBG-IMAGEPULL]
+    sources: [kubelet-sync]
+  - id: pod_reason:ErrImagePull
+    aliases: [error pulling image, failed to pull image]
+    terms: [image, pull, registry, pullsecret, unauthorized]
+    playbooks: [DBG-IMAGEPULL]
+    sources: [kubelet-images]
+  - id: pod_reason:CreateContainerConfigError
+    aliases: [create container config error]
+    terms: [configmap, secret, env, not found, runasnonroot]
+    playbooks: [DBG-CONFIGERR, DBG-RUNASROOT]
+    sources: [kuberuntime]
+  - id: pod_reason:CreateContainerError
+    aliases: [create container error]
+    terms: [container, runtime, create]
+    playbooks: [DBG-CONFIGERR]
+    sources: [kuberuntime]

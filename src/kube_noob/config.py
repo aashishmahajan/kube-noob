@@ -23,7 +23,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import yaml
@@ -91,7 +91,7 @@ class ClusterSettings(_Base):
 # apiKeyEnv may only name a model provider's key variable (ending in _API_KEY, or starting with KUBE_NOOB_), so a
 # configuration file cannot point the model client at an unrelated variable. The default per provider is set in
 # kube_noob.agent.providers, which is the only code that reads it.
-_KEY_VAR = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)$")
+_KEY_VAR = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)\Z")
 _CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
 
 
@@ -190,6 +190,189 @@ class WatchSettings(_Base):
         return v
 
 
+class PostureSettings(_Base):
+    """Daily drift and policy report (``kube-noob serve`` with ``report_enabled``; ``kube-noob posture report``).
+
+    Read-only: one live snapshot a day (a random first delay, then every 24 h +/- 10%), diffed against the previous one
+    in ``<dataDir>/posture``; the newest ``keep`` snapshots and their reports are kept."""
+
+    report_enabled: bool = False
+    namespaces: list[str] = Field(default_factory=list, max_length=50)  # empty: every namespace the account can list
+    keep: int = Field(default=14, ge=1, le=365)
+
+    @field_validator("namespaces")
+    @classmethod
+    def _dns_names(cls, v: list[str]) -> list[str]:
+        bad = [n for n in v if not re.fullmatch(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?", n)]
+        if bad:
+            raise ValueError(f"posture.namespaces must be namespace names: {bad}")
+        return v
+
+
+# rhacs.tokenEnv may only name a KUBE_NOOB_* variable (unset: the variable the RHACS CLI reads), so a configuration
+# file cannot make kube-noob send an unrelated variable to Central.
+_RHACS_TOKEN_VAR = re.compile(r"^KUBE_NOOB_[A-Z0-9_]+\Z")
+
+
+class RhacsSettings(_Base):
+    """Read RHACS Central's policies for ``kube-noob rhacs compare --live`` and the ``rhacs_compare_live`` tool.
+
+    Off by default. GET only, to ``endpoint``'s host only, no redirects; the token comes from ``tokenEnv`` (unset: the
+    RHACS CLI's API token variable) and is sent only to that host. Under the offline lock only a loopback or
+    in-cluster ``*.svc`` Central is allowed."""
+
+    enabled: bool = False
+    endpoint: str | None = None  # https://central.stackrox.svc or https://central-stackrox.apps.example.com
+    token_env: str | None = None
+    ca_file: Path | None = None  # PEM bundle for Central's certificate (default: the system trust store)
+    max_policies: int = Field(default=500, ge=1, le=2000)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _https_root(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().rstrip("/")
+        parts = urlsplit(v)
+        if parts.scheme != "https" or not parts.hostname:
+            raise ValueError(f"rhacs.endpoint must be an https:// URL with a host, got {v!r}")
+        if parts.username or parts.password or parts.path or parts.query or parts.fragment:
+            raise ValueError("rhacs.endpoint must be Central's root (https://host[:port]) without credentials or path")
+        return v
+
+    @field_validator("token_env")
+    @classmethod
+    def _token_var(cls, v: str | None) -> str | None:
+        if v is not None and not _RHACS_TOKEN_VAR.match(v):
+            raise ValueError(
+                f"rhacs.tokenEnv {v!r} must be a KUBE_NOOB_* variable; leave it unset to use the RHACS CLI's token "
+                "variable"
+            )
+        return v
+
+    @field_validator("ca_file")
+    @classmethod
+    def _expand_ca(cls, v: Path | None) -> Path | None:
+        return v.expanduser() if v is not None else None
+
+    @model_validator(mode="after")
+    def _endpoint_when_enabled(self) -> RhacsSettings:
+        if self.enabled and not self.endpoint:
+            raise ValueError("rhacs.enabled needs rhacs.endpoint (Central's https:// root)")
+        return self
+
+
+class CiSettings(_Base):
+    """Read CI run history from the GitHub Actions API for ``kube-noob build history`` (R4.4). Off by default.
+
+    GET only, to ``githubApiUrl``'s host only, no redirects, a random pause between requests; the token comes from
+    ``githubTokenEnv`` (a KUBE_NOOB_* variable; unset: the variable the GitHub CLI reads). Under the offline lock only
+    a loopback or in-cluster ``*.svc`` API (GitHub Enterprise Server behind a Service) is allowed."""
+
+    github_enabled: bool = False
+    github_api_url: str = "https://api.github.com"
+    github_token_env: str | None = None
+    max_runs: int = Field(default=200, ge=1, le=2000)
+
+    @field_validator("github_api_url")
+    @classmethod
+    def _api_root(cls, v: str) -> str:
+        v = v.strip().rstrip("/")
+        parts = urlsplit(v)
+        if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.query:
+            raise ValueError(f"ci.githubApiUrl must be an https:// URL without credentials or query, got {v!r}")
+        if parts.path not in {"", "/api/v3"}:
+            raise ValueError(
+                "ci.githubApiUrl must be https://api.github.com or a GitHub Enterprise https://<host>/api/v3"
+            )
+        return v
+
+    @field_validator("github_token_env")
+    @classmethod
+    def _gh_token_var(cls, v: str | None) -> str | None:
+        if v is not None and not _RHACS_TOKEN_VAR.match(v):
+            raise ValueError(f"ci.githubTokenEnv {v!r} must be a KUBE_NOOB_* variable; leave it unset for the default")
+        return v
+
+
+_RULE_ID = r"^KN-[A-Z]{1,2}\d{3}$"
+_NAMESPACE = r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+
+
+class AdmissionSettings(_Base):
+    """The ``kube-noob admission serve`` webhook (R3.3, tier A). Warnings only unless a rule is listed in
+    ``enforce``; the system namespaces are always excluded; rules that need other objects run only with ``lookups``
+    (which needs ``cluster.enabled``) and are never enforced."""
+
+    enforce: list[Annotated[str, Field(pattern=_RULE_ID)]] = Field(default_factory=list, max_length=100)
+    excluded_namespaces: list[Annotated[str, Field(pattern=_NAMESPACE)]] = Field(default_factory=list, max_length=200)
+    exceptions_file: Path | None = None
+    lookups: bool = False
+    max_warnings: int = Field(default=10, ge=1, le=50)
+    version: str | None = Field(default=None, pattern=r"^\d+\.\d+(\.\d+)?$")
+
+
+class ProbeSettings(_Base):
+    """Tier P: ephemeral debug containers or probe Jobs. Off by default; every probe needs an approval."""
+
+    enabled: bool = False
+
+
+class DryRunSettings(_Base):
+    """Tier D: server-side dry-run of manifests (``?dryRun=All``). Off by default; every request needs an approval."""
+
+    enabled: bool = False
+
+
+class ItsmSettings(_Base):
+    """Tier W: attach evidence to tickets in an external ITSM system. Off by default."""
+
+    write_enabled: bool = False
+
+
+class NotifySettings(_Base):
+    """Tier W: forward reports to chat or webhooks. Off by default."""
+
+    enabled: bool = False
+
+
+class GateSettings(_Base):
+    """Tier G: forward approved tool calls to an upstream MCP server. Off by default."""
+
+    enabled: bool = False
+
+
+class MemorySettings(_Base):
+    """Team memory repositories (``kube-noob memory init``) read where kube-noob runs: the CLI, the stdio MCP server
+    and the HTTP server. Read-only; kube-noob never uploads, bundles or exports them. ``$KUBE_NOOB_MEMORY_PATHS``
+    (paths separated by ``:``) overrides the list."""
+
+    paths: list[Path] = Field(default_factory=list, max_length=10)
+
+    @field_validator("paths")
+    @classmethod
+    def _expand(cls, v: list[Path]) -> list[Path]:
+        return [p.expanduser() for p in v]
+
+
+class MustGatherSettings(_Base):
+    """Where the ``analyze_must_gather`` MCP tool may read must-gathers. The local stdio server reads any path the
+    user names (it runs as the user) unless this is set; the HTTP server offers the tool only when it is set, and
+    then only for paths that resolve inside it (links resolved first). ``$KUBE_NOOB_MUST_GATHER_DIR`` overrides it."""
+
+    allowed_dir: Path | None = None
+
+    @field_validator("allowed_dir")
+    @classmethod
+    def _absolute(cls, v: Path | None) -> Path | None:
+        if v is None:
+            return None
+        v = v.expanduser()
+        if not v.is_absolute():
+            raise ValueError("mustGather.allowedDir must be an absolute path")
+        return v
+
+
 class JiraSettings(_Base):
     """Local copy of Red Hat's public Jira (``kube-noob corpus jira``) for "has Red Hat seen this error?" answers.
 
@@ -247,7 +430,18 @@ class Settings(_Base):
     judge: JudgeSettings = Field(default_factory=JudgeSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     watch: WatchSettings = Field(default_factory=WatchSettings)
+    posture: PostureSettings = Field(default_factory=PostureSettings)
+    rhacs: RhacsSettings = Field(default_factory=RhacsSettings)
+    ci: CiSettings = Field(default_factory=CiSettings)
+    admission: AdmissionSettings = Field(default_factory=AdmissionSettings)
     jira: JiraSettings = Field(default_factory=JiraSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
+    must_gather: MustGatherSettings = Field(default_factory=MustGatherSettings)
+    probe: ProbeSettings = Field(default_factory=ProbeSettings)
+    dry_run: DryRunSettings = Field(default_factory=DryRunSettings)
+    itsm: ItsmSettings = Field(default_factory=ItsmSettings)
+    notify: NotifySettings = Field(default_factory=NotifySettings)
+    gate: GateSettings = Field(default_factory=GateSettings)
     data_dir: Path = Field(default_factory=_default_data_dir)
     default_platform: Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"] = "kubernetes"
     source_path: Path | None = Field(default=None, exclude=True)
@@ -363,6 +557,12 @@ def _env_overrides() -> dict[str, Any]:
             for part in path[:-1]:
                 cur = cur.setdefault(part, {})
             cur[path[-1]] = val
+    must_gather = os.environ.get("KUBE_NOOB_MUST_GATHER_DIR")
+    if must_gather:
+        o["mustGather"] = {"allowedDir": must_gather}
+    memory = os.environ.get("KUBE_NOOB_MEMORY_PATHS")
+    if memory is not None:
+        o["memory"] = {"paths": [p for p in memory.split(os.pathsep) if p.strip()]}
     port = os.environ.get("KUBE_NOOB_SERVER_PORT")
     if port:
         try:

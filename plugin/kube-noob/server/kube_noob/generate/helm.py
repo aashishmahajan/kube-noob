@@ -27,7 +27,7 @@ from kube_noob.generate.blueprint import Blueprint
 from kube_noob.generate.manifests import generate
 from kube_noob.yamlio import dump_documents
 
-_SEMVER = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?\Z")
 _SCALAR = "__KN_S__"
 _INT = "__KN_I__"
 _BLOCK = "__KN_B__"

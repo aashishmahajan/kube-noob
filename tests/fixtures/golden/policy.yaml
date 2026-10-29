@@ -1,0 +1,316 @@
+# Golden questions: policy. Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository); graded against kube-noob by an
+# independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
+- id: pol-001
+  technology: policy
+  kind: error
+  question: 'Our Deployment''s ReplicaSet cannot create pods in the payments namespace: pods "api-6f7d" is forbidden: violates
+    PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "api" must set securityContext.allowPrivilegeEscalation=false),
+    runAsNonRoot != true (pod or container "api" must set securityContext.runAsNonRoot=true). What do I fix in the pod spec?'
+  answer: 'The namespace enforces the Restricted Pod Security Standard. On every container set allowPrivilegeEscalation: false
+    and runAsNonRoot: true (or at pod level); also drop ALL capabilities and set seccompProfile.type to RuntimeDefault or
+    Localhost. Or lower the namespace''s enforce level.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/security/pod-security-standards.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'pod-security/restricted:latest'
+- id: pol-002
+  technology: policy
+  kind: error
+  question: 'kubectl create deploy web --image=nginx --replicas=8 fails with: deployments.apps "web" is forbidden: ValidatingAdmissionPolicy
+    ''cap-replicas.corp.example'' with binding ''cap-replicas-prod'' denied request: failed expression: object.spec.replicas
+    <= 5. Where does this message come from and how do I make it friendlier?'
+  answer: The API server evaluated the policy's CEL validation, it returned false (8 > 5), and because the validation has
+    no message the expression itself is shown. Reduce the replicas, or change the policy or binding. For clearer text set
+    message or messageExpression on the validation.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/reference/access-authn-authz/validating-admission-policy.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#message-expression'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-VAP
+- id: pol-003
+  technology: policy
+  kind: howto
+  question: Before enforcing the baseline Pod Security Standard on all our existing namespaces, how can I see which running
+    pods would violate it without changing anything?
+  answer: 'Use a server-side dry run of the label command: kubectl label --dry-run=server --overwrite ns --all pod-security.kubernetes.io/enforce=baseline.
+    The admission plugin still checks each existing pod and reports violations as warnings, but the label is not applied.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/tasks/configure-pod-container/enforce-standards-namespace-labels.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-namespace-labels/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-pss#2'
+- id: pol-004
+  technology: policy
+  kind: error
+  question: 'Our CI job got: Error from server: error when creating "job.yaml": admission webhook "vpol.validate.kyverno.svc-fail"
+    denied the request: Policy require-team-label failed: label ''team'' is required. One legacy migration Job cannot be relabeled.
+    How do I exempt only that Job without editing the ValidatingPolicy?'
+  answer: 'Create a PolicyException (policies.kyverno.io/v1) whose policyRefs name the ValidatingPolicy and whose CEL matchConditions
+    select that Job. Exceptions are off by default: enable the enablePolicyException flag and set exceptionNamespace to the
+    one namespace where they are permitted (or "*").'
+  source:
+    repo: kyverno/website
+    path: src/content/docs/docs/guides/exceptions.md
+    commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
+    url: 'https://kyverno.io/docs/guides/exceptions/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:kyverno-troubleshooting#1'
+- id: pol-005
+  technology: policy
+  kind: concept
+  question: We set pod-security.kubernetes.io/enforce=restricted on a namespace. kubectl apply of a Deployment with a root
+    container succeeds, yet no pods appear. Why is the Deployment itself accepted?
+  answer: Pod Security Admission enforces only on Pod objects, not on workload resources such as Deployments. The Deployment
+    is admitted, then the controller's pod creations are rejected. Audit and warn modes also check workload pod templates,
+    which surfaces problems earlier.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/security/pod-security-admission.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/security/pod-security-admission/#workload-resources-and-pod-templates'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-PSA
+- id: pol-006
+  technology: policy
+  kind: error
+  question: 'On OpenShift the ReplicaSet reports: Error creating: pods "billing-" is forbidden: unable to validate against
+    any security context constraint: [provider restricted-v2: .spec.containers[0].securityContext.runAsUser: Invalid value:
+    0: must be in the ranges: [1000650000, 1000659999]]. Our pod spec hard-codes runAsUser: 0. What is the clean fix?'
+  answer: The SCC uses a UID-range strategy filled from the namespace's openshift.io/sa.scc.uid-range annotation, so UID 0
+    is refused. Remove the hard-coded runAsUser so OpenShift assigns one, and make the image run as an arbitrary non-root
+    user. Granting anyuid works but loosens security.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/security-context-constraints-pre-allocated-values.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-pre-allocated-values.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - openshift-scc/restricted-v2
+- id: pol-007
+  technology: policy
+  kind: howto
+  question: How can I trial a new ValidatingAdmissionPolicy in production so violations only surface as warnings and audit
+    annotations, then switch it to blocking later?
+  answer: 'Bind it with validationActions: [Warn, Audit] first (Deny and Warn cannot be combined), review the warnings and
+    audit events, then change the binding to validationActions: [Deny]. The policy has no effect until a ValidatingAdmissionPolicyBinding
+    exists.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/reference/access-authn-authz/validating-admission-policy.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#validation-actions'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-validating-admission-policy#3'
+- id: pol-008
+  technology: policy
+  kind: error
+  question: 'Creating a namespace fails with: Error from server ([ns-needs-owner] you must provide labels: {"owner"}): admission
+    webhook "validation.gatekeeper.sh" denied the request: [ns-needs-owner] you must provide labels: {"owner"}. We want two
+    weeks of visibility before blocking anything. What do we change?'
+  answer: The constraint ns-needs-owner uses the default enforcementAction, deny. Set spec.enforcementAction to dryrun (violations
+    appear in the constraint's status) or warn (the client gets a warning but the request passes), then switch back to deny
+    later. Or simply add the owner label.
+  source:
+    repo: open-policy-agent/gatekeeper
+    path: website/docs/violations.md
+    commit: e492e24cb08cc557411b1658142d62d3e4dd1688
+    url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/violations'
+  outOfScope: false
+  status: miss
+  gap: 'doc: Gatekeeper constraint spec.enforcementAction dryrun or warn instead of deny'
+- id: pol-009
+  technology: policy
+  kind: out-of-scope
+  question: 'My EKS worker node role gets AccessDenied for ecr:GetAuthorizationToken when pulling images. Which IAM policy
+    statement do I need to attach?'
+  answer: 'Outside this assistant''s scope: writing AWS IAM policies belongs to AWS IAM/EKS, not to Kubernetes admission policy
+    engines or SecurityContextConstraints.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: pol-010
+  technology: policy
+  kind: error
+  question: 'On a private GKE cluster every Pod create fails with: Internal error occurred: failed calling webhook "validate.kyverno.svc-fail":
+    failed to call webhook: Post "https://kyverno-svc.kyverno.svc:443/validate/fail?timeout=10s": context deadline exceeded.
+    The Kyverno pods show Running. What is wrong?'
+  answer: Private GKE control planes cannot reach nodes on Kyverno's webhook port by default, so the API server call times
+    out. Add a firewall rule that lets the control plane reach the worker nodes on TCP 9443, Kyverno's default webhook port.
+  source:
+    repo: kyverno/website
+    path: src/content/docs/docs/guides/troubleshooting.md
+    commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
+    url: 'https://kyverno.io/docs/guides/troubleshooting/#kyverno-fails-on-gke'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-WEBHOOK
+- id: pol-011
+  technology: policy
+  kind: howto
+  question: How do I make Gatekeeper's admission webhook skip an entire namespace so that namespace keeps working even when
+    Gatekeeper is down?
+  answer: 'Start Gatekeeper with --exempt-namespace=<ns> (Helm: controllerManager.exemptNamespaces), keep the webhook namespaceSelector
+    on admission.gatekeeper.sh/ignore DoesNotExist, and label the namespace admission.gatekeeper.sh/ignore. The API server
+    then never calls the webhook for it; audit still runs.'
+  source:
+    repo: open-policy-agent/gatekeeper
+    path: website/docs/exempt-namespaces.md
+    commit: e492e24cb08cc557411b1658142d62d3e4dd1688
+    url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/exempt-namespaces'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:gatekeeper-enforcement#4'
+- id: pol-012
+  technology: policy
+  kind: concept
+  question: If all Gatekeeper webhook pods go down, do constraints still block bad resources by default? What is the trade-off
+    of changing that?
+  answer: 'By default the webhook uses failurePolicy Ignore, so while it is unreachable nothing is enforced and audit later
+    reports what slipped in. Setting failurePolicy: Fail on the ValidatingWebhookConfiguration fails closed, but risks admission
+    deadlocks and ties API availability to Gatekeeper.'
+  source:
+    repo: open-policy-agent/gatekeeper
+    path: website/docs/failing-closed.md
+    commit: e492e24cb08cc557411b1658142d62d3e4dd1688
+    url: 'https://open-policy-agent.github.io/gatekeeper/website/docs/failing-closed'
+  outOfScope: false
+  status: miss
+  gap: 'doc: Gatekeeper webhook failurePolicy Ignore by default versus Fail trade-offs'
+- id: pol-013
+  technology: policy
+  kind: error
+  question: 'kubectl get validatingadmissionpolicy replica-check -o yaml shows status.typeChecking.expressionWarnings: apps/v1,
+    Kind=Deployment: ERROR: <input>:1:7: undefined field ''replicas'' for the expression object.replicas > 1. The policy was
+    still created. Should I fix it?'
+  answer: Yes. The expression references a field that does not exist at that path; for a Deployment it is object.spec.replicas.
+    Type-check results are advisory and do not block creation, but a broken expression errors at runtime and is then handled
+    by the policy's failurePolicy.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/reference/access-authn-authz/validating-admission-policy.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#type-checking'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-validating-admission-policy#4'
+- id: pol-014
+  technology: policy
+  kind: howto
+  question: How do I make pull requests fail when a Kubernetes manifest would violate our Kyverno policies, before anything
+    reaches the cluster?
+  answer: 'Run the Kyverno CLI in CI: kyverno apply policies/ -r resources/ checks manifests against the policy files, and
+    kyverno test tests/ runs predefined test cases. A manifest that fails a validate policy fails the step and halts the pipeline.'
+  source:
+    repo: kyverno/website
+    path: src/content/docs/docs/guides/testing-policies.md
+    commit: b0131526d7d8d6e4fa80856adb75aa4d7b2f4c89
+    url: 'https://kyverno.io/docs/guides/testing-policies/#continuous-integration'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:kyverno-troubleshooting#4'
+- id: pol-015
+  technology: policy
+  kind: error
+  question: 'My DaemonSet on OpenShift cannot create pods: unable to validate against any security context constraint: [provider
+    restricted-v2: .spec.containers[0].securityContext.privileged: Invalid value: true: Privileged containers are not allowed].
+    Should I just edit restricted-v2 to allow it?'
+  answer: 'No, don''t modify default SCCs; customizations can be reset on upgrade. Grant the pod''s service account an SCC
+    that permits privileged containers, such as privileged (oc adm policy add-scc-to-user privileged -z <sa>), or create a
+    custom SCC. privileged: true alone doesn''t select the SCC.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/security-context-constraints-about.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-about.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-SCC
+- id: pol-016
+  technology: policy
+  kind: out-of-scope
+  question: In Spring Security 6, how do I restrict /actuator/** to ROLE_ADMIN with a SecurityFilterChain bean?
+  answer: 'Outside this assistant''s scope: Spring Security configuration is application/framework security, not Kubernetes
+    admission control.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: pol-017
+  technology: policy
+  kind: concept
+  question: On OpenShift, if a pod is admitted by its SCC, is it automatically fine with Pod Security Admission? How do the
+    two relate?
+  answer: No. SCC admission and Pod Security Admission are independent controllers and a workload must satisfy both. The SCC
+    controller can fill defaults (such as seccomp RuntimeDefault) and validates against the matching SCC; PSA separately validates
+    the pod against the namespace's pod security standard.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/security-context-constraints-psa-coexistence.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-psa-coexistence.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:ocp-scc#3'
+- id: pol-018
+  technology: policy
+  kind: howto
+  question: How do I force a Deployment's pods to be admitted under one particular SCC instead of whichever SCC wins on priority?
+  answer: Put the openshift.io/required-scc annotation, set to the SCC name, on the pod template metadata (for a Deployment,
+    spec.template.metadata.annotations). The SCC must exist and the user or service account needs use permission in that namespace,
+    or admission fails.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/security-context-constraints-requiring.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-requiring.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:ocp-scc#4'
+- id: pol-019
+  technology: policy
+  kind: out-of-scope
+  question: 'Two services in my mesh get "RBAC: access denied" from Envoy. How do I write an AuthorizationPolicy that allows
+    only the frontend service account?'
+  answer: 'Outside this assistant''s scope: Istio AuthorizationPolicy belongs to the Istio service mesh, not to Kubernetes
+    admission policy engines.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: pol-020
+  technology: policy
+  kind: out-of-scope
+  question: Terraform Cloud fails my plan on a hard-mandatory Sentinel policy. How do I write the Sentinel rule so only tagged
+    resources pass?
+  answer: 'Outside this assistant''s scope: HashiCorp Sentinel is a Terraform/HashiCorp policy framework, not a Kubernetes
+    admission policy engine.'
+  source: {}
+  outOfScope: true
+  status: abstain

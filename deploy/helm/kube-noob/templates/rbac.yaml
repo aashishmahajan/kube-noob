@@ -29,6 +29,13 @@ rules:
   - apiGroups: [platform.stackrox.io]
     resources: [centrals, securedclusters]
     verbs: [get, list, watch]
+  - apiGroups: [apps.openshift.io]
+    resources: [deploymentconfigs]
+    verbs: [get, list, watch]
+  # Who may do what (no credentials): the attack-path scan reads RBAC; Secrets stay out.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings{{ if .cluster }}, clusterroles, clusterrolebindings{{ end }}]
+    verbs: [get, list, watch]
 {{- if .cluster }}
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]

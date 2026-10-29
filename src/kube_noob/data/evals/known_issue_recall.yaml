@@ -1,0 +1,93 @@
+# Known-issue recall: questions as people ask them (prose), as alerts fire (alert), and as tools print them
+# (events or log lines), each with the release-notes issue it should find. Negatives are everyday errors that must
+# never pull in a bug. Written from the issue's symptom in our own words, then frozen: the matcher is tuned, never
+# the questions. Gate (tests/test_known_issue_recall.py): recall >= 0.8, zero false matches.
+version: 1
+positives:
+  - {id: P01, style: prose, version: "4.21.0", expect: OCPBUGS-73881, text: "etcd leader changed frequently, apiserver timeouts after upgrade"}
+  - {id: P02, style: prose, version: "4.20.5", expect: OCPBUGS-73876, text: "etcd leader elections keep happening, high disk I/O on masters"}
+  - {id: P03, style: alert, version: "4.21.0", expect: OCPBUGS-73881, text: "etcdHighNumberOfLeaderChanges firing on all masters after updating to 4.21.0"}
+  - {id: P04, style: prose, version: "4.20.10", expect: OCPBUGS-81477, text: "application traffic drops with TCP resets every time kube-apiserver rolls out; etcd encryption is enabled"}
+  - {id: P05, style: prose, version: "4.20.0", expect: OCPBUGS-62273, text: "ovn-controller on one node uses a stale OVN database and burns CPU after ovnkube-controller stopped processing updates"}
+  - {id: P06, style: prose, version: "4.20.5", expect: OCPBUGS-66049, text: "DNS lookups fail after the dns-default pods were recreated, stale UDP conntrack entries with OVN-Kubernetes"}
+  - {id: P07, style: prose, version: "4.20.15", expect: OCPBUGS-84054, text: "virtual machines on a user-defined network lost their IP after ovnkube-controller restarted during the upgrade, DHCP options are gone"}
+  - {id: P08, style: events, version: "4.21.10", expect: OCPBUGS-98398, text: "ovnkube-controller: failed to update NetworkPolicy address set for the user defined network: object not found"}
+  - {id: P09, style: prose, version: "4.21.20", expect: OCPBUGS-128910, text: "after rebooting a node the EgressIP answers from two nodes; ovnkube-cluster-manager moved it but the old node kept it"}
+  - {id: P10, style: prose, expect: OCPBUGS-55485, text: "statefulset pod stuck in Terminating after the storage backend went down, CRI-O never sees the container exit"}
+  - {id: P11, style: events, version: "4.21.10", expect: OCPBUGS-84922, text: "crio: panic: send on closed channel during StopContainer"}
+  - {id: P12, style: prose, version: "4.20.12", expect: OCPBUGS-82143, text: "Tekton pipeline init containers fail now and then; CRI-O does not capture the exit code of init containers that finish quickly"}
+  - {id: P13, style: prose, version: "4.20.8", expect: OCPBUGS-74624, text: "static pods are terminated too early during node shutdown, the kubelet ignores their priorityClassName"}
+  - {id: P14, style: prose, version: "4.20.6", expect: OCPBUGS-43280, text: "guaranteed QoS pods with whole CPUs do not restart after a node reboot when the CPU manager policy is static"}
+  - {id: P15, style: prose, version: "4.20.10", expect: OCPBUGS-83393, text: "single-node OpenShift: machine-config-controller takes five minutes to get its lease after a hard reboot"}
+  - {id: P16, style: prose, expect: OCPBUGS-61516, text: "MCO node drain takes forever because something keeps uncordoning the node while it drains"}
+  - {id: P17, style: prose, version: "4.20.30", expect: OCPBUGS-114390, text: "no drain-failure events are emitted when the Machine Config Operator fails to drain a node"}
+  - {id: P18, style: prose, expect: OCPBUGS-74151, text: "API unavailable after deleting control plane machines; the etcd operator removed members and pre-drain hooks during a revision rollout"}
+  - {id: P19, style: events, expect: OCPBUGS-61347, text: "kube-apiserver crashed: fatal error: concurrent map iteration and map write, followed by list watch storms"}
+  - {id: P20, style: prose, version: "4.20.10", expect: OCPBUGS-77958, text: "operators fail to install on a hosted cluster with a custom API server port, OLM NetworkPolicy egress only allows 6443"}
+  - {id: P21, style: prose, version: "4.20.2", expect: OCPBUGS-61896, text: "oauth-openshift pods stuck during rollout because one node is NotReady"}
+  - {id: P22, style: events, expect: OCPBUGS-64619, text: "oc login fails with x509 certificate signed by unknown authority on the OAuth endpoint even though insecure-skip-tls-verify is set in the kubeconfig"}
+  - {id: P23, style: prose, expect: OCPBUGS-43406, text: "DNS outage during update because coredns restarted before the new operating system image was pulled"}
+  - {id: P24, style: prose, version: "4.20.30", expect: OCPBUGS-128980, text: "EgressIP object reassigned to a new node immediately when its node rebooted, traffic goes out of both nodes"}
+  - {id: P25, style: prose, expect: OCPBUGS-49368, text: "two EgressIP resources with the same IP address got assigned to more than one node after the OVN-Kubernetes control plane restarted"}
+  - {id: P26, style: prose, version: "4.20.0", expect: OCPBUGS-62913, text: "egress IPv6 address disabled after failover because of duplicate address detection"}
+  - {id: P27, style: prose, version: "4.20.10", expect: OCPBUGS-79537, text: "EgressFirewall dnsName rule intermittently blocks traffic because the DNS resolution refresh is too slow"}
+  - {id: P28, style: prose, version: "4.20.10", expect: OCPBUGS-82115, text: "egress IP is assigned to br-ex instead of the additional interface"}
+  - {id: P29, style: prose, version: "4.22.5", expect: OCPBUGS-114732, text: "pod with several containers requesting SR-IOV virtual functions from the same pool gets the wrong VF per container, Multus sorts them"}
+  - {id: P30, style: prose, version: "4.22.5", expect: OCPBUGS-99286, text: "router takes very long to start with many routes using externally managed certificates, one SubjectAccessReview after another"}
+  - {id: P31, style: prose, version: "4.20.10", expect: OCPBUGS-86251, text: "Prometheus crashes after rotating the client TLS certificates of scrape targets that have no CA configured"}
+  - {id: P32, style: prose, version: "4.20.10", expect: OCPBUGS-84254, text: "monitoring pods keep using an expired certificate after service-ca rotation"}
+  - {id: P33, style: prose, version: "4.20.10", expect: OCPBUGS-85271, text: "single-node OpenShift does not come back after a power loss, kube-apiserver certificate files are missing"}
+  - {id: P34, style: prose, version: "4.20.20", expect: OCPBUGS-88353, text: "ingress and console operators degraded after turning on mutual TLS on the default IngressController, canary health check fails"}
+  - {id: P35, style: prose, expect: OCPBUGS-58358, text: "Gateway API Istio control plane with one replica and a PodDisruptionBudget blocks node drains"}
+  - {id: P36, style: prose, version: "4.20.30", expect: OCPBUGS-129370, text: "hosted cluster networking broken in an AWS ISO region, the default MTU of 9001 is not supported there"}
+  - {id: P37, style: prose, expect: OCPBUGS-37733, text: "large packets between nodes and pods make the host send ICMP fragmentation needed messages"}
+  - {id: P38, style: prose, expect: OCPBUGS-56148, text: "TokenReviews fail for Prometheus scrapes of /metrics, the bearer token is not parsed from the authorization header"}
+  - {id: P39, style: alert, expect: OCPBUGS-60692, text: "KubeNodeNotReady keeps firing for cordoned nodes that are in maintenance"}
+  - {id: P40, style: alert, expect: OCPBUGS-60691, text: "KubeAggregatedAPIErrors fires more often the more API server instances we run"}
+  - {id: P41, style: alert, expect: OCPBUGS-60689, text: "KubeStatefulSetReplicasMismatch did not fire although the StatefulSet controller could not create the pods"}
+  - {id: P42, style: prose, expect: OCPBUGS-57643, text: "Cluster Network Operator stops in the middle of the upgrade when the whereabouts-shim network attachment is enabled"}
+  - {id: P43, style: events, version: "4.20.0", expect: OCPBUGS-62722, text: "ClusterExtension upgrade fails: the CRD validation diff in the status is larger than 32 KB"}
+  - {id: P44, style: prose, expect: OCPBUGS-58349, text: "operator bundle unpack jobs stay Pending when the cluster has no worker nodes, they lack control plane tolerations"}
+  - {id: P45, style: prose, expect: OCPBUGS-43966, text: "catalog snapshots every 5 minutes fail and cascade across catalog sources on clusters with many namespaces and subscriptions"}
+  - {id: P46, style: alert, expect: OCPBUGS-49769, text: "HAProxyReloadFail is firing; one route's private key field actually contains certificate data"}
+  - {id: P47, style: prose, expect: OCPBUGS-67161, text: "router pods restarted by the liveness probe whenever HAProxy reaches maxconn under client traffic"}
+  - {id: P48, style: prose, version: "4.21.3", expect: OCPBUGS-77930, text: "high-priority pod stays Pending forever with the NUMA-aware topo-aware-scheduler, lower-priority pods are not preempted"}
+  - {id: P49, style: prose, version: "4.21.2", expect: OCPBUGS-70297, text: "disconnected cluster after oc adm release mirror: CRI-O cannot verify the sigstore signature of the release image"}
+  - {id: P50, style: events, version: "4.20.10", expect: OCPBUGS-77958, text: "Warning  Failed  operator install timed out on hosted cluster: dial tcp 172.30.0.1:8443: i/o timeout, NetworkPolicy egress allows only port 6443 to kube-apiserver"}
+  - {id: P51, style: prose, version: "4.20.5", expect: OCPBUGS-73876, text: "etcd leader changed frequently, apiserver timeouts after upgrade"}
+negatives:
+  - {id: N01, text: "Back-off restarting failed container web in pod web-7d4b9c8f6d-x2k9p"}
+  - {id: N02, text: "CrashLoopBackOff"}
+  - {id: N03, text: "Last State: Terminated Reason: OOMKilled Exit Code: 137"}
+  - {id: N04, text: "Failed to pull image: rpc error: code = NotFound desc = manifest unknown"}
+  - {id: N05, text: "ImagePullBackOff"}
+  - {id: N06, text: "Readiness probe failed: HTTP probe failed with statuscode: 503"}
+  - {id: N07, text: "0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available"}
+  - {id: N08, text: "pod has unbound immediate PersistentVolumeClaims"}
+  - {id: N09, text: "Error: secret \"db-creds\" not found"}
+  - {id: N10, text: "dial tcp 10.0.0.12:5432: connect: connection refused"}
+  - {id: N11, text: "context deadline exceeded"}
+  - {id: N12, text: "pods is forbidden: User \"system:serviceaccount:shop:default\" cannot list resource \"pods\" in API group \"\" in the namespace \"shop\""}
+  - {id: N13, text: "error: You must be logged in to the server (Unauthorized)"}
+  - {id: N14, text: "dial tcp: lookup api.example.com on 172.30.0.10:53: no such host"}
+  - {id: N15, text: "mkdir /data/cache: permission denied"}
+  - {id: N16, text: "exec /app/server: exec format error"}
+  - {id: N17, text: "imagepullbakoff crashloopbackof"}
+  - {id: N18, text: "Job has reached the specified backoff limit"}
+  - {id: N19, text: "The node was low on resource: memory. Container web was using 2Gi, which exceeds its request of 512Mi."}
+  - {id: N20, text: "Multi-Attach error for volume pvc-1 Volume is already used by pod(s) web-0"}
+  - {id: N21, text: "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress"}
+  - {id: N22, text: "no matches for kind \"Ingress\" in version \"extensions/v1beta1\""}
+  - {id: N23, text: "spec.selector: Invalid value: field is immutable"}
+  - {id: N24, text: "namespace shop stuck in Terminating"}
+  - {id: N25, text: "error validating data: ValidationError(Deployment.spec): unknown field \"replica\""}
+  - {id: N26, text: "Application is not available. The application is currently not serving requests at this endpoint."}
+  - {id: N27, text: "service web has no endpoints"}
+  - {id: N28, text: "exceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=8Gi, limited: limits.memory=8Gi"}
+  - {id: N29, text: "Liveness probe failed: Get \"http://10.128.2.14:8080/healthz\": dial tcp 10.128.2.14:8080: connect: connection refused"}
+  - {id: N30, version: "4.21.2", text: "etcd leader changed frequently, apiserver timeouts after upgrade"}
+  - {id: N30b, version: "4.20.13", text: "etcd leader changed frequently, apiserver timeouts after upgrade"}
+  - {id: N31, text: "my deployment is slow"}
+  - {id: N32, text: "hello, is this thing on?"}
+  # N33 added 2026-10-28 (INS1): kubelet's image-pull wording matched OCPBUGS-64840 before message templates were stripped
+  - {id: N33, text: "Warning FailedToRetrieveImagePullSecret pod/web-1 Unable to retrieve some image pull secrets (regcred); attempting to pull the image may not succeed. Warning Failed pod/web-1 Failed to pull image \"quay.io/acme/web:1.2\": unauthorized: access to the requested resource is not authorized"}

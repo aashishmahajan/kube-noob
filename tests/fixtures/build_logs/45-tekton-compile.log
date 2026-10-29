@@ -1,0 +1,14 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError("HTTPSConnectionPool(host='pypi.org', port=443): Read timed out. (read timeout=15)")'
+[build : build] + mvn -B -DskipTests package
+[build : build] [INFO] --- maven-compiler-plugin:3.13.0:compile (default-compile) @ orders ---
+[build : build] [INFO] Compiling 42 source files with javac [debug target 17] to target/classes
+[build : build] [ERROR] COMPILATION ERROR : 
+[build : build] [ERROR] /workspace/source/src/main/java/com/acme/orders/OrderService.java:[57,23] cannot find symbol
+[build : build]   symbol:   method findByCustomer(java.lang.String)
+[build : build]   location: variable repository of type com.acme.orders.OrderRepository
+[build : build] [INFO] 1 error
+[build : build] [INFO] BUILD FAILURE
+[build : build] [ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project orders: Compilation failure
+task build failed: "step-build" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-06-build for more details

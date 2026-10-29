@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover - Windows
 
 MIN_RARE_TERMS = 3  # rare words the error and the ticket must share
 RARE_SHARE = 0.03  # a word in at most 3% of tickets is rare
-GENERAL_SHARE = 0.02  # and in at most 2% of the bundled Kubernetes and OpenShift docs
+GENERAL_MAX_CHUNKS = 2  # and in at most 2 sections of the bundled docs (see known_issues.GENERAL_MAX_CHUNKS)
 PHRASE_MAX_HITS = 25  # a line found word for word in more tickets than this is too common to identify one,
 PHRASE_MAX_SHARE = 0.005  # and in more than 0.5% of a smaller copy
 PHRASE_MIN_WORDS = 5
@@ -77,9 +77,11 @@ _ERRORISH = re.compile(
     r"invalid|x509|oomkilled|backoff|back-off|not found|exceeded|unauthorized|rejected|conflict|deadline|crash)\b"
 )
 _CLAUSE = re.compile(r"[:;,\"'()\[\]{}|=/\\<>]")
-_COMMENT_HEAD = re.compile(r"^Comment \((\d{4}-\d{2}-\d{2})?\): ?", re.MULTILINE)
+_COMMENT_HEAD = re.compile(
+    r"^Comment \((\d{4}-\d{2}-\d{2})?\)(?: by (?:Commenter [A-Z]{1,3}|a commenter))?: ?", re.MULTILINE
+)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n{2,}")
-_URL = re.compile(r"^https://[A-Za-z0-9.-]+/browse/([A-Z][A-Z0-9_]{1,29}-\d{1,9})$")
+_URL = re.compile(r"^https://[A-Za-z0-9.-]+/browse/([A-Z][A-Z0-9_]{1,29}-\d{1,9})\Z")
 REMARKS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("workaround", re.compile(r"(?i)\bwork[- ]?around\b|\bto work around\b|\bmitigat(e|ion)\b")),
     (
@@ -623,10 +625,10 @@ def error_phrases(text: str, limit: int = 4) -> list[str]:
     return sorted(found, key=lambda p: -len(p.split()))[:limit]
 
 
-def _general_frequency(word: str) -> float:
+def _general_count(word: str) -> int:
     from kube_noob.known_issues import _general_store
 
-    return _general_store().doc_frequency(word)
+    return _general_store().doc_count(word)
 
 
 def _row(con: sqlite3.Connection, key: str) -> sqlite3.Row | None:
@@ -711,7 +713,7 @@ def _match(con: sqlite3.Connection, text: str, platform: str | None, version: st
     rare = {
         w
         for w, d in df.items()
-        if 0 < d <= ceiling and w not in GENERIC_WORDS and _general_frequency(w) <= GENERAL_SHARE
+        if 0 < d <= ceiling and w not in GENERIC_WORDS and _general_count(w) <= GENERAL_MAX_CHUNKS
     }
     project_filter = ""
     params: list[Any] = []

@@ -1,0 +1,7 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] warning: unused import: `std::fmt`
+[e2e : run-tests] + npx playwright test
+[e2e : run-tests] Running 48 tests using 2 workers
+[e2e : run-tests]   ✓  checkout › pays with a saved card (3.1s)
+task e2e failed: TaskRun "app-ci-run-x7k2p-03-e2e" failed to finish within "15m0s". Run tkn tr desc app-ci-run-x7k2p-03-e2e for more details

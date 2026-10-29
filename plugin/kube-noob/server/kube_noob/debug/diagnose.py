@@ -12,30 +12,71 @@ from pathlib import Path
 from typing import Any
 
 from kube_noob.debug.cluster import Backend, redact_text
-from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Playbook
+from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Cause, Playbook
 from kube_noob.debug.steps import classify_step, split_comment
 from kube_noob.errors import ClusterAccessError
+from kube_noob.signals import Signal, for_text, playbooks_for
 
 MAX_INPUT = 400_000
+SIGNAL_WEIGHT = 1.0  # a playbook that catalogued signals point at gains this much, once: CrashLoopBackOff and
+# BackOff name one symptom, so two symptom signals must not outrank the specific cause (OOMKilled) they share
+MAX_SIGNALS_SHOWN = 50
 
 _COMPILED: dict[str, list[re.Pattern[str]]] = {
     p.pid: [re.compile(s, re.IGNORECASE) for s in p.signals] for p in PLAYBOOKS
 }
 
+# Names come from command- or output-shaped text: a -n flag, a Namespace: field, JSON, 'namespace "shop"' as API
+# errors quote it, namespace/shop; an unquoted word after "namespace" in a sentence ("a namespace issue") is English,
+# so it needs a hyphen or digit (or is "default") unless it follows "in namespace" ("pods in namespace shop").
 _NS_PATTERNS = (
-    re.compile(r"(?:-n|--namespace)[ =]([a-z0-9][-a-z0-9]{0,62})"),
+    re.compile(r"(?:^|[\s'\"`(])(?:-n|--namespace)[ =]([a-z0-9][-a-z0-9]{0,62})\b"),
     re.compile(r"\bNamespace:\s+([a-z0-9][-a-z0-9]{0,62})"),
     re.compile(r"\"namespace\":\s*\"([a-z0-9][-a-z0-9]{0,62})\""),
-    re.compile(r"namespace \"?([a-z0-9][-a-z0-9]{0,62})\"?"),
+    re.compile(r"\bnamespaces? \"([a-z0-9][-a-z0-9]{0,62})\""),
+    re.compile(r"\bnamespaces?/([a-z0-9][-a-z0-9]{0,62})\b"),
+    re.compile(r"\b(?:in|from|into|to) (?:the )?namespace ((?=[0-9-]*[a-z])[a-z0-9][-a-z0-9]{0,62})\b"),
+    re.compile(r"\bnamespace ((?=[a-z0-9-]*[-0-9])(?=[0-9-]*[a-z])[a-z0-9][-a-z0-9]{0,62}|default)\b"),
 )
+# "pod/api-1", 'pod "api-1"', or "pod api-7d9f" in a sentence; a bare word after "pod " ("my pod keeps restarting")
+# is English, so the unquoted form needs the hyphen or digit generated pod names carry.
 _POD_PATTERNS = (
-    re.compile(r"\bpod[/ ]\"?([a-z0-9][-a-z0-9.]{0,252})\"?"),
+    re.compile(r"\bpod/\"?([a-z0-9][-a-z0-9.]{0,252})\"?"),
+    re.compile(r"\bpod \"([a-z0-9][-a-z0-9.]{0,252})\""),
+    re.compile(r"\bpod ([a-z0-9][a-z0-9.]{0,120}[-0-9][-a-z0-9.]{0,130})\b"),
     re.compile(r"^Name:\s+([a-z0-9][-a-z0-9.]{0,252})$", re.MULTILINE),
 )
-_PVC_PATTERN = re.compile(r"(?:persistentvolumeclaim|pvc)[/ ]\"?([a-z0-9][-a-z0-9.]{0,252})\"?", re.IGNORECASE)
-_SA_PATTERN = re.compile(r"system:serviceaccount:[a-z0-9-]+:([a-z0-9][-a-z0-9]{0,62})")
+# The Service a paste is about: "svc/web", "kubectl get svc web" (a command, not "when I get endpoints for the
+# router"), 'no endpoints available for service "web"', or the
+# Name of `kubectl describe svc` output (it has Endpoints: or TargetPort: lines).
+_SVC_PATTERNS = (
+    re.compile(r"\b(?:svc|services?|endpoints|ep|endpointslices?)/\"?([a-z0-9][-a-z0-9]{0,62})\b"),
+    re.compile(r"\b(?:kubectl|oc) get (?:svc|services?|endpoints|ep)[ \t]+([a-z0-9][-a-z0-9]{0,62})\b(?![./])"),
+    re.compile(r"\b(?:no endpoints available for service|services?) \"([a-z0-9][-a-z0-9]{0,62})\""),
+)
+_DESCRIBE_SVC = re.compile(r"^(?:Endpoints|TargetPort):", re.MULTILINE)
+_DESCRIBE_NAME = re.compile(r"^Name:\s+([a-z0-9][-a-z0-9]{0,62})\s*$", re.MULTILINE)
+# A Service's selector: `kubectl describe svc` prints "Selector: app=web,tier=fe"; jsonpath {.spec.selector} prints
+# a JSON object on the next line.
+_SELECTOR_LINE = re.compile(
+    r"^Selector:[ \t]+([\w./-]{1,253}=[\w.-]{0,63}(?:,[\w./-]{1,253}=[\w.-]{0,63}){0,9})[ \t]*$", re.M
+)
+_SELECTOR_JSON = re.compile(r"\.spec\.selector\b[^\n]{0,200}\n[ \t]*(\{[^\n{}]{1,600}\})")
+_LABEL_KEY = re.compile(r"^[A-Za-z0-9][\w./-]{0,252}\Z")
+_LABEL_VALUE = re.compile(r"^[A-Za-z0-9._-]{0,63}\Z")
+# The same for claims: pvc/data-0, 'pvc "data"', claimName: data, or "pvc data-db-0" (the bare form needs a hyphen
+# or digit: "the pvc is pending" names no claim).
+_PVC_PATTERNS = (
+    re.compile(r"\b(?i:persistentvolumeclaims?|pvc)/\"?([a-z0-9][-a-z0-9.]{0,252})"),
+    re.compile(r"\b(?i:persistentvolumeclaims?|pvc) \"([a-z0-9][-a-z0-9.]{0,252})\""),
+    re.compile(r"\bclaimName:[ \t]*\"?([a-z0-9][-a-z0-9.]{0,252})"),
+    re.compile(r"\b(?i:persistentvolumeclaims?|pvc) ((?=[a-z0-9.]*[-0-9])[a-z0-9][-a-z0-9.]{0,252})\b"),
+)
+_SA_PATTERN = re.compile(r"system:serviceaccount:(?P<ns>[a-z0-9][-a-z0-9]{0,62}):([a-z0-9][-a-z0-9]{0,62})")
+_SA_SPEC = re.compile(r"\bserviceAccountName[=:]\s*\"?([a-z0-9][-a-z0-9.]{0,252})")
 _FORBIDDEN = re.compile(
-    r"User \"(?P<subject>[^\"]{1,253})\" cannot (?P<verb>[a-z]+) resource \"(?P<resource>[a-z0-9./-]{1,253})\""
+    r"User \"(?P<subject>[A-Za-z0-9@._:/=+#%-]{1,253})\" cannot (?P<verb>[a-z]+) resource "
+    r"\"(?P<resource>[a-z0-9./-]{1,253})\""
     r"(?: in API group \"(?P<group>[a-z0-9.-]*)\")?"
 )
 _EXIT_PATTERN = re.compile(r"(?:exit ?code|exitCode)[\"':\s]+(\d{1,3})", re.IGNORECASE)
@@ -47,23 +88,31 @@ class Diagnosis:
     score: float
     evidence: list[str]
     checks: list[str]
+    fixes: list[str] | None = None  # the playbook's fixes with the names from the input filled in
+    causes: list[str] | None = None  # the same for its root causes
+    likely: tuple[str, list[str]] | None = None  # the cause the input points at and its fixes (cause-linked triage)
+    knowledge: list[str] | None = None  # the playbook's reading that fits the platform
 
     def as_dict(self) -> dict[str, Any]:
         p = self.playbook
+        likely = {"likelyCause": self.likely[0], "likelyFixes": self.likely[1]} if self.likely is not None else {}
         return {
             "id": p.pid,
             "title": p.title,
             "confidence": round(min(1.0, self.score / 3.0), 2),
             "evidence": self.evidence,
-            "rootCauses": list(p.root_causes),
+            **likely,
+            "rootCauses": list(p.root_causes if self.causes is None else self.causes),
             # Diagnose before change: read-only evidence first; anything that executes or mutates needs approval.
             "readOnlyNextSteps": [_step(c) for c in self.checks if classify_step(c) == "read"],
             "diagnosticCommands": [
                 {**_step(c), "requiresApproval": True} for c in self.checks if classify_step(c) == "exec"
             ],
-            "proposedChanges": [{"change": f, "requiresApproval": True} for f in p.fixes],
+            "proposedChanges": [
+                {"change": f, "requiresApproval": True} for f in (p.fixes if self.fixes is None else self.fixes)
+            ],
             "relatedRules": list(p.related_rules),
-            "knowledge": list(p.knowledge),
+            "knowledge": list(p.knowledge if self.knowledge is None else self.knowledge),
         }
 
 
@@ -87,6 +136,7 @@ class DiagnoseResult:
     context: dict[str, str]
     exit_codes: dict[int, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    signals: list[Signal] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +145,7 @@ class DiagnoseResult:
                 "change the cluster are listed separately and require explicit approval."
             ),
             "context": self.context,
+            "signals": [x.as_dict() for x in self.signals[:MAX_SIGNALS_SHOWN]],
             "exitCodes": {str(k): v for k, v in self.exit_codes.items()},
             "diagnoses": [d.as_dict() for d in self.diagnoses],
             "notes": self.notes,
@@ -109,20 +160,60 @@ def _first(patterns: tuple[re.Pattern[str], ...], text: str) -> str | None:
     return None
 
 
+# English words that follow "namespace" in a sentence ("a different namespace from the pod") and are not its name.
+_NOT_A_NAMESPACE = frozenset(
+    {
+        "a", "an", "and", "another", "are", "as", "at", "but", "by", "different", "does", "for", "from", "has", "in",
+        "into", "is", "it", "its", "level", "of", "on", "or", "other", "same", "scoped", "than", "that", "the", "then",
+        "this", "to", "was", "which", "while", "with", "without",
+        "after", "all", "also", "although", "any", "be", "been", "before", "because", "can", "cannot", "could", "did",
+        "do", "each", "even", "every", "here", "if", "isn", "just", "must", "not", "only", "should", "since", "so",
+        "still", "there", "though", "unless", "until", "were", "when", "where", "will", "would", "yet",
+    }
+)  # fmt: skip
+# kube-scheduler's Scheduled event: "Successfully assigned <namespace>/<pod> to <node>" (pkg/scheduler/schedule_one.go)
+_ASSIGNED = re.compile(r"Successfully assigned ([a-z0-9][-a-z0-9]{0,62})/([a-z0-9][-a-z0-9.]{0,252}) to ")
+_PULL_SECRETS = re.compile(r"Unable to retrieve some image pull secrets \(([a-z0-9][-a-z0-9.]{0,252})")
+
+
+def _namespace(text: str) -> str | None:
+    for p in _NS_PATTERNS:
+        for m in p.finditer(text):
+            if m.group(1) not in _NOT_A_NAMESPACE:
+                return m.group(1)
+    return None
+
+
 def extract_context(text: str) -> dict[str, str]:
     ctx: dict[str, str] = {}
-    ns = _first(_NS_PATTERNS, text)
+    ns = _namespace(text)
+    assigned = _ASSIGNED.search(text)
     if ns:
         ctx["ns"] = ns
-    pod = _first(_POD_PATTERNS, text)
+    elif assigned:
+        ctx["ns"] = assigned.group(1)
+    m = _PULL_SECRETS.search(text)
+    if m:
+        ctx["secret"] = m.group(1)
+    pod = _first(_POD_PATTERNS, text) or (assigned.group(2) if assigned else None)
     if pod:
         ctx["pod"] = pod
         ctx.setdefault("name", pod)
-    m = _PVC_PATTERN.search(text)
-    if m:
-        ctx["pvc"] = m.group(1)
+    pvc = _first(_PVC_PATTERNS, text)
+    if pvc:
+        ctx["pvc"] = pvc
+    svc = _first(_SVC_PATTERNS, text)
+    if svc is None and _DESCRIBE_SVC.search(text) and (m := _DESCRIBE_NAME.search(text)):
+        svc = m.group(1)
+    if svc:
+        ctx["svc"] = svc
+    selector = _selector(text)
+    if selector:
+        ctx["selector"] = selector
     m = _SA_PATTERN.search(text)
     if m:
+        ctx["sa"], ctx["sa_ns"] = m.group(2), m.group("ns")
+    elif m := _SA_SPEC.search(text):
         ctx["sa"] = m.group(1)
     m = _FORBIDDEN.search(text)
     if m:
@@ -132,14 +223,47 @@ def extract_context(text: str) -> dict[str, str]:
     return ctx
 
 
+def _selector(text: str) -> str | None:
+    """The Service selector as ``k=v,k=v`` when every key and value is a valid label (anything else stays a
+    placeholder)."""
+    m = _SELECTOR_LINE.search(text)
+    if m:
+        return m.group(1)
+    m = _SELECTOR_JSON.search(text)
+    if not m:
+        return None
+    try:
+        doc = json.loads(m.group(1))
+    except ValueError:
+        return None
+    if not isinstance(doc, dict) or not doc or len(doc) > 10:
+        return None
+    pairs = []
+    for k, v in doc.items():
+        if not (isinstance(v, str) and _LABEL_KEY.match(k) and _LABEL_VALUE.match(v)):
+            return None
+        pairs.append(f"{k}={v}")
+    return ",".join(pairs)
+
+
+_SAFE_VALUE = re.compile(r"^(?!#)[A-Za-z0-9@._:/=+#%,-]{1,600}\Z")  # nothing a shell treats specially, no spaces
+
+
 def _fill(cmd: str, ctx: dict[str, str]) -> str:
+    """``cmd`` with the names found in the input. A value that could do anything in a shell (quotes, $, `, ;, |, &,
+    spaces, newlines...) is never pasted into a command: its placeholder stays, so a copied step only ever reads."""
+    ctx = {k: v for k, v in ctx.items() if isinstance(v, str) and _SAFE_VALUE.match(v)}
     out = cmd
-    sa_subject = f"system:serviceaccount:{ctx.get('ns', '<namespace>')}:{ctx.get('sa', 'default')}"
+    sa_ns = ctx.get("sa_ns") or ctx.get("ns", "<namespace>")
+    sa_subject = f"system:serviceaccount:{sa_ns}:{ctx.get('sa', 'default')}"
     defaults = {
         "ns": "<namespace>",
         "pod": "<pod>",
         "name": "<name>",
         "pvc": "<pvc>",
+        "svc": "<service>",
+        "selector": "<selector>",
+        "secret": "<secret>",
         "sa": "default",
         "subject": sa_subject if "sa" in ctx else "<user-or-serviceaccount>",
         "verb": "<verb>",
@@ -153,10 +277,21 @@ def _fill(cmd: str, ctx: dict[str, str]) -> str:
 _OPENSHIFT_ONLY = re.compile(
     r"#\s*\[(OCP|ROSA)\]|\boc (get|describe) (route|scc|securitycontextconstraints)\b|\boc adm (?!top)"
 )
+_KUBERNETES_ONLY = re.compile(r"#\s*\[K8S\]")  # e.g. kubeadm's static pods in kube-system
 
 
-def _for_platform(cmd: str, platform: str | None) -> str | None:
-    """Commands as the user's platform spells them: plain Kubernetes gets kubectl and no OpenShift-only steps."""
+_ROSA_STEP = re.compile(r"^rosa\s|#\s*\[ROSA\]")
+
+
+def _for_platform(cmd: str, platform: str | None, rosa: bool = False) -> str | None:
+    """Commands as the user's platform spells them: plain Kubernetes gets kubectl and no OpenShift-only steps;
+    OpenShift and ROSA get no steps marked [K8S]. ``platform`` None means no platform was given and the text says
+    OpenShift or ROSA, so it is treated as OpenShift. A `rosa` step needs a ROSA platform, or no platform and text
+    that says ROSA (``rosa``)."""
+    if _ROSA_STEP.search(cmd) and not (platform in ("rosa-classic", "rosa-hcp") or (platform is None and rosa)):
+        return None
+    if platform != "kubernetes" and _KUBERNETES_ONLY.search(cmd):
+        return None
     if platform != "kubernetes" or not cmd.startswith(("oc ", "openssl", "kubectl")):
         return cmd
     if _OPENSHIFT_ONLY.search(cmd):
@@ -168,41 +303,191 @@ def _for_platform(cmd: str, platform: str | None) -> str | None:
     return re.sub(r"^oc ", "kubectl ", cmd)
 
 
-def diagnose(text: str, platform: str | None = None, limit: int = 5) -> DiagnoseResult:
+def _fix_applies(fix: str, platform: str | None) -> bool:
+    """Fixes marked [OCP] or [ROSA] are for OpenShift; [K8S] for plain Kubernetes. With no platform, all apply."""
+    if platform == "kubernetes":
+        return not fix.startswith(("[OCP]", "[ROSA]"))
+    if platform:
+        return not fix.startswith("[K8S]")
+    return True
+
+
+_ROSA_CONTEXT = re.compile(r"(?i)\b(?:rosa|hypershift|hosted control planes?|hcp)\b")
+_TAG = re.compile(r"^(?:\[(OCP|ROSA|K8S)\]|On (OpenShift|ROSA)\b)")
+_WHEN: dict[tuple[str, int], tuple[re.Pattern[str], ...]] = {
+    (p.pid, c.cause): tuple(re.compile(w, re.IGNORECASE) for w in c.when) for p in PLAYBOOKS for c in p.causes
+}
+
+
+def _tag(text: str) -> str | None:
+    m = _TAG.match(text)
+    if not m:
+        return None
+    return (m.group(1) or ("OCP" if m.group(2) == "OpenShift" else "ROSA")).upper()
+
+
+def _fits(text: str, platform: str | None, openshift: bool, rosa: bool) -> bool:
+    """Whether a cause or fix marked [OCP], [ROSA], [K8S] (or "On OpenShift") fits: the platform decides when it is
+    given; without one, an OpenShift or ROSA cause needs the text to say so (G83), and a [K8S] one needs it not to."""
+    tag = _tag(text)
+    if tag is None:
+        return True
+    if platform == "kubernetes":
+        return tag == "K8S"
+    if platform:
+        return tag != "K8S"
+    if tag == "K8S":
+        return not (openshift or rosa)
+    return rosa if tag == "ROSA" else openshift or rosa
+
+
+def likely_cause(p: Playbook, text: str, platform: str | None, openshift: bool, rosa: bool) -> Cause | None:
+    """The cause ``text`` points at: three points for each of the cause's own patterns it matches, plus the
+    rarity-weighted words it shares with the cause and its fixes; the playbook's order breaks ties. When no cause's
+    own patterns match, a playbook with a ``default_cause`` shows that one (its most common cause; graders found shared
+    words a worse guess there), and otherwise the shared-word guess skips AWS causes for text about another cloud or
+    hardware (``_OTHER_INFRA``). A cause that does not fit the platform (``_fits``) is never chosen."""
+    if not p.causes:
+        return None
+    from kube_noob.insight import _playbook_word_counts, _specific_terms
+
+    df = _playbook_word_counts()
+    want = _specific_terms(text[:20_000], kubernetes_words=True)
+    best: Cause | None = None
+    best_score = -1.0
+    guess: Cause | None = None  # the best cause by shared words alone that suits the text's infrastructure
+    guess_score = -1.0
+    default: Cause | None = None
+    evidence = False
+    elsewhere = bool(_OTHER_INFRA.search(text)) and not _AWS_TEXT.search(text)
+    for c in sorted(p.causes, key=lambda c: c.cause):
+        cause = p.root_causes[c.cause]
+        if not _fits(cause, platform, openshift, rosa):
+            continue
+        if c.cause == p.default_cause:
+            default = c
+        hits = sum(1 for w in _WHEN[(p.pid, c.cause)] if w.search(text))
+        evidence = evidence or hits > 0
+        words = _specific_terms(" ".join([cause, *(p.fixes[i] for i in c.fixes)]), kubernetes_words=True)
+        score = 3.0 * hits + sum(1.0 / df.get(t, 1) for t in want & words)
+        if score > best_score:
+            best, best_score = c, score
+        if score > guess_score and not (elsewhere and _AWS_CAUSE.search(cause)):
+            guess, guess_score = c, score
+    if evidence:
+        return best
+    return default or guess or best
+
+
+# Without evidence, a cause about AWS pieces (EFS, EBS, security groups) is no guess for text about another cloud or
+# about hardware you run yourself (community graders: EFS advice on GKE and on-prem NFS posts, cloud security groups
+# on a bare-metal cluster).
+_AWS_CAUSE = re.compile(r"\b(?:EFS|EBS|AWS|security groups?|gp[23](?:-csi)?|VPC)\b|\bcloud\b", re.IGNORECASE)
+_AWS_TEXT = re.compile(r"\b(?:aws|amazon|eks|ec2|efs|ebs|rosa|gp[23])\b", re.IGNORECASE)
+_OTHER_INFRA = re.compile(
+    r"\b(?:azure|aks|gke|gce|google cloud|gcp|vsphere|bare[- ]?metal|on[- ]?prem\w*|openstack|homelab|minikube|"
+    r"kind cluster|k3s|microk8s|nutanix|proxmox)\b",
+    re.IGNORECASE,
+)
+
+
+# Reading about ROSA or OpenShift is none for plain Kubernetes or for text about another cloud (red team: a GKE
+# post cited the ROSA EFS doc).
+_PLATFORM_READING = ("rosa-", "ocp-")
+
+
+# Patterns too common to name an OpenShift playbook when the text does not say it is OpenShift: a bare "Permission
+# denied" is a Docker entrypoint without +x as often as an arbitrary UID. The playbook's specific patterns (nginx's
+# "mkdir() ... failed (13: Permission denied)") still name it.
+_WEAK_WITHOUT_CONTEXT: dict[str, frozenset[str]] = {
+    "DBG-ARBITRARY-UID": frozenset({"EACCES", "Permission denied"}),
+    "DBG-CLUSTEROPERATOR": frozenset({r"Degraded\s+True", r"Available\s+False"}),
+}
+
+
+def diagnose(
+    text: str, platform: str | None = None, limit: int = 5, signals: list[Signal] | None = None
+) -> DiagnoseResult:
+    """Rank playbooks for ``text``: one point per matching pattern plus ``SIGNAL_WEIGHT`` when catalogued signals point
+    at the playbook (``kube_noob.signals``: an alert name, a container or event reason, a phrase such as "leader
+    changed"), times the playbook's weight. ``signals`` overrides the signals read from ``text``, e.g. the ones read
+    from an Alertmanager payload."""
     if len(text) > MAX_INPUT:
         text = text[-MAX_INPUT:]
     text = redact_text(text)
     ctx = extract_context(text)
+    if signals is None:
+        signals = for_text(text)
+    linked = playbooks_for(signals)
     lines = text.splitlines()
     results: list[Diagnosis] = []
+    openshift = rosa = False
+    if not platform:
+        from kube_noob.known_issues import openshift_cluster_context
+
+        openshift = openshift_cluster_context(text)
+        rosa = bool(_ROSA_CONTEXT.search(text))
+    # Steps as the user's platform spells them; with none given, text that never says OpenShift or ROSA gets kubectl
+    # and no OpenShift-only steps (G83).
+    steps_platform = platform or (None if openshift or rosa else "kubernetes")
+    other_cloud = bool(_OTHER_INFRA.search(text)) and not _AWS_TEXT.search(text)
     for p in PLAYBOOKS:
         if platform and platform not in p.platforms:
             continue
-        evidence: list[str] = []
+        # No platform given: an OpenShift playbook needs the text to say it is OpenShift (a bare "Permission denied"
+        # is not the arbitrary-UID problem on Docker), and a ROSA playbook needs ROSA or hosted control planes.
+        weak: frozenset[str] = frozenset()
+        if not platform and "kubernetes" not in p.platforms:
+            if set(p.platforms) <= {"rosa-hcp", "rosa-classic"} and not rosa:
+                continue  # a ROSA playbook needs ROSA or hosted control planes in the text
+            if not openshift:
+                if p.pid not in _WEAK_WITHOUT_CONTEXT:
+                    continue  # an OpenShift playbook needs the text to say it is OpenShift
+                weak = _WEAK_WITHOUT_CONTEXT[p.pid]  # without it, only the playbook's specific patterns count
+        evidence: list[str] = [f"signal {x.kind} {x.name}" for x in linked.get(p.pid, [])]
         hits = 0
         for pat in _COMPILED[p.pid]:
-            matched_line = next((ln.strip() for ln in lines if pat.search(ln)), None)
-            if matched_line is None and pat.search(text):
-                matched_line = pat.pattern
+            if pat.pattern in weak or not pat.search(text):  # one scan; the line is looked up only for matches
+                continue
+            matched_line = next((ln.strip() for ln in lines if pat.search(ln)), pat.pattern)
             if matched_line is not None:
                 hits += 1
                 clipped = matched_line[:300]
                 if clipped not in evidence:
                     evidence.append(clipped)
-        if hits:
-            score = hits * p.weight
-            checks = [_for_platform(_fill(c, ctx), platform) for c in p.checks]
-            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c]))
+        boost = SIGNAL_WEIGHT if p.pid in linked else 0.0
+        if hits or boost:
+            score = (hits + boost) * p.weight
+            cause = likely_cause(p, text, platform, openshift, rosa)
+            order = list(range(len(p.checks)))
+            if cause is not None:  # the steps that confirm the likely cause first
+                order = [*cause.checks, *(i for i in order if i not in cause.checks)]
+            checks = [_for_platform(_fill(p.checks[i], ctx), steps_platform, rosa) for i in order]
+            fixes = [_fill(f, ctx) for f in p.fixes if _fix_applies(f, platform)]
+            reading = [
+                k
+                for k in p.knowledge
+                if not (k.startswith(_PLATFORM_READING) and (steps_platform == "kubernetes" or other_cloud))
+            ]
+            causes = [_fill(c, ctx) for c in p.root_causes if _fix_applies(c, platform)]
+            likely = None
+            if cause is not None:
+                likely = (
+                    _fill(p.root_causes[cause.cause], ctx),
+                    [_fill(p.fixes[i], ctx) for i in cause.fixes if _fits(p.fixes[i], platform, openshift, rosa)],
+                )
+            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c], fixes, causes, likely, reading))
     results.sort(key=lambda d: (-d.score, d.playbook.pid))
     codes = {int(c) for c in _EXIT_PATTERN.findall(text)}
     exit_info = {c: EXIT_CODES[c] for c in sorted(codes) if c in EXIT_CODES}
     notes: list[str] = []
     if not results:
+        cli = "kubectl" if steps_platform == "kubernetes" else "oc"
         notes.append(
-            "No playbook matched. Paste `oc describe pod`, `oc get events --sort-by=.lastTimestamp` and "
-            "`oc logs --previous` output for a better diagnosis."
+            f"No playbook matched. Paste `{cli} describe pod`, `{cli} get events --sort-by=.lastTimestamp` and "
+            f"`{cli} logs --previous` output for a better diagnosis."
         )
-    return DiagnoseResult(results[:limit], ctx, exit_info, notes)
+    return DiagnoseResult(results[:limit], ctx, exit_info, notes, signals)
 
 
 # --- live collection ---------------------------------------------------------------------------------------
@@ -229,7 +514,11 @@ def _pod_summary(pod: dict[str, Any]) -> list[str]:
     out: list[str] = []
     name = pod.get("metadata", {}).get("name")
     status = pod.get("status", {})
-    out.append(f"pod/{name} phase={status.get('phase')} node={pod.get('spec', {}).get('nodeName')}")
+    spec = pod.get("spec") or {}
+    out.append(f"pod/{name} phase={status.get('phase')} node={spec.get('nodeName')}")
+    pull = [str(s.get("name")) for s in spec.get("imagePullSecrets") or [] if isinstance(s, dict) and s.get("name")]
+    if pull or spec.get("serviceAccountName"):  # names only: kube-noob never reads a Secret
+        out.append(f"  spec serviceAccountName={spec.get('serviceAccountName') or 'default'} imagePullSecrets={pull}")
     for cond in status.get("conditions") or []:
         if cond.get("status") != "True":
             out.append(
@@ -250,6 +539,29 @@ def _pod_summary(pod: dict[str, Any]) -> list[str]:
                 f"  container {cs.get('name')} lastState terminated: {t.get('reason')} exitCode: {t.get('exitCode')}"
             )
         out.append(f"  container {cs.get('name')} ready={cs.get('ready')} restartCount: {cs.get('restartCount')}")
+    return out
+
+
+_PULL_REASONS = frozenset({"ErrImagePull", "ImagePullBackOff"})
+
+
+def _service_account_pull_secrets(backend: Backend, namespace: str, pods: list[dict[str, Any]]) -> list[str]:
+    """For pods stuck pulling: the pull secret names their ServiceAccounts link (names only, never a Secret)."""
+    accounts: list[str] = []
+    for pod in pods:
+        statuses = (pod.get("status") or {}).get("containerStatuses") or []
+        if any(((cs.get("state") or {}).get("waiting") or {}).get("reason") in _PULL_REASONS for cs in statuses):
+            sa = (pod.get("spec") or {}).get("serviceAccountName") or "default"
+            if sa not in accounts:
+                accounts.append(sa)
+    out: list[str] = []
+    for sa in accounts[:3]:
+        try:
+            obj = backend.get("serviceaccounts", name=sa, namespace=namespace)
+        except ClusterAccessError:
+            continue  # the ServiceAccount is a bonus; the events already name the missing secret
+        names = [str(s.get("name")) for s in obj.get("imagePullSecrets") or [] if isinstance(s, dict)]
+        out.append(f"serviceaccount/{sa} imagePullSecrets={names}")
     return out
 
 
@@ -292,6 +604,7 @@ def collect_evidence(backend: Backend, namespace: str, kind: str, name: str, log
         pods = backend.get("pods", namespace=namespace, selector=sel_str or None).get("items", []) if sel_str else []
     for pod in pods[:10]:
         lines.extend(_pod_summary(pod))
+    lines.extend(_service_account_pull_secrets(backend, namespace, pods[:10]))
     events = backend.get("events", namespace=namespace).get("items", [])
     names = {name} | {p.get("metadata", {}).get("name") for p in pods}
     rel = [
@@ -366,6 +679,21 @@ def bundle_markdown(result: dict[str, Any]) -> str:
         "## Evidence",
         *(f"- {e}" for e in result.get("evidence", [])),
     ]
+    if result.get("signals"):
+        lines += ["", "## Signals", ""]
+        lines += [
+            f"- {x['kind']} {x['name']}" + (f" ({x['detail']})" if x.get("detail") else "") for x in result["signals"]
+        ]
+    for m in result.get("memory", []):
+        state_label = {
+            "fix": "fix",
+            "runbook": "runbook",
+            "retired": "retired",
+            "tried, did not work": "tried, did not work",
+        }
+        lines += ["", f"## Team memory {m['citation']}: {state_label[m['state']]}", "", m["symptom"], ""]
+        lines += [f"- Cause: {m['cause']}", f"- Fix: {m['fix']['text']}", f"- {m['outcomes']['summary']}"]
+        lines += [f"- Note: {m['note']}"] if m.get("note") else []
     for m in result.get("knownIssues", []):
         lines += ["", f"## Reported issue {m['id']}", "", m["status"], "", m["summary"], "", f"- Issue: {m['url']}"]
         lines += [f"- Workaround: {m['workaround']}"] if m.get("workaround") else []

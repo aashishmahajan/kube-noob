@@ -1,0 +1,314 @@
+# Golden questions: rhacs. Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository); graded against kube-noob by an
+# independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
+- id: rhacs-001
+  technology: rhacs
+  kind: error
+  question: 'Our deploy job failed with: Error from server (Failed currently enforced policies from RHACS): error when creating
+    "web.yaml": admission webhook "policyeval.stackrox.io" denied the request. It is a production hotfix that has to ship
+    now. What are my options?'
+  answer: 'The admission controller rejected it: the workload violates a deploy-time policy with enforcement on. Best fix:
+    make it compliant. In an emergency add the admission.stackrox.io/break-glass annotation (value = ticket ref) if bypass
+    is enabled; it raises an Emergency Deployment Annotation violation.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/bypass-admission-controller-enforcement.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/bypass-admission-controller-enforcement.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-STACKROX-ADMISSION
+- id: rhacs-002
+  technology: rhacs
+  kind: howto
+  question: How do I run an RHACS policy check on our Kubernetes manifests in a CI job and get the results as JUnit XML for
+    the pipeline's test report?
+  answer: 'Export ROX_ENDPOINT as Central''s host:port and authenticate with an API token, then run roxctl deployment check
+    --file=<manifest.yaml> -o junit. Use --junit-suite-name to name the suite. Without -o the output is a table; json and
+    csv are also available.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/configuring-output-format.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/configuring-output-format.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-roxctl-ci#1'
+- id: rhacs-003
+  technology: rhacs
+  kind: error
+  question: 'Images from our private registry show no CVE data in RHACS, and the image page says "Failed to retrieve metadata
+    from the registry". Central sits in a locked-down network segment. What does this mean and what should I check?'
+  answer: 'Scanner could not reach the registry to read image metadata: usually a firewall or network block, or an authentication
+    problem. Check network access from Central/Scanner to the registry and add a registry integration with valid credentials
+    for that private repo; Central''s pod logs show the cause.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/common-scanner-warning-messages.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/common-scanner-warning-messages.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-RHACS-SCANNER-REGISTRY
+- id: rhacs-004
+  technology: rhacs
+  kind: concept
+  question: 'What is the practical difference between RHACS "hard" and "soft" policy enforcement, and which component performs
+    each?'
+  answer: 'Hard enforcement is done by the admission controller through a validating webhook: the API server rejects creating
+    or updating a workload that violates an enforced policy. Soft enforcement is done by Sensor, which scales the violating
+    workload''s pods down through the Kubernetes API.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/policy-enforcement-about.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-enforcement-about.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-enforcement#1'
+- id: rhacs-005
+  technology: rhacs
+  kind: error
+  question: 'After we switched RHACS admission control to fail closed, applying manifests sometimes dies with: Internal error
+    occurred: failed calling webhook "policyeval.stackrox.io": failed to call webhook: Post "https://admission-control.stackrox.svc:443/validate?timeout=10s":
+    context deadline exceeded. We would rather let requests through when RHACS is slow or down. What do I change?'
+  answer: 'Set the admission controller failure policy back to fail open. Operator: set spec.admissionControl.failurePolicy
+    to Ignore in the SecuredCluster CR (Fail blocks). Helm: set admissionControl.failurePolicy to Ignore in values-public.yaml
+    and run helm upgrade with your values files.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/admission-controller-failure-policy-changing.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/admission-controller-failure-policy-changing.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-RHACS-WEBHOOK-FAILURE-POLICY
+- id: rhacs-006
+  technology: rhacs
+  kind: howto
+  question: How do I stop one RHACS deploy-time policy from firing in every namespace whose name starts with test-?
+  answer: 'Edit the policy''s resource scope and add an exclusion under Excluded resources: a namespace entry written as an
+    RE2 regex such as test-.*. Cluster and namespace scoping only affect deploy-time and runtime evaluation, not build-stage
+    image checks.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/configure-policy-scope.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/configure-policy-scope.adoc'
+  outOfScope: false
+  status: miss
+  expect:
+  - 'kn:rhacs-policy-rules-scope#3'
+  gap: 'rank: kn:rhacs-policy-rules-scope#3 exclusion doc should outrank the roxctl deployment check doc'
+- id: rhacs-007
+  technology: rhacs
+  kind: error
+  question: 'A legacy image in RHACS shows "CVE DATA MAY BE INACCURATE" together with "Stale OS CVE data". The base image
+    is Debian 9. Is Scanner misbehaving?'
+  answer: No. The warning means the image's base OS is end of life, so the vendor no longer updates its vulnerability data
+    and the OS-package CVE results may be incomplete. Rebuild on a supported base image.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/common-scanner-warning-messages.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/common-scanner-warning-messages.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-RHACS-SCANNER-CVE-DATA
+- id: rhacs-008
+  technology: rhacs
+  kind: out-of-scope
+  question: Which flags make `trivy image` return a non-zero exit code only for HIGH and CRITICAL findings and skip vulnerabilities
+    that have no fix yet?
+  answer: 'Outside this assistant''s scope: this is Trivy CLI usage (Aqua Security''s open-source scanner), not Red Hat Advanced
+    Cluster Security / StackRox.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: rhacs-009
+  technology: rhacs
+  kind: error
+  question: 'New secured cluster, Collector pods keep restarting. Their logs end with "Connected to Sensor? false" followed
+    by FATAL Unable to connect to Sensor at ''sensor.rhacs.svc:443''. Sensor lives in a custom namespace. How do I troubleshoot?'
+  answer: Either Sensor is unhealthy or Collector points at the wrong address. Read GRPC_SERVER from the collector pod's env
+    and compare it with the sensor Service and port, and confirm the Sensor pod is Running 1/1. Fix whichever is wrong, then
+    delete the collector pods so they restart.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/unable-to-connect-to-the-sensor.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/unable-to-connect-to-the-sensor.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-RHACS-COLLECTOR-SENSOR
+- id: rhacs-010
+  technology: rhacs
+  kind: howto
+  question: 'The default "Privileged Container" policy is enabled in RHACS and generates violations, yet kubectl apply of
+    a privileged pod still goes through. How do I make it actually block?'
+  answer: Enabled only means it reports violations. Edit the policy to Inform and enforce, and turn on deploy-time enforcement
+    for it. Also make sure the cluster's admission controller enforcement behavior is set to enforce policies, since the admission
+    controller does the blocking.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/policy-enforcement-hard.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-enforcement-hard.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-enforcement#2'
+- id: rhacs-011
+  technology: rhacs
+  kind: concept
+  question: In a custom RHACS policy with two rule sections, each holding several criteria, when does a deployment count as
+    violating it?
+  answer: 'Rules are ORed and the criteria inside one rule are ANDed: a violation occurs if at least one rule has all of its
+    criteria satisfied. Most criteria describe the bad condition (many have NOT forms); a few describe required good state,
+    such as capabilities that must be dropped.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/policy-structure.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/policy-structure.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-policy-rules-scope#1'
+- id: rhacs-012
+  technology: rhacs
+  kind: error
+  question: 'Following the RHACS uninstall steps, the cleanup one-liner that lists clusterroles, bindings, roles and psp printed:
+    error: the server doesn''t have a resource type "psp". Did the cleanup break?'
+  answer: 'No, it is expected on newer clusters. Kubernetes removed PodSecurityPolicy in 1.25, so there is no psp resource
+    type to list. Carry on with the remaining steps: removing custom SCCs labeled for stackrox and deleting the ValidatingWebhookConfiguration
+    named stackrox.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/delete-acs-global-resources.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/delete-acs-global-resources.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-secured-cluster-troubleshooting#5'
+- id: rhacs-013
+  technology: rhacs
+  kind: out-of-scope
+  question: '`snyk container monitor` uploads my image to the wrong organization. Which option sets the org, and how do I
+    tag the project?'
+  answer: 'Outside this assistant''s scope: this is a Snyk CLI question (a different vendor''s scanner), not Red Hat Advanced
+    Cluster Security / StackRox.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: rhacs-014
+  technology: rhacs
+  kind: howto
+  question: We bootstrap secured clusters with roxctl sensor generate. How do I generate a bundle whose admission controller
+    does not enforce policies?
+  answer: Pass --admission-controller-enforcement=false to roxctl sensor generate. The default is true, which makes the admission
+    controller reject create or update requests that violate an enabled policy; false turns that enforcement off.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/roxctl-sensor-generate-options.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/roxctl-sensor-generate-options.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-enforcement#6'
+- id: rhacs-015
+  technology: rhacs
+  kind: error
+  question: 'After migrating Central to PostgreSQL, the log says: Failed to create collections for scope prod-eu: Unsupported
+    operator NOT_IN in scope''s label selectors. Our vulnerability report for that scope is empty now. What happened?'
+  answer: The migration only converts access scopes whose label selectors use the IN operator; NOT_IN, EXISTS and NOT_EXISTS
+    are not migrated. Build a replacement collection by hand with the same selection and point each affected report configuration
+    at it; until then those reports stay broken.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/migrate-scope-collections.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/migrate-scope-collections.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-secured-cluster-troubleshooting#6'
+- id: rhacs-016
+  technology: rhacs
+  kind: concept
+  question: In a secured cluster, what do Sensor, the admission controller, Collector and Scanner V4 each do?
+  answer: Sensor watches the cluster API and Collector events, raises deploy/runtime violations and handles cluster actions.
+    The admission controller blocks workloads that violate enforced policies. Collector monitors container runtime and network
+    activity on nodes, feeding Sensor. Scanner V4 indexes images.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/acs-secured-cluster-services-overview.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/acs-secured-cluster-services-overview.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-secured-cluster-troubleshooting#1'
+- id: rhacs-017
+  technology: rhacs
+  kind: error
+  question: '`roxctl image check --image registry.corp/app:1.4.2` in CI exits 1 with "ERROR: failed policies found: 1 policies
+    violated that are failing the check". The table lists "Fixable Severity at least Important" under BREAKS BUILD. We never
+    touched that policy. Why does it fail the build?'
+  answer: It is a default policy for build and deploy, enabled and shipped with build enforcement (it fails the build). It
+    triggers on fixable vulnerabilities rated Important or worse. Update the affected packages or base image; if you accept
+    the risk, drop its build enforcement or exclude the image.
+  source:
+    repo: stackrox/stackrox
+    path: pkg/defaults/policies/files/severity_important.json
+    commit: 69fc953f424bf243362dfaab47c4a1bad55fd83b
+    url: 'https://github.com/stackrox/stackrox/blob/69fc953f424bf243362dfaab47c4a1bad55fd83b/pkg/defaults/policies/files/severity_important.json'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-RHACS-IMAGE-CHECK-FAILED
+- id: rhacs-018
+  technology: rhacs
+  kind: howto
+  question: roxctl image check keeps returning old scan results for an image we just rebuilt under the same tag. How do I
+    make Central fetch fresh data?
+  answer: Add --force. It bypasses Central's cache so image metadata and scan results are pulled again from the registry and
+    scanner. The API token needs read and write access to the Image resource; the default Continuous Integration role already
+    has it.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/checking-images.adoc
+    commit: 801ccd0dfd1f73aed72188c8c960de5c5bc85cd6
+    url: 'https://github.com/openshift/openshift-docs/blob/801ccd0dfd1f73aed72188c8c960de5c5bc85cd6/modules/checking-images.adoc'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:rhacs-roxctl-ci#4'
+- id: rhacs-019
+  technology: rhacs
+  kind: out-of-scope
+  question: Can you write a Falco rule that fires when a shell is spawned inside a container, with the condition and output
+    fields?
+  answer: 'Outside this assistant''s scope: Falco is a separate CNCF runtime security project, not Red Hat Advanced Cluster
+    Security / StackRox.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: rhacs-020
+  technology: rhacs
+  kind: out-of-scope
+  question: In NeuVector, how do I create an admission control rule that rejects images from registries I have not approved?
+  answer: 'Outside this assistant''s scope: NeuVector admission control rules belong to SUSE NeuVector, a different product
+    from Red Hat Advanced Cluster Security / StackRox.'
+  source: {}
+  outOfScope: true
+  status: abstain

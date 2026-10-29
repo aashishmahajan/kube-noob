@@ -27,14 +27,15 @@ def crypto_posture() -> dict[str, Any]:
     every cryptographic operation goes through the FIPS-validated module.
     """
     import ssl
-    from pathlib import Path
 
     kernel: bool | None = None
-    flag = Path("/proc/sys/crypto/fips_enabled")
+    kernel_note = ""
     try:
-        kernel = flag.read_text(encoding="ascii").strip() == "1"
-    except OSError:
-        kernel = None
+        from kube_noob.host_fips import kernel_fips
+    except ImportError:  # the Claude plugin reads nothing from the machine: OpenSSL's own mode is still reported
+        kernel_note = "not read by the Claude plugin; run kube-noob doctor for the kernel flag"
+    else:
+        kernel = kernel_fips()
     openssl: bool | None = None
     try:
         import _hashlib
@@ -54,6 +55,7 @@ def crypto_posture() -> dict[str, Any]:
         "opensslFipsMode": openssl,
         "openssl": ssl.OPENSSL_VERSION,
         "algorithms": "SHA-256 for integrity checks; TLS through the system OpenSSL; no MD5, SHA-1 or custom crypto",
+        **({"kernelFipsNote": kernel_note} if kernel_note else {}),
     }
 
 
@@ -96,7 +98,12 @@ def posture(s: Settings) -> dict[str, Any]:
     if s.offline and not judge["local"]:
         warnings.append(f"judge.provider {s.judge.provider!r} is not local and will refuse under the offline lock.")
 
+    from kube_noob import tiers
+
+    conflicts += tiers.conflicts(s)
     learning = s.data_dir / "learning.json"
+    memory = memory_posture(s)
+    warnings += [f"memory path {m['path']}: {m['error']}" for m in memory if m.get("error")]
     return {
         "version": __version__,
         "configFile": str(s.source_path) if s.source_path else None,
@@ -109,15 +116,40 @@ def posture(s: Settings) -> dict[str, Any]:
             else "none",
             "backend": s.cluster.backend if s.cluster.enabled else None,
         },
+        "tiers": tiers.describe(s),
         "model": model,
         "judge": judge,
         "dataDir": {"path": str(s.data_dir), "exists": s.data_dir.is_dir(), "learningFile": str(learning)},
+        "memory": memory,
         "telemetry": "none",
         "crypto": crypto_posture(),
         "conflicts": conflicts,
         "warnings": warnings,
         "status": "conflict" if conflicts else "ok",
     }
+
+
+def memory_posture(s: Settings) -> list[dict[str, Any]]:
+    """Each configured memory repository: entry counts, or why it cannot be read. Read-only."""
+    from kube_noob.memory.repo import load_repo
+
+    out: list[dict[str, Any]] = []
+    for path in s.memory.paths:
+        row: dict[str, Any] = {"path": str(path)}
+        try:
+            loaded = load_repo(path)
+        except (OSError, ValueError) as exc:
+            row["error"] = str(exc)
+        else:
+            entries = [x.entry for x in loaded if x.entry is not None]
+            row.update(
+                entries=len(loaded),
+                approved=sum(1 for e in entries if e.status == "approved"),
+                proposed=sum(1 for e in entries if e.status == "proposed"),
+                unreadable=len(loaded) - len(entries),
+            )
+        out.append(row)
+    return out
 
 
 def render_text(p: dict[str, Any]) -> str:
@@ -132,7 +164,22 @@ def render_text(p: dict[str, Any]) -> str:
         f"  agent model    {p['model']['provider']}"
         + (f" -> {p['model']['endpoint']}" if p["model"]["endpoint"] else "")
         + (" (local)" if p["model"]["local"] else " (remote)"),
+        *(
+            f"  tier {t['tier']}         {'ON ' if t['enabled'] else 'off'} {t['name']} ({t['switch']})"
+            + (f"; needs {t['rbac']}" if t["enabled"] else "")
+            for t in p.get("tiers", [])
+        ),
         f"  data dir       {p['dataDir']['path']}",
+        *(
+            f"  memory         {m['path']}: "
+            + (
+                f"{m['entries']} entries ({m['approved']} approved, {m['proposed']} proposed)"
+                if "error" not in m
+                else "unreadable"
+            )
+            for m in p.get("memory", [])
+        ),
+        *(["  memory         none (memory.paths)"] if not p.get("memory") else []),
         f"  telemetry      {p['telemetry']}",
         f"  FIPS mode      {p['crypto']['fipsMode']} ({p['crypto']['openssl']})",
         f"  config file    {p['configFile'] or 'none (defaults + environment)'}",

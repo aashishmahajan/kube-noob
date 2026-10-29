@@ -1,0 +1,1078 @@
+{
+ "result": [
+  {
+   "sys_id": "00000000000000000000000000000000",
+   "number": "INC0010000",
+   "short_description": "orders-api pods OOMKilled during the nightly batch import (case 0)",
+   "description": "Caller: Jane Doe\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.",
+   "resolved_at": "2026-10-01 10:00:00",
+   "work_notes": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000001",
+   "number": "INC0010001",
+   "short_description": "ImagePullBackOff for payments after the registry move (case 1)",
+   "description": "Caller: Raj Patel\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+   "resolved_at": "2026-10-02 10:00:00",
+   "work_notes": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000002",
+   "number": "INC0010002",
+   "short_description": "etcd leader changes every few minutes after the 4.21.0 update (case 2)",
+   "description": "Caller: Ana Lima\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane.",
+   "resolved_at": "2026-10-03 10:00:00",
+   "work_notes": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000003",
+   "number": "INC0010003",
+   "short_description": "Route returns 503 for shop frontend (case 3)",
+   "description": "Caller: Jane Doe\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "The Service selector used app=front instead of app=frontend; corrected the selector.",
+   "resolved_at": "2026-10-04 10:00:00",
+   "work_notes": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nCause: the Service selected no pods. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000004",
+   "number": "INC0010004",
+   "short_description": "PVC stuck Pending for the reporting database (case 4)",
+   "description": "Caller: Raj Patel\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Set storageClassName gp3-csi on the claim and recreated it.",
+   "resolved_at": "2026-10-05 10:00:00",
+   "work_notes": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000005",
+   "number": "INC0010005",
+   "short_description": "Pods rejected by SCC in the batch namespace (case 5)",
+   "description": "Caller: Ana Lima\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.",
+   "resolved_at": "2026-10-06 10:00:00",
+   "work_notes": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000006",
+   "number": "INC0010006",
+   "short_description": "DNS lookups time out from the analytics pods (case 6)",
+   "description": "Caller: Jane Doe\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.",
+   "resolved_at": "2026-10-07 10:00:00",
+   "work_notes": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000007",
+   "number": "INC0010007",
+   "short_description": "Certificate expired on the internal API route (case 7)",
+   "description": "Caller: Raj Patel\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.",
+   "resolved_at": "2026-10-08 10:00:00",
+   "work_notes": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000008",
+   "number": "INC0010008",
+   "short_description": "Node NotReady after kubelet disk pressure (case 8)",
+   "description": "Caller: Ana Lima\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Cleaned unused images and raised the image GC thresholds on the machine config pool.",
+   "resolved_at": "2026-10-09 10:00:00",
+   "work_notes": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000009",
+   "number": "INC0010009",
+   "short_description": "Quota exceeded when scaling the checkout service (case 9)",
+   "description": "Caller: Jane Doe\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+   "resolved_at": "2026-10-10 10:00:00",
+   "work_notes": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000000a",
+   "number": "INC0010010",
+   "short_description": "HAProxy router pods restart at maxconn (case 10)",
+   "description": "Caller: Raj Patel\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised maxConnections in the IngressController tuningOptions to 40000.",
+   "resolved_at": "2026-10-11 10:00:00",
+   "work_notes": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000000b",
+   "number": "INC0010011",
+   "short_description": "orders-api pods OOMKilled during the nightly batch import (case 11)",
+   "description": "Caller: Ana Lima\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.",
+   "resolved_at": "2026-10-12 10:00:00",
+   "work_notes": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000000c",
+   "number": "INC0010012",
+   "short_description": "ImagePullBackOff for payments after the registry move (case 12)",
+   "description": "Caller: Jane Doe\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+   "resolved_at": "2026-10-13 10:00:00",
+   "work_notes": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000000d",
+   "number": "INC0010013",
+   "short_description": "etcd leader changes every few minutes after the 4.21.0 update (case 13)",
+   "description": "Caller: Raj Patel\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane.",
+   "resolved_at": "2026-10-14 10:00:00",
+   "work_notes": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000000e",
+   "number": "INC0010014",
+   "short_description": "Route returns 503 for shop frontend (case 14)",
+   "description": "Caller: Ana Lima\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "The Service selector used app=front instead of app=frontend; corrected the selector.",
+   "resolved_at": "2026-10-15 10:00:00",
+   "work_notes": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nCause: the Service selected no pods. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000000f",
+   "number": "INC0010015",
+   "short_description": "PVC stuck Pending for the reporting database (case 15)",
+   "description": "Caller: Jane Doe\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Set storageClassName gp3-csi on the claim and recreated it.",
+   "resolved_at": "2026-10-16 10:00:00",
+   "work_notes": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000010",
+   "number": "INC0010016",
+   "short_description": "Pods rejected by SCC in the batch namespace (case 16)",
+   "description": "Caller: Raj Patel\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.",
+   "resolved_at": "2026-10-17 10:00:00",
+   "work_notes": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000011",
+   "number": "INC0010017",
+   "short_description": "DNS lookups time out from the analytics pods (case 17)",
+   "description": "Caller: Ana Lima\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.",
+   "resolved_at": "2026-10-18 10:00:00",
+   "work_notes": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000012",
+   "number": "INC0010018",
+   "short_description": "Certificate expired on the internal API route (case 18)",
+   "description": "Caller: Jane Doe\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.",
+   "resolved_at": "2026-10-19 10:00:00",
+   "work_notes": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000013",
+   "number": "INC0010019",
+   "short_description": "Node NotReady after kubelet disk pressure (case 19)",
+   "description": "Caller: Raj Patel\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Cleaned unused images and raised the image GC thresholds on the machine config pool.",
+   "resolved_at": "2026-10-20 10:00:00",
+   "work_notes": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000014",
+   "number": "INC0010020",
+   "short_description": "Quota exceeded when scaling the checkout service (case 20)",
+   "description": "Caller: Ana Lima\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+   "resolved_at": "2026-10-21 10:00:00",
+   "work_notes": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000015",
+   "number": "INC0010021",
+   "short_description": "HAProxy router pods restart at maxconn (case 21)",
+   "description": "Caller: Jane Doe\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised maxConnections in the IngressController tuningOptions to 40000.",
+   "resolved_at": "2026-10-22 10:00:00",
+   "work_notes": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000016",
+   "number": "INC0010022",
+   "short_description": "orders-api pods OOMKilled during the nightly batch import (case 22)",
+   "description": "Caller: Raj Patel\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.",
+   "resolved_at": "2026-10-23 10:00:00",
+   "work_notes": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000017",
+   "number": "INC0010023",
+   "short_description": "ImagePullBackOff for payments after the registry move (case 23)",
+   "description": "Caller: Ana Lima\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+   "resolved_at": "2026-10-24 10:00:00",
+   "work_notes": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000018",
+   "number": "INC0010024",
+   "short_description": "etcd leader changes every few minutes after the 4.21.0 update (case 24)",
+   "description": "Caller: Jane Doe\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane.",
+   "resolved_at": "2026-10-25 10:00:00",
+   "work_notes": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000019",
+   "number": "INC0010025",
+   "short_description": "Route returns 503 for shop frontend (case 25)",
+   "description": "Caller: Raj Patel\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "The Service selector used app=front instead of app=frontend; corrected the selector.",
+   "resolved_at": "2026-10-26 10:00:00",
+   "work_notes": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause: the Service selected no pods. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000001a",
+   "number": "INC0010026",
+   "short_description": "PVC stuck Pending for the reporting database (case 26)",
+   "description": "Caller: Ana Lima\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Set storageClassName gp3-csi on the claim and recreated it.",
+   "resolved_at": "2026-10-27 10:00:00",
+   "work_notes": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000001b",
+   "number": "INC0010027",
+   "short_description": "Pods rejected by SCC in the batch namespace (case 27)",
+   "description": "Caller: Jane Doe\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.",
+   "resolved_at": "2026-10-28 10:00:00",
+   "work_notes": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000001c",
+   "number": "INC0010028",
+   "short_description": "DNS lookups time out from the analytics pods (case 28)",
+   "description": "Caller: Raj Patel\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.",
+   "resolved_at": "2026-10-01 10:00:00",
+   "work_notes": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000001d",
+   "number": "INC0010029",
+   "short_description": "Certificate expired on the internal API route (case 29)",
+   "description": "Caller: Ana Lima\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.",
+   "resolved_at": "2026-10-02 10:00:00",
+   "work_notes": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000001e",
+   "number": "INC0010030",
+   "short_description": "Node NotReady after kubelet disk pressure (case 30)",
+   "description": "Caller: Jane Doe\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "7",
+    "display_value": "Closed"
+   },
+   "close_code": "Solved (Work Around)",
+   "close_notes": "Cleaned unused images and raised the image GC thresholds on the machine config pool.",
+   "resolved_at": "2026-10-03 10:00:00",
+   "work_notes": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000001f",
+   "number": "INC0010031",
+   "short_description": "Quota exceeded when scaling the checkout service (case 31)",
+   "description": "Caller: Raj Patel\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "7",
+   "close_code": "Solved (Work Around)",
+   "close_notes": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+   "resolved_at": "2026-10-04 10:00:00",
+   "work_notes": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000020",
+   "number": "INC0010032",
+   "short_description": "HAProxy router pods restart at maxconn (case 32)",
+   "description": "Caller: Ana Lima\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "7",
+    "display_value": "Closed"
+   },
+   "close_code": "Solved (Work Around)",
+   "close_notes": "Raised maxConnections in the IngressController tuningOptions to 40000.",
+   "resolved_at": "2026-10-05 10:00:00",
+   "work_notes": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000021",
+   "number": "INC0010033",
+   "short_description": "orders-api pods OOMKilled during the nightly batch import (case 33)",
+   "description": "Caller: Jane Doe\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "7",
+   "close_code": "Solved (Work Around)",
+   "close_notes": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.",
+   "resolved_at": "2026-10-06 10:00:00",
+   "work_notes": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000022",
+   "number": "INC0010034",
+   "short_description": "ImagePullBackOff for payments after the registry move (case 34)",
+   "description": "Caller: Raj Patel\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "7",
+    "display_value": "Closed"
+   },
+   "close_code": "Solved (Work Around)",
+   "close_notes": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+   "resolved_at": "2026-10-07 10:00:00",
+   "work_notes": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000023",
+   "number": "INC0010035",
+   "short_description": "etcd leader changes every few minutes after the 4.21.0 update (case 35)",
+   "description": "Caller: Ana Lima\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "7",
+   "close_code": "Solved (Work Around)",
+   "close_notes": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane.",
+   "resolved_at": "2026-10-08 10:00:00",
+   "work_notes": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000024",
+   "number": "INC0010036",
+   "short_description": "Route returns 503 for shop frontend (case 36)",
+   "description": "Caller: Jane Doe\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "2",
+    "display_value": "In Progress"
+   },
+   "close_code": "",
+   "close_notes": "The Service selector used app=front instead of app=frontend; corrected the selector.",
+   "resolved_at": "",
+   "work_notes": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause: the Service selected no pods. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000025",
+   "number": "INC0010037",
+   "short_description": "PVC stuck Pending for the reporting database (case 37)",
+   "description": "Caller: Raj Patel\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "2",
+   "close_code": "",
+   "close_notes": "Set storageClassName gp3-csi on the claim and recreated it.",
+   "resolved_at": "",
+   "work_notes": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000026",
+   "number": "INC0010038",
+   "short_description": "Pods rejected by SCC in the batch namespace (case 38)",
+   "description": "Caller: Ana Lima\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "2",
+    "display_value": "In Progress"
+   },
+   "close_code": "",
+   "close_notes": "Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.",
+   "resolved_at": "",
+   "work_notes": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000027",
+   "number": "INC0010039",
+   "short_description": "DNS lookups time out from the analytics pods (case 39)",
+   "description": "Caller: Jane Doe\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "2",
+   "close_code": "",
+   "close_notes": "Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.",
+   "resolved_at": "",
+   "work_notes": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000028",
+   "number": "INC0010040",
+   "short_description": "Certificate expired on the internal API route (case 40)",
+   "description": "Caller: Raj Patel\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "2",
+    "display_value": "In Progress"
+   },
+   "close_code": "",
+   "close_notes": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.",
+   "resolved_at": "",
+   "work_notes": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000029",
+   "number": "INC0010041",
+   "short_description": "Node NotReady after kubelet disk pressure (case 41)",
+   "description": "Caller: Ana Lima\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "8",
+   "close_code": "",
+   "close_notes": "Cleaned unused images and raised the image GC thresholds on the machine config pool.",
+   "resolved_at": "",
+   "work_notes": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000002a",
+   "number": "INC0010042",
+   "short_description": "Quota exceeded when scaling the checkout service (case 42)",
+   "description": "Caller: Jane Doe\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "8",
+    "display_value": "Canceled"
+   },
+   "close_code": "",
+   "close_notes": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+   "resolved_at": "",
+   "work_notes": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000002b",
+   "number": "INC0010043",
+   "short_description": "HAProxy router pods restart at maxconn (case 43)",
+   "description": "Caller: Raj Patel\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "8",
+   "close_code": "",
+   "close_notes": "Raised maxConnections in the IngressController tuningOptions to 40000.",
+   "resolved_at": "",
+   "work_notes": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000002c",
+   "number": "INC0010044",
+   "short_description": "orders-api pods OOMKilled during the nightly batch import (case 44)",
+   "description": "Caller: Ana Lima\nPods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "7",
+    "display_value": "Closed"
+   },
+   "close_code": "Not Solved (Not Reproducible)",
+   "close_notes": "Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.",
+   "resolved_at": "2026-10-17 10:00:00",
+   "work_notes": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nRoot cause: the import loaded the whole catalogue into memory. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000002d",
+   "number": "INC0010045",
+   "short_description": "ImagePullBackOff for payments after the registry move (case 45)",
+   "description": "Caller: Jane Doe\nFailed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "7",
+   "close_code": "Not Solved (Not Reproducible)",
+   "close_notes": "Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.",
+   "resolved_at": "2026-10-18 10:00:00",
+   "work_notes": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nCause was a pull secret that still pointed at the old registry. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000002e",
+   "number": "INC0010046",
+   "short_description": "etcd leader changes every few minutes after the 4.21.0 update (case 46)",
+   "description": "Caller: Raj Patel\netcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "7",
+    "display_value": "Closed"
+   },
+   "close_code": "Not Solved (Not Reproducible)",
+   "close_notes": "Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane.",
+   "resolved_at": "2026-10-19 10:00:00",
+   "work_notes": "2026-10-02 09:12:41 - Raj Patel (Work notes)\nRoot cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "0000000000000000000000000000002f",
+   "number": "INC0010047",
+   "short_description": "Route returns 503 for shop frontend (case 47)",
+   "description": "Caller: Ana Lima\nThe router answers 503 Service Unavailable for shop.apps.example.test.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "6",
+   "close_code": "Solution provided",
+   "close_notes": "",
+   "resolved_at": "2026-10-20 10:00:00",
+   "work_notes": "2026-10-03 09:12:41 - Ana Lima (Work notes)\nCause: the Service selected no pods. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000030",
+   "number": "INC0010048",
+   "short_description": "PVC stuck Pending for the reporting database (case 48)",
+   "description": "Caller: Jane Doe\npersistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solution provided",
+   "close_notes": "",
+   "resolved_at": "2026-10-21 10:00:00",
+   "work_notes": "2026-10-04 09:12:41 - Jane Doe (Work notes)\nRoot cause was a claim without a storage class on a cluster with no default class. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000031",
+   "number": "INC0010049",
+   "short_description": "Pods rejected by SCC in the batch namespace (case 49)",
+   "description": "Caller: Raj Patel\nunable to validate against any security context constraint: runAsUser 0 is not an allowed user.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": "6",
+   "close_code": "Solution provided",
+   "close_notes": "",
+   "resolved_at": "2026-10-22 10:00:00",
+   "work_notes": "2026-10-05 09:12:41 - Raj Patel (Work notes)\nCause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000032",
+   "number": "INC0010050",
+   "short_description": "DNS lookups time out from the analytics pods (case 50)",
+   "description": "Caller: Ana Lima\ndial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solution provided",
+   "close_notes": "2026-10-01T09:12:41Z kubelet started\n2026-10-01T09:12:42Z kubelet ready",
+   "resolved_at": "2026-10-23 10:00:00",
+   "work_notes": "2026-10-06 09:12:41 - Ana Lima (Work notes)\nRoot cause: a default-deny egress policy blocked DNS. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000033",
+   "number": "INC0010051",
+   "short_description": "Certificate expired on the internal API route (case 51)",
+   "description": "Caller: Jane Doe\nx509: certificate has expired or is not yet valid for api.internal.example.test.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA. Rotated the token: password is S3cretValue51 and the API key is AKIAABCDEFGHIJKLMNOP.",
+   "resolved_at": "2026-10-24 10:00:00",
+   "work_notes": "2026-10-07 09:12:41 - Jane Doe (Work notes)\nCause was a manually created certificate that nobody renewed. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000034",
+   "number": "INC0010052",
+   "short_description": "Node NotReady after kubelet disk pressure (case 52)",
+   "description": "Caller: Raj Patel\nNode worker-3 NotReady; kubelet reports DiskPressure and evicts pods.\nReported by Raj Patel <raj.patel@example.org>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Cleaned unused images and raised the image GC thresholds on the machine config pool. Rotated the token: password is S3cretValue52 and the API key is AKIAABCDEFGHIJKLMNOP.",
+   "resolved_at": "2026-10-25 10:00:00",
+   "work_notes": "2026-10-08 09:12:41 - Raj Patel (Work notes)\nRoot cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Raj Patel",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000035",
+   "number": "INC0010053",
+   "short_description": "Quota exceeded when scaling the checkout service (case 53)",
+   "description": "Caller: Ana Lima\nexceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.\nReported by Ana Lima <ana.lima@example.net>.",
+   "state": "6",
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised the namespace quota after the capacity review and set requests to match real usage.",
+   "resolved_at": "2026-10-26 10:00:00",
+   "work_notes": "2026-10-09 09:12:41 - Ana Lima (Work notes)\nCause: limits far above real usage consumed the quota. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Ana Lima",
+   "assignment_group": "Platform Team"
+  },
+  {
+   "sys_id": "00000000000000000000000000000036",
+   "number": "INC0010054",
+   "short_description": "HAProxy router pods restart at maxconn (case 54)",
+   "description": "Caller: Jane Doe\nRouter pods restarted by the liveness probe when HAProxy reaches maxconn under load.\nReported by Jane Doe <jane.doe@example.com>.",
+   "state": {
+    "value": "6",
+    "display_value": "Resolved"
+   },
+   "close_code": "Solved (Permanently)",
+   "close_notes": "Raised maxConnections in the IngressController tuningOptions to 40000.",
+   "resolved_at": "2026-10-27 10:00:00",
+   "work_notes": "2026-10-01 09:12:41 - Jane Doe (Work notes)\nRoot cause: maxconn too low for the client traffic. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+   "comments": "",
+   "caller_id": {
+    "link": "https://example.service-now.com/api/now/table/sys_user/1",
+    "value": "a1b2c3"
+   },
+   "assigned_to": "Jane Doe",
+   "assignment_group": "Platform Team"
+  }
+ ]
+}

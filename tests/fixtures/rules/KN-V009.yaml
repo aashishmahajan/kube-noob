@@ -1,0 +1,11 @@
+rule: KN-V009
+good: |
+  apiVersion: v1
+  kind: ConfigMap
+  metadata: {name: web-config, namespace: shop}
+  data: {a: b}
+bad: |
+  apiVersion: v1
+  kind: ConfigMap
+  metadata: {name: Web_Config, namespace: shop}
+  data: {a: b}

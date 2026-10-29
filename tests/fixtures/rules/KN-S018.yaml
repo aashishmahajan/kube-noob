@@ -1,0 +1,12 @@
+rule: KN-S018
+good: |
+  apiVersion: v1
+  kind: Secret
+  metadata: {name: s, namespace: shop}
+  type: Opaque
+bad: |
+  apiVersion: v1
+  kind: Secret
+  metadata: {name: s, namespace: shop}
+  type: Opaque
+  data: {password: aHVudGVyMg==}

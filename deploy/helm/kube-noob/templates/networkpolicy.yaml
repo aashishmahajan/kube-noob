@@ -37,6 +37,14 @@ spec:
       ports:
         - {protocol: UDP, port: {{ .Values.networkPolicy.egress.dnsPort }}}
         - {protocol: TCP, port: {{ .Values.networkPolicy.egress.dnsPort }}}
+    {{- if eq (include "kube-noob.memorySource" .) "git" }}
+    - to:
+        {{- range .Values.memory.git.egressCIDRs }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: {{ include "kube-noob.memoryGitPort" . }}}
+    {{- end }}
     {{- if .Values.config.clusterEnabled }}
     {{- if not .Values.networkPolicy.egress.apiServerCIDRs }}
     {{- fail "config.clusterEnabled requires networkPolicy.egress.apiServerCIDRs (or networkPolicy.egress.enabled=false)" }}
@@ -48,6 +56,24 @@ spec:
       ports:
         - {protocol: TCP, port: {{ .Values.networkPolicy.egress.apiServerPort }}}
         - {protocol: TCP, port: 443}
+    {{- end }}
+    {{- if .Values.rhacs.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.rhacs.centralNamespace | quote }}
+          podSelector:
+            matchLabels: {app: central}
+      ports:
+        - {protocol: TCP, port: 8443}
+    {{- if and .Values.rhacs.egressCIDRs (not (.Values.config.offline | default false)) }}
+    - to:
+        {{- range .Values.rhacs.egressCIDRs }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
     {{- end }}
     {{- if and (or .Values.config.webEnabled .Values.jira.sync.enabled) (not (.Values.config.offline | default false)) }}
     - to:

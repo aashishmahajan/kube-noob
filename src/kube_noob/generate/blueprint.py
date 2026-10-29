@@ -11,13 +11,13 @@ from pydantic.alias_generators import to_camel
 
 from kube_noob.catalog import DEFAULT_STORAGE_CLASS, OPENSHIFT_FAMILY, ROSA_FAMILY
 
-_NAME = re.compile(r"^[a-z]([-a-z0-9]{0,51}[a-z0-9])?$")
-_PATH = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*$")
-_HOST = re.compile(r"^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$")
-_QTY = re.compile(r"^\d+(\.\d+)?(m|Ki|Mi|Gi|Ti|k|M|G|T)?$")
+_NAME = re.compile(r"^[a-z]([-a-z0-9]{0,51}[a-z0-9])?\Z")
+_PATH = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*\Z")
+_HOST = re.compile(r"^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+\Z")
+_QTY = re.compile(r"^\d+(\.\d+)?(m|Ki|Mi|Gi|Ti|k|M|G|T)?\Z")
 # IANA_SVC_NAME (container/service port names): <= 15 chars, lowercase alphanumerics and '-', at least one letter,
 # no leading/trailing or consecutive hyphens.
-_PORT_NAME = re.compile(r"^(?=.*[a-z])(?!.*--)[a-z0-9]([-a-z0-9]{0,13}[a-z0-9])?$")
+_PORT_NAME = re.compile(r"^(?=.*[a-z])(?!.*--)[a-z0-9]([-a-z0-9]{0,13}[a-z0-9])?\Z")
 
 
 def _cidr(v: str) -> str:

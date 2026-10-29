@@ -110,7 +110,7 @@ def http_app(settings: Settings, *, allow_unauthenticated: bool = False) -> ASGI
         )
     # Over HTTP many callers share one learning file, so the tools that write it are not offered (add team notes
     # with `kube-noob learning note` in the pod instead).
-    mcp = build_server(settings, shared=True)
+    mcp = build_server(settings, shared=True, rest=security)
     app = mcp.streamable_http_app(
         streamable_http_path=srv.path,
         transport_security=security,

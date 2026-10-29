@@ -1,0 +1,35 @@
+rule: KN-V010
+good: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+bad: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    replicas: 2
+    selector:
+      matchLabels: {app: api}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        containers:
+        - name: web
+          image: quay.io/acme/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

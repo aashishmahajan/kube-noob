@@ -17,3 +17,21 @@ description: >
   termination mismatch, or a NetworkPolicy missing `policy-group.network.openshift.io/ingress: ""`.
 - EgressFirewall: name must be `default`, one per project, first match wins (specific Allow first, Deny 0.0.0.0/0 last).
 - Use `kubenoob_audit_manifests` with `platform: openshift` and a `version`, and `kubenoob_diagnose` for errors.
+- To enforce the audit rules in the cluster, `kubenoob_policy_generate` writes ValidatingAdmissionPolicy or Kyverno
+  ValidatingPolicy YAML; suggest `mode: audit` first and switch a rule to enforce once its warnings are gone.
+- For "what could an attacker reach?", `kubenoob_posture_scan` ranks paths from a Route, Ingress or exposed
+  Service to node access or the pod's ServiceAccount rights; lead with rank 1, its evidence and its fix.
+- With an RHACS policy export, `kubenoob_rhacs_compare` says which policies kube-noob's rules also check, which
+  differ (image, runtime or API-event data) and what kube-noob has no rule for; name the gaps and disagreements first.
+- For a failed build (GitHub Actions, Jenkins, Tekton, `oc logs build/...`), `kubenoob_build_diagnose` names the
+  failing step, the cause class and the fix; `kubenoob_containerfile_audit` checks the Containerfile.
+- For scanner output (Trivy or Grype JSON, a CycloneDX or SPDX SBOM, an RHACS image scan), `kubenoob_vuln_report`
+  applies Red Hat VEX (citing each statement it used to drop a finding), marks CISA KEV entries and, with the
+  manifests, ranks findings by exposure and privileges; lead with rank 1 and its attack path, then the fix version.
+- For SAST output (SARIF from Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL), `kubenoob_code_report`
+  merges the same file, line and CWE across tools, follows each file through the Containerfiles into the images
+  that ship it and, with the manifests, ranks by exposure and privileges; with scanner reports and dependency files
+  it names the line to change for each vulnerable package. Lead with rank 1; findings in files no image ships
+  (tests, tools) come last.
+- For "what could go wrong with this application?", `kubenoob_threat_model` gives a STRIDE table per element with
+  the rules and policies that mitigate each threat and ATT&CK ids; name the open threats first.

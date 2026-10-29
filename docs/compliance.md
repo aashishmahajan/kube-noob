@@ -52,7 +52,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 60 audit rules and their controls
+## The 61 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -68,6 +68,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-C010 | Replicas not spread across zones/nodes | SC-36 |
 | KN-C011 | terminationGracePeriodSeconds is 0 | CP-10 |
 | KN-C012 | HPA cannot compute CPU utilization | SC-6 |
+| KN-C013 | Pull secret exists only in another namespace | CM-6 |
 | KN-N001 | Namespace has workloads but no NetworkPolicy | SC-7, SC-7(5), AC-4 |
 | KN-N002 | Route without TLS | SC-8, SC-8(1) |
 | KN-N003 | Ingress without TLS | SC-8, SC-8(1) |

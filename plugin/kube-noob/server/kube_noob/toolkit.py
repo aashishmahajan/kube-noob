@@ -8,13 +8,16 @@ web tools exist only when ``webEnabled: true``; live-cluster tools only when ``c
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import re
 import tempfile
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -39,9 +42,13 @@ from kube_noob.known_issues import match as known_issue_match
 from kube_noob.learn.memory import LearningStore
 from kube_noob.learn.tutor import Tutor
 from kube_noob.net import Purpose, http_client
+from kube_noob.signals import alertmanager, for_text, playbooks_for
 
 PlatformT = Literal["kubernetes", "openshift", "rosa-classic", "rosa-hcp"]
 MAX_MANIFEST_CHARS = 1_000_000
+RHACS_CACHE_SECONDS = 300
+MAX_BUILD_LOG = 2_000_000
+MAX_SCAN_REPORT = 20_000_000  # one scanner report or SBOM given inline
 StageName = Literal["validate", "audit", "calibrate", "red-team"]
 ALL_STAGE_NAMES: tuple[StageName, ...] = ("validate", "audit", "calibrate", "red-team")
 # web_fetch reads documentation text only: archives, binaries, scripts and images are refused before decoding.
@@ -77,6 +84,13 @@ class ManifestsIn(_In):
 
 
 class AuditIn(ManifestsIn):
+    exceptions: str | None = Field(
+        None,
+        max_length=1_000_000,
+        description="An exception list (YAML, apiVersion kube-noob.io/v1, kind ExceptionList): each entry names a "
+        "rule, a scope, an owner, a reason and an expiry date. Active entries hide the findings they cover; expired "
+        "and refused entries are reported and fail the gate.",
+    )
     min_severity: Literal["info", "low", "medium", "high", "critical"] = Field(
         "low", description="Hide findings below this severity."
     )
@@ -126,9 +140,17 @@ class RuleIn(_In):
     rule_id: str = Field(..., pattern=r"^[A-Za-z]{2}-[A-Za-z]{1,2}\d{3}$", description="e.g. KN-S001")
 
 
+MAX_DIAGNOSE_TEXT = 400_000
+MAX_SIGNAL_TEXT = 400_000
+
+
 class DiagnoseIn(_In):
     text: str = Field(
-        ..., min_length=3, max_length=400_000, description="Events, `describe` output, logs, CLI errors or status JSON."
+        ...,
+        min_length=3,
+        max_length=MAX_DIAGNOSE_TEXT,
+        description="Events, `describe` output, logs, CLI errors, status JSON or an Alertmanager webhook payload "
+        "(its alerts are read as text; an `openshift_version` or `version` label gives the version).",
     )
     platform: PlatformT | None = None
     version: str | None = Field(
@@ -169,6 +191,102 @@ class KnownIssuesIn(_In):
     limit: int = Field(3, ge=1, le=10)
 
 
+class SignalsIn(_In):
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_SIGNAL_TEXT,
+        description="An Alertmanager payload, events, a ClusterOperator, pod status, logs or an error in words.",
+    )
+
+
+class MemorySignalIn(_In):
+    kind: Literal["alert", "co_condition", "event_reason", "pod_reason", "admission", "component", "error_template"]
+    name: str = Field(..., min_length=1, max_length=260)
+
+
+class MemoryMatchIn(_In):
+    text: str = Field(
+        ...,
+        min_length=3,
+        max_length=MAX_SIGNAL_TEXT,
+        description="An error, events, logs, a symptom in words or an Alertmanager webhook payload.",
+    )
+    version: str | None = Field(
+        None,
+        max_length=20,
+        pattern=r"^\d+\.\d+(\.\d+)?$",
+        description="The cluster's OpenShift version: entries already fixed there are shown as retired.",
+    )
+    platform: PlatformT | None = None
+    operators: dict[str, str] = Field(
+        default_factory=dict, max_length=20, description="Installed operators and their versions, name -> version."
+    )
+    include_proposed: bool = Field(False, description="Also show entries not yet approved by a reviewer.")
+    limit: int = Field(5, ge=1, le=20)
+
+
+class MemoryProposeIn(_In):
+    symptom: str = Field(..., min_length=3, max_length=500, description="What was observed, in one or two sentences.")
+    cause: str = Field(..., min_length=3, max_length=2000, description="The confirmed root cause, in words.")
+    fix: str = Field(..., min_length=3, max_length=2000, description="What fixed it (or what was tried), in words.")
+    kind: Literal["fix", "negative", "runbook"] = Field("fix", description="negative: tried and did not work.")
+    platform: PlatformT | None = None
+    signals: list[MemorySignalIn] = Field(default_factory=list, max_length=20)
+    commands: list[Annotated[str, Field(max_length=500)]] = Field(
+        default_factory=list, max_length=20, description="Commands, one per item; labelled by kube-noob's classifier."
+    )
+    fixed_in: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")
+    owners: list[Annotated[str, Field(max_length=100)]] = Field(default_factory=list, max_length=5)
+    repository: int = Field(0, ge=0, le=9, description="Which of the configured memory.paths to propose into.")
+    confirmed_by_user: bool = Field(
+        False,
+        description="True only after the user read the entry and asked to save it; otherwise only the YAML returns.",
+    )
+
+
+class InsightIn(_In):
+    text: str = Field(
+        ...,
+        min_length=3,
+        max_length=MAX_DIAGNOSE_TEXT,
+        description="Anything pasted: events, describe output, logs, an Alertmanager payload, a policy denial, a "
+        "ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.",
+    )
+    platform: PlatformT | None = None
+    version: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")
+
+
+class TicketChangesIn(_In):
+    since: str = Field(
+        "2d",
+        max_length=32,
+        pattern=r"^(\d{1,4}[dhm]|\d{4}-\d{2}-\d{2}([T ][0-9:+.Z-]{0,20})?)$",
+        description="How far back: 2d, 36h, 90m or a date such as 2026-10-25.",
+    )
+    project: str | None = Field(None, max_length=30, pattern=r"^[A-Za-z][A-Za-z0-9_]{1,29}$")
+    kinds: list[
+        Literal[
+            "fixed",
+            "done",
+            "closed",
+            "not-a-bug",
+            "wont-fix",
+            "duplicate",
+            "cannot-reproduce",
+            "obsolete",
+            "reopened",
+            "fix-in-progress",
+            "fix-proposed",
+            "fix-version",
+            "opened",
+            "open",
+            "status",
+        ]
+    ] = Field(default_factory=list, max_length=15)
+    limit: int = Field(50, ge=1, le=500)
+
+
 class PolicyExplainIn(_In):
     text: str = Field(
         ...,
@@ -177,6 +295,40 @@ class PolicyExplainIn(_In):
         description="The denial as printed: `kubectl apply` or `oc apply` output, a FailedCreate event or a Warning.",
     )
     platform: PlatformT | None = None
+
+
+EngineT = Literal["vap", "kyverno"]
+
+
+def _both_engines() -> list[EngineT]:
+    return ["vap", "kyverno"]
+
+
+class PolicyGenerateIn(_In):
+    platform: PlatformT = "kubernetes"
+    version: str | None = Field(default=None, max_length=20, description="OpenShift (4.20) or Kubernetes (1.33)")
+    engines: list[EngineT] = Field(
+        default_factory=_both_engines,
+        min_length=1,
+        max_length=2,
+        description="vap: ValidatingAdmissionPolicy + binding (built into Kubernetes 1.30+); kyverno: Kyverno "
+        "ValidatingPolicy (policies.kyverno.io/v1, Kyverno 1.18+).",
+    )
+    mode: Literal["audit", "enforce"] = Field(default="audit", description="audit warns and records; enforce refuses")
+    rules: list[Annotated[str, Field(pattern=r"^[A-Za-z]{2}-[A-Za-z]{1,2}\d{3}$", max_length=10)]] = Field(
+        default_factory=list, max_length=100, description="Rule ids such as KN-S001 (default: every rule)."
+    )
+    exclude_namespaces: list[Annotated[str, Field(pattern=r"^[a-z0-9-]{1,63}$", max_length=63)]] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Namespaces the policies skip, besides kube-system, kube-public and kube-node-lease.",
+    )
+    exceptions: str | None = Field(
+        None,
+        max_length=1_000_000,
+        description="An exception list (YAML, kube-noob.io/v1 ExceptionList): active entries become exemptions in "
+        "their rule's policy (with the ReplicaSets and pods their workloads make); expired or refused ones are listed.",
+    )
 
 
 _ENDPOINT_HELP = (
@@ -241,6 +393,197 @@ class IncidentConfirmIn(IncidentIn):
 
 class NamespaceCheckIn(_In):
     namespace: str = Field(..., max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+
+
+class PostureScanIn(_In):
+    manifests: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MANIFEST_CHARS,
+        description="Routes, Ingresses, Services, workloads, ServiceAccounts and RBAC objects (YAML). Secret objects "
+        "are dropped unread.",
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked paths to return.")
+
+
+class ClusterPostureIn(_In):
+    namespaces: list[Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", max_length=63)]] = Field(
+        default_factory=list, max_length=50, description="Namespaces to read (default: all the account can list)."
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked paths to return.")
+
+
+class BuildDiagnoseIn(_In):
+    log: str = Field(
+        ...,
+        min_length=3,
+        max_length=MAX_BUILD_LOG,
+        description="A failed build or pipeline log: GitHub Actions, Jenkins, Tekton (tkn ... logs) or an OpenShift "
+        "build (oc logs build/<name>). The end of the log matters most: when cutting, keep the end.",
+    )
+    platform: PlatformT | None = None
+    version: str | None = Field(
+        None,
+        max_length=20,
+        pattern=r"^\d+\.\d+(\.\d+)?$",
+        description="The cluster's OpenShift version, for reported issues that may apply.",
+    )
+
+
+class ContainerfileIn(_In):
+    containerfile: str = Field(
+        ..., min_length=4, max_length=MAX_MANIFEST_CHARS, description="The Containerfile or Dockerfile text."
+    )
+    manifests: str | None = Field(
+        None,
+        max_length=MAX_MANIFEST_CHARS,
+        description="Optional: the workload YAML that runs the image; its readiness or liveness probes satisfy the "
+        "health check.",
+    )
+
+
+class RhacsCompareIn(_In):
+    policies: str = Field(
+        ...,
+        min_length=2,
+        max_length=MAX_MANIFEST_CHARS,
+        description='An RHACS policy export as JSON: {"policies": [...]} from the RHACS portal (Export policy to '
+        "JSON) or POST /v1/policies/export, a list of policies, or one policy.",
+    )
+    outcomes: list[Literal["overlap", "related", "gap", "outside", "unexplained"]] = Field(
+        default_factory=list, max_length=5, description="Only return policies with these outcomes (default: all)."
+    )
+
+
+# Down to a release (cpe:/o:redhat:enterprise_linux:9): without one a RHEL 8 statement could speak for a RHEL 9 image
+_CPE = r"^cpe:/[aho]:[a-z0-9_.-]+:[a-z0-9_.-]+:[0-9][a-z0-9_.-]*(?::[A-Za-z0-9_.:-]*)?$"
+
+
+class VulnReportIn(_In):
+    reports: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        ...,
+        min_length=1,
+        max_length=10,
+        description="Scanner output as JSON text: Trivy (trivy image -f json [--list-all-pkgs]), Grype (grype -o "
+        "json), a CycloneDX or SPDX 2 JSON SBOM, or an RHACS image (GET /v1/images/{id}). Reports of the same image "
+        "are assessed together.",
+    )
+    vex: list[Annotated[str, Field(min_length=2, max_length=25_000_000)]] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Optional Red Hat CSAF VEX documents (JSON) to apply on top of the local redhat-vex corpus.",
+    )
+    kev: str | None = Field(
+        None,
+        max_length=20_000_000,
+        description="Optional: the CISA KEV catalog JSON (known_exploited_vulnerabilities.json, CC0).",
+    )
+    manifests: str | None = Field(
+        None,
+        max_length=MAX_MANIFEST_CHARS,
+        description="Optional: the YAML that runs the images; findings are then ranked by exposure and privileges "
+        "and shown with their attack path.",
+    )
+    products: list[Annotated[str, Field(pattern=_CPE, max_length=200)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Red Hat product CPE prefixes the images belong to (default: from the RHEL release in the "
+        "report, e.g. cpe:/o:redhat:enterprise_linux:9).",
+    )
+    image: str | None = Field(
+        None, max_length=500, description="Treat every report as this image (registry/repo:tag or @sha256:...)."
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked findings to return.")
+    trust_report_vex: bool = Field(
+        False,
+        description="Honour a CycloneDX report's own analysis (not_affected, resolved, false_positive). Off by "
+        "default: the findings it marks are kept, with a note.",
+    )
+
+
+class CodeBuildIn(_In):
+    path: str = Field(
+        ..., min_length=1, max_length=500, description="Its path in the repository, e.g. web/Containerfile."
+    )
+    text: str = Field(..., min_length=5, max_length=1_000_000, description="The Containerfile.")
+    image: str | None = Field(
+        None, max_length=500, description="The image it builds (registry/repository[:tag]); places it in workloads."
+    )
+    context: str | None = Field(
+        None, max_length=500, description="Build context in the repository (default: the Containerfile's directory)."
+    )
+    ignore: str | None = Field(None, max_length=1_000_000, description="The context's .dockerignore text.")
+    target: str | None = Field(None, max_length=100, description="The --target stage, if the build sets one.")
+
+
+class MustGatherIn(_In):
+    path: str = Field(
+        ...,
+        min_length=2,
+        max_length=4096,
+        pattern=r"^[^\x00]+$",
+        description="Absolute path of a must-gather directory or .tar, .tar.gz or .tgz archive on the machine the "
+        "server runs on (under mustGather.allowedDir when it is set). Nothing is extracted or run; Secrets are never "
+        "read.",
+    )
+    top: int = Field(50, ge=1, le=500, description="How many findings to return, most severe first.")
+    case_draft: bool = Field(
+        False, description="Also return caseDraft: a support case draft with placeholders for what only you know."
+    )
+
+
+class CodeReportIn(_In):
+    sarif: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="SARIF 2.1.0 as JSON text from Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL (any SARIF "
+        "producer works). The same file, line and CWE from several tools become one finding.",
+    )
+    containerfiles: list[CodeBuildIn] = Field(
+        default_factory=list, max_length=20, description="Containerfiles, to know which images ship each file."
+    )
+    manifests: str | None = Field(
+        None, max_length=MAX_MANIFEST_CHARS, description="YAML that runs the images: ranks by exposure and privileges."
+    )
+    reports: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Trivy or Grype JSON or a CycloneDX report of an image: each language-package vulnerability "
+        "points at the dependency file and line that declares it.",
+    )
+    dependency_files: dict[
+        Annotated[str, Field(min_length=1, max_length=500)], Annotated[str, Field(max_length=5_000_000)]
+    ] = Field(
+        default_factory=dict,
+        max_length=200,
+        description="Dependency files by repository path (requirements.txt, package.json, package-lock.json, "
+        "pom.xml, go.mod, ...), to find the line that declares a vulnerable package.",
+    )
+    source_roots: list[Annotated[str, Field(pattern=r"^/[^\x00]{0,499}$")]] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Absolute directories the scanners ran in (the CI checkout), so absolute paths map to the "
+        "repository.",
+    )
+    top: int = Field(20, ge=1, le=200, description="How many ranked findings to return.")
+    include_quality: bool = Field(False, description="Also list lint and quality results (never ranked).")
+
+
+class ThreatModelIn(_In):
+    manifests: str = Field(..., min_length=10, max_length=MAX_MANIFEST_CHARS, description="The application's YAML.")
+    platform: PlatformT | None = None
+    version: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")
+    reports: list[Annotated[str, Field(min_length=2, max_length=MAX_SCAN_REPORT)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Optional scanner reports of its images, to assess public-facing exploits (threat TM-E01).",
+    )
+
+
+class RhacsLiveIn(_In):
+    outcomes: list[Literal["overlap", "related", "gap", "outside", "unexplained"]] = Field(
+        default_factory=list, max_length=5, description="Only return policies with these outcomes (default: all)."
+    )
 
 
 class LearningNoteIn(_In):
@@ -351,6 +694,15 @@ class EmptyIn(_In):
     pass
 
 
+def _has_module(name: str) -> bool:
+    """Whether a module ships in this install. find_spec raises, not returns None, when a parent package is missing
+    (the Claude plugin has no kube_noob.mustgather at all)."""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -360,6 +712,7 @@ class ToolSpec:
     fn: Callable[[Any], Any]
     read_only: bool = True
     open_world: bool = False
+    tier: str | None = None  # a capability tier beyond read-only (kube_noob.tiers); offered only when it is on
 
 
 class Toolkit:
@@ -370,6 +723,9 @@ class Toolkit:
         self.shared = shared
         self.tutor = Tutor(settings.data_dir)
         self.learning = LearningStore(settings.data_dir)
+        # Central's policies, read at most once per RHACS_CACHE_SECONDS whatever the number of callers.
+        self._rhacs_lock = threading.Lock()
+        self._rhacs_cache: tuple[float, list[dict[str, Any]], dict[str, Any]] | None = None
 
     # -- helpers ---------------------------------------------------------------------------------------------
     def store(self) -> Any:
@@ -398,9 +754,29 @@ class Toolkit:
         return r.as_dict()
 
     def audit(self, p: AuditIn) -> dict[str, Any]:
+        from kube_noob.audit import exceptions as exc
+
         stages = {Stage(s) for s in p.stages}
         r = analyze(p.manifests, p.platform, p.version, stages=stages, min_severity=Severity.parse(p.min_severity))
+        excepted: list[dict[str, Any]] = []
+        review = exc.review(p.exceptions) if p.exceptions else None
+        if review is not None:
+            kept = []
+            used: set[str] = set()
+            for f in r.findings:
+                hit = exc.match(review, f.rule_id, f.resource)
+                if hit is None:
+                    kept.append(f)
+                else:
+                    used.add(hit.id)
+                    excepted.append(
+                        {**f.as_dict(), "exception": {"id": hit.id, "owner": hit.owner, "expires": hit.expires}}
+                    )
+            r.findings = kept
         out = r.as_dict()
+        if review is not None:
+            out["excepted"] = excepted
+            out["exceptions"] = {**review.summary(), "unused": [e.id for e in review.active if e.id not in used]}
         self._observe(
             [f"platform:{out.get('platform')}"]
             + [f"rule:{f['ruleId']}" for f in out.get("findings", []) if "ruleId" in f]
@@ -514,13 +890,27 @@ class Toolkit:
 
     # -- debugging -------------------------------------------------------------------------------------------
     def diagnose(self, p: DiagnoseIn) -> dict[str, Any]:
-        out = diagnose(p.text, platform=p.platform, limit=p.limit).as_dict()
+        """Playbooks, reported issues and policy denials for the text. An Alertmanager payload is read alert by alert
+        (``kube_noob.signals.alertmanager``); its signals come from the payload's structure and its version label
+        stands in for ``version`` when that is not given."""
+        payload = alertmanager.parse(p.text)
+        text = payload.text if payload else p.text
+        version = p.version or (payload.version if payload else None)
+        out = diagnose(text, platform=p.platform, limit=p.limit, signals=for_text(p.text)).as_dict()
+        if payload:
+            out = {
+                "input": {**payload.summary(), "version": version} | ({"versionFrom": "argument"} if p.version else {}),
+                **out,
+            }
         self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
-        reported = known_issue_match(p.text, p.platform, p.version, 3, self.settings.data_dir)
+        reported = known_issue_match(
+            payload.symptoms if payload else text, p.platform, version, 3, self.settings.data_dir, require_context=True
+        )
         out["knownIssues"] = reported["matches"]
         if reported["matches"]:
             self._observe([f"known-issue:{m['id']}" for m in reported["matches"]])
-        denials = explain_denials(p.text, p.platform)["denials"]
+        self._attach_memory(out, p.text, version, p.platform)
+        denials = explain_denials(text, p.platform)["denials"]
         if denials:
             out["policyDenials"] = denials
             self._observe([f"policy:{d['engine']}" for d in denials])
@@ -529,6 +919,84 @@ class Toolkit:
     def known_issues(self, p: KnownIssuesIn) -> dict[str, Any]:
         out = known_issue_match(p.text, p.platform, p.version, p.limit, self.settings.data_dir)
         self._observe([f"known-issue:{m['id']}" for m in out["matches"]])
+        self._attach_memory(out, p.text, p.version, p.platform)
+        return out
+
+    def _attach_memory(self, out: dict[str, Any], text: str, version: str | None, platform: str | None) -> None:
+        """Approved team memory entries for the same text, cited as [mem:MEM-<n>], when memory.paths is set."""
+        if not self.settings.memory.paths:
+            return
+        from kube_noob.memory.match import for_answers
+
+        found = for_answers(list(self.settings.memory.paths), text, version, platform)
+        out["memory"] = found["matches"]
+        if found["notes"]:
+            out["memoryNotes"] = found["notes"]
+        self._observe([f"memory:{m['id']}" for m in found["matches"]])
+
+    # -- team memory -----------------------------------------------------------------------------------------
+    def memory_match(self, p: MemoryMatchIn) -> dict[str, Any]:
+        from kube_noob.memory.match import match
+
+        out = match(
+            list(self.settings.memory.paths),
+            p.text,
+            version=p.version,
+            platform=p.platform,
+            operators=p.operators,
+            include_proposed=p.include_proposed,
+            limit=p.limit,
+        )
+        self._observe([f"memory:{m['id']}" for m in out["matches"]])
+        return out
+
+    def memory_propose(self, p: MemoryProposeIn) -> dict[str, Any]:
+        """The entry as YAML and where it would go. It is written (as ``proposed``, never committed) only by a local
+        stdio server, only into a configured repository, and only when the user confirmed; the HTTP server never
+        writes."""
+        from datetime import date
+
+        from kube_noob.debug.steps import classify_step
+        from kube_noob.memory import MemoryEntry, dump_entry
+        from kube_noob.memory.repo import add_entry, next_number, require_repo
+
+        paths = list(self.settings.memory.paths)
+        if p.repository >= len(paths):
+            raise ValueError(f"repository {p.repository} is not configured; memory.paths has {len(paths)}")
+        root = require_repo(paths[p.repository])
+        fields: dict[str, Any] = {
+            "kind": p.kind,
+            "signals": [x.model_dump() for x in p.signals],
+            "symptom": p.symptom,
+            "platform": p.platform or self.settings.default_platform,
+            "versions": {"fixedIn": p.fixed_in} if p.fixed_in else {},
+            "cause": p.cause,
+            "fix": {
+                "text": p.fix,
+                "commands": [
+                    {"command": c, "label": "read-only" if classify_step(c) == "read" else "needs-approval"}
+                    for c in p.commands
+                ],
+            },
+            "owners": p.owners or ["unassigned"],
+        }
+        today = date.today()
+        preview = MemoryEntry.model_validate(
+            {**fields, "id": f"MEM-{next_number(root)}", "status": "proposed", "created": today, "updated": today}
+        )
+        out: dict[str, Any] = {
+            "yaml": dump_entry(preview),
+            "suggestedPath": str(root / "entries" / f"{preview.id}.yaml"),
+            "written": False,
+        }
+        if self.shared:
+            out["note"] = "This server never writes memory: open a pull request with the YAML above."
+        elif not p.confirmed_by_user:
+            out["note"] = "Show the YAML to the user; save it only when they confirm (confirmed_by_user: true)."
+        else:
+            path, entry = add_entry(root, fields, today)
+            out.update(written=True, path=str(path), id=entry.id, yaml=dump_entry(entry))
+            out["note"] = "Saved as proposed; a reviewer approves it in a pull request (kube-noob memory validate)."
         return out
 
     def ticket(self, p: TicketIn) -> dict[str, Any]:
@@ -539,10 +1007,321 @@ class Toolkit:
             self._observe([f"known-issue:{out['id']}"])
         return out
 
+    def extract_signals(self, p: SignalsIn) -> dict[str, Any]:
+        """The signals in a text and what they point at: catalogue entries (with their upstream sources) and the
+        playbooks ranked by how many signals point at them. ``signals`` are read from the text or payload;
+        ``implied`` are the catalogued names its words imply ("leader changed")."""
+        from kube_noob.signals import extract
+        from kube_noob.signals.catalogue import get
+
+        payload = alertmanager.parse(p.text)
+        found = extract(p.text)
+        named = {(x.kind, x.name) for x in found}
+        everything = for_text(p.text)
+        implied = [x for x in everything if (x.kind, x.name) not in named]
+        catalogue: list[dict[str, Any]] = []
+        for x in everything:
+            entry = get(x.kind, x.name)
+            if entry and entry.id not in {c["id"] for c in catalogue}:
+                catalogue.append(
+                    {
+                        "id": entry.id,
+                        "components": list(entry.components),
+                        "playbooks": list(entry.playbooks),
+                        "sources": list(entry.sources),
+                    }
+                )
+        ranked = sorted(playbooks_for(everything).items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        out: dict[str, Any] = {
+            "signals": [x.as_dict() for x in found],
+            "implied": [x.as_dict() for x in implied],
+            "catalogue": catalogue,
+            "playbooks": [pid for pid, _ in ranked],
+        }
+        if payload:
+            out = {"input": payload.summary(), **out}
+        self._observe([f"signal:{c['id']}" for c in catalogue][:20])  # catalogued (public) names only
+        return out
+
+    def insight(self, p: InsightIn) -> dict[str, Any]:
+        from kube_noob.insight import insight
+
+        out = insight(self, p.text, p.platform, p.version)
+        self._observe([f"insight:{k['kind']}" for k in out["kinds"]])
+        return out
+
+    def ticket_changes(self, p: TicketChangesIn) -> dict[str, Any]:
+        from kube_noob import ticket_changes
+
+        since = ticket_changes.parse_since(p.since)
+        out = ticket_changes.changes(self.settings.data_dir, since, p.project, list(p.kinds), p.limit)
+        out["openTickets"] = ticket_changes.open_summary(self.settings.data_dir, p.project)
+        return out
+
     def explain_denial(self, p: PolicyExplainIn) -> dict[str, Any]:
         out = explain_denials(p.text, p.platform)
         self._observe([f"policy:{d['engine']}" for d in out["denials"]])
         return out
+
+    def policy_generate(self, p: PolicyGenerateIn) -> dict[str, Any]:
+        from kube_noob.audit import exceptions as exc
+        from kube_noob.generate import policies
+
+        engines = tuple(dict.fromkeys(p.engines))
+        entries = exc.review(p.exceptions).entries if p.exceptions else []
+        g = policies.generate(
+            platform=p.platform,
+            platform_version=p.version,
+            engines=engines,
+            mode=p.mode,
+            rules=p.rules or None,
+            exclude_namespaces=p.exclude_namespaces,
+            exceptions=entries,
+        )
+        self._observe([f"policy-generate:{e}" for e in engines])
+        header = policies.header(
+            g, platform=p.platform, platform_version=p.version, mode=p.mode, engines=engines, exceptions=entries
+        )
+        return {**g.summary(), "yaml": g.yaml(header)}
+
+    def posture_scan(self, p: PostureScanIn) -> dict[str, Any]:
+        from kube_noob import attack_paths
+
+        out = attack_paths.scan_manifests(p.manifests, top=p.top)
+        self._observe([f"posture:{len(out['paths'])}"])
+        return out
+
+    def cluster_posture_scan(self, p: ClusterPostureIn) -> dict[str, Any]:
+        from kube_noob import attack_paths
+
+        inv = attack_paths.collect_live(get_backend(self.settings), list(p.namespaces))
+        return attack_paths.scan(inv, top=p.top)
+
+    def build_diagnose(self, p: BuildDiagnoseIn) -> dict[str, Any]:
+        """The failing step, the error line and its template, the cause class and the fix; reported issues and team
+        memory for the error lines."""
+        from kube_noob.build import logs
+
+        d = logs.diagnose(p.log)
+        out = logs.as_dict(d)
+        platform = p.platform or ("openshift" if d.system == "openshift-build" else None)
+        evidence = "\n".join(e.full or e.text for e in d.evidence) or "\n".join(p.log.splitlines()[-40:])
+        reported = known_issue_match(
+            evidence[:100_000], platform, p.version, 3, self.settings.data_dir, require_context=True
+        )
+        out["knownIssues"] = reported["matches"]
+        self._attach_memory(out, evidence[:MAX_SIGNAL_TEXT], p.version, platform)
+        self._observe([f"build:{d.system}:{d.cause or 'unknown'}"])
+        return out
+
+    def containerfile_audit(self, p: ContainerfileIn) -> dict[str, Any]:
+        try:
+            from kube_noob.build import containerfile as cf
+            from kube_noob.build import image
+        except ImportError as exc:  # the Claude plugin build ships without the Containerfile and image audit
+            raise ValueError(
+                "The Containerfile audit is not part of this build (the Claude plugin): run kube-noob build audit "
+                "-f Containerfile, or use the in-cluster service."
+            ) from exc
+
+        try:
+            out = image.audit(p.containerfile, manifests=p.manifests)
+        except cf.ContainerfileError as exc:
+            raise ValueError(str(exc)) from exc
+        self._observe([f"containerfile:{f['ruleId']}" for f in out["findings"]])
+        return out
+
+    @staticmethod
+    def _rhacs_out(policies: list[dict[str, Any]], outcomes: list[str], source: dict[str, Any]) -> dict[str, Any]:
+        from kube_noob import rhacs
+
+        out = {"source": source, **rhacs.compare(policies)}
+        if outcomes:
+            out["policies"] = [r for r in out["policies"] if r["outcome"] in outcomes]
+        return out
+
+    def rhacs_compare(self, p: RhacsCompareIn) -> dict[str, Any]:
+        from kube_noob import rhacs
+
+        try:
+            policies = rhacs.load(p.policies)
+        except rhacs.RhacsError as exc:
+            raise ValueError(str(exc)) from exc
+        self._observe(["rhacs-compare"])
+        return self._rhacs_out(policies, list(p.outcomes), {"input": "export"})
+
+    def _vuln(
+        self, reports: list[str], vex_texts: list[str], kev_text: str | None, manifests: str | None, **kw: Any
+    ) -> dict[str, Any]:
+        from kube_noob.attack_paths import Inventory as PathInventory
+        from kube_noob.attack_paths import workload_reach
+        from kube_noob.vuln import assess
+        from kube_noob.vuln import kev as kevmod
+        from kube_noob.vuln import reports as rep
+        from kube_noob.vuln import vex as vexmod
+        from kube_noob.yamlio import load_documents
+
+        try:
+            parsed = [rep.parse(r, f"report {i + 1}") for i, r in enumerate(reports)]
+            index = vexmod.load(self.settings.data_dir, texts=vex_texts, products=kw.get("products", ()))
+            kev = kevmod.parse(kev_text, "KEV catalog") if kev_text else None
+            reach = (
+                workload_reach(PathInventory.from_documents(d.data for d in load_documents(manifests)))
+                if manifests
+                else None
+            )
+            return assess.assess(parsed, vex=index, kev=kev, reach=reach, **kw)
+        except (rep.ReportError, vexmod.VexError, kevmod.KevError, assess.AssessError) as exc:
+            raise ValueError(str(exc)) from exc
+
+    def vuln_report(self, p: VulnReportIn) -> dict[str, Any]:
+        """Normalised findings from scanner output, Red Hat VEX applied (each dropped finding cites its statement),
+        ranked by exposure, privileges and known exploitation with the attack path."""
+        out = self._vuln(
+            list(p.reports),
+            list(p.vex),
+            p.kev,
+            p.manifests,
+            products=tuple(p.products),
+            image=p.image,
+            top=p.top,
+            trust_report_vex=p.trust_report_vex,
+        )
+        self._observe(sorted({f"vuln:{fmt}" for img in out["images"] for fmt in img["formats"]}))
+        return {**out, "findings": out["findings"][: max(p.top, 50)], "findingsTotal": len(out["findings"])}
+
+    def _must_gather_path(self, raw: str) -> Path:
+        """The path to open: absolute; with mustGather.allowedDir, resolved (links followed) and inside it. A shared
+        (HTTP) server without allowedDir reads nothing."""
+        given = Path(raw).expanduser()
+        if not given.is_absolute():
+            raise ValueError(f"{raw}: give an absolute path")
+        allowed = self.settings.must_gather.allowed_dir
+        if allowed is None:
+            if self.shared:
+                raise ValueError("this server reads no must-gather: mustGather.allowedDir is not set")
+            return given
+        root = allowed.resolve()
+        target = given.resolve()
+        if target != root and root not in target.parents:
+            raise ValueError(f"{raw}: outside mustGather.allowedDir ({allowed})")
+        return target
+
+    def analyze_must_gather(self, p: MustGatherIn) -> dict[str, Any]:
+        """What is wrong in a must-gather, ranked, with the known bugs and team memory that match each finding."""
+        from kube_noob.mustgather import analyse, ingest
+        from kube_noob.mustgather import report as mg_report
+
+        path = self._must_gather_path(p.path)
+        try:
+            bundle = ingest.open_bundle(path)
+        except ingest.MustGatherError as exc:
+            raise ValueError(str(exc)) from exc
+        analysis = analyse.analyse(bundle)
+        rep = mg_report.build(
+            bundle,
+            analysis,
+            data_dir=self.settings.data_dir,
+            memory_dirs=list(self.settings.memory.paths) or None,
+        )
+        out: dict[str, Any] = {k: v for k, v in bundle.as_dict().items() if k != "source"}
+        out.update(rep)
+        out["findingsTotal"] = len(rep["findings"])
+        out["findings"] = rep["findings"][: p.top]
+        if p.case_draft:
+            out["caseDraft"] = mg_report.case_draft(rep)
+        self._observe([f"signal:{s['kind']}:{s['name']}" for s in rep["signals"][:20]])
+        return out
+
+    def code_report(self, p: CodeReportIn) -> dict[str, Any]:
+        """Code findings from SARIF, merged across tools, followed into the images that ship them and the workloads
+        that run them; dependency vulnerabilities pointed at the file and line to change."""
+        from kube_noob.attack_paths import Inventory as PathInventory
+        from kube_noob.attack_paths import workload_reach
+        from kube_noob.code import assess, sarif, ship
+        from kube_noob.vuln import reports as vr
+        from kube_noob.yamlio import load_documents
+
+        if not p.sarif and not p.reports:
+            raise ValueError("pass SARIF (sarif) or scanner reports (reports)")
+        try:
+            sarifs = [sarif.parse(x, f"SARIF {i + 1}", roots=list(p.source_roots)) for i, x in enumerate(p.sarif)]
+            builds = [
+                ship.parse_build(
+                    ship.Build(
+                        c.path,
+                        c.text,
+                        c.image or "",
+                        c.context if c.context is not None else (c.path.rsplit("/", 1)[0] if "/" in c.path else "."),
+                        c.ignore or "",
+                        c.target or "",
+                    )
+                )
+                for c in p.containerfiles
+            ]
+            reach = (
+                dict(workload_reach(PathInventory.from_documents(d.data for d in load_documents(p.manifests))))
+                if p.manifests
+                else None
+            )
+            scans = [vr.parse(r, f"report {i + 1}") for i, r in enumerate(p.reports)]
+        except (sarif.SarifError, ship.ShipError, vr.ReportError) as exc:
+            raise ValueError(str(exc)) from exc
+        out = assess.assess(
+            sarifs,
+            builds,
+            reach,
+            scans,
+            dict(p.dependency_files) if p.dependency_files else None,
+            top=p.top,
+            include_quality=p.include_quality,
+        )
+        self._observe(sorted({f"code:{t.split()[0].lower()}" for t in out["tools"]}))
+        return out
+
+    def threat_model(self, p: ThreatModelIn) -> dict[str, Any]:
+        """A STRIDE threat model per application: entry points, trust boundaries, data stores and identities from
+        the manifests, each threat with the rules and policies that mitigate it and MITRE ATT&CK technique ids."""
+        from kube_noob.vuln import assess, threat
+
+        vulnerable = None
+        if p.reports:
+            out = self._vuln(list(p.reports), [], None, p.manifests)
+            vulnerable = assess.summary_for_workloads(out)
+        platform = p.platform or self.settings.default_platform
+        try:
+            return threat.model(p.manifests, platform=platform, version=p.version, vulnerable_images=vulnerable)
+        except threat.ThreatError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def rhacs_compare_live(self, p: RhacsLiveIn) -> dict[str, Any]:
+        try:
+            from kube_noob import rhacs_central
+        except ImportError as exc:  # the Claude plugin build ships without the Central reader
+            raise ValueError(
+                "Reading RHACS Central is not part of this build (the Claude plugin). Use the kube-noob CLI or the "
+                "in-cluster service, or pass an export to rhacs_compare."
+            ) from exc
+
+        with self._rhacs_lock:
+            now = time.monotonic()
+            if self._rhacs_cache is None or now - self._rhacs_cache[0] > RHACS_CACHE_SECONDS:
+                policies, source = rhacs_central.read_central(self.settings)
+                self._rhacs_cache = (now, policies, source)
+            read_at, policies, source = self._rhacs_cache
+        return self._rhacs_out(policies, list(p.outcomes), {**source, "ageSeconds": round(now - read_at)})
+
+    def posture_report(self, p: EmptyIn) -> dict[str, Any]:
+        from kube_noob import drift
+
+        rep = drift.latest_report(self.settings.data_dir / "posture")
+        if rep is None:
+            return {
+                "report": None,
+                "message": "No drift report yet: kube-noob serve writes one a day with posture.reportEnabled, or run "
+                "kube-noob --cluster-enabled posture report --live",
+            }
+        return {"report": rep}
 
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
         inv = Inventory.from_yaml(p.manifests, p.default_namespace)
@@ -635,6 +1414,8 @@ class Toolkit:
             self.settings.data_dir,
         )
         self._observe([f"playbook:{d['id']}" for d in out.get("diagnoses", [])])
+        blob = "\n".join([*out.get("evidence", []), *out.get("logs", {}).values()])
+        self._attach_memory(out, blob, (out.get("cluster") or {}).get("openshift"), p.platform)
         return out
 
     def cluster_version(self, _: EmptyIn) -> dict[str, Any]:
@@ -883,10 +1664,44 @@ class Toolkit:
             ToolSpec(
                 "diagnose",
                 "Diagnose symptoms offline",
-                "Match pasted events / describe output / logs / CLI errors against troubleshooting playbooks; "
-                "returns ranked root causes, read-only checks with names filled in, and fixes.",
+                "Match pasted events / describe output / logs / CLI errors or an Alertmanager webhook payload against "
+                "troubleshooting playbooks, ranked by matching patterns and by the signals the text carries (alert "
+                "names, reasons); returns the signals, ranked root causes, read-only checks with names filled in, "
+                "fixes, reported issues for the version and policy denials.",
                 DiagnoseIn,
                 self.diagnose,
+            ),
+            ToolSpec(
+                "extract_signals",
+                "Extract signals",
+                "Read the canonical names in an error: Alertmanager alert names (webhook payload or text), event and "
+                "ClusterOperator condition reasons, container reasons, admission rules, components and normalised "
+                "error templates, plus the alerts its words imply. Returns each signal with where it was found, the "
+                "catalogue entry (components, playbooks, upstream source) and the playbooks it points at. Read-only "
+                "and offline.",
+                SignalsIn,
+                self.extract_signals,
+            ),
+            ToolSpec(
+                "insight",
+                "What is this, and what does it say?",
+                "Start here for anything the user pastes. Names what the input is (events, pod status, logs, an "
+                "Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a "
+                "Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at "
+                "once) and runs every analyser that applies: diagnosis with reported issues and team memory, the "
+                "denial explainer, the audit, the documentation. Returns every finding with its source, read-only "
+                "next steps and what was not analysed and why. Read-only, local.",
+                InsightIn,
+                self.insight,
+            ),
+            ToolSpec(
+                "ticket_changes",
+                "What changed in Red Hat Jira",
+                "Reconcile the local copy of Red Hat's public Jira: tickets fixed (with fix versions), closed as "
+                "not a bug, won't fix or duplicate, reopened, given a fix version or opened since a date, with links, "
+                "and the open tickets per project and verdict. Read-only and local; each sync records the changes.",
+                TicketChangesIn,
+                self.ticket_changes,
             ),
             ToolSpec(
                 "known_issues",
@@ -917,6 +1732,90 @@ class Toolkit:
                 "Security and RBAC) and the audit rules that catch it before deploy.",
                 PolicyExplainIn,
                 self.explain_denial,
+            ),
+            ToolSpec(
+                "policy_generate",
+                "Turn audit rules into admission policies",
+                "Generate ValidatingAdmissionPolicy (with binding) and/or Kyverno ValidatingPolicy YAML from "
+                "kube-noob's audit rules, in audit (warn and record) or enforce mode, for a platform. One policy per "
+                "rule decidable from one object; each names its rule, fix and source. Rules that need other objects "
+                "or that the API server already enforces are listed with the reason. Nothing is applied.",
+                PolicyGenerateIn,
+                self.policy_generate,
+            ),
+            ToolSpec(
+                "posture_scan",
+                "Attack paths in manifests",
+                "Rank the paths from an exposure (Route, Ingress, LoadBalancer or NodePort Service) to what a "
+                "compromised pod could do: node access (privileged, hostPath, host namespaces) or Kubernetes API "
+                "rights through its ServiceAccount token (read Secrets, exec, create workloads, escalate). Score = "
+                "exposure x blast radius; every step names the field that proves it, with a fix. Secret objects are "
+                "dropped unread.",
+                PostureScanIn,
+                self.posture_scan,
+            ),
+            ToolSpec(
+                "build_diagnose",
+                "Diagnose a failed build log",
+                "Read a failed GitHub Actions, Jenkins, Tekton or OpenShift build log: the failing step (and why it is "
+                "that step), the error line and its template, the cause class (dependency fetch, compile, test, image "
+                "push, registry auth, quota, timeout, out of memory, permissions) with its evidence, reported issues, "
+                "team memory and the fix for that CI system. Read-only.",
+                BuildDiagnoseIn,
+                self.build_diagnose,
+            ),
+            ToolSpec(
+                "rhacs_compare",
+                "Compare RHACS policies with kube-noob's rules",
+                "Map every policy in an RHACS (StackRox) export to kube-noob rules by name and criteria: overlap (same "
+                "setting, with severity and scope differences), related (the same risk seen through image, runtime or "
+                "API-event data), gap (a deploy-time setting kube-noob has no rule for), outside (image contents, "
+                "runtime behaviour, API events, label conventions) or unexplained (criteria kube-noob does not know). "
+                "Lists disagreements and the rules no policy covers. Local only.",
+                RhacsCompareIn,
+                self.rhacs_compare,
+            ),
+            ToolSpec(
+                "vuln_report",
+                "Assess scanner output: VEX, exploitation, reachability",
+                "Read Trivy or Grype JSON, CycloneDX or SPDX SBOMs, or an RHACS image scan into one finding per "
+                "package, version and CVE (with the fix version); apply Red Hat VEX (a not-affected or already-fixed "
+                "finding drops out, citing the statement); mark CISA KEV entries; and, with the manifests, rank by "
+                "exposure, privileges and RBAC reach with each finding's attack path. SBOM packages are matched "
+                "against Red Hat VEX. Local only.",
+                VulnReportIn,
+                self.vuln_report,
+            ),
+            ToolSpec(
+                "code_report",
+                "Assess SAST findings: where the code ships and who runs it",
+                "Read the SARIF that Semgrep, Bandit, SpotBugs/FindSecBugs, ESLint or CodeQL wrote (kube-noob has no "
+                "analysis engine of its own): one finding per file, line and CWE across tools, suppressed and fixed "
+                "results excluded with the reason, lint kept apart. With Containerfiles, each file is followed into "
+                "the images that ship it (copied or built; tests and tools are not shipped); with manifests, findings "
+                "rank by exposure and privileges with the attack path. With scanner reports and dependency files, "
+                "each language-package vulnerability points at the file and line to change. Local only.",
+                CodeReportIn,
+                self.code_report,
+            ),
+            ToolSpec(
+                "threat_model",
+                "STRIDE threat model of an application",
+                "From manifests: entry points, trust boundaries, data stores and identities, and per element the "
+                "STRIDE threats with status (open, mitigated, not assessed), the evidence, the kube-noob rules, "
+                "generated admission policies and RHACS policies that mitigate each, and MITRE ATT&CK for Containers "
+                "technique ids. Deterministic; Secrets are dropped unread.",
+                ThreatModelIn,
+                self.threat_model,
+            ),
+            ToolSpec(
+                "posture_report",
+                "Latest drift and policy report",
+                "The newest daily report in this install's data folder: objects added, removed and changed since the "
+                "previous snapshot (with the fields that changed), findings new and fixed, and open findings by "
+                "namespace, owner and rule. Local data only.",
+                EmptyIn,
+                self.posture_report,
             ),
             ToolSpec(
                 "check_network_policy",
@@ -1063,6 +1962,15 @@ class Toolkit:
                     open_world=True,
                 ),
                 ToolSpec(
+                    "cluster_posture_scan",
+                    "Attack paths in the cluster (live, read-only)",
+                    "Read Routes, Ingresses, Services, workloads, ServiceAccounts, RBAC and SCCs from the cluster "
+                    "(never Secrets) and rank the attack paths like posture_scan.",
+                    ClusterPostureIn,
+                    self.cluster_posture_scan,
+                    open_world=True,
+                ),
+                ToolSpec(
                     "cluster_check_namespace",
                     "Check a namespace now (live, read-only)",
                     "Run one watch poll on a namespace: find crash loops, OOM kills, image pulls, policy denials, "
@@ -1081,6 +1989,54 @@ class Toolkit:
                     open_world=True,
                 ),
             ]
+        if importlib.util.find_spec("kube_noob.build.containerfile") is not None:  # not in the Claude plugin
+            s.append(
+                ToolSpec(
+                    "containerfile_audit",
+                    "Audit a Containerfile",
+                    "Static checks of a Containerfile or Dockerfile: base images pinned by digest, a non-root USER, "
+                    "no credentials in ENV, ARG, LABEL, RUN or copied files, no download piped into a shell, package "
+                    "caches cleaned, a health check or probes, a multi-stage build. Each finding names its fix and "
+                    "source. The CLI (kube-noob build audit) also reads the build context and the built image's "
+                    "layers.",
+                    ContainerfileIn,
+                    self.containerfile_audit,
+                )
+            )
+        if _has_module("kube_noob.mustgather.analyse") and (  # not in the Claude plugin
+            not self.shared or self.settings.must_gather.allowed_dir is not None
+        ):
+            s.append(
+                ToolSpec(
+                    "analyze_must_gather",
+                    "Analyse a must-gather",
+                    "Open an OpenShift must-gather (or oc adm inspect output) safely and say what is wrong, most "
+                    "severe first: the cluster version and update, cluster operators, nodes, machine config pools, "
+                    "OLM operators, pods, warning events and etcd log hints. Each finding has its evidence file, its "
+                    "signals, read-only commands to confirm it, and the known OpenShift bugs and team memory entries "
+                    "that match it for the version the cluster runs. Nothing is extracted or run and Secrets are "
+                    "never read."
+                    + (
+                        f" Paths must be inside {self.settings.must_gather.allowed_dir}."
+                        if self.settings.must_gather.allowed_dir
+                        else " Local: reads the path you give on this machine."
+                    ),
+                    MustGatherIn,
+                    self.analyze_must_gather,
+                )
+            )
+        if self.settings.rhacs.enabled and importlib.util.find_spec("kube_noob.rhacs_central") is not None:
+            s.append(
+                ToolSpec(
+                    "rhacs_compare_live",
+                    "Compare Central's RHACS policies (live, read-only)",
+                    "Read the policies from RHACS Central (rhacs.endpoint; GET only) and "
+                    "compare them like rhacs_compare.",
+                    RhacsLiveIn,
+                    self.rhacs_compare_live,
+                    open_world=True,
+                )
+            )
         if self.settings.web_enabled:
             s.append(
                 ToolSpec(
@@ -1093,6 +2049,38 @@ class Toolkit:
                     open_world=True,
                 )
             )
+        if self.settings.memory.paths:
+            s.append(
+                ToolSpec(
+                    "memory_match",
+                    "Search your team's memory",
+                    "Approved entries from your team's memory repositories (memory.paths) for an error, symptom or "
+                    "Alertmanager payload: signals first, then distinctive words. Each entry says whether it is a fix, "
+                    "a runbook, something tried that did not work, or retired for the given version, with how often "
+                    "it was applied and resolved. Cite as [mem:MEM-<n>].",
+                    MemoryMatchIn,
+                    self.memory_match,
+                )
+            )
+            s.append(
+                ToolSpec(
+                    "memory_propose",
+                    "Propose a memory entry",
+                    "Turn a confirmed fix (or a fix that did not work) into a memory entry: returns the YAML and its "
+                    "suggested path. "
+                    + (
+                        "This server never writes: the user opens a pull request with the YAML."
+                        if self.shared
+                        else "Saves it as proposed (never commits) only with confirmed_by_user after the user "
+                        "read it and asked to save it."
+                    ),
+                    MemoryProposeIn,
+                    self.memory_propose,
+                    read_only=self.shared,
+                )
+            )
         if self.shared:
             s = [t for t in s if t.name not in {"learning_note_add", "learning_profile_set", "incident_confirm"}]
-        return s
+        from kube_noob.tiers import offered
+
+        return [t for t in s if offered(t, self.settings)]

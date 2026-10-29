@@ -1,0 +1,32 @@
+# Your own problems as a test: kube-noob selftest --cases examples/problems.yaml
+# Each case has an `input` (a question, events, logs, an alert payload or manifests) and, once you know the right
+# answer, an `expect`. Cases without `expect` are answered and listed for you to label.
+cases:
+  - id: pull-secret-other-namespace
+    source: launch post comment, 2026-10-28
+    input: "ImagePullBackOff when the pull secret sits in a different namespace from the pod"
+    platform: openshift
+    expect:
+      playbook: DBG-PULLSECRET
+      mention: [system:image-puller, oc secrets link]
+      notMention: ["-n from"]
+  - id: pull-secret-events
+    input: |
+      Warning  FailedToRetrieveImagePullSecret  kubelet  Unable to retrieve some image pull secrets (regcred); attempting to pull the image may not succeed.
+      Warning  Failed                           kubelet  Error: ImagePullBackOff
+    expect:
+      playbook: DBG-PULLSECRET
+      mention: [regcred]
+  - id: helm-locked-release
+    input: "helm upgrade failed: another operation (install/upgrade/rollback) is in progress"
+    expect:
+      playbook: DBG-HELM-LOCK
+      docs: [helm-troubleshooting]
+  - id: etcd-after-upgrade
+    input: "etcd leader changed frequently, apiserver timeouts after upgrade"
+    version: "4.21.0"
+    expect:
+      playbook: DBG-ETCD
+      issues: [OCPBUGS-73881]
+  - id: label-me
+    input: "route returns 503 application is not available"

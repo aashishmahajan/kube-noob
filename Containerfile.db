@@ -1,0 +1,30 @@
+# kube-noob-db: the public data image (requirements R1.3). It holds one archive, kube-noob-db.tgz, built by
+# `kube-noob corpus db-bundle` and checked by `kube-noob corpus db-check`: the documentation corpus with its licenses,
+# release history and the release-note known issues. No Red Hat Jira data, nothing that may not be redistributed.
+# The Helm chart (db.enabled) copies the archive with cp in an init container; kube-noob serve imports it on start.
+# Build:  kube-noob corpus db-bundle -o dist/kube-noob-db/kube-noob-db.tgz
+#         tar -xzf dist/kube-noob-db/kube-noob-db.tgz -C dist/kube-noob-db ATTRIBUTION.md
+#         docker build -f Containerfile.db -t kube-noob-db:dev .
+# CI resolves BASE_IMAGE to an immutable digest at build time.
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+FROM ${BASE_IMAGE}
+ARG BUILT_AT=unknown
+ARG VERSION=0.5.0
+LABEL name="kube-noob-db" \
+      vendor="kube-noob project" \
+      version="${VERSION}" \
+      release="${BUILT_AT}" \
+      summary="Public data for kube-noob: documentation with licenses, release history, known issues" \
+      description="The redistributable kube-noob database, rebuilt daily and checked to hold no Jira data and nothing that may not be shared. Sources and licenses: /kube-noob-db/ATTRIBUTION.md." \
+      maintainer="kube-noob maintainers (https://github.com/aashishmahajan/kube-noob)" \
+      org.opencontainers.image.title="kube-noob-db" \
+      org.opencontainers.image.created="${BUILT_AT}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/aashishmahajan/kube-noob" \
+      org.opencontainers.image.licenses="CC-BY-4.0 AND Apache-2.0 AND MIT" \
+      io.k8s.display-name="kube-noob-db"
+COPY --chown=0:0 --chmod=0444 dist/kube-noob-db/kube-noob-db.tgz dist/kube-noob-db/ATTRIBUTION.md /kube-noob-db/
+COPY LICENSE NOTICE /licenses/
+USER 1001
+CMD ["ls", "-l", "/kube-noob-db"]

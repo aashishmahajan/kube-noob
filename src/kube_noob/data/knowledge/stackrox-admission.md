@@ -5,6 +5,9 @@ tags: [stackrox, rhacs, admission, debugging]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [rhacs, stackrox, acs, roxctl, central, sensor, collector, scanner, securedcluster, admission-control]
 sources:
   - {title: "stackrox secured-cluster Helm templates (admission-controller.yaml)", url: "https://github.com/stackrox/stackrox/tree/master/image/templates/helm/stackrox-secured-cluster/templates", license: Apache-2.0}
   - {title: "stackrox CHANGELOG 4.9.0 (ROX-30278, ROX-30279) and SecuredCluster API", url: "https://github.com/stackrox/stackrox/blob/master/CHANGELOG.md", license: Apache-2.0}

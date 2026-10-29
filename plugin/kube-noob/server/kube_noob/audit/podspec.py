@@ -66,8 +66,11 @@ def pod_template(doc: Document) -> PodTemplate | None:
     return PodTemplate(doc=doc, spec=spec, path=path)
 
 
-def containers(pod: PodTemplate, include_init: bool = True) -> Iterator[ContainerRef]:
-    keys = ("containers", "initContainers", "ephemeralContainers") if include_init else ("containers",)
+def containers(pod: PodTemplate, include_init: bool = True, *, ephemeral: bool = True) -> Iterator[ContainerRef]:
+    """App containers, then (``include_init``) init containers and, unless ``ephemeral`` is False, ephemeral ones."""
+    keys: tuple[str, ...] = ("containers", "initContainers", "ephemeralContainers") if include_init else ("containers",)
+    if not ephemeral:
+        keys = tuple(k for k in keys if k != "ephemeralContainers")
     for key in keys:
         items = pod.spec.get(key)
         if not isinstance(items, list):

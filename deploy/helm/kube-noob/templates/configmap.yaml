@@ -25,6 +25,43 @@ data:
         {{- range .Values.rbac.namespaces }}
         - {{ . | quote }}
         {{- end }}
+    posture:
+      reportEnabled: {{ .Values.posture.report.enabled }}
+      keep: {{ .Values.posture.report.keep }}
+      {{- if ne .Values.rbac.scope "cluster" }}
+      namespaces:
+        - {{ .Release.Namespace | quote }}
+        {{- range .Values.rbac.namespaces }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+    rhacs:
+      enabled: {{ .Values.rhacs.enabled }}
+      {{- if .Values.rhacs.enabled }}
+      endpoint: {{ .Values.rhacs.endpoint | quote }}
+      maxPolicies: {{ .Values.rhacs.maxPolicies }}
+      {{- if .Values.rhacs.caConfigMap.name }}
+      caFile: /etc/kube-noob-rhacs-ca/{{ .Values.rhacs.caConfigMap.key }}
+      {{- end }}
+      {{- end }}
+    probe:
+      enabled: {{ .Values.probe.enabled }}
+    dryRun:
+      enabled: {{ .Values.dryRun.enabled }}
+    itsm:
+      writeEnabled: {{ .Values.itsm.writeEnabled }}
+    notify:
+      enabled: {{ .Values.notify.enabled }}
+    gate:
+      enabled: {{ .Values.gate.enabled }}
+    {{- if .Values.mustGather.pvc.claimName }}
+    mustGather:
+      allowedDir: /srv/kube-noob/must-gather
+    {{- end }}
+    {{- if ne (include "kube-noob.memorySource" .) "none" }}
+    memory:
+      paths: [/srv/kube-noob/memory]
+    {{- end }}
     jira:
       syncEnabled: {{ .Values.jira.sync.enabled }}
       projects: {{ .Values.jira.sync.projects | quote }}

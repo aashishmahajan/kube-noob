@@ -1,0 +1,13 @@
+rule: KN-ST003
+good: |
+  apiVersion: storage.k8s.io/v1
+  kind: StorageClass
+  metadata: {name: fast}
+  provisioner: ebs.csi.aws.com
+  volumeBindingMode: WaitForFirstConsumer
+bad: |
+  apiVersion: storage.k8s.io/v1
+  kind: StorageClass
+  metadata: {name: fast}
+  provisioner: ebs.csi.aws.com
+  volumeBindingMode: Immediate

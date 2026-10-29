@@ -1,0 +1,319 @@
+# Golden questions: openshift. Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository); graded against kube-noob by an
+# independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
+# ocp-020 (a kubeadm init question) was dropped: kubeadm is in scope for kube-noob, so it was not out of scope.
+# Every item is asked with platform: openshift, as an OpenShift or ROSA user's kube-noob is configured.
+- id: ocp-001
+  technology: openshift
+  kind: error
+  question: Our S2I builds in the dev project started failing at the push step with 'requested access to the resource is denied'.
+    The push secret is fine and other projects push without trouble. What should I look at?
+  answer: The project has most likely hit one of its image-related quotas. Run `oc describe quota` in that project to compare
+    limits with current usage, then free up usage or get the quota raised.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/builds-troubleshooting-access-resources.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/builds-troubleshooting-access-resources.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-BUILD-IMAGE-QUOTA
+- id: ocp-002
+  technology: openshift
+  kind: error
+  question: 'Bare-metal IPI install, nodes keep logging runtime network not ready: NetworkReady=false reason:NetworkPluginNotReady
+    ... Missing CNI default network. Where do I start debugging?'
+  answer: The Cluster Network Operator should deploy the CNI early in install. Check `oc get all -n openshift-network-operator`,
+    confirm the `network.config.openshift.io` cluster object exists (if not, the installer never created it), and read the
+    network-operator pod logs.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/ipi-install-troubleshooting-runtime-network-not-ready.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/ipi-install-troubleshooting-runtime-network-not-ready.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-OCP-CNI-NOT-READY
+- id: ocp-003
+  technology: openshift
+  kind: error
+  question: 'A Subscription in our ops namespace never produces a CSV. The InstallPlan message ends with: more than one operator
+    group(s) are managing this namespace count=2. What is wrong?'
+  answer: An install plan needs exactly one OperatorGroup in its namespace. Two exist here, so the CSV is not generated. Remove
+    the extra OperatorGroup so only one remains and let the install plan proceed.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/olm-operatorgroups-troubleshooting.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/olm-operatorgroups-troubleshooting.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-OLM-OPERATORGROUP
+- id: ocp-004
+  technology: openshift
+  kind: error
+  question: 'I ran oc patch etcd/cluster --type=merge -p ''{"spec": {"backendQuotaGiB": 8}}'' on a cluster currently at 10
+    and got: etcd backendQuotaGiB may not be decreased. What values does it accept?'
+  answer: 'The etcd disk quota (a Technology Preview feature) takes whole numbers from 8 to 32 GiB and can only be raised.
+    Check the current value with `oc describe etcd/cluster | grep "Backend Quota"` and patch to a higher integer, at most
+    32.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/etcd-increase-db-troubleshooting.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/etcd-increase-db-troubleshooting.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-etcd-db-size#3'
+- id: ocp-005
+  technology: openshift
+  kind: error
+  question: 'oc adm prune images dies with: error communicating with registry: Get https://172.30.30.30:5000/healthz: http:
+    server gave HTTP response to HTTPS client. How do I get pruning to run?'
+  answer: The prune client tries HTTPS but the registry answers in plain HTTP, so it is not secured. The recommended fix is
+    to secure the registry. As a discouraged workaround you can append `--force-insecure` to the prune command.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/pruning-images-troubleshooting.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/pruning-images-troubleshooting.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-PRUNE-REGISTRY
+- id: ocp-006
+  technology: openshift
+  kind: error
+  question: 'My PVC on an LVMS cluster sits in Pending, and oc describe pvc shows: ProvisioningFailed ... storageclass.storage.k8s.io
+    "lvms-vg1" not found. What does that mean and what else can leave a PVC pending?'
+  answer: 'The StorageClass the claim references does not exist (name or class mismatch). Other Pending causes: insufficient
+    compute resources, network problems, node selector mismatch, no free PVs, or the PV''s node being NotReady. Use `oc get
+    pvc` and `oc describe pvc` events.'
+  source:
+    repo: openshift/openshift-docs
+    path: modules/lvms-troubleshooting-investigating-a-pvc-stuck-in-the-pending-state.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/lvms-troubleshooting-investigating-a-pvc-stuck-in-the-pending-state.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-PVC-PENDING
+- id: ocp-007
+  technology: openshift
+  kind: error
+  question: One worker went NotReady after a reboot and no pod will start on it. Events say Failed to create pod sandbox ...
+    error recreating the missing symlinks, and I also see can't stat lower layer. Is there a supported way to reset container
+    storage?
+  answer: Yes, wipe the CRI-O storage. Cordon and drain the node, stop kubelet, force-remove pods with crictl, stop crio,
+    run `crio wipe -f`, restart crio and kubelet, confirm the node is Ready, then `oc adm uncordon` it.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/cleaning-crio-storage.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/cleaning-crio-storage.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - DBG-CRIO-STORAGE
+- id: ocp-008
+  technology: openshift
+  kind: error
+  question: 'The serving cert for one of our services will not regenerate. The service''s serving-cert-generation-error annotation
+    says: secret/ssl-key references serviceUID 62ad25ca-..., which does not match 77b6dd80-.... How do I force it to regenerate?'
+  answer: The secret was issued for a service that no longer exists or has a different UID. Delete the old secret, then remove
+    the serving-cert-generation-error and serving-cert-generation-error-num annotations from the service with `oc annotate
+    service <name> <annotation>-` (trailing dash).
+  source:
+    repo: openshift/openshift-docs
+    path: modules/nodes-pods-secrets-troubleshooting.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/nodes-pods-secrets-troubleshooting.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-service-serving-certs#1'
+- id: ocp-009
+  technology: openshift
+  kind: howto
+  question: We added UPI bare-metal workers. They are not listed by oc get nodes yet, and oc logs against the new ones fails
+    later on. How do I approve their certificate signing requests, and in what order?
+  answer: Run `oc get csr` and approve pending client CSRs with `oc adm certificate approve <csr_name>` (or pipe all pending
+    ones to it). Then list again and approve the kubelet serving CSRs that appear next. Do this within an hour; UPI clusters
+    need an auto-approver for later serving CSRs.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/installation-approve-csrs.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/installation-approve-csrs.adoc'
+  outOfScope: false
+  platform: openshift
+  status: miss
+  gap: 'doc: UPI worker join: oc get csr, oc adm certificate approve client CSRs first, then serving CSRs'
+- id: ocp-010
+  technology: openshift
+  kind: howto
+  question: The PodSecurityViolation alert keeps firing but never says which workloads are the problem. How do I find the
+    offending pods?
+  answer: Gather API server audit logs with `oc adm must-gather -- /usr/bin/gather_audit_logs`, then zgrep the kube-apiserver
+    logs for the pod-security audit-violations annotation and pipe through jq to list namespace and pod names. You need jq
+    and cluster-admin.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/security-context-constraints-psa-alert-eval.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-psa-alert-eval.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-pod-security-admission#2'
+- id: ocp-011
+  technology: openshift
+  kind: howto
+  question: How do I make a Deployment always run under one specific custom SCC so a different SCC can't be chosen for it,
+    and how can I check which SCC a pod actually got?
+  answer: Set the `openshift.io/required-scc` annotation to the SCC name in the pod template of the Deployment (not on a live
+    pod). The SCC must exist and be usable by the creator or service account, else admission fails. Verify via the pod's `openshift.io/scc`
+    annotation.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/security-context-constraints-requiring.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-requiring.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-scc#4'
+- id: ocp-012
+  technology: openshift
+  kind: howto
+  question: Our cluster update has shown a 'Working towards' message in ClusterVersion for hours. Which commands show what
+    is holding it up?
+  answer: Inspect `oc get clusterversion -o yaml` (status.conditions), list operators still progressing with `oc get co`,
+    and read `.status.history` via jsonpath; a missing or stalled history entry means the update timed out. Typical updates
+    take roughly 90 to 180 minutes.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/core-cluster-upgrade-ts-update-stuck.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/core-cluster-upgrade-ts-update-stuck.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-cluster-update-status#3'
+- id: ocp-013
+  technology: openshift
+  kind: howto
+  question: UPI install on bare metal and the bootstrap never finishes. How do I collect logs from the bootstrap node and
+    confirm it actually received its Ignition file?
+  answer: SSH as core and run `journalctl -b -f -u bootkube.service`, plus podman logs for its containers. Check the Ignition
+    URL with `curl -I` (200 expected) and the HTTP server access log. Confirm api.<cluster>.<domain> resolves and the load
+    balancer forwards 6443 to bootstrap and masters.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/gathering-bootstrap-diagnostic-data.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/gathering-bootstrap-diagnostic-data.adoc'
+  outOfScope: false
+  platform: openshift
+  status: miss
+  gap: 'doc: collect bootstrap logs via ssh core, journalctl -b -f -u bootkube.service and podman logs'
+- id: ocp-014
+  technology: openshift
+  kind: concept
+  question: What is the difference between Available, Progressing, Degraded and Upgradeable on a ClusterOperator, and does
+    Degraded=True mean my applications are down?
+  answer: Available=False means part of the operand is non-functional. Progressing=True means it is moving between steady
+    states. Degraded marks a persistent mismatch with desired state; if the Operator is still Available, workloads are not
+    necessarily affected. Upgradeable=False blocks only minor updates.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/determining-upgrade-viability-conditiontype.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/determining-upgrade-viability-conditiontype.adoc'
+  outOfScope: false
+  platform: openshift
+  status: miss
+  gap: 'doc: ClusterOperator condition types Available, Progressing, Degraded and Upgradeable defined side by side'
+- id: ocp-015
+  technology: openshift
+  kind: concept
+  question: Conceptually, what does the bootstrap machine do during an OpenShift installation, and when does it go away?
+  answer: It serves the remote resources the control plane machines fetch to boot, helps them form etcd, and runs a temporary
+    control plane that schedules the production one. Once the production control plane takes over and the platform components
+    are added, the installer shuts the bootstrap machine down.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/determining-where-installation-issues-occur.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/determining-where-installation-issues-occur.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-install-troubleshooting#0'
+- id: ocp-016
+  technology: openshift
+  kind: concept
+  question: Why do some of my namespaces get pod-security.kubernetes.io warn and audit labels that nobody on my team set?
+    What decides the profile?
+  answer: A controller syncs the warn and audit labels automatically. It maps the SCCs that namespace service accounts may
+    use to pod security profiles and sets the labels to the most privileged profile found. A user's own privileges for directly
+    applied pods are not considered.
+  source:
+    repo: openshift/openshift-docs
+    path: modules/security-context-constraints-psa-synchronization.adoc
+    commit: 164957757519b01359989b533feac5ecab551530
+    url: 'https://github.com/openshift/openshift-docs/blob/164957757519b01359989b533feac5ecab551530/modules/security-context-constraints-psa-synchronization.adoc'
+  outOfScope: false
+  platform: openshift
+  status: pass
+  expect:
+  - 'kn:ocp-pod-security-admission#0'
+- id: ocp-017
+  technology: openshift
+  kind: out-of-scope
+  question: We are evaluating OpenShift later, but today our Argo CD on a plain kubeadm cluster shows the app as OutOfSync
+    with a ComparisonError after I added a Helm values file. How do I fix the diff?
+  answer: 'Outside this assistant''s scope: this is an upstream Argo CD (GitOps tooling) problem on a vanilla Kubernetes cluster,
+    not an OpenShift Container Platform troubleshooting issue.'
+  source: {}
+  outOfScope: true
+  platform: openshift
+  status: abstain
+- id: ocp-018
+  technology: openshift
+  kind: out-of-scope
+  question: 'Our Spring Boot service running in a pod on OpenShift throws java.lang.OutOfMemoryError: Java heap space under
+    load. Which -Xmx and GC flags should I use?'
+  answer: 'Outside this assistant''s scope: JVM heap and garbage-collector tuning is application and Java runtime configuration,
+    not OpenShift platform troubleshooting.'
+  source: {}
+  outOfScope: true
+  platform: openshift
+  status: abstain
+- id: ocp-019
+  technology: openshift
+  kind: out-of-scope
+  question: Istio sidecar injection is not happening on our GKE cluster even though the namespace has istio-injection=enabled.
+    We also run OpenShift elsewhere, but this one is on Google Cloud. What do I check?
+  answer: 'Outside this assistant''s scope: this is an upstream Istio service mesh issue on Google Kubernetes Engine (GKE),
+    not OpenShift Container Platform.'
+  source: {}
+  outOfScope: true
+  platform: openshift
+  status: abstain

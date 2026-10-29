@@ -1,0 +1,11 @@
+[fetch-source : clone] + CHECKOUT_DIR=/workspace/output/
+[fetch-source : clone] {"level":"info","ts":1730023872.12,"caller":"git/git.go:176","msg":"Successfully cloned https://github.com/acme/web.git @ 1f2e3d4 (grafted, HEAD) in path /workspace/output/"}
+[fetch-source : clone] Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError("HTTPSConnectionPool(host='pypi.org', port=443): Read timed out. (read timeout=15)")'
+[unit-test : run-tests] + mvn -B verify
+[unit-test : run-tests] [INFO] Running com.acme.orders.OrderServiceTest
+[unit-test : run-tests] [ERROR] Tests run: 18, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 2.311 s <<< FAILURE! -- in com.acme.orders.OrderServiceTest
+[unit-test : run-tests] [ERROR] com.acme.orders.OrderServiceTest.cancelsExpiredOrders -- Time elapsed: 0.042 s <<< FAILURE!
+[unit-test : run-tests] org.opentest4j.AssertionFailedError: expected: <CANCELLED> but was: <OPEN>
+[unit-test : run-tests] [ERROR] Tests run: 120, Failures: 1, Errors: 0, Skipped: 2
+[unit-test : run-tests] [ERROR] There are test failures.
+task unit-test failed: "step-run-tests" exited with code 1. Run tkn tr desc app-ci-run-x7k2p-06-unit-test for more details

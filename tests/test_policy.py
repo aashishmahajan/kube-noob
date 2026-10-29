@@ -635,6 +635,8 @@ def test_cli_drops_terminal_escapes(capsys: pytest.CaptureFixture[str]) -> None:
         "unable to validate against any security context constraint: [" * 3_200,
         "x" * 200_000 + " max limit to request ratio",
         'User "' * 33_000,
+        ("error " + "a-" * 40_000 + "\n") * 3,  # redaction was quadratic on long dashed tokens (fixed in loop S1)
+        "--" + "a." * 100_000,
     ],
 )
 def test_explain_stays_fast_on_hostile_input(text: str) -> None:

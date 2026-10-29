@@ -37,6 +37,17 @@ helm test kube-noob -n kube-noob
 
 Clients connect to `http://kube-noob.kube-noob.svc:8080/mcp` with `Authorization: Bearer <token>`.
 
+Callers that do not speak MCP (CI jobs, scripts, a chat bot) use the REST routes beside it, with the same token and
+the same tools: `POST /v1/insight`, `/v1/diagnose`, `/v1/audit`, `/v1/known-issues`, `/v1/policy/reach`,
+`/v1/memory/match` (with `memory.source`), `/v1/must-gather` (with `mustGather.pvc.claimName`), and `GET` or `POST
+/v1/reports`. `GET /v1/openapi.json` describes them ([docs/api/openapi.json](api/openapi.json)); `GET /v1` lists the
+routes this install offers. Bodies are JSON objects with the tool's arguments; a POST must be `application/json`.
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"text": "0/3 nodes are available: 3 Insufficient memory."}' http://kube-noob.kube-noob.svc:8080/v1/diagnose
+```
+
 ## 2. Sidecar mode
 
 [deploy/sidecar/app-with-kube-noob-sidecar.yaml](../deploy/sidecar/app-with-kube-noob-sidecar.yaml) is a complete

@@ -1,0 +1,15 @@
+rule: KN-ST005
+good: |
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata: {name: data, namespace: shop}
+  spec:
+    accessModes: [ReadWriteOnce]
+    storageClassName: gp3-csi
+    resources: {requests: {storage: 1Gi}}
+bad: |
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata: {name: data, namespace: shop}
+  spec:
+    accessModes: [ReadWriteOnce]

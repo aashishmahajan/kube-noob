@@ -16,7 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
-# file -> regex patterns whose group "v" is the version to replace
+# file -> regex patterns whose group "v" is the version to replace, or group "m" its MAJOR.MINOR (an image tag that
+# follows the newest release of a minor)
 TARGETS: dict[str, tuple[str, ...]] = {
     "src/kube_noob/__init__.py": (r'__version__ = "(?P<v>[^"]+)"',),
     "server.json": (r'"version": "(?P<v>[^"]+)"',),
@@ -29,6 +30,14 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "deploy/helm/kube-noob/Chart.yaml": (r"^version: (?P<v>\S+)$", r'^appVersion: "(?P<v>[^"]+)"$'),
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),
     "Containerfile": (r"^ARG VERSION=(?P<v>\S+)$",),
+    "deploy/tekton/kube-noob-gate.yaml": (
+        r'app\.kubernetes\.io/version: "(?P<v>[^"]+)"',
+        r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",
+    ),
+    "deploy/gitlab/kube-noob-gate.gitlab-ci.yml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),
+    "docs/install.md": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<m>\d+\.\d+)(?![.\d])",),
+    # the owner's commands for the OpenShift Helm catalog pull request: every version in it is the release's
+    "docs/openshift-catalog.md": (r"(?<![\d.])(?P<v>\d+\.\d+\.\d+)(?!\.?\d)",),
 }
 
 
@@ -60,7 +69,8 @@ def bump(root: Path, new: str, note: str) -> list[str]:
             rx = re.compile(pat, re.MULTILINE)
             if not rx.search(updated):
                 raise ValueError(f"{rel}: pattern {pat!r} not found")
-            updated = rx.sub(lambda m: m.group(0).replace(m.group("v"), new), updated)
+            key, value = ("m", ".".join(new.split(".")[:2])) if "m" in rx.groupindex else ("v", new)
+            updated = rx.sub(lambda m, k=key, v=value: m.group(0).replace(m.group(k), v), updated)
         if updated != text:
             path.write_text(updated)
             changed.append(rel)

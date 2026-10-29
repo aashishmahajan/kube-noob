@@ -1,0 +1,222 @@
+Issue key,Summary,Description,Status,Resolution,Resolved,Assignee,Comment,Comment
+OPS-100,orders-api pods OOMKilled during the nightly batch import (case 0),"Caller: Jane Doe
+Pods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,01/Oct/26 10:00 AM,Jane Doe,"01/Oct/26 9:00 AM;557058:abc0;2026-10-01 09:12:41 - Jane Doe (Work notes)
+Root cause: the import loaded the whole catalogue into memory. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",01/Oct/26 9:01 AM;557058:abc1;Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.
+OPS-101,ImagePullBackOff for payments after the registry move (case 1),"Caller: Raj Patel
+Failed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,02/Oct/26 10:00 AM,Raj Patel,"02/Oct/26 9:00 AM;557058:abc0;2026-10-02 09:12:41 - Raj Patel (Work notes)
+Cause was a pull secret that still pointed at the old registry. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",02/Oct/26 9:01 AM;557058:abc1;Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.
+OPS-102,etcd leader changes every few minutes after the 4.21.0 update (case 2),"Caller: Ana Lima
+etcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,03/Oct/26 10:00 AM,Ana Lima,"03/Oct/26 9:00 AM;557058:abc0;2026-10-03 09:12:41 - Ana Lima (Work notes)
+Root cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.","03/Oct/26 9:01 AM;557058:abc1;Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+OPS-103,Route returns 503 for shop frontend (case 3),"Caller: Jane Doe
+The router answers 503 Service Unavailable for shop.apps.example.test.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,04/Oct/26 10:00 AM,Jane Doe,"04/Oct/26 9:00 AM;557058:abc0;2026-10-04 09:12:41 - Jane Doe (Work notes)
+Cause: the Service selected no pods. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",04/Oct/26 9:01 AM;557058:abc1;The Service selector used app=front instead of app=frontend; corrected the selector.
+OPS-104,PVC stuck Pending for the reporting database (case 4),"Caller: Raj Patel
+persistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,05/Oct/26 10:00 AM,Raj Patel,"05/Oct/26 9:00 AM;557058:abc0;2026-10-05 09:12:41 - Raj Patel (Work notes)
+Root cause was a claim without a storage class on a cluster with no default class. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",05/Oct/26 9:01 AM;557058:abc1;Set storageClassName gp3-csi on the claim and recreated it.
+OPS-105,Pods rejected by SCC in the batch namespace (case 5),"Caller: Ana Lima
+unable to validate against any security context constraint: runAsUser 0 is not an allowed user.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,06/Oct/26 10:00 AM,Ana Lima,"06/Oct/26 9:00 AM;557058:abc0;2026-10-06 09:12:41 - Ana Lima (Work notes)
+Cause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",06/Oct/26 9:01 AM;557058:abc1;Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.
+OPS-106,DNS lookups time out from the analytics pods (case 6),"Caller: Jane Doe
+dial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,07/Oct/26 10:00 AM,Jane Doe,"07/Oct/26 9:00 AM;557058:abc0;2026-10-07 09:12:41 - Jane Doe (Work notes)
+Root cause: a default-deny egress policy blocked DNS. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",07/Oct/26 9:01 AM;557058:abc1;Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.
+OPS-107,Certificate expired on the internal API route (case 7),"Caller: Raj Patel
+x509: certificate has expired or is not yet valid for api.internal.example.test.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,08/Oct/26 10:00 AM,Raj Patel,"08/Oct/26 9:00 AM;557058:abc0;2026-10-08 09:12:41 - Raj Patel (Work notes)
+Cause was a manually created certificate that nobody renewed. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",08/Oct/26 9:01 AM;557058:abc1;Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.
+OPS-108,Node NotReady after kubelet disk pressure (case 8),"Caller: Ana Lima
+Node worker-3 NotReady; kubelet reports DiskPressure and evicts pods.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,09/Oct/26 10:00 AM,Ana Lima,"09/Oct/26 9:00 AM;557058:abc0;2026-10-09 09:12:41 - Ana Lima (Work notes)
+Root cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",09/Oct/26 9:01 AM;557058:abc1;Cleaned unused images and raised the image GC thresholds on the machine config pool.
+OPS-109,Quota exceeded when scaling the checkout service (case 9),"Caller: Jane Doe
+exceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,10/Oct/26 10:00 AM,Jane Doe,"10/Oct/26 9:00 AM;557058:abc0;2026-10-01 09:12:41 - Jane Doe (Work notes)
+Cause: limits far above real usage consumed the quota. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",10/Oct/26 9:01 AM;557058:abc1;Raised the namespace quota after the capacity review and set requests to match real usage.
+OPS-110,HAProxy router pods restart at maxconn (case 10),"Caller: Raj Patel
+Router pods restarted by the liveness probe when HAProxy reaches maxconn under load.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,11/Oct/26 10:00 AM,Raj Patel,"11/Oct/26 9:00 AM;557058:abc0;2026-10-02 09:12:41 - Raj Patel (Work notes)
+Root cause: maxconn too low for the client traffic. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",11/Oct/26 9:01 AM;557058:abc1;Raised maxConnections in the IngressController tuningOptions to 40000.
+OPS-111,orders-api pods OOMKilled during the nightly batch import (case 11),"Caller: Ana Lima
+Pods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,12/Oct/26 10:00 AM,Ana Lima,"12/Oct/26 9:00 AM;557058:abc0;2026-10-03 09:12:41 - Ana Lima (Work notes)
+Root cause: the import loaded the whole catalogue into memory. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",12/Oct/26 9:01 AM;557058:abc1;Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.
+OPS-112,ImagePullBackOff for payments after the registry move (case 12),"Caller: Jane Doe
+Failed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,13/Oct/26 10:00 AM,Jane Doe,"13/Oct/26 9:00 AM;557058:abc0;2026-10-04 09:12:41 - Jane Doe (Work notes)
+Cause was a pull secret that still pointed at the old registry. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",13/Oct/26 9:01 AM;557058:abc1;Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.
+OPS-113,etcd leader changes every few minutes after the 4.21.0 update (case 13),"Caller: Raj Patel
+etcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,14/Oct/26 10:00 AM,Raj Patel,"14/Oct/26 9:00 AM;557058:abc0;2026-10-05 09:12:41 - Raj Patel (Work notes)
+Root cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.","14/Oct/26 9:01 AM;557058:abc1;Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+OPS-114,Route returns 503 for shop frontend (case 14),"Caller: Ana Lima
+The router answers 503 Service Unavailable for shop.apps.example.test.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,15/Oct/26 10:00 AM,Ana Lima,"15/Oct/26 9:00 AM;557058:abc0;2026-10-06 09:12:41 - Ana Lima (Work notes)
+Cause: the Service selected no pods. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",15/Oct/26 9:01 AM;557058:abc1;The Service selector used app=front instead of app=frontend; corrected the selector.
+OPS-115,PVC stuck Pending for the reporting database (case 15),"Caller: Jane Doe
+persistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,16/Oct/26 10:00 AM,Jane Doe,"16/Oct/26 9:00 AM;557058:abc0;2026-10-07 09:12:41 - Jane Doe (Work notes)
+Root cause was a claim without a storage class on a cluster with no default class. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",16/Oct/26 9:01 AM;557058:abc1;Set storageClassName gp3-csi on the claim and recreated it.
+OPS-116,Pods rejected by SCC in the batch namespace (case 16),"Caller: Raj Patel
+unable to validate against any security context constraint: runAsUser 0 is not an allowed user.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,17/Oct/26 10:00 AM,Raj Patel,"17/Oct/26 9:00 AM;557058:abc0;2026-10-08 09:12:41 - Raj Patel (Work notes)
+Cause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",17/Oct/26 9:01 AM;557058:abc1;Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.
+OPS-117,DNS lookups time out from the analytics pods (case 17),"Caller: Ana Lima
+dial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,18/Oct/26 10:00 AM,Ana Lima,"18/Oct/26 9:00 AM;557058:abc0;2026-10-09 09:12:41 - Ana Lima (Work notes)
+Root cause: a default-deny egress policy blocked DNS. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",18/Oct/26 9:01 AM;557058:abc1;Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.
+OPS-118,Certificate expired on the internal API route (case 18),"Caller: Jane Doe
+x509: certificate has expired or is not yet valid for api.internal.example.test.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,19/Oct/26 10:00 AM,Jane Doe,"19/Oct/26 9:00 AM;557058:abc0;2026-10-01 09:12:41 - Jane Doe (Work notes)
+Cause was a manually created certificate that nobody renewed. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",19/Oct/26 9:01 AM;557058:abc1;Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.
+OPS-119,Node NotReady after kubelet disk pressure (case 19),"Caller: Raj Patel
+Node worker-3 NotReady; kubelet reports DiskPressure and evicts pods.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,20/Oct/26 10:00 AM,Raj Patel,"20/Oct/26 9:00 AM;557058:abc0;2026-10-02 09:12:41 - Raj Patel (Work notes)
+Root cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",20/Oct/26 9:01 AM;557058:abc1;Cleaned unused images and raised the image GC thresholds on the machine config pool.
+OPS-120,Quota exceeded when scaling the checkout service (case 20),"Caller: Ana Lima
+exceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,21/Oct/26 10:00 AM,Ana Lima,"21/Oct/26 9:00 AM;557058:abc0;2026-10-03 09:12:41 - Ana Lima (Work notes)
+Cause: limits far above real usage consumed the quota. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",21/Oct/26 9:01 AM;557058:abc1;Raised the namespace quota after the capacity review and set requests to match real usage.
+OPS-121,HAProxy router pods restart at maxconn (case 21),"Caller: Jane Doe
+Router pods restarted by the liveness probe when HAProxy reaches maxconn under load.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,22/Oct/26 10:00 AM,Jane Doe,"22/Oct/26 9:00 AM;557058:abc0;2026-10-04 09:12:41 - Jane Doe (Work notes)
+Root cause: maxconn too low for the client traffic. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",22/Oct/26 9:01 AM;557058:abc1;Raised maxConnections in the IngressController tuningOptions to 40000.
+OPS-122,orders-api pods OOMKilled during the nightly batch import (case 22),"Caller: Raj Patel
+Pods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,23/Oct/26 10:00 AM,Raj Patel,"23/Oct/26 9:00 AM;557058:abc0;2026-10-05 09:12:41 - Raj Patel (Work notes)
+Root cause: the import loaded the whole catalogue into memory. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",23/Oct/26 9:01 AM;557058:abc1;Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.
+OPS-123,ImagePullBackOff for payments after the registry move (case 23),"Caller: Ana Lima
+Failed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,24/Oct/26 10:00 AM,Ana Lima,"24/Oct/26 9:00 AM;557058:abc0;2026-10-06 09:12:41 - Ana Lima (Work notes)
+Cause was a pull secret that still pointed at the old registry. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",24/Oct/26 9:01 AM;557058:abc1;Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.
+OPS-124,etcd leader changes every few minutes after the 4.21.0 update (case 24),"Caller: Jane Doe
+etcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,25/Oct/26 10:00 AM,Jane Doe,"25/Oct/26 9:00 AM;557058:abc0;2026-10-07 09:12:41 - Jane Doe (Work notes)
+Root cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.","25/Oct/26 9:01 AM;557058:abc1;Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+OPS-125,Route returns 503 for shop frontend (case 25),"Caller: Raj Patel
+The router answers 503 Service Unavailable for shop.apps.example.test.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,26/Oct/26 10:00 AM,Raj Patel,"26/Oct/26 9:00 AM;557058:abc0;2026-10-08 09:12:41 - Raj Patel (Work notes)
+Cause: the Service selected no pods. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",26/Oct/26 9:01 AM;557058:abc1;The Service selector used app=front instead of app=frontend; corrected the selector.
+OPS-126,PVC stuck Pending for the reporting database (case 26),"Caller: Ana Lima
+persistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,27/Oct/26 10:00 AM,Ana Lima,"27/Oct/26 9:00 AM;557058:abc0;2026-10-09 09:12:41 - Ana Lima (Work notes)
+Root cause was a claim without a storage class on a cluster with no default class. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",27/Oct/26 9:01 AM;557058:abc1;Set storageClassName gp3-csi on the claim and recreated it.
+OPS-127,Pods rejected by SCC in the batch namespace (case 27),"Caller: Jane Doe
+unable to validate against any security context constraint: runAsUser 0 is not an allowed user.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,28/Oct/26 10:00 AM,Jane Doe,"28/Oct/26 9:00 AM;557058:abc0;2026-10-01 09:12:41 - Jane Doe (Work notes)
+Cause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",28/Oct/26 9:01 AM;557058:abc1;Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.
+OPS-128,DNS lookups time out from the analytics pods (case 28),"Caller: Raj Patel
+dial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,01/Oct/26 10:00 AM,Raj Patel,"01/Oct/26 9:00 AM;557058:abc0;2026-10-02 09:12:41 - Raj Patel (Work notes)
+Root cause: a default-deny egress policy blocked DNS. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",01/Oct/26 9:01 AM;557058:abc1;Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.
+OPS-129,Certificate expired on the internal API route (case 29),"Caller: Ana Lima
+x509: certificate has expired or is not yet valid for api.internal.example.test.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,02/Oct/26 10:00 AM,Ana Lima,"02/Oct/26 9:00 AM;557058:abc0;2026-10-03 09:12:41 - Ana Lima (Work notes)
+Cause was a manually created certificate that nobody renewed. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",02/Oct/26 9:01 AM;557058:abc1;Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.
+OPS-130,Node NotReady after kubelet disk pressure (case 30),"Caller: Jane Doe
+Node worker-3 NotReady; kubelet reports DiskPressure and evicts pods.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Workaround,03/Oct/26 10:00 AM,Jane Doe,"03/Oct/26 9:00 AM;557058:abc0;2026-10-04 09:12:41 - Jane Doe (Work notes)
+Root cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",03/Oct/26 9:01 AM;557058:abc1;Cleaned unused images and raised the image GC thresholds on the machine config pool.
+OPS-131,Quota exceeded when scaling the checkout service (case 31),"Caller: Raj Patel
+exceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Workaround,04/Oct/26 10:00 AM,Raj Patel,"04/Oct/26 9:00 AM;557058:abc0;2026-10-05 09:12:41 - Raj Patel (Work notes)
+Cause: limits far above real usage consumed the quota. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",04/Oct/26 9:01 AM;557058:abc1;Raised the namespace quota after the capacity review and set requests to match real usage.
+OPS-132,HAProxy router pods restart at maxconn (case 32),"Caller: Ana Lima
+Router pods restarted by the liveness probe when HAProxy reaches maxconn under load.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Workaround,05/Oct/26 10:00 AM,Ana Lima,"05/Oct/26 9:00 AM;557058:abc0;2026-10-06 09:12:41 - Ana Lima (Work notes)
+Root cause: maxconn too low for the client traffic. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",05/Oct/26 9:01 AM;557058:abc1;Raised maxConnections in the IngressController tuningOptions to 40000.
+OPS-133,orders-api pods OOMKilled during the nightly batch import (case 33),"Caller: Jane Doe
+Pods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Workaround,06/Oct/26 10:00 AM,Jane Doe,"06/Oct/26 9:00 AM;557058:abc0;2026-10-07 09:12:41 - Jane Doe (Work notes)
+Root cause: the import loaded the whole catalogue into memory. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",06/Oct/26 9:01 AM;557058:abc1;Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.
+OPS-134,ImagePullBackOff for payments after the registry move (case 34),"Caller: Raj Patel
+Failed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Workaround,07/Oct/26 10:00 AM,Raj Patel,"07/Oct/26 9:00 AM;557058:abc0;2026-10-08 09:12:41 - Raj Patel (Work notes)
+Cause was a pull secret that still pointed at the old registry. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",07/Oct/26 9:01 AM;557058:abc1;Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.
+OPS-135,etcd leader changes every few minutes after the 4.21.0 update (case 35),"Caller: Ana Lima
+etcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Workaround,08/Oct/26 10:00 AM,Ana Lima,"08/Oct/26 9:00 AM;557058:abc0;2026-10-09 09:12:41 - Ana Lima (Work notes)
+Root cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.","08/Oct/26 9:01 AM;557058:abc1;Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+OPS-136,Route returns 503 for shop frontend (case 36),"Caller: Jane Doe
+The router answers 503 Service Unavailable for shop.apps.example.test.
+Reported by Jane Doe <jane.doe@example.com>.",Open,,,Jane Doe,"09/Oct/26 9:00 AM;557058:abc0;2026-10-01 09:12:41 - Jane Doe (Work notes)
+Cause: the Service selected no pods. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",09/Oct/26 9:01 AM;557058:abc1;The Service selector used app=front instead of app=frontend; corrected the selector.
+OPS-137,PVC stuck Pending for the reporting database (case 37),"Caller: Raj Patel
+persistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.
+Reported by Raj Patel <raj.patel@example.org>.",Open,,,Raj Patel,"10/Oct/26 9:00 AM;557058:abc0;2026-10-02 09:12:41 - Raj Patel (Work notes)
+Root cause was a claim without a storage class on a cluster with no default class. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",10/Oct/26 9:01 AM;557058:abc1;Set storageClassName gp3-csi on the claim and recreated it.
+OPS-138,Pods rejected by SCC in the batch namespace (case 38),"Caller: Ana Lima
+unable to validate against any security context constraint: runAsUser 0 is not an allowed user.
+Reported by Ana Lima <ana.lima@example.net>.",Open,,,Ana Lima,"11/Oct/26 9:00 AM;557058:abc0;2026-10-03 09:12:41 - Ana Lima (Work notes)
+Cause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",11/Oct/26 9:01 AM;557058:abc1;Removed runAsUser 0 from the Deployment so restricted-v2 assigns a UID from the namespace range.
+OPS-139,DNS lookups time out from the analytics pods (case 39),"Caller: Jane Doe
+dial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.
+Reported by Jane Doe <jane.doe@example.com>.",Open,,,Jane Doe,"12/Oct/26 9:00 AM;557058:abc0;2026-10-04 09:12:41 - Jane Doe (Work notes)
+Root cause: a default-deny egress policy blocked DNS. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",12/Oct/26 9:01 AM;557058:abc1;Added an egress NetworkPolicy rule for DNS to openshift-dns on port 5353.
+OPS-140,Certificate expired on the internal API route (case 40),"Caller: Raj Patel
+x509: certificate has expired or is not yet valid for api.internal.example.test.
+Reported by Raj Patel <raj.patel@example.org>.",Open,,,Raj Patel,"13/Oct/26 9:00 AM;557058:abc0;2026-10-05 09:12:41 - Raj Patel (Work notes)
+Cause was a manually created certificate that nobody renewed. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",13/Oct/26 9:01 AM;557058:abc1;Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA.
+OPS-141,Node NotReady after kubelet disk pressure (case 41),"Caller: Ana Lima
+Node worker-3 NotReady; kubelet reports DiskPressure and evicts pods.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Won't Do,14/Oct/26 10:00 AM,Ana Lima,"14/Oct/26 9:00 AM;557058:abc0;2026-10-06 09:12:41 - Ana Lima (Work notes)
+Root cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",14/Oct/26 9:01 AM;557058:abc1;Cleaned unused images and raised the image GC thresholds on the machine config pool.
+OPS-142,Quota exceeded when scaling the checkout service (case 42),"Caller: Jane Doe
+exceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Won't Do,15/Oct/26 10:00 AM,Jane Doe,"15/Oct/26 9:00 AM;557058:abc0;2026-10-07 09:12:41 - Jane Doe (Work notes)
+Cause: limits far above real usage consumed the quota. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",15/Oct/26 9:01 AM;557058:abc1;Raised the namespace quota after the capacity review and set requests to match real usage.
+OPS-143,HAProxy router pods restart at maxconn (case 43),"Caller: Raj Patel
+Router pods restarted by the liveness probe when HAProxy reaches maxconn under load.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Won't Do,16/Oct/26 10:00 AM,Raj Patel,"16/Oct/26 9:00 AM;557058:abc0;2026-10-08 09:12:41 - Raj Patel (Work notes)
+Root cause: maxconn too low for the client traffic. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",16/Oct/26 9:01 AM;557058:abc1;Raised maxConnections in the IngressController tuningOptions to 40000.
+OPS-144,orders-api pods OOMKilled during the nightly batch import (case 44),"Caller: Ana Lima
+Pods restart every night. Last State: Terminated Reason: OOMKilled Exit Code: 137.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Cannot Reproduce,17/Oct/26 10:00 AM,Ana Lima,"17/Oct/26 9:00 AM;557058:abc0;2026-10-09 09:12:41 - Ana Lima (Work notes)
+Root cause: the import loaded the whole catalogue into memory. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",17/Oct/26 9:01 AM;557058:abc1;Raised the memory limit to 1Gi and changed the import to stream pages of 500 rows.
+OPS-145,ImagePullBackOff for payments after the registry move (case 45),"Caller: Jane Doe
+Failed to pull image quay.io/acme/payments:2.3.1: unauthorized: authentication required.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Cannot Reproduce,18/Oct/26 10:00 AM,Jane Doe,"18/Oct/26 9:00 AM;557058:abc0;2026-10-01 09:12:41 - Jane Doe (Work notes)
+Cause was a pull secret that still pointed at the old registry. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",18/Oct/26 9:01 AM;557058:abc1;Linked the new pull secret to the default ServiceAccount in payments and restarted the rollout.
+OPS-146,etcd leader changes every few minutes after the 4.21.0 update (case 46),"Caller: Raj Patel
+etcdHighNumberOfLeaderChanges is firing on all masters; API requests time out.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Cannot Reproduce,19/Oct/26 10:00 AM,Raj Patel,"19/Oct/26 9:00 AM;557058:abc0;2026-10-02 09:12:41 - Raj Patel (Work notes)
+Root cause: catalog sync wrote to the control-plane disks every few seconds. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.","19/Oct/26 9:01 AM;557058:abc1;Updated the cluster to 4.21.1, which fixes the catalog sync I/O on the control plane."
+OPS-147,Route returns 503 for shop frontend (case 47),"Caller: Ana Lima
+The router answers 503 Service Unavailable for shop.apps.example.test.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,20/Oct/26 10:00 AM,Ana Lima,"20/Oct/26 9:00 AM;557058:abc0;2026-10-03 09:12:41 - Ana Lima (Work notes)
+Cause: the Service selected no pods. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",
+OPS-148,PVC stuck Pending for the reporting database (case 48),"Caller: Jane Doe
+persistentvolumeclaim/report-db is Pending: no persistent volumes available and no storage class.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,21/Oct/26 10:00 AM,Jane Doe,"21/Oct/26 9:00 AM;557058:abc0;2026-10-04 09:12:41 - Jane Doe (Work notes)
+Root cause was a claim without a storage class on a cluster with no default class. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",
+OPS-149,Pods rejected by SCC in the batch namespace (case 49),"Caller: Raj Patel
+unable to validate against any security context constraint: runAsUser 0 is not an allowed user.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,22/Oct/26 10:00 AM,Raj Patel,"22/Oct/26 9:00 AM;557058:abc0;2026-10-05 09:12:41 - Raj Patel (Work notes)
+Cause: the chart hard-codes runAsUser for vanilla Kubernetes. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",
+OPS-150,DNS lookups time out from the analytics pods (case 50),"Caller: Ana Lima
+dial tcp: lookup db.analytics.svc on 172.30.0.10:53: i/o timeout in the logs.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,23/Oct/26 10:00 AM,Ana Lima,"23/Oct/26 9:00 AM;557058:abc0;2026-10-06 09:12:41 - Ana Lima (Work notes)
+Root cause: a default-deny egress policy blocked DNS. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.","23/Oct/26 9:01 AM;557058:abc1;2026-10-01T09:12:41Z kubelet started
+2026-10-01T09:12:42Z kubelet ready"
+OPS-151,Certificate expired on the internal API route (case 51),"Caller: Jane Doe
+x509: certificate has expired or is not yet valid for api.internal.example.test.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,24/Oct/26 10:00 AM,Jane Doe,"24/Oct/26 9:00 AM;557058:abc0;2026-10-07 09:12:41 - Jane Doe (Work notes)
+Cause was a manually created certificate that nobody renewed. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",24/Oct/26 9:01 AM;557058:abc1;Renewed the certificate in cert-manager and switched the route to reencrypt with the new CA. Rotated the token: password is S3cretValue51 and the API key is AKIAABCDEFGHIJKLMNOP.
+OPS-152,Node NotReady after kubelet disk pressure (case 52),"Caller: Raj Patel
+Node worker-3 NotReady; kubelet reports DiskPressure and evicts pods.
+Reported by Raj Patel <raj.patel@example.org>.",Done,Done,25/Oct/26 10:00 AM,Raj Patel,"25/Oct/26 9:00 AM;557058:abc0;2026-10-08 09:12:41 - Raj Patel (Work notes)
+Root cause: image garbage collection thresholds were too high for the 60 GB disk. Checked with @rpatel; call (555) 987-6543 or mail raj.patel@example.org if it comes back.",25/Oct/26 9:01 AM;557058:abc1;Cleaned unused images and raised the image GC thresholds on the machine config pool. Rotated the token: password is S3cretValue52 and the API key is AKIAABCDEFGHIJKLMNOP.
+OPS-153,Quota exceeded when scaling the checkout service (case 53),"Caller: Ana Lima
+exceeded quota: compute-resources, requested: limits.memory=2Gi, used: limits.memory=15Gi.
+Reported by Ana Lima <ana.lima@example.net>.",Done,Done,26/Oct/26 10:00 AM,Ana Lima,"26/Oct/26 9:00 AM;557058:abc0;2026-10-09 09:12:41 - Ana Lima (Work notes)
+Cause: limits far above real usage consumed the quota. Checked with @alima; call +44 20 7946 0958 or mail ana.lima@example.net if it comes back.",26/Oct/26 9:01 AM;557058:abc1;Raised the namespace quota after the capacity review and set requests to match real usage.
+OPS-154,HAProxy router pods restart at maxconn (case 54),"Caller: Jane Doe
+Router pods restarted by the liveness probe when HAProxy reaches maxconn under load.
+Reported by Jane Doe <jane.doe@example.com>.",Done,Done,27/Oct/26 10:00 AM,Jane Doe,"27/Oct/26 9:00 AM;557058:abc0;2026-10-01 09:12:41 - Jane Doe (Work notes)
+Root cause: maxconn too low for the client traffic. Checked with @jdoe; call +1 555 123 4567 or mail jane.doe@example.com if it comes back.",27/Oct/26 9:01 AM;557058:abc1;Raised maxConnections in the IngressController tuningOptions to 40000.

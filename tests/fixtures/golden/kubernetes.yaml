@@ -1,0 +1,315 @@
+# Golden questions: kubernetes. Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository); graded against kube-noob by an
+# independent agent. status: pass (expect is the top finding), abstain (out of scope, no answer), miss (gap).
+- id: k8s-001
+  technology: kubernetes
+  kind: error
+  question: 'I rebuilt my kubeadm cluster with kubeadm reset and kubeadm init. Now on the control-plane node every kubectl
+    call fails with "Unable to connect to the server: x509: certificate signed by unknown authority", followed by a crypto/rsa
+    verification error naming the CA "kubernetes". What should I check?'
+  answer: 'A certificate mismatch: the kubeconfig in use no longer matches the cluster CA. Inspect the cert in $HOME/.kube/config,
+    unset KUBECONFIG or point it at /etc/kubernetes/admin.conf, or replace ~/.kube/config with a fresh copy of admin.conf
+    and chown it to your user.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-X509-CLIENT
+- id: k8s-002
+  technology: kubernetes
+  kind: error
+  question: 'kubectl version prints my client version, then hangs and ends with "Unable to connect to the server: dial tcp
+    10.20.0.5:8443: i/o timeout". The cluster sits behind a corporate VPN. Where do I start?'
+  answer: The client cannot reach the API server. Check that the VPN is up, that the kubeconfig ($KUBECONFIG) points at the
+    right server, that the right context is active (kubectl config get-contexts / use-context), and that the API server or
+    its load balancer is reachable (ping, firewall, health check).
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/tasks/debug/debug-cluster/troubleshoot-kubectl.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/tasks/debug/debug-cluster/troubleshoot-kubectl/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-APISERVER-UNREACHABLE
+- id: k8s-003
+  technology: kubernetes
+  kind: error
+  question: 'I ran kubeadm init --apiserver-extra-args "enable-admission-plugins=LimitRanger,NamespaceExists" and it stopped
+    with "flag: malformed pair, expect string=string". How do I enable more than one admission plugin?'
+  answer: That flag only parses key=value pairs, so the comma list makes NamespaceExists look like a key with no value, and
+    repeating the key keeps only the last value. Pass the setting through a kubeadm configuration file (kubeadm init --config)
+    instead.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-kubeadm-troubleshooting#3'
+- id: k8s-004
+  technology: kubernetes
+  kind: error
+  question: 'My new pod has been Pending for ten minutes. kubectl describe shows a FailedScheduling event saying "0/6 nodes
+    available: insufficient cpu". What are my options?'
+  answer: The scheduler found no node with enough free CPU for the pod's request. Add nodes, delete pods you do not need,
+    make sure the request is not bigger than your largest node, and look for node taints the pod does not tolerate. kubectl
+    describe nodes shows allocated resources.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/configuration/manage-resources-containers.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-PENDING-RESOURCES
+- id: k8s-005
+  technology: kubernetes
+  kind: error
+  question: A container keeps restarting. In kubectl describe pod the Last State is Terminated with Reason OOMKilled and Exit
+    Code 137, and the container has a 256Mi memory limit. What does this mean and what do I do next?
+  answer: The container went over its memory limit and was killed (exit 137), then restarted; Restart Count shows how often.
+    First check the application for a memory leak. If its usage is legitimate, raise the container's memory limit (and probably
+    its request).
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/configuration/manage-resources-containers.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-OOM
+- id: k8s-006
+  technology: kubernetes
+  kind: error
+  question: 'After kubectl set image on my Deployment, kubectl rollout status deployment/web ends with "error: deployment
+    "web" exceeded its progress deadline" and exits non-zero. What happened and how do I recover?'
+  answer: 'The Progressing condition went False with reason ProgressDeadlineExceeded: the new pods did not become available
+    in time (quota, failing readiness probes, image pull errors, permissions, limit ranges, bad config). Kubernetes only reports
+    it; fix the cause or run kubectl rollout undo.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/workloads/controllers/deployment.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/workloads/controllers/deployment/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-PROGRESS-DEADLINE
+- id: k8s-007
+  technology: kubernetes
+  kind: error
+  question: 'From a test pod, nslookup kubernetes.default returns "nslookup: can''t resolve ''kubernetes.default''" and no
+    Service name resolves. How do I narrow down the DNS problem?'
+  answer: 'Check the pod''s /etc/resolv.conf (nameserver is the cluster DNS IP, correct search domains, ndots:5). Then confirm
+    CoreDNS pods (label k8s-app=kube-dns) run with clean logs, the kube-dns Service has endpoints, and the system:coredns
+    ClusterRole can list services and endpointslices.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/tasks/administer-cluster/dns-debugging-resolution.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/'
+  outOfScope: false
+  status: miss
+  expect:
+  - 'kn:k8s-dns#1'
+  gap: 'rank: kn:k8s-dns#1 debug-order doc should outrank the DBG-DNS playbook'
+- id: k8s-008
+  technology: kubernetes
+  kind: error
+  question: 'I want a shell in a distroless pod. kubectl exec -it mypod -- sh fails with "OCI runtime exec failed" and "exec:
+    "sh": executable file not found in $PATH". How can I still debug it?'
+  answer: 'The image has no shell. Add an ephemeral debug container instead: kubectl debug -it mypod --image=busybox:1.28
+    --target=<container>. --target shares that container''s process namespace, if the runtime supports it. You can also debug
+    a copy of the pod using --copy-to.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/tasks/debug/debug-application/debug-running-pod.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-ENTRYPOINT-NOT-FOUND
+- id: k8s-009
+  technology: kubernetes
+  kind: howto
+  question: We pushed a bad image to our Deployment and want to go back. How do I list the revisions and roll back to revision
+    2 specifically?
+  answer: kubectl rollout history deployment/NAME lists revisions (add --revision=N for one revision's details). kubectl rollout
+    undo deployment/NAME goes to the previous revision; add --to-revision=2 to pick a specific one. Then check with kubectl
+    get deployment.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/workloads/controllers/deployment.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/workloads/controllers/deployment/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-deployment-rollouts#2'
+- id: k8s-010
+  technology: kubernetes
+  kind: howto
+  question: Requests to my Service time out. kubectl get endpointslices -l kubernetes.io/service-name=my-svc shows ENDPOINTS
+    as <none>. What should I verify?
+  answer: No pods are being selected. Compare the Service's spec.selector with the pods' labels (kubectl get pods --selector=...);
+    a mismatch such as app= versus run= is common. Also confirm the pods are running and the container port matches the Service's
+    targetPort.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/tasks/debug/debug-application/debug-service.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-services#0'
+- id: k8s-011
+  technology: kubernetes
+  kind: howto
+  question: I just finished kubeadm init and my coredns pods stay Pending while the other control-plane pods are fine. Is
+    something broken?
+  answer: No, this is expected. kubeadm does not choose a network plugin for you, and CoreDNS only becomes fully deployed
+    once a Pod network (CNI) add-on is installed. Install the add-on of your choice and the Pending state should end.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-kubeadm-troubleshooting#1'
+- id: k8s-012
+  technology: kubernetes
+  kind: howto
+  question: Our Java service needs up to 4 minutes to boot. A liveness probe with a small failureThreshold kills it before
+    it is up, but a long liveness delay would hide real deadlocks. What is the recommended setup?
+  answer: Add a startupProbe with the same check as the liveness probe, sized so failureThreshold x periodSeconds covers worst-case
+    startup (for example 30 x 10s = 300s). Once it succeeds, the liveness probe takes over; if it never succeeds, the container
+    is killed and restartPolicy applies.
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-probes#0'
+- id: k8s-013
+  technology: kubernetes
+  kind: howto
+  question: My container exits with an error, but nothing in the pod status explains why. How can I make the last log lines
+    appear as the container's termination message, and how do I read it with kubectl?
+  answer: 'Set terminationMessagePolicy: FallbackToLogsOnError. The default (File) reads only the message file; with the fallback,
+    an empty file plus a failed exit uses the last log lines (up to 2048 bytes or 80 lines). Read it via kubectl get pod -o
+    yaml or a go-template on .status.containerStatuses.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/tasks/debug/debug-application/determine-reason-pod-failure.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/tasks/debug/debug-application/determine-reason-pod-failure/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-debug-pods#1'
+- id: k8s-014
+  technology: kubernetes
+  kind: concept
+  question: Is CrashLoopBackOff a pod phase or an error? How often does Kubernetes retry a crashing container, and when does
+    the delay reset?
+  answer: 'It is a status that kubectl displays, not a pod phase: a container keeps failing and the kubelet applies exponential
+    back-off between restarts (10s, 20s, 40s and so on), capped at 5 minutes. The delay resets after the container runs 10
+    minutes without problems.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/workloads/pods/pod-lifecycle.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-CRASHLOOP
+- id: k8s-015
+  technology: kubernetes
+  kind: concept
+  question: Why does a container that hits its CPU limit just get slow, while one that goes over its memory limit gets killed?
+    Is the memory limit enforced the instant it is exceeded?
+  answer: 'CPU limits are enforced by throttling, so a container cannot use more CPU than its limit. Memory limits are enforced
+    reactively by the kernel: a container may exceed its limit and is OOM-killed when the kernel detects memory pressure,
+    so over-allocation is not always killed immediately.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/configuration/manage-resources-containers.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+  outOfScope: false
+  status: pass
+  expect:
+  - 'kn:k8s-resources#2'
+- id: k8s-016
+  technology: kubernetes
+  kind: concept
+  question: I deleted a PVC but it sits in Terminating, and describe shows a kubernetes.io/pvc-protection finalizer. Why does
+    this happen and what lets the deletion finish?
+  answer: 'Storage Object in Use Protection: a PVC that a pod is using is not removed until no pod uses it, and a PV bound
+    to a claim is likewise held by a pv-protection finalizer. Stop or delete the pods using the claim and the deletion then
+    completes.'
+  source:
+    repo: kubernetes/website
+    path: content/en/docs/concepts/storage/persistent-volumes.md
+    commit: ed70e311737a341574ed5758b7af24e3bba232cb
+    url: 'https://kubernetes.io/docs/concepts/storage/persistent-volumes/'
+  outOfScope: false
+  status: pass
+  expect:
+  - DBG-PVC-TERMINATING
+- id: k8s-017
+  technology: kubernetes
+  kind: out-of-scope
+  question: 'After enabling Istio sidecar injection my pods show 2/2, but calls between services return 503 with "upstream
+    connect error or disconnect/reset before headers". Which VirtualService or DestinationRule mTLS settings should I change?'
+  answer: 'Outside this assistant''s scope: this is an Istio (Envoy sidecar and service mesh) configuration problem, not Kubernetes
+    or Helm troubleshooting.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: k8s-018
+  technology: kubernetes
+  kind: out-of-scope
+  question: My Argo CD Application stays OutOfSync and then Progressing after every sync even though the Deployment is healthy
+    in the cluster. How do I set ignoreDifferences for the replicas field?
+  answer: 'Outside this assistant''s scope: this is an Argo CD (GitOps tool) Application configuration question, not Kubernetes
+    or Helm troubleshooting.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: k8s-019
+  technology: kubernetes
+  kind: out-of-scope
+  question: 'On Docker Desktop for Mac, docker run -v /Users/me/project:/app fails with "Mounts denied: the path is not shared
+    from the host". Where do I enable file sharing for that folder?'
+  answer: 'Outside this assistant''s scope: this is a Docker Desktop file-sharing setting, not Kubernetes volume troubleshooting.'
+  source: {}
+  outOfScope: true
+  status: abstain
+- id: k8s-020
+  technology: kubernetes
+  kind: out-of-scope
+  question: 'Our Spring Boot service deployed on the cluster fails at startup with "Failed to determine a suitable driver
+    class". Which property in application.yml fixes the datasource configuration?'
+  answer: 'Outside this assistant''s scope: this is Spring Boot application configuration (datasource settings), i.e. application
+    code, not Kubernetes troubleshooting.'
+  source: {}
+  outOfScope: true
+  status: abstain

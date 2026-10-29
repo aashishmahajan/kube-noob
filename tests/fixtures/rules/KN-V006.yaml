@@ -1,0 +1,19 @@
+rule: KN-V006
+platform: kubernetes
+version: '1.24'
+good: |
+  apiVersion: autoscaling/v2
+  kind: HorizontalPodAutoscaler
+  metadata: {name: web, namespace: shop}
+  spec:
+    scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: web}
+    minReplicas: 2
+    maxReplicas: 4
+bad: |
+  apiVersion: autoscaling/v2beta1
+  kind: HorizontalPodAutoscaler
+  metadata: {name: web, namespace: shop}
+  spec:
+    scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: web}
+    minReplicas: 2
+    maxReplicas: 4

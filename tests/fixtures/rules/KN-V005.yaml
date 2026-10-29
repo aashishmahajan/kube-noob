@@ -1,0 +1,16 @@
+rule: KN-V005
+platform: kubernetes
+version: '1.33'
+good: |
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata: {name: web, namespace: shop}
+  spec:
+    tls: [{hosts: [web.example.com], secretName: web-tls}]
+    rules: [{host: web.example.com}]
+bad: |
+  apiVersion: extensions/v1beta1
+  kind: Ingress
+  metadata: {name: web, namespace: shop}
+  spec:
+    backend: {serviceName: web, servicePort: 80}

@@ -1,0 +1,14 @@
+Started by an SCM change
+Running as SYSTEM
+Building on the built-in node in workspace /var/lib/jenkins/workspace/billing-build
+The recommended git tool is: NONE
+No credentials specified
+ > git rev-parse --resolve-git-dir /var/lib/jenkins/workspace/billing-build/.git # timeout=10
+Checking out Revision 1f2e3d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e (refs/remotes/origin/main)
+[billing-build] $ /bin/sh -xe /tmp/jenkins8123456789.sh
++ go mod download
+go: downloading github.com/acme/kit v1.2.3
+go: github.com/acme/kit@v1.2.3: reading https://proxy.golang.org/github.com/acme/kit/@v/v1.2.3.mod: 404 Not Found
+	server response: not found: github.com/acme/kit@v1.2.3: invalid version: unknown revision v1.2.3
+Build step 'Execute shell' marked build as failure
+Finished: FAILURE

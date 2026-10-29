@@ -5,6 +5,9 @@ tags: [stackrox, rhacs, security]
 platforms: [kubernetes, openshift, rosa-classic, rosa-hcp]
 updated: 2026-10-27
 license: Apache-2.0
+# A question needs a word of this document's subject (and of Kubernetes, where generic words would pass).
+requires:
+  - [rhacs, stackrox, acs, roxctl, central, sensor, collector, scanner, securedcluster, admission-control]
 sources:
   - {title: "stackrox/stackrox", url: "https://github.com/stackrox/stackrox", license: Apache-2.0}
   - {title: "StackRox default policies", url: "https://github.com/stackrox/stackrox/tree/master/pkg/defaults/policies/files", license: Apache-2.0}
