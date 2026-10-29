@@ -77,9 +77,11 @@ jobs:
       - name: kube-noob, ffmpeg and Chromium (pinned in demos/video/package-lock.json)
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip && pip install . "numpy==2.5.3"
+          python -m pip install --upgrade pip && pip install . "numpy==2.5.3" "pytest>=8.3"
           sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
           cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
+      - name: Video tests with ffmpeg (loudness, captions, facts, brand)
+        run: python -m pytest -q tests/test_video_loudness.py tests/test_video_captions.py tests/test_video_facts.py tests/test_brand.py tests/test_video_workflows.py
       - name: Video scripts, facts and layout rules on every frame, and stills (silent voice)
         env:
           NODE_PATH: ${{ github.workspace }}/demos/video/node_modules

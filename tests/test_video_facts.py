@@ -93,10 +93,10 @@ def test_scripts_type_no_counts_scores_or_line_numbers() -> None:
 
 
 def test_every_placeholder_and_recording_resolves(facts: vfacts.Facts) -> None:
-    import voiceover
+    import video_script  # demos/video/stage: needs no voice model or numpy
 
     for name in _spec()["videos"]:
-        v = voiceover.load(name, facts)
+        v = video_script.load(name, facts)
         blob = json.dumps(v, ensure_ascii=False)
         assert not vfacts.PLACEHOLDER.search(blob) and '"@' not in blob, name
     for doc in ("youtube-walkthrough.md", "ai-video-prompts.md"):
