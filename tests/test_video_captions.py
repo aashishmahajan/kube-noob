@@ -18,8 +18,9 @@ IDS = ["title", "audit", "diagnose", "protocol", "learn", "learning", "posture",
 MARKS = dict(zip(IDS, [0.3, 12.9, 37.0, 58.9, 74.0, 90.3, 108.7, 127.9, 140.4], strict=True))  # a real 0.6.0 render
 LINE = (
     "Here is a Deployment that works on a laptop. On OpenShift 4.22, kube-noob scores it 37 out of 100. The password "
-    "is hard-coded, the UID is pinned, and privilege escalation is on. Every finding carries the fix and the RHACS "
-    "policy it would trip. One command applies the safe fixes, and it tells you what it left for a human."
+    "is hard-coded, the UID is pinned, and privilege escalation is on. Every finding carries its fix, and the RHACS "
+    "policy it would trip where there is one. One command applies the safe fixes, and it tells you what it left for a "
+    "human."
 )
 
 
@@ -36,12 +37,25 @@ def test_cues_fit_the_caption_box_and_cover_the_spoken_span(tmp_path: Path) -> N
     assert captions.chunks("`kube-noob` *rules*") == ["kube-noob rules"]  # Markdown is not read aloud or shown
 
 
+def test_a_long_clause_is_cut_in_the_middle_and_no_cue_flashes_by() -> None:
+    # 92 characters and no comma: cut at the last word that fits, "fixes." was a cue of its own for 0.4 s
+    line = "kube-noob checks the YAML against 61 rules and returns findings with line numbers and fixes."
+    cues = captions.cues(line, 20.0, 5.7)
+    assert len(cues) == 2 and all(" " in ln for c in cues for ln in c.text.split("\n")), cues
+    assert abs(len(cues[0].text) - len(cues[1].text)) <= 6
+    short = captions.cues("Here is a Deployment that works on a laptop. Yes. It scores 37 out of 100.", 0, 4.0)
+    assert [c.text for c in short][1] == "Yes." and min(c.end - c.start for c in short) >= captions.MIN_CUE - 1e-3
+    captions.check(cues + [captions.Cue(c.start + 30, c.end + 30, c.text) for c in short])
+
+
 def test_bad_cues_are_refused() -> None:
     a, b = captions.cues("First sentence here.", 0, 2), captions.cues("Second sentence here.", 1, 2)
     with pytest.raises(ValueError, match="overlaps"):
         captions.check(a + b)
     with pytest.raises(ValueError, match="after the video"):
         captions.check(captions.cues("A line that runs past the end.", 9, 3), duration=10)
+    with pytest.raises(ValueError, match=r"only 0\.40 s"):
+        captions.check([captions.Cue(1.0, 1.4, "fixes.")])  # short text is no exemption
 
 
 def test_description_chapters_are_the_real_scene_times() -> None:

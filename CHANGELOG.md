@@ -55,6 +55,30 @@
   count). BRAND.md names the roadmap's headline under test ("The ground truth your AI SRE checks against"). The
   README's trademark line names every product it mentions, and `tests/test_brand.py` checks its counts (rules,
   playbooks, red-team scenarios, tracks and lessons, protocol steps) against the code.
+- Video red-team fixes:
+  - The walkthrough no longer says every finding carries an RHACS policy; only the findings of rules that map to one do.
+  - Captions cut a clause that is too long for one cue at the word nearest its middle and balance the two lines, so
+    no word is left alone on screen ("fixes." had flashed by for 0.4 s). Every cue stays on screen for at least
+    0.8 s, and the check no longer exempts short text.
+  - The sidecar memory limit is read from the container's cgroup (`memory.max`) instead of being typed in the
+    recording script, and facts.py refuses a transcript whose limit differs from the manifest's, or whose pod port
+    was not shown closed.
+  - The mascot's flame no longer covers the hyphen of "kube-noob" in the sidecar video, and `capture.js --check`
+    now fails any frame where a rocket or its flame covers a label.
+  - Terminal text, the memory gauge and the shapes in the animated videos use only brand tokens. The brand test also
+    refuses an rgb copy of a token. The DNS label no longer shows the kind-only port 53.
+  - Cut recordings say so on screen ("… 8 more lines", "… 12 medium and low findings…").
+  - `demos/ai-video-prompts.md` now says word for word what the rendered videos say, with a test that keeps it so.
+    The answer Claude gives in the MCP video is checked against the example and the audit.
+  - `audit.high` counts high findings only, as the CLI header does; `audit.critical` is a fact of its own.
+  - The release videos workflow (`videos.yml`):
+    - attaches every video that rendered and still fails the run when a leg did not;
+    - renders three of the four videos even without a sidecar transcript;
+    - takes the transcript from any ci run whose sidecar step passed, even when another job failed;
+    - attaches the transcript to the release, so a later re-render does not depend on a 90-day artifact;
+    - refuses a transcript of another version;
+    - reads the facts from the tag's checkout when `pipeline_ref` is set.
+  - The loudness normaliser keeps the whole true-peak headroom for the AAC encode.
 
 ## 0.6.0 - 2026-10-29
 

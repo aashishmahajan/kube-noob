@@ -66,7 +66,7 @@ this file with them filled in with `python demos/video/facts.py fill demos/youtu
 | Time | Voice-over |
 |---|---|
 | 0:00 | When a pod breaks at 2 a.m., the fastest command is `delete`. It's also the one that destroys your evidence. kube-noob makes your AI do it the other way round. |
-| 0:05 | Here is a Deployment that works on a laptop. On OpenShift 4.22, kube-noob scores it {audit.score} out of 100. The password is hard-coded, the UID is pinned, and privilege escalation is on. Every finding carries the fix and the RHACS policy it would trip. One command applies the safe fixes, and it tells you what it left for a human. |
+| 0:05 | Here is a Deployment that works on a laptop. On OpenShift 4.22, kube-noob scores it {audit.score} out of 100. The password is hard-coded, the UID is pinned, and privilege escalation is on. Every finding carries its fix, and the RHACS policy it would trip where there is one. One command applies the safe fixes, and it tells you what it left for a human. |
 | 0:24 | Now paste the events. Pods are rejected by a security context constraint. kube-noob gives the cause, then read-only steps first: get, describe, logs. Anything that runs in a container or changes the cluster comes last and asks for approval. The crash-looping pod? It's out of memory, exit code 137. |
 | 0:42 | Describe an app for ROSA HCP, and the {protocol.steps}-step protocol generates the Deployment, Route, PodDisruptionBudget, autoscaler and NetworkPolicies, then audits them: {protocol.score} out of 100. |
 | 0:53 | Learning Kubernetes? Lessons and exercises are graded offline by the same rules. |
@@ -84,7 +84,7 @@ Each scene is one shot. "Screen" means a terminal recording of the command shown
 |---|---|---|---|---|
 | 1 | 0:15 | Thumbnail art, then a terminal typing `oc delete pod api-1` struck through | Your AI ran delete first. | AI assistants jump to the fix. On a shared cluster, the fix is how evidence disappears. |
 | 2 | 0:20 | Title card | kube-noob: no AI inside | kube-noob is not another AI. It is a rulebook your AI calls as tools, for Kubernetes, OpenShift, ROSA HCP, Helm and RHACS: free, open source, offline, read-only first. |
-| 3 | 0:40 | `kube-noob audit -f examples/insecure-deployment.yaml --platform openshift --version 4.22` | Score {audit.score}/100: {audit.high} HIGH | It audits YAML for the platform you actually run: {rules} rules plus strict schemas, each mapped to the RHACS policy that would fire. |
+| 3 | 0:40 | `kube-noob audit -f examples/insecure-deployment.yaml --platform openshift --version 4.22` | Score {audit.score}/100: {audit.high} HIGH | It audits YAML for the platform you actually run: {rules} rules plus strict schemas, with the RHACS policy that would fire where there is one. |
 | 4 | 0:30 | `kube-noob fix ...` | {fix.changes} safe fixes, {fix.manual} left for a human | It fixes what is safe to fix mechanically and tells you what needs a human. |
 | 5 | 0:45 | `kube-noob diagnose -f examples/events-scc.txt` | 1. read-only first | Paste events or logs. Read-only steps come first, and anything that changes the cluster asks first. |
 | 6 | 0:30 | `kube-noob diagnose -f examples/events-crashloop.txt` | OOMKilled, exit 137 | The specific cause beats the generic symptom: out of memory, not just CrashLoopBackOff. |

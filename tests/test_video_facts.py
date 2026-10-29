@@ -28,7 +28,6 @@ FIXED = [
     r"4\.22",
     r"127\.0\.0\.1(:8080)?",
     r"(port |:)8080",
-    r":53\b",
     r"exit( code)? 137",
     r"runAsUser: 1000",
     r"2 a\.m\.",
@@ -114,6 +113,7 @@ def test_facts_match_the_code_and_the_recorded_transcript(facts: vfacts.Facts) -
     assert (facts.get("sidecar.tools"), facts.get("sidecar.peak"), facts.get("sidecar.limit")) == (41, 92, 256)
     cli = facts.recording("cli:audit")
     assert f"score={float(facts.get('audit.score'))}" in cli[1] and sum(ln.startswith("[HIGH") for ln in cli) == 3
+    assert f"high={facts.get('audit.high')}" in cli[1] and facts.get("audit.critical") == 0  # same count as on screen
     tool = "\n".join(facts.recording("tool:audit"))
     assert f"score {facts.get('audit.score')} · high {facts.get('audit.high')}" in tool
     assert f"score after the automatic fixes: {facts.get('fix.score')}" in tool
@@ -126,6 +126,72 @@ def test_sidecar_facts_fail_loudly_without_the_ci_transcript(monkeypatch: pytest
     monkeypatch.delenv("KN_SIDECAR_TRANSCRIPT", raising=False)
     with pytest.raises(vfacts.FactError, match="KN_SIDECAR_TRANSCRIPT"):
         vfacts.Facts().get("sidecar.peak")
+
+
+def test_the_sidecar_limit_is_the_manifests_and_a_failed_run_is_refused(tmp_path: Path) -> None:
+    script = (ROOT / "scripts" / "demo_sidecar_kind.sh").read_text(encoding="utf-8")
+    assert "memory.max" in script and "limit 256" not in script  # read from the cgroup, not typed
+    assert vfacts._manifest_limit_mib() == 256
+    text = TRANSCRIPT.read_text(encoding="utf-8")
+    for bad, why in (
+        (text.replace("limit 256 MiB", "limit 512 MiB"), "512 MiB there, 256 MiB in"),
+        (text.replace("port 8080: closed", "port 8080: OPEN"), "not shown closed"),
+    ):
+        (tmp_path / "t.txt").write_text(bad, encoding="utf-8")
+        with pytest.raises(vfacts.FactError, match=why):
+            vfacts.Facts(tmp_path / "t.txt").get("sidecar.limit")
+
+
+def test_facts_describe_the_product_tree_and_fail_loudly_without_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert vfacts.PRODUCT == ROOT  # videos.yml points KN_PRODUCT_ROOT at the release tag's checkout
+    monkeypatch.setattr(vfacts, "PRODUCT", tmp_path)
+    with pytest.raises(vfacts.FactError, match=r"insecure-deployment\.yaml not found"):
+        vfacts.Facts().get("audit.score")
+
+
+def test_claudes_answer_quotes_the_example_and_the_audit(facts: vfacts.Facts) -> None:
+    import yaml
+
+    docs = list(yaml.safe_load_all((ROOT / vfacts.EXAMPLE).read_text(encoding="utf-8")))
+    dep = next(d for d in docs if d["kind"] == "Deployment")
+    svc = next(d for d in docs if d["kind"] == "Service")
+    env = {e["name"]: e.get("value") for c in dep["spec"]["template"]["spec"]["containers"] for e in c.get("env", [])}
+    answer = "\n".join(next(s for s in _spec()["videos"]["mcp"]["scenes"] if s["kind"] == "explain")["answer"])
+    assert f"DB_PASSWORD: {env['DB_PASSWORD']}" in answer
+    pods = dep["spec"]["template"]["metadata"]["labels"]["app"]
+    assert f"selector is app: {svc['spec']['selector']['app']}, but the pods are app: {pods}" in answer
+    severity = {
+        m.group(2): {"HIGH": "high", "MED": "medium"}[m.group(1)]
+        for m in (re.match(r"  (HIGH|MED) +(KN-[A-Z]+\d+)", ln) for ln in facts.recording("tool:audit"))
+        if m
+    }
+    claimed = re.findall(r"\(((?:KN-[A-Z]+\d+(?: and )?)+), (high|medium)\)", answer)
+    assert len(claimed) == 3
+    for ids, sev in claimed:
+        assert all(severity.get(i) == sev for i in ids.split(" and ")), (ids, sev, severity)
+
+
+def test_a_cut_recording_says_so_on_screen(facts: vfacts.Facts) -> None:
+    import build_scenes
+
+    cut = r"… \d+ medium and low findings and every fix line left out here"
+    assert re.fullmatch(cut, facts.recording("cli:audit")[-1])
+    steps = build_scenes.parse_transcript("# c\n$ cmd\n" + "\n".join(f"line {i}" for i in range(12)), 9)
+    assert steps[0]["output"][9:] == ["… 3 more lines"]
+    assert build_scenes.parse_transcript("# c\n$ cmd\nok", 9)[0]["output"] == ["ok"]
+
+
+def test_the_text_to_video_prompts_say_what_the_rendered_videos_say() -> None:
+    doc = (ROOT / "demos" / "ai-video-prompts.md").read_text(encoding="utf-8")
+    sections = re.split(r"(?m)^## Video \d+:.*$", doc)[1:]
+    spec = _spec()["videos"]
+    assert len(sections) == len(spec)
+    for name, body in zip(spec, sections, strict=True):
+        rows = [ln.strip("| ").split(" | ") for ln in body.splitlines() if re.match(r"^\| \d+ \|", ln)]
+        scenes = [s for s in spec[name]["scenes"] if s["kind"] != "end"]
+        assert [(r[3].replace("`", ""), r[4]) for r in rows] == [(s["caption"], s["vo"]) for s in scenes], name
 
 
 def test_rules_a_script_names_are_real_and_found_in_the_example(facts: vfacts.Facts) -> None:

@@ -91,7 +91,7 @@ def normalize(wav: Path, voiced: bool) -> dict[str, float]:
                 af += f":level=false,aresample={RATE}"
             _run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-af", af, "-c:a", "pcm_s24le", str(out)], check=True)
             result = measure(out)
-            if abs(result["I"] - target) <= 0.1 and result["TP"] <= ceiling + 0.1:
+            if abs(result["I"] - target) <= 0.1 and result["TP"] <= ceiling:  # the full headroom, for the encode
                 break
             gain += target - result["I"]
             if result["TP"] > ceiling:

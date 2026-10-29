@@ -69,9 +69,14 @@ def test_video_pages_take_fonts_and_colours_from_the_brand() -> None:
         for system_font in ("DejaVu", "Liberation", "Helvetica", "Arial", '"Inter"', "'Inter'", 'font-family="Inter'):
             assert system_font not in text, (page, system_font)  # a machine's fonts never stand in for the brand
         lower = text.lower()
+        triples = {tuple(map(int, m.groups())) for m in re.finditer(r"\b(\d{1,3}) ?, ?(\d{1,3}) ?, ?(\d{1,3})\b", text)}
         for name, hex_ in colors.items():
             assert hex_.lower() not in lower, f"{page.name} hard-codes {name} {hex_}; use var(--kn-...) or KN.tokens"
+            rgb = tuple(int(hex_[i : i + 2], 16) for i in (1, 3, 5))
+            assert rgb not in triples, f"{page.name} copies {name} as rgb{rgb}; use var(--kn-...-rgb) or KN.rgb"
         assert "kube-noob-icon.svg" not in text  # the icon comes from brand.js as a data: URL
+    stage = (VIDEO / "stage" / "stage.html").read_text(encoding="utf-8")
+    assert "tx: KN.rgb.ink" in stage and "tx: KN.rgb.dangerSoft" in stage  # terminal text is a token
 
 
 def test_video_scripts_use_the_brand_call_to_action() -> None:

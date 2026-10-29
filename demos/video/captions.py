@@ -1,10 +1,11 @@
 """WebVTT captions for the kube-noob videos, from the voice-over timings, for the website, YouTube and LinkedIn
 (which play muted until someone taps).
 
-Each spoken line becomes cues of at most two lines of 42 characters, split at sentence and clause boundaries, and
-timed in proportion to their length inside the span the voice actually speaks. voiceover.py writes
-kube-noob-<video>.vtt for the animated videos and audio_kit.py score writes kube-noob-walkthrough.vtt. Standard
-library only.
+Each spoken line becomes cues of at most two lines of 42 characters, split at sentence and clause boundaries (a
+clause too long for one cue is cut at the word nearest its middle, so no word is left alone on screen), and timed in
+proportion to their length inside the span the voice actually speaks, every cue on screen for at least MIN_CUE.
+voiceover.py writes kube-noob-<video>.vtt for the animated videos and audio_kit.py score writes
+kube-noob-walkthrough.vtt. Standard library only.
 """
 
 from __future__ import annotations
@@ -32,39 +33,67 @@ def _clean(text: str) -> str:
 
 
 def _wrap(text: str) -> list[str]:
+    """Fewest lines of at most LINE characters; two lines are balanced, so neither is a lone word."""
     lines: list[str] = []
     for word in text.split(" "):
         if lines and len(lines[-1]) + 1 + len(word) <= LINE:
             lines[-1] += " " + word
         else:
             lines.append(word)
-    return lines
+    if len(lines) != 2:
+        return lines
+    words = text.split(" ")
+    cuts = [(" ".join(words[:i]), " ".join(words[i:])) for i in range(1, len(words))]
+    return list(min((c for c in cuts if max(map(len, c)) <= LINE), key=lambda c: max(map(len, c))))
+
+
+def _fits(text: str) -> bool:
+    return len(_wrap(text)) <= LINES
+
+
+def _halves(piece: str) -> list[str]:
+    """A clause too long for one cue, cut at the word nearest its middle, and again while a half does not fit."""
+    words = piece.split(" ")
+    if _fits(piece) or len(words) == 1:  # a single word wider than the box is refused by check()
+        return [piece]
+    cut = min(range(1, len(words)), key=lambda i: abs(len(" ".join(words[:i])) - len(" ".join(words[i:]))))
+    return _halves(" ".join(words[:cut])) + _halves(" ".join(words[cut:]))
 
 
 def chunks(text: str) -> list[str]:
-    """Split a spoken line into caption-sized pieces: sentences first, then clauses, then words."""
+    """Split a spoken line into caption-sized pieces: sentences first, then clauses, then balanced halves."""
     out: list[str] = []
     for sentence in re.split(r"(?<=[.!?])\s+", _clean(text)):
         if not sentence:
             continue
-        parts = [sentence]
-        if len(sentence) > LINE * LINES:
-            parts = [p for p in re.split(r"(?<=[,;:])\s+", sentence) if p]
+        parts = [sentence] if _fits(sentence) else [p for p in re.split(r"(?<=[,;:])\s+", sentence) if p]
         piece = ""
         for part in parts:
-            if piece and len(piece) + 1 + len(part) > LINE * LINES:
+            if not _fits(part):
+                out.extend([piece] if piece else [])
+                out.extend(_halves(part))
+                piece = ""
+            elif piece and not _fits(f"{piece} {part}"):
                 out.append(piece)
                 piece = part
             else:
                 piece = f"{piece} {part}".strip()
-            while len(_wrap(piece)) > LINES:  # one clause longer than a cue: cut at the last word that fits
-                lines = _wrap(piece)
-                head = " ".join(lines[:LINES])
-                out.append(head)
-                piece = piece[len(head) :].strip()
         if piece:
             out.append(piece)
     return out
+
+
+def _durations(lengths: list[int], duration: float) -> list[float]:
+    """Time in proportion to length, but at least MIN_CUE per cue, the rest shared by the longer ones."""
+    fixed: set[int] = set()
+    while True:
+        left = duration - MIN_CUE * len(fixed)
+        free = sum(n for i, n in enumerate(lengths) if i not in fixed)
+        d = [MIN_CUE if i in fixed else left * n / free for i, n in enumerate(lengths)]
+        short = {i for i, x in enumerate(d) if x < MIN_CUE - 1e-9} - fixed
+        if not short or len(fixed | short) == len(lengths):
+            return d  # a span too short for every cue to get MIN_CUE is refused by check()
+        fixed |= short
 
 
 def cues(text: str, start: float, duration: float) -> list[Cue]:
@@ -72,11 +101,9 @@ def cues(text: str, start: float, duration: float) -> list[Cue]:
     pieces = chunks(text)
     if not pieces or duration <= 0:
         return []
-    total = sum(len(p) for p in pieces)
     out: list[Cue] = []
     t = start
-    for i, p in enumerate(pieces):
-        d = duration * len(p) / total
+    for i, (p, d) in enumerate(zip(pieces, _durations([len(p) for p in pieces], duration), strict=True)):
         end = start + duration if i == len(pieces) - 1 else t + d
         out.append(Cue(round(t, 3), round(end, 3), "\n".join(_wrap(p))))
         t = end
@@ -97,7 +124,7 @@ def check(all_cues: list[Cue], duration: float | None = None) -> None:
     for c in all_cues:
         if c.start < prev_end - 1e-3 or c.end <= c.start:
             raise ValueError(f"cue {c.text!r} at {c.start}-{c.end} overlaps or is empty")
-        if c.end - c.start < MIN_CUE - 1e-3 and len(c.text) > 12:
+        if c.end - c.start < MIN_CUE - 2e-3:
             raise ValueError(f"cue {c.text!r} is on screen for only {c.end - c.start:.2f} s")
         lines = c.text.split("\n")
         if len(lines) > LINES or any(len(ln) > LINE for ln in lines):

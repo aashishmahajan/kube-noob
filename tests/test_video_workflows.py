@@ -65,6 +65,29 @@ def test_every_release_renders_and_attaches_measured_4k_masters() -> None:
     )
     assert jobs["attach"]["permissions"] == {"contents": "write"} and "gh release upload" in _run(jobs["attach"])
     assert "SHA256SUMS-videos.txt" in _run(jobs["attach"])
+    render_step = next(s for s in jobs["render"]["steps"] if s.get("name") == "Render the 4K master")
+    assert render_step["env"]["KN_PRODUCT_ROOT"].endswith("/product")  # the facts describe the tag, not pipeline_ref
+
+
+def test_one_failed_leg_or_one_red_ci_job_does_not_cost_the_release_its_videos() -> None:
+    jobs = _wf("videos.yml")["jobs"]
+    # every leg that rendered is attached, and the run still goes red when one did not
+    assert "!cancelled()" in jobs["attach"]["if"] and "!cancelled()" in jobs["render"]["if"]
+    attach = _run(jobs["attach"])
+    assert '"$RENDER" != success' in attach and '"$TRANSCRIPT" != success' in attach
+    transcript_dl = [s for s in jobs["render"]["steps"] if "transcript-for-videos" in str(s.get("with", {}))]
+    assert [s["if"] for s in transcript_dl] == ["matrix.video == 'sidecar'"]  # only that leg needs the cluster run
+    # the transcript: the one kept with the release, else a ci run whose sidecar step passed, of this version
+    run = _run(jobs["transcript"])
+    assert "gh release download" in run and "-p sidecar-transcript-4.22.txt" in run
+    assert 'select(.conclusion == "success")' not in run  # a red unrelated job no longer disqualifies the run
+    kind = _wf("ci.yml")["jobs"]["e2e-kind"]
+    assert kind["name"].startswith("e2e-kind (OpenShift ") and "4.22" in str(kind["strategy"]["matrix"])
+    step = next(s for s in kind["steps"] if "demo_sidecar_kind.sh" in str(s.get("run", "")))
+    assert step["name"].startswith("Sidecar under Pod Security") and "Sidecar under Pod Security" in run
+    assert 'startswith("e2e-kind (OpenShift 4.22")' in run
+    assert "connected to kube_noob_mcp ${TAG#v} at" in run
+    assert "transcript-for-videos" in str(jobs["attach"]["steps"])  # attached for re-renders of this tag
 
 
 def test_the_playwright_version_is_locked() -> None:

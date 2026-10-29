@@ -2,8 +2,9 @@
 
 Three short videos to generate with a text-to-video model (for example Sora, Grok or a similar tool). Paste each
 scene's prompt as one generation, then cut the clips together and add the voice-over. To skip the video model, render
-all three locally with `demos/video/stage/build.sh` (same scenes and voice-over, real terminal text; see
-[README.md](README.md)).
+all three locally with `demos/video/stage/build.sh` (real terminal text; see [README.md](README.md)). The on-screen
+text and voice-over columns are the captions and voice-over of `demos/video/stage/videos.json`, word for word
+(tests/test_video_facts.py compares them), so a generated cut says what the rendered one says.
 
 ## Before you generate
 
@@ -25,7 +26,7 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 
 | # | Length | Prompt | On-screen text | Voice-over |
 |---|---|---|---|---|
-| 1 | 5 s | A dark navy control room at night, one glowing terminal window floating in the center. A red command line appears and the whole room flickers red, like an alarm. Cinematic, shallow depth of field, no readable text. | Your AI ran `delete` first. | When a pod breaks at 2 a.m., the fastest command is delete. |
+| 1 | 5 s | A dark navy control room at night, one glowing terminal window floating in the center. A red command line appears and the whole room flickers red, like an alarm. Cinematic, shallow depth of field, no readable text. | Your AI ran delete first. | When a pod breaks at two in the morning, the fastest command is delete. |
 | 2 | 5 s | The red glow freezes and fades; small glowing cubes (pods) dissolve into dust, suggesting lost evidence. Slow motion, moody. | The evidence is gone. | It's also the one that destroys your evidence. |
 | 3 | 7 s | A friendly cartoon rocket with a round window and a smile flies in from the lower left on a green-blue arc of light and stops beside the terminal. Clean 3D illustration style, soft rim light. | kube-noob | Meet kube-noob. There's no AI inside it. |
 | 4 | 8 s | Split screen: on the left a chat bubble labelled only with a speech icon, on the right the rocket holding a clipboard with green check marks; a beam connects them. Flat, modern, navy and green palette. | No AI inside. Works with yours. | Your AI does the talking. kube-noob supplies the rules, the read-only steps and the citations. |
@@ -35,10 +36,10 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 
 | # | Length | Prompt | On-screen text | Voice-over |
 |---|---|---|---|---|
-| 1 | 8 s | Isometric 3D illustration: a large translucent box (a pod) on a navy grid; inside it two smaller containers side by side, one labelled with a chat icon (the app), one with the rocket mascot. Soft studio lighting. | Your app + kube-noob, one pod | Run kube-noob next to your own app, in the same pod. |
-| 2 | 10 s | A short glowing cable loops between the two containers inside the pod only. Outside the pod, other glowing cubes try to reach the rocket and bounce off a transparent shield. | 127.0.0.1 only | It listens on 127.0.0.1, so only containers in that pod can call it. |
-| 3 | 10 s | The pod's outer wall shows a single small door marked with a padlock; arrows to the outside world fade out before reaching it. | No egress. No token to manage. | It needs no network access at all, and there's no Service, Route or token to manage. |
-| 4 | 12 s | Blank glowing terminal window over the isometric scene (overlay the real `kube-noob-sidecar.mp4` segment: audit, rollout, MCP calls, closed port). | Pod Security restricted | We deploy it on a cluster that enforces Pod Security restricted. The app asks it to audit a Deployment and diagnose a crash, over loopback. |
+| 1 | 8 s | Isometric 3D illustration: a large translucent box (a pod) on a navy grid; inside it two smaller containers side by side, one labelled with a chat icon (the app), one with the rocket mascot. Soft studio lighting. | Your app and kube-noob, one pod | Run kube-noob next to your own app, in the same pod. |
+| 2 | 10 s | A short glowing cable loops between the two containers inside the pod only. Outside the pod, other glowing cubes try to reach the rocket and bounce off a transparent shield. | Listens on 127.0.0.1 only | It listens only on localhost, so only the containers in that pod can call it. |
+| 3 | 10 s | The pod's outer wall shows a single small door marked with a padlock. One green arrow leaves it for a small DNS sign; red arrows toward the internet and other cluster services fade out before reaching them. | DNS-only egress. No Service, no token. | It makes no outbound calls, so its network policy allows DNS only. kube-noob gets no Service, no Route and no token to manage. |
+| 4 | 12 s | Blank glowing terminal window over the isometric scene (overlay the real `kube-noob-sidecar.mp4` segment: audit, rollout, MCP calls, closed port). | Recorded on a cluster that enforces Pod Security restricted | On a test cluster that enforces Pod Security restricted, the app asks it to audit a Deployment and diagnose a crash, over localhost. |
 | 5 | 8 s | A small gauge on the rocket's container settles at a low level, green. | {sidecar.peak} MiB peak · {sidecar.limit} MiB limit | In our test cluster it peaked at {sidecar.peak} mebibytes, well under its limit. |
 | 6 | 12 s | Pull back to show many pods on the grid, each with a tiny rocket beside its app. | deploy/sidecar/app-with-kube-noob-sidecar.yaml | One example manifest, audited for OpenShift 4.20 and later. Get it at kube-noob dot com. |
 
@@ -46,8 +47,9 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 
 | # | Length | Prompt | On-screen text | Voice-over |
 |---|---|---|---|---|
-| 1 | 8 s | A laptop on a desk at night, a code editor glowing; a speech bubble rises from the screen. Warm desk lamp, navy room. | Ask in your own words | Paste a Deployment into Claude and ask what's wrong for OpenShift 4.22. |
-| 2 | 12 s | From the laptop, a thin beam goes to the rocket mascot sitting on the desk next to the laptop (not in the cloud). The rocket flips through a thick rulebook. | Runs on your machine | The kube-noob plugin runs on your machine. Claude calls its tools: audit, fix, diagnose. |
+| 1 | 8 s | A laptop on a desk at night, a code editor glowing; a speech bubble rises from the screen. Warm desk lamp, navy room. | Ask in your own words | Ask Claude to review a Deployment for OpenShift 4.22. |
+| 2 | 12 s | From the laptop, a thin beam goes to the rocket mascot sitting on the desk next to the laptop (not in the cloud). The rocket flips through a thick rulebook. | Runs on your machine | The kube-noob plugin runs on your machine. Claude calls its tools: audit, fix and diagnose. |
 | 3 | 15 s | Blank glowing terminal window (overlay the real `kube-noob-mcp.mp4` segment: tool calls and the score). | {audit.score}/100 · {audit.high} high findings | kube-noob checks the YAML against {rules} rules and returns findings with line numbers and fixes. Same answer every time. |
 | 4 | 15 s | The speech bubble fills with neat green check marks while the rulebook closes. | Claude explains. kube-noob checks. | Claude explains the result in plain language and cites the rule ids. |
 | 5 | 10 s | The laptop's network icon stays dim while the rocket works; a tiny label reads "local". | No AI inside kube-noob | There's no model inside kube-noob, and it makes no network calls of its own. |
+| 6 | 6 s | The rocket on the desk waves at the camera; the laptop screen shows two blank command lines (overlay the plugin install commands from the real `kube-noob-mcp.mp4`). | Add it to Claude Code | Add it to Claude Code with two commands. Get it at kube-noob dot com. |

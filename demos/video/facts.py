@@ -13,7 +13,7 @@ Usage:
 
 Facts:
   version, rules, selftest                       the installed kube-noob
-  audit.score, audit.high, audit.medium, audit.low
+  audit.score, audit.critical, audit.high, audit.medium, audit.low
                                                  examples/insecure-deployment.yaml for OpenShift 4.22, through the
                                                  same audit tool Claude calls
   fix.changes, fix.manual, fix.score             the same file through the fix tool (score after the fixes)
@@ -39,7 +39,11 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+# The source tree whose example and sidecar manifest the facts describe: the release tag's checkout when
+# .github/workflows/videos.yml renders an older tag with a newer pipeline (pipeline_ref); this tree otherwise.
+PRODUCT = Path(os.environ.get("KN_PRODUCT_ROOT") or ROOT).resolve()
 EXAMPLE = "examples/insecure-deployment.yaml"
+SIDECAR_MANIFEST = "deploy/sidecar/app-with-kube-noob-sidecar.yaml"
 PLATFORM, VERSION = "openshift", "4.22"
 PLACEHOLDER = re.compile(r"\{([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)(?::(words))?\}")
 RECORDING = re.compile(r"^@([a-z]+:[a-z]+)$")
@@ -94,9 +98,22 @@ def words(n: int) -> str:
     return words(n // 1000) + " thousand" + ("" if rest == 0 else (" and " if rest < 100 else " ") + words(rest))
 
 
+def _product(rel: str) -> Path:
+    path = PRODUCT / rel
+    if not path.is_file():
+        raise FactError(f"{path} not found (KN_PRODUCT_ROOT={os.environ.get('KN_PRODUCT_ROOT', '')!r})")
+    return path
+
+
 def _cli(*args: str) -> str:
+    _product(EXAMPLE)
     r = subprocess.run(
-        [sys.executable, "-m", "kube_noob", *args], cwd=ROOT, capture_output=True, text=True, check=False, timeout=600
+        [sys.executable, "-m", "kube_noob", *args],
+        cwd=PRODUCT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=600,
     )
     if r.returncode not in (0, 1) or not r.stdout.strip():  # audit exits 1 when it finds problems
         raise FactError(f"`kube-noob {' '.join(args)}` failed ({r.returncode}): {r.stderr.strip()[:300]}")
@@ -124,6 +141,21 @@ def parse_transcript(text: str) -> list[dict[str, Any]]:
         while s["output"] and not s["output"][-1].strip():
             s["output"].pop()
     return steps
+
+
+def _manifest_limit_mib() -> int:
+    """limits.memory of the kube-noob container in the sidecar example, in MiB."""
+    import yaml
+
+    units = {"Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "K": 10**3, "M": 10**6, "G": 10**9, "": 1}
+    for doc in yaml.safe_load_all(_product(SIDECAR_MANIFEST).read_text(encoding="utf-8")):
+        if doc and doc.get("kind") == "Deployment":
+            for c in doc["spec"]["template"]["spec"]["containers"]:
+                if c["name"] == "kube-noob":
+                    m = re.fullmatch(r"(\d+)([KMG]i?|)", str(c["resources"]["limits"]["memory"]))
+                    if m:
+                        return int(m.group(1)) * units[m.group(2)] // 2**20
+    raise FactError(f"{SIDECAR_MANIFEST}: no kube-noob container with a memory limit")
 
 
 def _change(c: dict[str, Any]) -> str:
@@ -182,13 +214,14 @@ class Facts:
         from kube_noob.toolkit import AuditIn, FixIn
 
         kit = _kit()
-        manifests = (ROOT / EXAMPLE).read_text(encoding="utf-8")
+        manifests = _product(EXAMPLE).read_text(encoding="utf-8")
         a = kit.audit(AuditIn(manifests=manifests, platform=PLATFORM, version=VERSION))
         counts = a["summary"]["counts"]
         self._values.update(
             {
                 "audit.score": _num(a["summary"]["score"]),
-                "audit.high": counts["high"] + counts["critical"],
+                "audit.critical": counts["critical"],
+                "audit.high": counts["high"],
                 "audit.medium": counts["medium"],
                 "audit.low": counts["low"],
             }
@@ -206,8 +239,9 @@ class Facts:
         wiring = [x for x in a["findings"] if x["severity"] == "medium" and rules[x["ruleId"]]["stage"] == "validate"]
         lines = [
             f"● kube-noob · kubenoob_audit_manifests (platform: {PLATFORM}, version: {VERSION})",
-            f"  score {self._values['audit.score']} · high {self._values['audit.high']} · "
-            f"medium {counts['medium']} · low {counts['low']}",
+            f"  score {self._values['audit.score']} · "
+            + (f"critical {counts['critical']} · " if counts["critical"] else "")
+            + f"high {counts['high']} · medium {counts['medium']} · low {counts['low']}",
         ]
         lines += [f"  HIGH  {x['ruleId']}  line {x['line']}  {rules[x['ruleId']]['title']}" for x in high]
         lines += [f"  MED   {x['ruleId']}  line {x['line']}  {rules[x['ruleId']]['title']}" for x in wiring[:1]]
@@ -222,10 +256,15 @@ class Facts:
         args = ["audit", "-f", EXAMPLE, "--platform", PLATFORM, "--version", VERSION]
         out = _cli(*args).splitlines()
         lines = [f"$ kube-noob {' '.join(args)}", out[0]]
+        rest = 0
         for i, line in enumerate(out):
             if line.startswith("[HIGH") or line.startswith("[CRITICAL"):
                 lines.append(re.sub(r"( L\d+) .*$", r"\1", line))  # the field path makes the line too wide
                 lines.append(out[i + 1])
+            elif re.match(r"\[(MEDIUM|LOW)", line):
+                rest += 1
+        if rest:
+            lines.append(f"… {rest} medium and low findings and every fix line left out here")
         self._recordings["cli:audit"] = lines
 
     def _protocol(self) -> None:
@@ -250,6 +289,14 @@ class Facts:
         if not conn or not mem:
             raise FactError(
                 f"{self.sidecar}: no 'connected to kube_noob_mcp' or memory line; is it a sidecar transcript?"
+            )
+        if "port 8080: closed" not in text:
+            raise FactError(f"{self.sidecar}: the pod port is not shown closed; the video shows only a passing run")
+        limit = _manifest_limit_mib()
+        if int(mem.group(2)) != limit:
+            raise FactError(
+                f"{self.sidecar}: the kube-noob container's memory limit is {mem.group(2)} MiB there, {limit} MiB in "
+                f"{SIDECAR_MANIFEST}; record the transcript again (scripts/demo_sidecar_kind.sh)"
             )
         self._values.update(
             {

@@ -52,7 +52,7 @@ run "The app calls kube-noob on 127.0.0.1 inside its own pod: audit, diagnose, c
 run "Nothing outside the pod can reach it: port 8080 on the pod IP is closed" \
   "kubectl -n team-tools exec deploy/assistant -c assistant -- python3 -c \"import socket; ip=socket.gethostbyname(socket.gethostname()); s=socket.socket(); r=s.connect_ex((ip, 8080)); print('pod IP', ip, 'port 8080:', 'closed (listens on 127.0.0.1 only)' if r else 'OPEN'); raise SystemExit(0 if r else 1)\""
 run "Memory used by the kube-noob container after those calls" \
-  "kubectl -n team-tools exec deploy/assistant -c kube-noob -- python3 -c \"import pathlib as p; f=lambda n: int(p.Path('/sys/fs/cgroup', n).read_text()) // 2**20 if p.Path('/sys/fs/cgroup', n).exists() else None; print('current', f('memory.current'), 'MiB; peak', f('memory.peak'), 'MiB; limit 256 MiB')\""
+  "kubectl -n team-tools exec deploy/assistant -c kube-noob -- python3 -c \"import pathlib as p; r=lambda n: p.Path('/sys/fs/cgroup', n).read_text().strip() if p.Path('/sys/fs/cgroup', n).exists() else ''; f=lambda n: int(r(n)) // 2**20 if r(n).isdigit() else None; print('current', f('memory.current'), 'MiB; peak', f('memory.peak'), 'MiB; limit', f('memory.max'), 'MiB')\""
 run "kube-noob runs as non-root with a read-only root filesystem" \
   "kubectl -n team-tools exec deploy/assistant -c kube-noob -- python3 -c \"import os; print('uid', os.getuid(), '- root filesystem writable:', os.access('/', os.W_OK))\""
 run "Traffic policy: ingress only to the app port, egress DNS only" \

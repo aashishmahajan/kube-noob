@@ -55,7 +55,7 @@ def test_normalise_reaches_the_target_without_passing_the_true_peak_limit(tmp_pa
     before = loudness.measure(wav)
     assert before["TP"] + (target - before["I"]) > tp  # a plain gain would clip the spec
     after = loudness.normalize(wav, voiced=True)
-    assert abs(after["I"] - target) <= tol / 2 and after["TP"] <= tp - loudness.TP_HEADROOM + 0.2
+    assert abs(after["I"] - target) <= tol / 2 and after["TP"] <= tp - loudness.TP_HEADROOM  # the whole headroom
     done = loudness.verify(_mux(tmp_path, wav, "ok.mp4"), voiced=True)
     assert abs(done["loudness"]["I"] - target) <= tol and done["loudness"]["TP"] <= tp
     assert abs(done["durations"]["video"] - done["durations"]["audio"]) < 0.06

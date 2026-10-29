@@ -77,7 +77,7 @@ def parse_transcript(text: str, max_out: int) -> list[dict[str, object]]:
         out: list[str] = s["output"]  # type: ignore[assignment]
         while out and not out[-1].strip():
             out.pop()
-        s["output"] = out[:max_out]
+        s["output"] = out[:max_out] + ([f"… {len(out) - max_out} more lines"] if len(out) > max_out else [])
     return steps
 
 

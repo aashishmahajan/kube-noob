@@ -99,7 +99,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .ctr-kn .top { background: rgba(24,104,86,.96); }
 .shield .face { background: rgba(94,234,212,.035); border: 2px dashed rgba(94,234,212,.32); }
 .shield .top, .shield .bottom { display: none; }
-.mini .face { background: rgba(248,113,113,.38); border: 1.5px solid rgba(254,202,202,.85); }
+.mini .face { background: rgba(var(--kn-danger-rgb), .38); border: 1.5px solid rgba(var(--kn-danger-soft-rgb), .85); }
 .door { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #0b1a33; border: 3px solid var(--kn-warning); border-radius: 6px 6px 0 0; }
 .isoFloor { position: absolute; left: 0; top: 0; width: 5200px; height: 5200px; transform-origin: 0 0;
   background-image: linear-gradient(rgba(94,234,212,.12) 2px, transparent 2px), linear-gradient(90deg, rgba(94,234,212,.12) 2px, transparent 2px);
@@ -112,7 +112,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 
 /* desk (mcp) */
 #desk .lamp { position: absolute; left: -200px; top: -260px; width: 1300px; height: 1100px; border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(251,191,36,.22), rgba(251,191,36,.06) 55%, transparent); }
+  background: radial-gradient(closest-side, rgba(var(--kn-warning-rgb), .22), rgba(var(--kn-warning-rgb), .06) 55%, transparent); }
 #desk .top { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
   clip-path: polygon(0 1080px, 1920px 1080px, 1700px 690px, 220px 690px);
   background: linear-gradient(180deg, #34507c, #1c2c48 45%, #0f192d); }
@@ -147,7 +147,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 /* end card */
 #endcard { z-index: 30; background: radial-gradient(ellipse 1300px 800px at 40% 40%, var(--kn-navy) 0%, var(--kn-navy-deep) 55%, var(--kn-navy-night) 100%); }
 #endcard .wrap { position: absolute; left: 300px; top: 230px; display: flex; gap: 64px; align-items: center; }
-#endcard img { width: 250px; height: 250px; border-radius: 56px; box-shadow: 0 0 80px rgba(67,233,123,.25); }
+#endcard img { width: 250px; height: 250px; border-radius: 56px; box-shadow: 0 0 80px rgba(var(--kn-green-rgb), .25); }
 #endcard .wm { font: 800 170px/0.95 var(--sans); letter-spacing: -0.035em;
   background: linear-gradient(90deg, var(--kn-green), var(--kn-teal) 55%, var(--kn-blue)); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: 12px; }
 #endcard .tag { font: 700 50px var(--sans); color: var(--kn-ink); margin-top: 14px; letter-spacing: -0.01em; }
@@ -301,7 +301,7 @@ function tokens(line) {
   if (line.startsWith('$ ')) return [['tp', '$ '], ['tc', line.slice(2)]];
   if (line.startsWith('> ')) return [['tp', '> '], ['tc', line.slice(2)]];
   if (line.startsWith('/')) return [['tp', '> '], ['tc', line]];
-  if (line.startsWith('#')) return [['tk', line]];
+  if (line.startsWith('#') || line.startsWith('… ')) return [['tk', line]];  // a comment, or lines left out
   const out = [];
   const re = /(\[HIGH[^\]]*\]|\bHIGH\b|\bMED\b|●|score[ =]\d+(\.\d+)?(\/100)?|high=\d+|medium=\d+|low=\d+|\bmodel none\b|\bweb off\b|\bcluster off\b|closed \(listens on 127\.0\.0\.1 only\)|deleted|Error from server \(NotFound\)|not found|\d+ tools|→)/g;
   let last = 0, m;
@@ -522,7 +522,7 @@ function buildIso() {
      <path class="ok" d="M680 30 L680 760" stroke="${K.green}" stroke-width="16" fill="none" stroke-linecap="round"/>
      <path class="no1" d="M720 30 L1450 700" stroke="${KN.tokens.colors.danger}" stroke-width="16" fill="none" stroke-linecap="round"/>
      <path class="no2" d="M640 30 L80 700" stroke="${KN.tokens.colors.danger}" stroke-width="16" fill="none" stroke-linecap="round"/></svg>`);
-  ISO.dnsLabel = billboard(w, 380, 960, 60, `<div class="label mono">DNS :53 only</div>`); // on its line, raised so the line passes under it
+  ISO.dnsLabel = billboard(w, 380, 960, 60, `<div class="label mono">DNS only</div>`); // the port differs: 53 upstream, 5353 on OpenShift
   ISO.noLabels = [billboard(w, 748, 812, 60, `<div class="label" style="color:var(--kn-danger-soft)">✕ internet</div>`),
                   billboard(w, 88, 812, 60, `<div class="label" style="color:var(--kn-danger-soft)">✕ cluster services</div>`)];
   // the gauge's numbers come from the sidecar transcript recorded in CI (videos.json gauge, filled by facts.py)
@@ -531,11 +531,11 @@ function buildIso() {
      <rect x="0" y="0" width="420" height="310" rx="26" fill="rgba(5,12,26,.86)" stroke="rgba(${K.greenRgb},.5)" stroke-width="2"/>
      <path d="M80 190 A130 130 0 0 1 340 190" fill="none" stroke="#1e3a5f" stroke-width="24" stroke-linecap="round"/>
      <path class="arc" d="M80 190 A130 130 0 0 1 340 190" fill="none" stroke="${K.green}" stroke-width="24" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
-     <line class="ndl" x1="210" y1="190" x2="210" y2="96" stroke="#f8fafc" stroke-width="7" stroke-linecap="round"/>
-     <circle cx="210" cy="190" r="12" fill="#f8fafc"/>
-     <text x="80" y="226" fill="#8ea3c2" style="font-family: var(--sans)" font-size="20" text-anchor="middle">0</text>
-     <text x="340" y="226" fill="#8ea3c2" style="font-family: var(--sans)" font-size="20" text-anchor="middle">${G.limit} ${G.unit}</text>
-     <text class="val" x="210" y="262" fill="#f8fafc" style="font-family: var(--sans)" font-weight="800" font-size="44" text-anchor="middle">0 ${G.unit}</text>
+     <line class="ndl" x1="210" y1="190" x2="210" y2="96" stroke="${KN.tokens.colors.ink}" stroke-width="7" stroke-linecap="round"/>
+     <circle cx="210" cy="190" r="12" fill="${KN.tokens.colors.ink}"/>
+     <text x="80" y="226" fill="${KN.tokens.colors.muted}" style="font-family: var(--sans)" font-size="20" text-anchor="middle">0</text>
+     <text x="340" y="226" fill="${KN.tokens.colors.muted}" style="font-family: var(--sans)" font-size="20" text-anchor="middle">${G.limit} ${G.unit}</text>
+     <text class="val" x="210" y="262" fill="${KN.tokens.colors.ink}" style="font-family: var(--sans)" font-weight="800" font-size="44" text-anchor="middle">0 ${G.unit}</text>
      <text x="210" y="292" fill="${KN.tokens.colors.greenSoft}" style="font-family: var(--sans)" font-weight="600" font-size="21" text-anchor="middle">peak memory, limit ${G.limit} ${G.unit}</text></svg>`);
   reg('iso', iso);
 }
@@ -550,7 +550,7 @@ function isoBase(T, o) {
   for (const k of ['shield', 'cable', 'door', 'loopLabel', 'lock', 'arrows', 'dnsLabel', 'gauge']) ISO[k].style.display = 'none';
   ISO.noLabels.forEach(n => { n.style.display = 'none'; });
   ISO.minis.forEach(m => { m.b.style.display = 'none'; m.f.style.display = 'none'; });
-  drawRocket(ISO.rk, { x: 95, y: 150, sc: 0.62, t: T, flame: 0.6 });
+  drawRocket(ISO.rk, { x: 95, y: 112, sc: 0.55, t: T, flame: 0.6 }); // flame clear of the "kube-noob" label
   ISO.extra.forEach(p => drawRocket(p.r, { x: 60, y: 110, sc: 0.5, t: T + 1, flame: 0.6 }));
 }
 
@@ -630,7 +630,8 @@ function endcard(L, dur) {
 const TERM_A = { x: 440, y: 200, w: 1040, h: 560 };
 // Where the rocket rests beside TERM_A: its hull (fins at +-106 px) stays clear of the terminal's right edge (1480).
 const ROCKET_REST = [1640, 560];
-const GREEN = { tc: K.greenRgb, tx: '214,245,226' }, REDT = { tc: '248,113,113', tx: '254,226,226' };
+// terminal text is a brand token too: ink on the green terminal, dangerSoft on the red one
+const GREEN = { tc: K.greenRgb, tx: KN.rgb.ink }, REDT = { tc: KN.rgb.danger, tx: KN.rgb.dangerSoft };
 let TERM, ROCKET;
 const ORB = { cx: 960, cy: 480, rx: 560, ry: 250 };
 const orb = th => [ORB.cx + ORB.rx * Math.cos(th), ORB.cy + ORB.ry * Math.sin(th)];
@@ -929,7 +930,7 @@ async function init() {
 }
 window.renderAt = renderAt;
 // The brand rule for the mascot, checked on the frame just rendered (capture.js --check runs it on every frame):
-// a resting rocket may not overlap a visible terminal or caption.
+// a resting rocket may not overlap a visible terminal, caption or label.
 function visible(e) {
   if (!e || e.style.display === 'none') return false;
   for (let n = e; n && n !== D.body; n = n.parentElement) {
@@ -942,7 +943,7 @@ function overlap(a, b) {
   const w = Math.min(a.right, b.right) - Math.max(a.left, b.left), h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
   return w > 0 && h > 0 ? Math.round(w * h) : 0;
 }
-window.layoutIssues = () => [...rocketIssues(), ...captionCovered()];
+window.layoutIssues = () => [...rocketIssues(), ...labelsUnderRockets(), ...captionCovered()];
 function rocketIssues() {
   if (!ROCKET || ROCKET.flying || !visible(ROCKET.e)) return [];
   const rs = ROCKET.hull.map(h => h.getBoundingClientRect());
@@ -956,6 +957,20 @@ function rocketIssues() {
   if (visible($('caption'))) { // the caption box spans the frame: compare with its text only
     const a = overlap(box, textBox($('caption')));
     if (a > 0) out.push(`rocket overlaps the caption (${a} px²)`);
+  }
+  return out;
+}
+// No word on screen sits under a mascot or its flame, in any scene ("kube-noob" stays hyphenated).
+function labelsUnderRockets() {
+  const labels = [...D.querySelectorAll('.label')].filter(visible);
+  const rockets = [ROCKET, ISO.rk, ...(ISO.extra || []).map(p => p.r)].filter(r => r && !r.flying && visible(r.e));
+  const out = [];
+  for (const r of rockets) {
+    const parts = [...r.hull, r.flame].map(h => h.getBoundingClientRect());
+    for (const l of labels) {
+      const a = parts.reduce((n, b) => n + overlap(b, l.getBoundingClientRect()), 0);
+      if (a > 0) out.push(`rocket overlaps the label "${l.textContent}" (${a} px²)`);
+    }
   }
   return out;
 }

@@ -88,7 +88,7 @@ const mark = id => { window.__marks.push({ id, t: performance.now() }); return p
 const holdUntil = async t => { const left = t - performance.now(); if (left > 0) await sleep(left); };
 function color(line) {
   let h = esc(line);
-  if (/^\s*why:/.test(line)) return `<span class="why">${h}</span>`;
+  if (/^\s*(why:|… )/.test(line)) return `<span class="why">${h}</span>`;  // … marks lines left out
   h = h.replace(/\[HIGH\s*\]|\bhigh=\d+/g, m => `<span class="high">${m}</span>`)
        .replace(/\bmedium=\d+/g, m => `<span class="med">${m}</span>`)
        .replace(/(\d+\/\d+ passed|passed: True|status: ready|posture: OK|offline lock\s+ON|score 100\.0\/100)/g, m => `<span class="ok">${m}</span>`)
