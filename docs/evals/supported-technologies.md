@@ -160,6 +160,28 @@ right bug name an unrelated one. A count of documents was tried and measured wor
 better, 24 worse, 5 neither; most rows with no answer started naming an unrelated bug), so it was not kept and those
 rows are retired.
 
+## The owner's by-technology file (QA9, baseline 2026-10-29)
+
+A second answered file from the owner: 2,486 community questions with high-confidence accepted answers, maintainer
+replies or Jira resolutions, none of them in the first file. Policy engines (Kyverno, Gatekeeper) 596, ODF/Rook/Ceph
+storage 373, Helm 320, workload debugging 249, ROSA HCP 180 and smaller groups. The file stays outside the repository
+(third-party text); `docs/evals/by-technology-test-sample-grades.csv` keeps row ids, topics and verdicts only.
+
+Baseline on a stratified sample of the test half (126 rows, 8 per topic where the topic has them), two independent
+graders who saw the question, the accepted answer and what kube-noob showed:
+
+| Verdict | Grader A | Grader B |
+|---|---|---|
+| Helpful (points at the accepted resolution) | 21 | 32 |
+| Partial (right topic, misses the resolution) | 18 | 8 |
+| Wrong (would mislead) | 6 | 8 |
+| Missed (nothing specific, though in scope) | 48 | 60 |
+| Out of scope | 33 | 18 |
+
+Nearly every helpful answer is an OpenShift bug matched in the release notes. Nothing helpful came for ODF/Rook
+storage (0 of 8), Kyverno and Gatekeeper usage (0 of 8), Helm templating (0 of 8), kubectl and YAML how-tos (0 of
+8) or workload debugging (0 of 8). Changes for these are tuned on the train half only and measured on the test half.
+
 ## How these numbers move
 
 - Tune on the train half, report on the test half: `python scripts/eval_questions.py <answered.csv> --out <dir>
