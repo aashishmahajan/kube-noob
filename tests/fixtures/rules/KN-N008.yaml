@@ -1,0 +1,20 @@
+rule: KN-N008
+good: |
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    selector: {app: web}
+    ports: [{port: 80, targetPort: 8080}]
+bad: |
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: web
+    namespace: shop
+  spec:
+    selector: {app: web}
+    externalIPs: ["203.0.113.10"]
+    ports: [{port: 80, targetPort: 8080}]

@@ -4,6 +4,18 @@
 
 - kube-noob.com is built from this repository's releases by a separate site repository; this repository keeps only
   the product. The site's own third-party notices are on the site (`/notices/`).
+- CVE signatures in the audit (G106): KN-S021 gitRepo volume (CVE-2024-10220, CVE-2025-1767; deprecated since 1.11,
+  off by default from 1.33, gone after 1.35: clone with an init container into an emptyDir), KN-N008 Service
+  externalIPs (CVE-2020-8554, no patch; DenyServiceExternalIPs), KN-N009 risky ingress-nginx annotations (the Critical
+  and High lists plus the annotations behind CVE-2021-25742, CVE-2023-5043/5044, CVE-2025-24514/1097/1098,
+  CVE-2025-15566, CVE-2026-1580, CVE-2026-24513 and CVE-2026-3288), KN-N010 a controller ConfigMap that enables
+  snippets, Critical-risk annotations or unvalidated paths, KN-S022 '+' or '=' in a pod sysctl (CVE-2022-0811,
+  cr8escape, CRI-O), KN-S023 workingDir under /proc and KN-B011 Containerfile WORKDIR under /proc (CVE-2024-21626,
+  Leaky Vessels, runc 1.1.12), KN-S024 an ingress-nginx controller image below the releases that fix CVE-2025-1974 and
+  the later advisories (critical when the validating webhook is on), KN-V019 the retired ingress-nginx (archived
+  2026-03-24; move to a Gateway API implementation), and KN-S008 now flags a Localhost seccomp profile with no file
+  (CVE-2023-2431). Each cites the Kubernetes CVE feed issue or the GitHub advisory, ships fixtures and an admission
+  policy, and feeds the red team (RT-PRIVESC, RT-EXPOSURE) and the threat model (TM-E02, TM-S03, TM-E04).
 - `demos/video/stage/build.sh` honours `KN_SCALE` (1 for 1920x1080, default 2 for 4K).
 - Videos in the brand: `docs/brand/tokens.json` and `docs/brand/BRAND.md` are the one source for the palette (the
   icon's navy, blue and green), type, tagline and call to action. Inter 4.1 and JetBrains Mono 2.304 are bundled

@@ -52,7 +52,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 61 audit rules and their controls
+## The 69 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -76,6 +76,9 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-N005 | NodePort Service | SC-7, CM-7 |
 | KN-N006 | EgressFirewall rule is shadowed | SC-7, SC-7(5), AC-4 |
 | KN-N007 | NetworkPolicy allows all ingress | SC-7, SC-7(5), AC-4 |
+| KN-N008 | Service uses externalIPs | SC-7, SC-8, AC-4 |
+| KN-N009 | Ingress uses a risky ingress-nginx annotation | CM-7, SI-2, SC-7 |
+| KN-N010 | ingress-nginx ConfigMap widens what an Ingress may ask of the controller | CM-6, CM-7, SI-2 |
 | KN-S001 | Privileged container | AC-6, CM-7, SC-39 |
 | KN-S002 | Privilege escalation not disabled | AC-6, AC-6(10), CM-7 |
 | KN-S003 | Container may run as root | AC-6, CM-6 |
@@ -96,6 +99,10 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S018 | Secret material committed in manifests | IA-5(7), SC-28 |
 | KN-S019 | Permissive SecurityContextConstraints | AC-6, CM-7, SC-39 |
 | KN-S020 | Unmasked /proc | SC-39, CM-7 |
+| KN-S021 | gitRepo volume | SI-2, CM-7, SC-39 |
+| KN-S022 | Pod sysctl name or value contains '+' or '=' | SI-2, SC-39, CM-7 |
+| KN-S023 | Container workingDir under /proc | SI-2, SC-39 |
+| KN-S024 | ingress-nginx controller image below the fixed releases | SI-2, SA-22 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |
@@ -117,6 +124,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-V016 | Route TLS configuration is invalid | SC-8, CM-6 |
 | KN-V017 | MachineConfig is not a customer lever on ROSA | CM-6 |
 | KN-V018 | Duplicate key in a YAML mapping | CM-3(2), CM-6 |
+| KN-V019 | Ingress targets the retired ingress-nginx | SA-22 |
 
 Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final)):
 
