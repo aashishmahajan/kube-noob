@@ -32,7 +32,7 @@ from kube_noob.errors import ApprovalError, TierDisabledError
 
 MAX_TTL = timedelta(hours=24)
 DEFAULT_TTL = timedelta(minutes=15)
-_PRINTABLE = re.compile(r"^[^\x00-\x1f\x7f]+$")
+_PRINTABLE = re.compile(r"^[^\x00-\x1f\x7f]+\Z")
 
 
 @dataclass(frozen=True)

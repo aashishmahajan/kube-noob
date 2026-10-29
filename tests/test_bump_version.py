@@ -28,8 +28,10 @@ FILES = [
     "Containerfile",
     "deploy/tekton/kube-noob-gate.yaml",
     "deploy/gitlab/kube-noob-gate.gitlab-ci.yml",
+    "docs/install.md",
     "CHANGELOG.md",
 ]
+MINOR_ONLY = {"docs/install.md"}  # names the image's MAJOR.MINOR tag, which a patch release does not change
 
 
 def _load():  # type: ignore[no-untyped-def]
@@ -59,7 +61,7 @@ def test_bump_updates_every_reference(repo: Path) -> None:
     old = bv.current_version(repo)
     new = _next_patch(old)
     changed = bv.bump(repo, new, "Security: rebuild on patched UBI base image.")
-    assert set(changed) == set(FILES)
+    assert set(changed) == set(FILES) - MINOR_ONLY
     assert f'__version__ = "{new}"' in (repo / "src/kube_noob/__init__.py").read_text()
     server = json.loads((repo / "server.json").read_text())
     assert server["version"] == server["packages"][0]["version"] == new
@@ -83,6 +85,17 @@ def test_bump_updates_every_reference(repo: Path) -> None:
     for f in FILES:
         # CHANGELOG keeps history; uv.lock may hold dependency versions that contain the old string (checked above).
         assert old not in (repo / f).read_text() or f in {"CHANGELOG.md", "plugin/kube-noob/uv.lock"}, f
+
+
+def test_a_minor_bump_moves_the_major_minor_image_tag(repo: Path) -> None:
+    """docs/install.md pulls ghcr.io/...:MAJOR.MINOR; it stayed on the old minor after a bump (red team, 2026-10-29)."""
+    bv = _load()
+    major, minor, _ = (int(x) for x in bv.current_version(repo).split("."))
+    new = f"{major}.{minor + 1}.0"
+    changed = bv.bump(repo, new, "Minor release.")
+    assert set(changed) == set(FILES)
+    install = (repo / "docs/install.md").read_text()
+    assert f"kube-noob:{major}.{minor + 1} " in install and f"kube-noob:{major}.{minor} " not in install
 
 
 def test_bump_rejects_bad_or_non_increasing_versions(repo: Path) -> None:

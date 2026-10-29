@@ -33,8 +33,8 @@ MAX_TEMPLATES = 20
 MIN_TEMPLATE_WORDS = 3
 
 _ORDER = {k: i for i, k in enumerate(KINDS)}
-_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_:.-]{0,127}$")
-_REASON = re.compile(r"^[A-Z][A-Za-z0-9]{1,63}$")
+_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_:.-]{0,127}\Z")
+_REASON = re.compile(r"^[A-Z][A-Za-z0-9]{1,63}\Z")
 _ALERTNAME_TEXT = re.compile(r"""alertname\s*[=:]\s*["']?([A-Za-z_][A-Za-z0-9_:]{0,127})""")
 _FIRING = re.compile(r"^\s*\[(?:FIRING|RESOLVED)(?::\d+)?\]\s+([A-Za-z_][A-Za-z0-9_:]{0,127})")
 _EVENT_ROW = re.compile(r"^\s*(?:\S+\s+)?(Warning|Normal)\s+([A-Z][A-Za-z0-9]{1,63})\s")

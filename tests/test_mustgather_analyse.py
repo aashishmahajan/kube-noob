@@ -249,6 +249,23 @@ def test_untrusted_names_and_text(tmp_path: Path) -> None:
     assert [f.reason for f in a.findings if f.analyser == "events"] == ["FailedMount"]  # not a reason: dropped
 
 
+def test_a_name_with_a_trailing_newline_gets_no_command(tmp_path: Path) -> None:
+    """Python's ``$`` matches before a trailing newline, so ``"shop\\n"`` once passed the name check and split a
+    printed read-only step into two shell lines (the second one any no-argument command, such as ``env``)."""
+    pods: dict[str, str | bytes] = {
+        "namespaces/shop/pods/env/env.yaml": _pod("env", ns="shop\n"),
+        "namespaces/shop/pods/web/web.yaml": _pod("web\n"),
+        "namespaces/shop/pods/ok/ok.yaml": _pod("ok", reason="CrashLoopBackOff\n"),
+        "namespaces/shop/pods/fine/fine.yaml": _pod("fine"),
+    }
+    a = analyse.analyse(_bundle(tmp_path, pods))
+    steps = [c for f in a.findings for c in f.next]
+    assert steps and all("\n" not in c and "\r" not in c for c in steps)
+    assert steps == ["oc describe pod -n shop fine", "oc logs -n shop fine -c c --previous"]
+    text = analyse.render_text(a)
+    assert "\n env\n" not in text and not [line for line in text.splitlines() if line.strip() in {"env", "web"}]
+
+
 def test_duplicates_across_gather_roots_and_copied_csvs(tmp_path: Path) -> None:
     node = "kind: Node\nmetadata: {name: n1}\nstatus:\n  conditions: [{type: Ready, status: 'False'}]\n"
     csv = (

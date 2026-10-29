@@ -123,10 +123,10 @@ ALIASES = {
     "clusterrolebinding": "clusterrolebindings",
 }
 
-_NAME = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$")
-_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,() ]{1,512}$")
-_FIELD_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,]{1,512}$")
-_CONTAINER = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+_NAME = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?\Z")
+_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,() ]{1,512}\Z")
+_FIELD_SELECTOR = re.compile(r"^[A-Za-z0-9._/\-=!,]{1,512}\Z")
+_CONTAINER = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\Z")
 
 _LOG_REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]+"), r"\1***"),

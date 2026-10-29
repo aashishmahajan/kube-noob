@@ -40,8 +40,8 @@ LICENSES = frozenset(
 )
 MAX_MEMBER = 300_000_000  # bytes per file in the archive
 MAX_MEMBERS = 500
-_SHARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}\.jsonl$")
-_KNOWN = re.compile(r"^known_issues/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.json$")
+_SHARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}\.jsonl\Z")
+_KNOWN = re.compile(r"^known_issues/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.json\Z")
 FIXED = ("MANIFEST.json", "ATTRIBUTION.md")
 SEED_RECORD = "DB_SEED.json"
 

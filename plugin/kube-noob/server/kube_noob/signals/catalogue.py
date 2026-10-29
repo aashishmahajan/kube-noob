@@ -15,7 +15,7 @@ import yaml
 from kube_noob.signals.core import Signal
 
 KINDS = ("alert", "event_reason", "pod_reason")
-_ID = re.compile(r"^(alert|event_reason|pod_reason):([A-Za-z][A-Za-z0-9_]{1,127})$")
+_ID = re.compile(r"^(alert|event_reason|pod_reason):([A-Za-z][A-Za-z0-9_]{1,127})\Z")
 
 
 @dataclass(frozen=True)

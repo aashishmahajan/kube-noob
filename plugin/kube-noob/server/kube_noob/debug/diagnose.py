@@ -62,8 +62,8 @@ _SELECTOR_LINE = re.compile(
     r"^Selector:[ \t]+([\w./-]{1,253}=[\w.-]{0,63}(?:,[\w./-]{1,253}=[\w.-]{0,63}){0,9})[ \t]*$", re.M
 )
 _SELECTOR_JSON = re.compile(r"\.spec\.selector\b[^\n]{0,200}\n[ \t]*(\{[^\n{}]{1,600}\})")
-_LABEL_KEY = re.compile(r"^[A-Za-z0-9][\w./-]{0,252}$")
-_LABEL_VALUE = re.compile(r"^[A-Za-z0-9._-]{0,63}$")
+_LABEL_KEY = re.compile(r"^[A-Za-z0-9][\w./-]{0,252}\Z")
+_LABEL_VALUE = re.compile(r"^[A-Za-z0-9._-]{0,63}\Z")
 # The same for claims: pvc/data-0, 'pvc "data"', claimName: data, or "pvc data-db-0" (the bare form needs a hyphen
 # or digit: "the pvc is pending" names no claim).
 _PVC_PATTERNS = (
@@ -91,6 +91,7 @@ class Diagnosis:
     fixes: list[str] | None = None  # the playbook's fixes with the names from the input filled in
     causes: list[str] | None = None  # the same for its root causes
     likely: tuple[str, list[str]] | None = None  # the cause the input points at and its fixes (cause-linked triage)
+    knowledge: list[str] | None = None  # the playbook's reading that fits the platform
 
     def as_dict(self) -> dict[str, Any]:
         p = self.playbook
@@ -111,7 +112,7 @@ class Diagnosis:
                 {"change": f, "requiresApproval": True} for f in (p.fixes if self.fixes is None else self.fixes)
             ],
             "relatedRules": list(p.related_rules),
-            "knowledge": list(p.knowledge),
+            "knowledge": list(p.knowledge if self.knowledge is None else self.knowledge),
         }
 
 
@@ -245,7 +246,7 @@ def _selector(text: str) -> str | None:
     return ",".join(pairs)
 
 
-_SAFE_VALUE = re.compile(r"^(?!#)[A-Za-z0-9@._:/=+#%,-]{1,600}$")  # nothing a shell treats specially, no spaces
+_SAFE_VALUE = re.compile(r"^(?!#)[A-Za-z0-9@._:/=+#%,-]{1,600}\Z")  # nothing a shell treats specially, no spaces
 
 
 def _fill(cmd: str, ctx: dict[str, str]) -> str:
@@ -390,6 +391,11 @@ _OTHER_INFRA = re.compile(
 )
 
 
+# Reading about ROSA or OpenShift is none for plain Kubernetes or for text about another cloud (red team: a GKE
+# post cited the ROSA EFS doc).
+_PLATFORM_READING = ("rosa-", "ocp-")
+
+
 # Patterns too common to name an OpenShift playbook when the text does not say it is OpenShift: a bare "Permission
 # denied" is a Docker entrypoint without +x as often as an arbitrary UID. The playbook's specific patterns (nginx's
 # "mkdir() ... failed (13: Permission denied)") still name it.
@@ -424,6 +430,7 @@ def diagnose(
     # Steps as the user's platform spells them; with none given, text that never says OpenShift or ROSA gets kubectl
     # and no OpenShift-only steps (G83).
     steps_platform = platform or (None if openshift or rosa else "kubernetes")
+    other_cloud = bool(_OTHER_INFRA.search(text)) and not _AWS_TEXT.search(text)
     for p in PLAYBOOKS:
         if platform and platform not in p.platforms:
             continue
@@ -457,6 +464,11 @@ def diagnose(
                 order = [*cause.checks, *(i for i in order if i not in cause.checks)]
             checks = [_for_platform(_fill(p.checks[i], ctx), steps_platform, rosa) for i in order]
             fixes = [_fill(f, ctx) for f in p.fixes if _fix_applies(f, platform)]
+            reading = [
+                k
+                for k in p.knowledge
+                if not (k.startswith(_PLATFORM_READING) and (steps_platform == "kubernetes" or other_cloud))
+            ]
             causes = [_fill(c, ctx) for c in p.root_causes if _fix_applies(c, platform)]
             likely = None
             if cause is not None:
@@ -464,15 +476,16 @@ def diagnose(
                     _fill(p.root_causes[cause.cause], ctx),
                     [_fill(p.fixes[i], ctx) for i in cause.fixes if _fits(p.fixes[i], platform, openshift, rosa)],
                 )
-            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c], fixes, causes, likely))
+            results.append(Diagnosis(p, score, evidence[:5], [c for c in checks if c], fixes, causes, likely, reading))
     results.sort(key=lambda d: (-d.score, d.playbook.pid))
     codes = {int(c) for c in _EXIT_PATTERN.findall(text)}
     exit_info = {c: EXIT_CODES[c] for c in sorted(codes) if c in EXIT_CODES}
     notes: list[str] = []
     if not results:
+        cli = "kubectl" if steps_platform == "kubernetes" else "oc"
         notes.append(
-            "No playbook matched. Paste `oc describe pod`, `oc get events --sort-by=.lastTimestamp` and "
-            "`oc logs --previous` output for a better diagnosis."
+            f"No playbook matched. Paste `{cli} describe pod`, `{cli} get events --sort-by=.lastTimestamp` and "
+            f"`{cli} logs --previous` output for a better diagnosis."
         )
     return DiagnoseResult(results[:limit], ctx, exit_info, notes, signals)
 

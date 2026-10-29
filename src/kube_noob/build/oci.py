@@ -27,7 +27,7 @@ MAX_MEMBERS = 500_000
 MAX_FILE_READ = 1_048_576  # bytes of one file that are scanned
 MAX_SCANNED = 256 * 1_048_576  # bytes of file content scanned per image
 MAX_UNPACKED = 4 * 1024 * 1_048_576  # uncompressed layer bytes read per image
-_DIGEST = re.compile(r"^sha256:([a-f0-9]{64})$")
+_DIGEST = re.compile(r"^sha256:([a-f0-9]{64})\Z")
 _INDEX_TYPES = {"application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"}
 _TEXT_SUFFIX = re.compile(
     r"\.(?:env|ya?ml|json|properties|conf|cfg|ini|toml|sh|bash|txt|xml|npmrc|pypirc|netrc|pem|key|py|js|ts|rb|go|"

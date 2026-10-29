@@ -54,10 +54,10 @@ NOT_EVALUATED = (
     "CNI-specific policies (Cilium, Calico) and firewalls or security groups outside the cluster",
     "pods with hostNetwork: true (NetworkPolicy does not apply to them on most network plugins)",
 )
-_LABEL_VALUE = re.compile(r"^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$")
-_DNS = re.compile(r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$")
-_PORT_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
-_LABEL_KEY = re.compile(r"^([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$")
+_LABEL_VALUE = re.compile(r"^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?\Z")
+_DNS = re.compile(r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?\Z")
+_PORT_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?\Z")
+_LABEL_KEY = re.compile(r"^([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?\Z")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 

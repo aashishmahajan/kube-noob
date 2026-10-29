@@ -65,10 +65,10 @@ CLUSTER_SCOPED_KINDS = frozenset(
         "ClusterIssuer",
     }
 )
-_DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
-_NS_PREFIX = re.compile(r"^[a-z0-9][-a-z0-9]{1,60}\*$")
-_NAME_PATTERN = re.compile(r"^[a-z0-9*]([-a-z0-9.*]{0,251}[a-z0-9*])?$")
-_KIND_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9]{0,62}$")
+_DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\Z")
+_NS_PREFIX = re.compile(r"^[a-z0-9][-a-z0-9]{1,60}\*\Z")
+_NAME_PATTERN = re.compile(r"^[a-z0-9*]([-a-z0-9.*]{0,251}[a-z0-9*])?\Z")
+_KIND_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9]{0,62}\Z")
 
 
 class ExceptionsError(ValueError):

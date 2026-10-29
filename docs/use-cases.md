@@ -138,7 +138,8 @@ kube-noob search 'CVE-2023-44487 openshift haproxy router'
 notes: known issues, and the issues each update fixed. You get the issue link, whether a fix exists and in which
 version, the workaround, and the release-notes file it came from. Pass your version and issues already fixed there are
 left out. `diagnose` runs the same check, and on a live cluster `debug` and `bundle` read the version themselves.
-A match needs several rare words in common, so everyday errors such as OOMKilled never pull in an unrelated bug.
+A match needs several rare words in common, so everyday errors such as OOMKilled never pull in an unrelated bug;
+an error copied word for word from an issue (seven words in a row, one of them rare) is a match on its own.
 
 ```bash
 kube-noob known-issues 'could not find any suitable subnets for creating the ELB' --version 4.20.8

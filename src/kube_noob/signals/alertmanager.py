@@ -30,8 +30,8 @@ MAX_VALUE = 2_000  # characters kept from one label or annotation value
 MAX_TEXT = 400_000  # characters of readable text, the diagnose input limit
 VERSION_LABELS = ("openshift_version", "version")
 
-_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_:]{0,127}$")
-_OCP_RELEASE = re.compile(r"^4\.\d{1,2}(\.\d{1,3})?$")
+_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_:]{0,127}\Z")
+_OCP_RELEASE = re.compile(r"^4\.\d{1,2}(\.\d{1,3})?\Z")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 

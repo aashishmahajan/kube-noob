@@ -47,8 +47,8 @@ HOSTS = frozenset({HOST, "access.redhat.com"})  # Red Hat serves the same securi
 BASE = f"https://{HOST}/data/csaf/v2/vex"
 MIN_DELAY = 1.0
 MAX_CHANGES = 2_000_000  # bytes of changes.csv read
-_CVE = re.compile(r"^CVE-(\d{4})-(\d{4,7})$")
-_PATH = re.compile(r"^(\d{4})/cve-\d{4}-\d{4,7}\.json$")
+_CVE = re.compile(r"^CVE-(\d{4})-(\d{4,7})\Z")
+_PATH = re.compile(r"^(\d{4})/cve-\d{4}-\d{4,7}\.json\Z")
 
 
 def check_license(source: Source) -> None:

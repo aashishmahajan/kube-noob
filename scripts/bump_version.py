@@ -16,7 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
-# file -> regex patterns whose group "v" is the version to replace
+# file -> regex patterns whose group "v" is the version to replace, or group "m" its MAJOR.MINOR (an image tag that
+# follows the newest release of a minor)
 TARGETS: dict[str, tuple[str, ...]] = {
     "src/kube_noob/__init__.py": (r'__version__ = "(?P<v>[^"]+)"',),
     "server.json": (r'"version": "(?P<v>[^"]+)"',),
@@ -34,6 +35,7 @@ TARGETS: dict[str, tuple[str, ...]] = {
         r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",
     ),
     "deploy/gitlab/kube-noob-gate.gitlab-ci.yml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),
+    "docs/install.md": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<m>\d+\.\d+)(?![.\d])",),
 }
 
 
@@ -65,7 +67,8 @@ def bump(root: Path, new: str, note: str) -> list[str]:
             rx = re.compile(pat, re.MULTILINE)
             if not rx.search(updated):
                 raise ValueError(f"{rel}: pattern {pat!r} not found")
-            updated = rx.sub(lambda m: m.group(0).replace(m.group("v"), new), updated)
+            key, value = ("m", ".".join(new.split(".")[:2])) if "m" in rx.groupindex else ("v", new)
+            updated = rx.sub(lambda m, k=key, v=value: m.group(0).replace(m.group(k), v), updated)
         if updated != text:
             path.write_text(updated)
             changed.append(rel)

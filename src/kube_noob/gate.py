@@ -31,7 +31,7 @@ SEVERITIES = ("info", "low", "medium", "high", "critical")
 _SOURCE = re.compile(r"^# Source: ([\w.-]{1,200})/(.{1,400})$")
 _KIND = re.compile(r"^kind:\s{0,5}([A-Z][A-Za-z0-9]{1,62})\s*$", re.M)
 # Kinds whose names are distinctive enough to search release notes for (Route, Service or Pod are everyday words).
-_DISTINCT_KIND = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+$")
+_DISTINCT_KIND = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\Z")
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 INFO_URI = "https://github.com/aashishmahajan/kube-noob"
 

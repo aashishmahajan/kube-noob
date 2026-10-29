@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Red team of the 0.6.0 candidate (an independent agent that built and installed the wheel): no high findings, two
+  medium, three low, all fixed. A must-gather namespace with a trailing newline (`"shop\n"`) passed the name check,
+  because Python's `$` also matches before a final newline, and split a printed read-only step into two shell lines
+  (the second any no-argument command, such as `env`); every validator in the package now ends with `\Z`, and a test
+  fails on any new one anchored with `$` (pydantic fields keep `$`, which its Rust engine reads as the end of the
+  text). The documented `known-issues 'could not find any suitable subnets for creating the ELB'` example found
+  nothing: an error copied word for word from an issue (seven words in a row, one of them rare) now matches it, with
+  `exactError: true`; on the owner's 6,218 community rows no match changed. With no playbook matched, plain Kubernetes
+  is told to paste `kubectl` output, not `oc`; plain Kubernetes and other clouds no longer get ROSA or OpenShift
+  reading (a GKE PVC post cited the ROSA EFS doc), and the RWX fix starts with what any cloud needs (a file-storage
+  class whose driver supports ReadWriteMany) before the AWS and ODF specifics: 4 community rows changed, all in that
+  fix's wording. `scripts/bump_version.py` now moves the `MAJOR.MINOR` image tag in `docs/install.md`.
 - A RHACS ticket (roxctl, Scanner, Central, the UI) that never says the cluster is OpenShift is no longer matched
   against the OpenShift release notes: the OCPBUGS items it got shared only words with it. Graders on the 10 community
   rows that changed: 10 better. Jira key recall unchanged.

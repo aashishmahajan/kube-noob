@@ -85,7 +85,7 @@ _TEXT_FILTERS = {
     "xxd",
     "true",
 }
-_ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
+_ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\Z")
 
 
 def _segments(cmd: str) -> list[str]:

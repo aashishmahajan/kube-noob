@@ -21,7 +21,7 @@ from kube_noob.memory.io import ENTRIES_DIR, dump_entry, load_entry
 from kube_noob.memory.model import MemoryEntry
 
 MAX_ENTRIES = 10_000
-_ENTRY_FILE = re.compile(r"^MEM-[1-9]\d{0,6}\.yaml$")
+_ENTRY_FILE = re.compile(r"^MEM-[1-9]\d{0,6}\.yaml\Z")
 
 
 @dataclass(frozen=True)

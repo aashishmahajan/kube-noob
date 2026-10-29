@@ -708,8 +708,9 @@ PLAYBOOKS: tuple[Playbook, ...] = (
             "oc get pods -n openshift-cluster-csi-drivers   # [OCP]",
         ),
         (
-            "RWX on AWS/ROSA: install the AWS EFS CSI Driver Operator, create an EFS StorageClass "
-            "(provisioningMode: efs-ap, fileSystemId) and use it; on ODF use ocs-storagecluster-cephfs.",
+            "RWX needs a file-storage class whose CSI driver supports ReadWriteMany, not a block-storage one: on "
+            "AWS/ROSA install the AWS EFS CSI Driver Operator, create an EFS StorageClass (provisioningMode: efs-ap, "
+            "fileSystemId) and use it; on ODF use ocs-storagecluster-cephfs; elsewhere an NFS or CephFS class.",
             "Recreate the PVC with a valid storageClassName (the field is immutable).",
         ),
         related_rules=("KN-ST001", "KN-ST004", "KN-ST005"),

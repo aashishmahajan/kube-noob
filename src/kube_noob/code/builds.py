@@ -20,7 +20,7 @@ from pathlib import Path
 
 from kube_noob.code import ship
 
-SPEC = re.compile(r"^(?P<path>[^=,]{1,500})(?:=(?P<image>[^,]{1,500}))?(?P<opts>(?:,[a-z]{1,10}=[^,]{1,500})*)$")
+SPEC = re.compile(r"^(?P<path>[^=,]{1,500})(?:=(?P<image>[^,]{1,500}))?(?P<opts>(?:,[a-z]{1,10}=[^,]{1,500})*)\Z")
 MAX_CONTAINERFILE_BYTES = 1_000_000
 MAX_IGNORE_BYTES = 1_000_000
 CONTEXT_IGNORE_NAMES = (".containerignore", ".dockerignore")

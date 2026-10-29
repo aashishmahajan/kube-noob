@@ -41,6 +41,8 @@ GENERAL_MAX_CHUNKS = 2  # and in at most 2 sections of the bundled docs (a count
 RELATIVE_FLOOR = 0.75  # further matches must score at least 75% of the best one
 STRONG_SCORE = 40.0  # a score this high with two rare shared words, or one and a clear lead, is a match
 DOMINANCE = 2.0  # "a clear lead": at least twice the next applicable issue's score
+QUOTE_WORDS = 7  # a run of this many words copied from an issue's text, one of them rare, is a quotation of it
+_WORD = re.compile(r"[a-z0-9]+(?:[._/-][a-z0-9]+)*")
 
 
 @functools.cache
@@ -295,6 +297,21 @@ class Index:
     def _rare_shared(self, query_tokens: set[str], issue: Issue) -> list[str]:
         return self._rare(query_tokens & self._tokens(issue))
 
+    def _quotes(self, text: str) -> set[str]:
+        """Runs of ``QUOTE_WORDS`` words from ``text`` with a rare word in them: an error copied from the product
+        quotes the issue that describes it, even when it shares fewer rare words than ``MIN_RARE_TERMS``."""
+        words = _WORD.findall(text.lower())[:3000]
+        rare = {w for w in set(words) if self._rare(set(tokenize(w)))}
+        return {
+            " ".join(words[i : i + QUOTE_WORDS])
+            for i in range(len(words) - QUOTE_WORDS + 1)
+            if rare.intersection(words[i : i + QUOTE_WORDS])
+        }
+
+    def _quoted(self, quotes: set[str], issue: Issue) -> bool:
+        body = f" {' '.join(_WORD.findall(issue.text.lower()))} "
+        return any(f" {q} " in body for q in quotes)
+
     def match(
         self,
         text: str,
@@ -348,6 +365,7 @@ class Index:
             for hit in self.store.search(f"{query}\n{' '.join(sig_terms)}", limit=40):
                 own = scores.get(hit.chunk.chunk_id, (0.0, 0.0))[0]
                 scores[hit.chunk.chunk_id] = (own, max(hit.score, own))
+        quotes = self._quotes(text)
         rows: list[tuple[float, Issue, list[str], list[str]]] = []
         best: dict[str, float] = {}
         for chunk_id, (own, expanded) in scores.items():
@@ -367,8 +385,10 @@ class Index:
             runner_up = rows[n + 1][0] if n + 1 < len(rows) else 0.0
             if score < MIN_SCORE or (top and score < RELATIVE_FLOOR * top):
                 continue
+            quoted = bool(r_text) and self._quoted(quotes, issue)
             accepted = (
-                len(r_text) >= MIN_RARE_TERMS
+                quoted
+                or len(r_text) >= MIN_RARE_TERMS
                 or (len(r_text) >= 1 and len(r_text) + len(r_sig) >= MIN_RARE_TERMS)
                 or (len(r_text) >= 2 and score >= STRONG_SCORE)
                 or (len(r_text) >= 1 and score >= STRONG_SCORE and score >= DOMINANCE * runner_up)
@@ -376,7 +396,7 @@ class Index:
             if not accepted:
                 continue
             top = top or score
-            match = {**issue.as_dict(running, score), "sharedTerms": (r_text + r_sig)[:8]}
+            match = {**issue.as_dict(running, score), "sharedTerms": (r_text + r_sig)[:8], "exactError": quoted}
             if r_sig:
                 match["signals"] = sorted({f"{x.kind}:{x.name}" for x in signals})[:5]
             out["matches"].append(match)

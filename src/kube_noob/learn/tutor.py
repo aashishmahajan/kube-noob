@@ -22,7 +22,7 @@ import yaml
 from kube_noob.evals.checks import evaluate
 from kube_noob.knowledge.store import get_store
 
-_LEARNER = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
+_LEARNER = re.compile(r"^[A-Za-z0-9._@-]{1,64}\Z")
 
 
 @cache

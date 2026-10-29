@@ -24,9 +24,9 @@ from kube_noob.errors import ConfigError, KubeNoobError, WebDisabledError
 
 DEFAULT_TOKEN_ENV = "GITHUB_TOKEN"  # noqa: S105 - the variable the GitHub CLI and Actions use; a name, not a token
 MAX_BYTES = 20_000_000
-_REPO = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
-_WORKFLOW = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-_BRANCH = re.compile(r"^[A-Za-z0-9_./-]{1,200}$")
+_REPO = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
+_WORKFLOW = re.compile(r"^[A-Za-z0-9_.-]{1,100}\Z")
+_BRANCH = re.compile(r"^[A-Za-z0-9_./-]{1,200}\Z")
 
 
 class HistoryFetchError(ValueError):

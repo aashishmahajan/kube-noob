@@ -568,3 +568,40 @@ def test_a_rhacs_ticket_that_never_says_openshift_gets_no_openshift_release_note
     assert out["matches"] == [] and "RHACS" in out["note"]
     ocp = match("RHACS on OpenShift 4.16: the Download baseline button does nothing", None, None, 3, tmp_path, True)
     assert "RHACS" not in str(ocp.get("note", ""))
+
+
+@pytest.mark.parametrize(
+    ("platform", "text", "cli"),
+    [
+        ("kubernetes", "kind cluster node NotReady", "kubectl"),
+        (None, "my GKE cluster feels slow today", "kubectl"),
+        ("openshift", "my cluster feels slow today", "oc"),
+        (None, "my OpenShift cluster feels slow today", "oc"),
+    ],
+)
+def test_with_no_playbook_the_note_names_the_platforms_cli(platform: str | None, text: str, cli: str) -> None:
+    """A plain Kubernetes, EKS, GKE or kind user has no `oc` (red team, 2026-10-29)."""
+    out = diagnose(text, platform=platform)
+    assert out.diagnoses == []
+    note = " ".join(out.notes)
+    assert f"`{cli} describe pod`" in note and f"`{cli} logs --previous`" in note
+    assert ("`oc " in note) == (cli == "oc")
+
+
+def test_plain_kubernetes_and_other_clouds_get_no_rosa_or_openshift_reading_or_aws_only_fixes() -> None:
+    """The cause and steps were right on a GKE post; the always-shown lists still cited ROSA's EFS doc, and the RWX fix
+    read as AWS-only (red team, 2026-10-29)."""
+    gke = diagnose("On GKE my PVC stays Pending, no volume is provisioned", platform="kubernetes").as_dict()
+    d = next(x for x in gke["diagnoses"] if x["id"] == "DBG-PVC-PENDING")
+    assert not [k for k in d["knowledge"] if k.startswith(("rosa-", "ocp-"))]
+    assert "storage-access-modes" in d["knowledge"]
+    rwx = diagnose("On GKE my PVC is Pending: ReadWriteMany is not supported by the standard-rwo class").as_dict()
+    d = next(x for x in rwx["diagnoses"] if x["id"] == "DBG-PVC-PENDING")
+    assert d["likelyCause"].startswith("Access mode unsupported")
+    assert d["likelyFixes"][0].startswith("RWX needs a file-storage class whose CSI driver supports ReadWriteMany")
+    assert "elsewhere an NFS or CephFS class" in d["likelyFixes"][0]
+    rosa = diagnose("On ROSA my PVC stays Pending: ReadWriteMany is not supported by gp3-csi").as_dict()
+    d = next(x for x in rosa["diagnoses"] if x["id"] == "DBG-PVC-PENDING")
+    assert "rosa-efs" in d["knowledge"] and "EFS CSI Driver Operator" in d["likelyFixes"][0]
+    crash = diagnose("Back-off restarting failed container api in pod api-1", platform="kubernetes").as_dict()
+    assert all("ocp-arbitrary-uid" not in x["knowledge"] for x in crash["diagnoses"])

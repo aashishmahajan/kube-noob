@@ -37,7 +37,7 @@ MAX_EVIDENCE = 30
 MAX_OUTCOMES = 1_000
 MAX_LIST = 20
 
-_VERSION = re.compile(r"^\d{1,3}\.\d{1,4}(\.\d{1,6})?$")
+_VERSION = re.compile(r"^\d{1,3}\.\d{1,4}(\.\d{1,6})?\Z")
 _SIGNAL_NAMES: dict[str, re.Pattern[str]] = {
     "alert": re.compile(r"^[A-Za-z][A-Za-z0-9_:.-]{0,127}$"),
     "co_condition": re.compile(
@@ -49,15 +49,15 @@ _SIGNAL_NAMES: dict[str, re.Pattern[str]] = {
     "component": re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$"),
     "error_template": re.compile(r"^[0-9a-f]{12}$"),
 }
-_RANGE_PART = re.compile(r"^(>=|<=|>|<|=)v?(\d{1,6}(?:\.\d{1,6}){0,2})$")
-_DNS_SUBDOMAIN = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
-_TICKET_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,29}-\d{1,9}$")
-_CITATION = re.compile(r"^\[?(kn|mem):[A-Za-z0-9._:-]{1,200}(#\d{1,6})?\]?$")
-_BUNDLE = re.compile(r"^bundle:(?!.*\.\.)[A-Za-z0-9._-]{1,100}(/[A-Za-z0-9._-]{1,100}){0,5}$")
-_URL = re.compile(r"^https://[A-Za-z0-9.-]{1,253}(:\d{1,5})?(/[^\s<>\"'`]{0,800})?$")
-_OPAQUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,99}$")
-_CLUSTER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
-_OWNER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@/+-]{0,99}$")
+_RANGE_PART = re.compile(r"^(>=|<=|>|<|=)v?(\d{1,6}(?:\.\d{1,6}){0,2})\Z")
+_DNS_SUBDOMAIN = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\Z")
+_TICKET_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,29}-\d{1,9}\Z")
+_CITATION = re.compile(r"^\[?(kn|mem):[A-Za-z0-9._:-]{1,200}(#\d{1,6})?\]?\Z")
+_BUNDLE = re.compile(r"^bundle:(?!.*\.\.)[A-Za-z0-9._-]{1,100}(/[A-Za-z0-9._-]{1,100}){0,5}\Z")
+_URL = re.compile(r"^https://[A-Za-z0-9.-]{1,253}(:\d{1,5})?(/[^\s<>\"'`]{0,800})?\Z")
+_OPAQUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,99}\Z")
+_CLUSTER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}\Z")
+_OWNER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@/+-]{0,99}\Z")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _PRINTS_SECRET = re.compile(
     r"\b(get|describe|edit)\s+(secrets?|secret/\S+)\b.*(-o|--output)[ =]?(yaml|json|jsonpath|go-template|template)"
@@ -65,6 +65,12 @@ _PRINTS_SECRET = re.compile(
     r"|\bget\s+(secrets?|secret/\S+)\b.*--template",
     re.IGNORECASE,
 )
+
+
+def _whole(pattern: re.Pattern[str]) -> str:
+    """The pattern for a pydantic ``Field``: its Rust engine has no ``\\Z``, and its ``$`` already means the end of
+    the text (Python's ``$`` also matches before a final newline, so the compiled patterns here end with ``\\Z``)."""
+    return pattern.pattern.removesuffix("\\Z") + "$"
 
 
 def vkey(version: str) -> tuple[int, ...]:
@@ -118,7 +124,7 @@ class Versions(_Model):
 
 
 class OperatorRange(_Model):
-    name: str = Field(..., min_length=1, max_length=253, pattern=_DNS_SUBDOMAIN.pattern)
+    name: str = Field(..., min_length=1, max_length=253, pattern=_whole(_DNS_SUBDOMAIN))
     range: str | None = Field(None, max_length=60, description="One or two comparators: '>=0.28.0 <0.29.0', '=4.16.2'.")
 
     @field_validator("range")
@@ -235,8 +241,8 @@ class Evidence(_Model):
 class Outcome(_Model):
     date: date
     result: Literal["resolved", "not-resolved", "partial"]
-    ticket: str | None = Field(None, max_length=100, pattern=_OPAQUE.pattern)
-    cluster: str | None = Field(None, max_length=63, pattern=_CLUSTER.pattern)
+    ticket: str | None = Field(None, max_length=100, pattern=_whole(_OPAQUE))
+    cluster: str | None = Field(None, max_length=63, pattern=_whole(_CLUSTER))
 
     @field_validator("ticket", "cluster", mode="before")
     @classmethod
@@ -249,7 +255,7 @@ class Outcome(_Model):
 
 
 class RiskAccepted(_Model):
-    owner: str = Field(..., max_length=100, pattern=_OWNER.pattern)
+    owner: str = Field(..., max_length=100, pattern=_whole(_OWNER))
     reason: str
     expires: date | None = None
 
@@ -259,8 +265,8 @@ class RiskAccepted(_Model):
         return _prose("riskAccepted.reason", v, MAX_NOTE * 2)
 
 
-_OwnerName = Annotated[str, Field(max_length=100, pattern=_OWNER.pattern)]
-_SourceUrl = Annotated[str, Field(max_length=900, pattern=_URL.pattern)]
+_OwnerName = Annotated[str, Field(max_length=100, pattern=_whole(_OWNER))]
+_SourceUrl = Annotated[str, Field(max_length=900, pattern=_whole(_URL))]
 
 
 class MemoryEntry(_Model):
@@ -277,10 +283,10 @@ class MemoryEntry(_Model):
     evidence: Annotated[list[Evidence], Field(max_length=MAX_EVIDENCE)] = []
     outcomes: Annotated[list[Outcome], Field(max_length=MAX_OUTCOMES)] = []
     owners: Annotated[
-        list[Annotated[str, Field(max_length=100, pattern=_OWNER.pattern)]], Field(min_length=1, max_length=MAX_LIST)
+        list[Annotated[str, Field(max_length=100, pattern=_whole(_OWNER))]], Field(min_length=1, max_length=MAX_LIST)
     ]
     sources: Annotated[
-        list[Annotated[str, Field(max_length=900, pattern=_URL.pattern)]], Field(max_length=MAX_LIST)
+        list[Annotated[str, Field(max_length=900, pattern=_whole(_URL))]], Field(max_length=MAX_LIST)
     ] = []
     created: date
     updated: date

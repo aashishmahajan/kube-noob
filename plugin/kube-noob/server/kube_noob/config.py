@@ -91,7 +91,7 @@ class ClusterSettings(_Base):
 # apiKeyEnv may only name a model provider's key variable (ending in _API_KEY, or starting with KUBE_NOOB_), so a
 # configuration file cannot point the model client at an unrelated variable. The default per provider is set in
 # kube_noob.agent.providers, which is the only code that reads it.
-_KEY_VAR = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)$")
+_KEY_VAR = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)\Z")
 _CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
 
 
@@ -211,7 +211,7 @@ class PostureSettings(_Base):
 
 # rhacs.tokenEnv may only name a KUBE_NOOB_* variable (unset: the variable the RHACS CLI reads), so a configuration
 # file cannot make kube-noob send an unrelated variable to Central.
-_RHACS_TOKEN_VAR = re.compile(r"^KUBE_NOOB_[A-Z0-9_]+$")
+_RHACS_TOKEN_VAR = re.compile(r"^KUBE_NOOB_[A-Z0-9_]+\Z")
 
 
 class RhacsSettings(_Base):
