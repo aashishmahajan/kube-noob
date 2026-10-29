@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.5.0 - 2026-10-28
+
+Has Red Hat seen this error before? A local copy of Red Hat's public Jira, and what became of each ticket.
+
+- `kube-noob corpus jira --online` copies every ticket of the chosen projects, whatever its status: by default the
+  28 OpenShift, ROSA, ACM and RHACS projects (OCPBUGS, ROX, HOSTEDCP, CNV, OSSM, LOG...), or `--projects all` or a
+  list. `corpus jira-projects --online` lists what Red Hat's Jira shows (292 public projects on 2026-10-28).
+- Supported interfaces only: projects from `/rest/api/3/project/search` and tickets from `/rest/api/3/search/jql`,
+  never the web pages (Atlassian's Acceptable Use Policy forbids scraping). One request per second or slower (the
+  site's robots.txt crawl delay) plus jitter, backoff on 429 honouring `Retry-After`, and a request budget per run
+  (`--max-requests`, `jira.maxRequests`, default 600). Later runs fetch only what changed (`updated >= -Nm`) and
+  resume a stopped backfill by key.
+- `known-issues`, `diagnose`, `debug`, `bundle` and the incident watch now say what became of a matching ticket: fixed
+  (in which release, and whether the cluster's version already has it), fix merged or proposed, open, or closed as
+  Not a Bug, Won't Do, Cannot Reproduce, Obsolete or as a duplicate (followed to the original), with the workaround,
+  cause or "why closed" sentence from the latest comments. Matches need rare shared words or a distinctive error line
+  found word for word, so generic errors never pull in a ticket. SQLite FTS5 index: about 50 ms per lookup over
+  100,000 tickets.
+- Fix versions are compared with the cluster's version only for projects that ship OpenShift releases (OCPBUGS, OKD,
+  HOSTEDCP, USHIFT); operators with their own version lines (OADP 1.4, Logging 5.9...) and RHACS are never called
+  "already fixed in your version". Kubernetes status words and everyday English never count as evidence, so pasted
+  `describe` output in a few tickets cannot make CrashLoopBackOff or OOMKilled match one.
+- `kube-noob ticket OCPBUGS-12345 --version 4.21.1` and the MCP tool `kubenoob_ticket` look up one ticket.
+- Upgrading from 0.4: the version-filtered ROX copy that `corpus jira` wrote before is refreshed by the first full
+  sync; an imported copy resumes where it ends.
+- The service can keep the copy current: `jira.sync.enabled` in the chart (needs persistence and one replica; opens
+  egress 443, and the EgressFirewall allows redhat.atlassian.net only).
+- Tickets are public but not redistributable: they stay in the data directory, are never in the package, plugin or
+  dataset exports, and CI uploads them only encrypted. Reporter, assignee and comment authors are never stored.
+- Release-note issue links point at redhat.atlassian.net (Red Hat's Jira moved to Atlassian Cloud).
+- Ticket shards no longer load into the general search index; they have their own.
+- Chart fix found by kube-noob's own audit (KN-ST002): with `persistence.enabled` and the default ReadWriteOnce volume,
+  the Deployment now uses the Recreate strategy and refuses `replicaCount` above 1. A rolling update's surge pod, or a
+  second replica, on another node hung in ContainerCreating with a Multi-Attach error.
+
+## 0.4.0 - 2026-10-27
+
+An incident watch that remembers: always on, read-only, no model.
+
+- `kube-noob watch -n <namespace>` (and `watch.enabled` in the chart, `kube-noob serve --watch`): polls pods,
+  events, deployments and replicasets with get and list only, and groups what it finds into incidents by namespace,
+  workload and signal: CrashLoopBackOff, OOMKilled, ImagePullBackOff, container config errors, FailedCreate (with the
+  policy that denied it), Unschedulable, FailedMount, failing probes, stuck rollouts and evictions.
+- Each new or recurring incident is explained once: the matching playbook, the policy denial, reported OpenShift
+  issues, and what changed in the Deployment's last rollout (image, environment variable names, resources) when it
+  started soon after.
+- The incident ledger (`incidents.json` in the data directory) keeps occurrences, durations and the fixes a person
+  confirmed (`kube-noob incidents confirm`); a recurrence comes back with the last confirmed fix, and the same problem
+  in another workload shows it too. It never stores log lines, object specs or Secret values (PRIVACY.md).
+- MCP tools `kubenoob_incidents`, `kubenoob_incident`, `kubenoob_incident_confirm` (not on shared HTTP servers) and,
+  with cluster access, `kubenoob_cluster_check_namespace`. CI runs the watch on kind against a crash loop and a
+  Pod Security denial.
+
 ## 0.3.1 - 2026-10-27
 
 Why was this denied, and can pod A reach pod B? Policy debugging, offline and read-only.

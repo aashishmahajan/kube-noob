@@ -1,4 +1,4 @@
-"""Is this a reported issue? Match an error or symptom against the issues Red Hat lists in the OpenShift release notes.
+"""Is this a reported issue? Match an error against the OpenShift release notes and the local Red Hat Jira copy.
 
 The index holds every known issue (open in a release) and every fixed issue (fixed in a release or update) that the
 release notes link to an issue id, for the minor releases in the bundled snapshot. A match is returned only when the
@@ -8,6 +8,10 @@ what that means for the version the user runs.
 
 Data: ``kube_noob/data/known_issues/*.json`` (refreshed with ``scripts/vendor_known_issues.py``) plus, when present,
 a newer copy in ``<dataDir>/known_issues/`` written by ``kube-noob corpus known-issues --online``.
+
+When the install keeps a local copy of Red Hat's public Jira (``kube-noob corpus jira --online``), tickets that match
+are added with what became of them: fixed and in which release, still open, or closed as not a bug, won't fix or a
+duplicate (see ``kube_noob.tickets``). A release-note issue that is also in the copy gains the ticket's current state.
 """
 
 from __future__ import annotations
@@ -70,7 +74,7 @@ class Issue:
 
     @property
     def url(self) -> str:
-        return f"https://issues.redhat.com/browse/{self.id}"
+        return f"https://redhat.atlassian.net/browse/{self.id}"
 
     def status(self, running: str | None) -> str:
         if self.kind == "known":
@@ -253,4 +257,25 @@ def get_index(data_dir: Path | None = None) -> Index:
 def match(
     text: str, platform: str | None = None, version: str | None = None, limit: int = 3, data_dir: Path | None = None
 ) -> dict[str, Any]:
-    return get_index(data_dir).match(text, platform, version, limit)
+    from kube_noob import tickets
+
+    out = get_index(data_dir).match(text, platform, version, limit)
+    found = tickets.match(text, platform, version, limit, data_dir)
+    if not found.get("available"):
+        if found.get("note"):
+            out["ticketsNote"] = found["note"]
+        return out
+    out["knowledge"]["jiraTickets"] = found["knowledge"]
+    by_id = {m["id"]: m for m in out["matches"]}
+    for m in found["matches"]:
+        if m["id"] in by_id:  # the release notes name it; the ticket says what became of it since
+            by_id[m["id"]]["ticket"] = {
+                k: m[k] for k in ("verdict", "jiraStatus", "resolution", "fixVersions", "status", "remarks")
+            }
+        else:
+            out["matches"].append(m)
+    if out["matches"]:
+        out.pop("note", None)
+    elif found.get("note"):
+        out["note"] = f"{out.get('note', '')} {found['note']}".strip()
+    return out

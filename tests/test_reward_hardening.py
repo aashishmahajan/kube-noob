@@ -142,16 +142,16 @@ def test_unknown_rwx_storage_class_is_flagged() -> None:
 def test_grader_credits_corpus_citations_via_toolkit(tmp_path: Path) -> None:
     write_shard(
         tmp_path,
-        "jira-rox",
+        "git-stackrox-docs",
         [
             {
-                "id": "jira-ROX-1",
-                "title": "ROX-1: scanner crash",
+                "id": "git-stackrox-docs-scanner",
+                "title": "Scanner troubleshooting",
                 "text": "## Problem\n\nThe scanner pod crashes with an out-of-memory error after upgrading to 4.10. "
                 * 5,
-                "sourceId": "jira:ROX",
-                "license": "proprietary-public",
-                "redistributable": False,
+                "sourceId": "git:stackrox-docs",
+                "license": "Apache-2.0",
+                "redistributable": True,
             }
         ],
     )

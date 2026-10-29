@@ -65,18 +65,41 @@ def _emit(obj: Any, fmt: str) -> None:
         print(yaml.safe_dump(obj, sort_keys=False, width=120, allow_unicode=True), end="")
 
 
+_REMARK_LABELS = {"cause": "cause", "expected": "why closed", "fix": "fix note"}
+
+
+def _print_ticket_lines(m: dict[str, Any]) -> None:
+    if m.get("workaround"):
+        _tprint(f"  workaround: {m['workaround']}")
+    for r in m.get("remarks") or []:
+        if r["kind"] in _REMARK_LABELS:
+            _tprint(f"  {_REMARK_LABELS[r['kind']]} ({r.get('date') or r['from']}): {r['text']}")
+
+
 def _print_known_issues(out: dict[str, Any]) -> None:
     for m in out["matches"]:
-        print(f"{m['id']}  {m['status']}")
-        print(f"  {m['summary']}")
+        _tprint(f"{m['id']}  {m['status']}")
+        _tprint(f"  {m['summary']}")
+        if m.get("kind") == "ticket":
+            _print_ticket_lines(m)
+            _tprint(f"  ticket: {m['url']}  ({m['source']})")
+            continue
         if m.get("workaround"):
-            print(f"  workaround: {m['workaround']}")
-        print(f"  issue: {m['url']}")
-        print(f"  release notes: {m['source']}")
+            _tprint(f"  workaround: {m['workaround']}")
+        if m.get("ticket"):
+            _tprint(f"  ticket now: {m['ticket']['status']}")
+        _tprint(f"  issue: {m['url']}")
+        _tprint(f"  release notes: {m['source']}")
     if out.get("note"):
-        print(out["note"])
+        _tprint(out["note"])
     k = out["knowledge"]
     print(f"index: release-note issues as of {k['knownIssuesAsOf']} for OpenShift {', '.join(k['openshiftReleases'])}")
+    jt = k.get("jiraTickets")
+    if jt:
+        names = ", ".join(jt["projects"][:6]) + ("..." if len(jt["projects"]) > 6 else "")
+        print(f"index: {jt['tickets']} Red Hat Jira tickets ({names}) retrieved {jt['asOf']}")
+    elif out.get("ticketsNote"):
+        _tprint(f"index: no Red Hat Jira tickets: {out['ticketsNote']}")
 
 
 def _print_report(rep: dict[str, Any]) -> None:
@@ -258,6 +281,15 @@ def build_parser() -> argparse.ArgumentParser:
     kis.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
     kis.add_argument("--limit", type=int, default=3)
 
+    tik = sub.add_parser(
+        "ticket",
+        help="Look up a Red Hat Jira ticket in the local copy: what became of it, fix versions, workaround",
+        description="Show one ticket from the local copy of Red Hat's public Jira (kube-noob corpus jira --online). "
+        "Example: kube-noob ticket OCPBUGS-12345 --version 4.21.1",
+    )
+    tik.add_argument("key", help="a Jira key such as OCPBUGS-12345 or ROX-30000")
+    tik.add_argument("--version", dest="pversion", help="your OpenShift version: says whether the fix is in it")
+
     pol = sub.add_parser(
         "policy",
         help="Why was this denied? Would a NetworkPolicy allow this traffic?",
@@ -290,6 +322,30 @@ def build_parser() -> argparse.ArgumentParser:
     prc.add_argument("--namespace", dest="default_namespace", default="default", help="for objects without one")
     prc.add_argument("--live", action="store_true", help="read the policies from the cluster (read-only)")
     prc.add_argument("--platform", choices=PLATFORMS)
+
+    wt = sub.add_parser(
+        "watch",
+        help="Watch namespaces read-only: open, explain and remember incidents (needs cluster access)",
+        description="Polls pods, events, deployments and replicasets (get/list only, never Secrets), groups problems "
+        "into incidents, explains each new one and records it in the local incident ledger. Example: kube-noob "
+        "--cluster-enabled watch -n shop --once",
+    )
+    wt.add_argument("-n", "--namespace", dest="namespaces", action="append", default=[], help="repeat for several")
+    wt.add_argument("--once", action="store_true", help="poll once and exit")
+    wt.add_argument("--interval", type=int, default=None, help="seconds between polls (default watch.intervalSeconds)")
+
+    inc = sub.add_parser("incidents", help="Incidents the watch recorded: list, show, or confirm the fix")
+    isub = inc.add_subparsers(dest="incidents_cmd")
+    _patch(isub, common)
+    il = isub.add_parser("list", help="Open incidents (default), or --all")
+    il.add_argument("--all", action="store_true", help="include resolved incidents")
+    il.add_argument("-n", "--namespace", default=None)
+    ish = isub.add_parser("show", help="One incident in full")
+    ish.add_argument("incident_id")
+    icf = isub.add_parser("confirm", help="Remember the cause and fix that worked (summaries only)")
+    icf.add_argument("incident_id")
+    icf.add_argument("--cause", required=True)
+    icf.add_argument("--fix", required=True)
 
     dbg = sub.add_parser("debug", help="Collect live read-only evidence for a workload and diagnose it")
     dbg.add_argument("target", help="kind/name, e.g. deployment/orders-api")
@@ -358,6 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--host")
     sv.add_argument("--port", type=int)
     sv.add_argument("--allow-unauthenticated", action="store_true")
+    sv.add_argument("--watch", action="store_true", help="also run the incident watch (watch.enabled)")
 
     c = sub.add_parser("corpus", help="Build / inspect the local corpus (network: maintainers & CI)")
     csub = c.add_subparsers(dest="corpus_cmd", required=True)
@@ -366,13 +423,21 @@ def build_parser() -> argparse.ArgumentParser:
     cb.add_argument("--sources", default="all", help="comma-separated source ids or 'all'")
     cb.add_argument("--limit-per-source", type=int)
     cb.add_argument("--online", action="store_true", help="Required: confirm network ingestion")
-    cj = csub.add_parser("jira", help="Pull public Jira issues (jittered, rate-limited)")
-    cj.add_argument("--project", default="ROX")
-    cj.add_argument("--base-url", default="https://redhat.atlassian.net")
-    cj.add_argument("--min-version", default="4.10")
-    cj.add_argument("--target", type=int, default=1200)
-    cj.add_argument("--max-scan", type=int, default=6000)
+    cj = csub.add_parser(
+        "jira",
+        help="Keep a local copy of Red Hat's public Jira tickets (every status), through its REST API",
+        description="Copy every ticket of the chosen projects, whatever its status, into the data folder and index "
+        "it for known-issues, diagnose and the incident watch. Paced at one request per second or slower; "
+        "--max-requests caps a run and the next run resumes. The copy is not redistributable and never leaves "
+        "this machine.",
+    )
+    cj.add_argument(
+        "--projects", help="default (Kubernetes, OpenShift, ROSA, ACM, RHACS), all, or keys such as OCPBUGS,ROX"
+    )
+    cj.add_argument("--max-requests", type=int, help="request budget for this run (default jira.maxRequests)")
     cj.add_argument("--online", action="store_true")
+    cjp = csub.add_parser("jira-projects", help="List the projects on Red Hat's public Jira, marking the default set")
+    cjp.add_argument("--online", action="store_true")
     ch = csub.add_parser("history", help="Release timelines from Git tags")
     ch.add_argument("--online", action="store_true")
     cki = csub.add_parser("known-issues", help="Refresh reported OpenShift issues from the release notes (Git)")
@@ -585,8 +650,31 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _emit(out, fmt)
         return 0
 
+    if a.cmd == "ticket":
+        out = kit.ticket(tk.TicketIn(key=a.key, version=a.pversion))
+        if a.format != "text":
+            _emit(out, fmt)
+        elif not out.get("found"):
+            _tprint(out["note"])
+        else:
+            _tprint(f"{out['id']}  {out['summary']}")
+            resolution = out["resolution"] or "Unresolved"
+            _tprint(f"  {out['type']} | {out['jiraStatus']} | {resolution} | updated {out['updated'] or 'unknown'}")
+            _tprint(f"  {out['status']}")
+            _print_ticket_lines(out)
+            for link in out.get("related") or []:
+                _tprint(f"  {link['relation']} {link['key']}")
+            _tprint(f"  {out['url']}  ({out['source']})")
+        return 0 if out.get("found") else 1
+
     if a.cmd == "policy":
         return _policy(a, s, kit, fmt)
+
+    if a.cmd == "watch":
+        return _watch(a, s, fmt)
+
+    if a.cmd == "incidents":
+        return _incidents(a, kit, fmt)
 
     if a.cmd == "bundle":
         from kube_noob.debug.diagnose import bundle_markdown
@@ -694,6 +782,16 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         if a.port:
             s.server.port = a.port
         app = http_app(s, allow_unauthenticated=a.allow_unauthenticated)
+        if a.watch or s.watch.enabled:
+            from kube_noob.watch import start_background
+
+            start_background(s)
+        if s.jira.sync_enabled:
+            from kube_noob.sources.jira import start_background as start_jira_sync
+
+            if s.offline:
+                raise ConfigError("jira.syncEnabled downloads tickets; the offline lock forbids it (unset one)")
+            start_jira_sync(s)
         uvicorn.run(
             app,
             host=s.server.host,
@@ -860,6 +958,79 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
     return 0 if out["verdict"] == "allowed" else 1
 
 
+def _print_poll(result: dict[str, Any]) -> None:
+    ch = result["changes"]
+    _tprint(
+        f"{result['polledAt']}  {', '.join(result['namespaces']) or 'nothing readable'}: "
+        f"{len(ch['opened'])} new, {len(ch['reopened'])} back again, {len(ch['resolved'])} resolved, "
+        f"{len(result['open'])} open"
+    )
+    for row in result["open"]:
+        _tprint(f"  {row['id']}  {row['headline']}")
+    for err in result.get("errors", []):
+        _tprint(f"  read failed: {err}")
+
+
+def _watch(a: argparse.Namespace, s: Settings, fmt: str) -> int:
+    import threading
+
+    from kube_noob.debug.cluster import get_backend
+    from kube_noob.watch import Watcher, resolve_namespaces
+
+    if not s.cluster.enabled:
+        raise ConfigError("watch needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
+    if a.interval is not None:
+        if not 15 <= a.interval <= 3600:
+            raise ConfigError("--interval must be 15 to 3600 seconds")
+        s.watch.interval_seconds = a.interval
+    watcher = Watcher(s, get_backend(s), resolve_namespaces(s, a.namespaces), getattr(a, "platform", None))
+    if a.once:
+        result = watcher.poll()
+        _print_poll(result) if a.format == "text" else _emit(result, fmt)
+        return 0
+    stop = threading.Event()
+    try:
+        while not stop.is_set():
+            result = watcher.poll()
+            _print_poll(result) if a.format == "text" else _emit(result, fmt)
+            sys.stdout.flush()
+            stop.wait(s.watch.interval_seconds)
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
+def _incidents(a: argparse.Namespace, kit: Any, fmt: str) -> int:
+    from kube_noob import toolkit as tk
+
+    cmd = a.incidents_cmd or "list"
+    if cmd == "show":
+        out = kit.incident(tk.IncidentIn(id=a.incident_id))
+        _emit(out, fmt)
+        return 0
+    if cmd == "confirm":
+        _emit(
+            kit.incident_confirm(
+                tk.IncidentConfirmIn(id=a.incident_id, cause=a.cause, fix=a.fix, confirmed_by_user=True)
+            ),
+            fmt,
+        )
+        return 0
+    out = kit.incidents(
+        tk.IncidentsIn(
+            status="all" if getattr(a, "all", False) else "open", namespace=getattr(a, "namespace", None), limit=100
+        )
+    )
+    if a.format == "text":
+        for row in out["incidents"]:
+            _tprint(f"{row['id']}  {row['status']:8} x{row['occurrences']}  {row['headline']}")
+        if out.get("note"):
+            _tprint(out["note"])
+    else:
+        _emit(out, fmt)
+    return 0
+
+
 def _learning(a: argparse.Namespace, kit: Any, fmt: str) -> int:
     from kube_noob import toolkit as tk
 
@@ -891,12 +1062,12 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     from kube_noob.sources.corpus import read_manifest, verify, write_shard
 
     cc = a.corpus_cmd
-    if cc in {"build", "jira", "history", "known-issues"} and s.offline:
+    if cc in {"build", "jira", "jira-projects", "history", "known-issues"} and s.offline:
         raise ConfigError(
             "the offline lock is on (offline: true / KUBE_NOOB_OFFLINE); corpus downloads are blocked. "
             "Import a prepared corpus instead: kube-noob corpus import <dir-or-tgz>"
         )
-    if cc in {"build", "jira", "history", "known-issues"} and not (a.online or s.web_enabled):
+    if cc in {"build", "jira", "jira-projects", "history", "known-issues"} and not (a.online or s.web_enabled):
         raise ConfigError("corpus ingestion uses the network; pass --online (or set webEnabled: true)")
     if cc == "known-issues":
         import tempfile
@@ -927,54 +1098,44 @@ def _corpus(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             print(f"{src.source_id}: {summary[src.source_id]}", file=sys.stderr)
         _emit({"dataDir": str(s.data_dir), "sources": summary}, fmt)
         return 0 if all(isinstance(v, int) for v in summary.values()) else 4
-    if cc == "jira":
-        from datetime import UTC, datetime
-
-        from kube_noob.net import Purpose, http_client
-        from kube_noob.sources.jira import JiraClient, insights, insights_markdown, pull_project
+    if cc in {"jira", "jira-projects"}:
+        from kube_noob.jira_catalog import DEFAULT_PROJECTS
+        from kube_noob.sources.jira import JiraClient, jira_http, run_sync
 
         email, api_token = os.environ.get("JIRA_EMAIL"), os.environ.get("JIRA_API_TOKEN")
         if bool(email) != bool(api_token):
             raise ConfigError("Set both JIRA_EMAIL and JIRA_API_TOKEN for an authenticated pull, or neither")
         auth = (email, api_token) if email and api_token else None
-        with http_client(s, Purpose.SOURCES, allow_sources=True, timeout=60) as http:
-            client = JiraClient(http, a.base_url, auth=auth)
-            res = pull_project(client, a.project, a.min_version, a.target, a.max_scan, a.base_url)
-        entry = write_shard(s.data_dir, f"jira-{a.project.lower()}", res.records)
-        ins = insights(res.records, a.project)
-        now = datetime.now(UTC).isoformat(timespec="seconds")
-        write_shard(
-            s.data_dir,
-            f"jira-{a.project.lower()}-insights",
-            [
-                {
-                    "id": f"insights-jira-{a.project.lower()}",
-                    "title": f"{a.project} issue insights ({a.min_version}+)",
-                    "text": insights_markdown(ins, now, a.min_version),
-                    "url": f"{a.base_url}/browse/{a.project}",
-                    "sourceId": f"jira-insights:{a.project}",
-                    "license": "aggregate statistics derived by kube-noob",
-                    "redistributable": True,
-                    "retrievedAt": now,
-                }
-            ],
-        )
-        _emit(
-            {
-                "records": len(res.records),
-                "scanned": res.stats.scanned,
-                "requests": res.stats.requests,
-                "retries": res.stats.retries,
-                "strategy": res.stats.strategy,
-                "errors": res.stats.errors,
-                "versionsConsidered": res.versions_considered,
-                "gaFloor": res.ga_floor,
-                "shard": entry,
-                "insights": ins,
-            },
-            fmt,
-        )
-        return 0 if len(res.records) >= min(a.target, 1) else 4
+        if cc == "jira-projects":
+            with jira_http(s, s.jira.base_url) as http:
+                projects = JiraClient(http, s.jira.base_url, auth=auth, max_requests=20).projects()
+            rows = [{**p, "default": p["key"] in DEFAULT_PROJECTS} for p in projects]
+            if a.format == "text":
+                for r in rows:
+                    _tprint(f"{'*' if r['default'] else ' '} {r['key']:12} {r['name']}")
+                print(f"{len(rows)} projects; * = in the default set (kube-noob corpus jira --online)")
+            else:
+                _emit({"projects": rows}, fmt)
+            return 0
+        if a.max_requests is not None and not 1 <= a.max_requests <= 100_000:
+            raise ConfigError("--max-requests must be 1 to 100000")
+        out = run_sync(s, a.projects, a.max_requests, auth)
+        if a.format == "text":
+            for p in out["projects"]:
+                state = "complete" if p.get("complete") else "partial, resumes next run"
+                extra = f" ({p['error']})" if p.get("error") else ""
+                _tprint(f"{p['project']:10} +{p['fetched']:<6} {p['total']:>7} tickets  {state}{extra}")
+            if out["skipped"]:
+                print(f"not reached this run (budget): {', '.join(out['skipped'])}")
+            idx = out.get("index") or {}
+            print(
+                f"{out['requests']} requests, {out['retries']} retries; index: {idx.get('tickets', 0)} tickets "
+                f"retrieved {idx.get('asOf')}"
+            )
+        else:
+            _emit(out, fmt)
+        errors = [p for p in out["projects"] if p.get("error")]
+        return 4 if errors and len(errors) == len(out["projects"]) else 0
     if cc == "history":
         from kube_noob.sources.history import minor_timeline, tags_with_dates, timeline_record
         from kube_noob.sources.registry import HISTORY_REPOS

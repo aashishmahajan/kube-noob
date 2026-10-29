@@ -23,6 +23,8 @@ Everything lives in the data directory: `~/.local/share/kube-noob` by default, o
 | `progress/<learner>.json` | Lessons read, exercise and quiz results, points. The learner id is a label you choose (default `local`); use a nickname, not an email address | Delete the file |
 | `learning.json` | Your profile (platform, versions, team conventions) and fixes you confirmed (symptom, cause, fix). Notes that contain credentials, logs or manifests are rejected. Counters record rule and playbook ids only, never your text | `kube-noob learning forget <id>`, delete the file, or set `learningEnabled: false` |
 | `corpus/` | Documents you indexed with `corpus add-docs` (credentials masked), and public corpus data you built or imported | Delete the directory |
+| `corpus/jira-*.jsonl`, `jira/` | Only after `kube-noob corpus jira` or `jira.sync.enabled`: the public Red Hat Jira tickets of the chosen projects (title, status, versions, description and the latest comments, with emails, account ids and @mentions removed; reporter, assignee and comment authors are never stored), the sync state and a search index. Public data, not redistributable: kube-noob never publishes it | Delete the files |
+| `incidents.json` | Only when the incident watch runs (`kube-noob watch`, `watch.enabled`): per incident the namespace, workload, signal, redacted event and status lines, the diagnosis ids and steps, rollout changes (image names, environment variable names, resource values), when it opened and resolved, and fixes a person confirmed. Never log lines, object specs or Secret values. Resolved incidents are dropped after `watch.retentionDays` (30) unless a fix was confirmed | Delete the file |
 
 Nothing from a request is kept after it is answered. What is listed above stays until you delete it; the maintainers
 never receive it.
@@ -39,7 +41,7 @@ By default, nothing. Each destination below is off until you turn it on.
 | Your cluster's API server | `cluster.enabled: true` or `--cluster-enabled` | Read-only get, list and logs requests |
 | Allowlisted documentation sites (listed below) | `webEnabled: true`; refused under the offline lock | HTTPS GET of the page address; nothing is downloaded to disk or run |
 | The model you configure | Only `kube-noob ask`, `kube-noob train bench` and the eval judge | Your question and the tool results; under the offline lock, local models only |
-| Public GitHub repositories and the public Red Hat Jira | Only `kube-noob corpus build`, `jira`, `history` and `known-issues` (maintainers and CI); refused under the offline lock | Requests for public data |
+| Public GitHub repositories and the public Red Hat Jira | Only `kube-noob corpus build`, `jira`, `jira-projects`, `history` and `known-issues`, and `jira.sync.enabled` in the service; refused under the offline lock | Requests for public data: Jira search queries (project key, an "updated in the last N minutes" or "key below N" filter) through its REST API, at most one per second |
 
 The default web allowlist is kubernetes.io, helm.sh, docs.redhat.com, docs.openshift.com, access.redhat.com,
 cloud.redhat.com, developers.redhat.com, redhat.atlassian.net, docs.aws.amazon.com, github.com,

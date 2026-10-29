@@ -1,3 +1,23 @@
+{{- if and .Values.watch.enabled (not .Values.config.clusterEnabled) }}
+{{- fail "watch.enabled needs config.clusterEnabled: the watch reads pods, events, deployments and replicasets" }}
+{{- end }}
+{{- if and .Values.watch.enabled (gt (int .Values.replicaCount) 1) }}
+{{- fail "watch.enabled keeps one incident ledger: set replicaCount: 1" }}
+{{- end }}
+{{- if and .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") (gt (int .Values.replicaCount) 1) }}
+{{- fail "persistence with a ReadWriteOnce volume attaches to one node: set replicaCount: 1 (or a ReadWriteMany accessMode)" }}
+{{- end }}
+{{- if .Values.jira.sync.enabled }}
+{{- if (.Values.config.offline | default false) }}
+{{- fail "jira.sync.enabled downloads Red Hat Jira tickets; config.offline forbids it (import a copy instead)" }}
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+{{- fail "jira.sync.enabled keeps a copy that takes hours to build: set persistence.enabled: true" }}
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "jira.sync.enabled syncs from one pod: set replicaCount: 1" }}
+{{- end }}
+{{- end }}
 {{- if and (.Values.config.offline | default false) .Values.config.webEnabled }}
 {{- fail "config.offline locks web access off; unset config.webEnabled (the two contradict each other)" }}
 {{- end }}
@@ -12,8 +32,12 @@ spec:
   selector:
     matchLabels: {{- include "kube-noob.selectorLabels" . | nindent 6 }}
   strategy:
+    {{- if and .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") }}
+    type: Recreate          # a ReadWriteOnce volume attaches to one node: a surge pod elsewhere would hang
+    {{- else }}
     type: RollingUpdate
     rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+    {{- end }}
   template:
     metadata:
       labels: {{- include "kube-noob.labels" . | nindent 8 }}

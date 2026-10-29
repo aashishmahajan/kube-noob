@@ -148,7 +148,7 @@ def _record(
         "summary": _summary(text),
         "workaround": _workaround(text) if kind == "known" else None,
         "text": text,
-        "url": f"https://issues.redhat.com/browse/{ids[0]}",
+        "url": f"https://redhat.atlassian.net/browse/{ids[0]}",
         "source": source,
     }
 

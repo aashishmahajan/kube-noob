@@ -62,7 +62,8 @@ def test_image_build_context_has_every_wheel_input() -> None:
 
 
 def test_scheduled_cadences_and_rox_corpus_scope() -> None:
-    """Weekly risk review, weekly corpus refresh, and a ROX Jira pull of 1000+ issues from 4.10 onward."""
+    """Weekly risk review, weekly corpus refresh, and a Red Hat Jira copy that covers ROX (every version, so RHACS
+    4.10 onward included) with room for well over 1000 issues."""
     import yaml
 
     wf = ROOT / ".github" / "workflows"
@@ -73,8 +74,11 @@ def test_scheduled_cadences_and_rox_corpus_scope() -> None:
     assert re.fullmatch(r"\d+ \d+ \* \* \d", triggers["schedule"][0]["cron"])
     ctriggers = corpus.get("on") or corpus.get(True)
     assert re.fullmatch(r"\d+ \d+ \* \* \d", ctriggers["schedule"][0]["cron"])
-    assert "--project ROX" in corpus_text and "'4.10'" in corpus_text
-    assert int(re.search(r"jira_target \|\| '(\d+)'", corpus_text).group(1)) >= 1000
+    from kube_noob.jira_catalog import DEFAULT_PROJECTS
+
+    assert '--projects "$JIRA_PROJECTS"' in corpus_text and "inputs.jira_projects || 'default'" in corpus_text
+    assert "ROX" in DEFAULT_PROJECTS and "OCPBUGS" in DEFAULT_PROJECTS
+    assert int(re.search(r"jira_max_requests \|\| '(\d+)'", corpus_text).group(1)) >= 1000  # x100 issues each
 
 
 def test_ships_as_mcp_plugin_cli_and_openshift_service() -> None:
