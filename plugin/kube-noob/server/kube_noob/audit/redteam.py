@@ -141,7 +141,18 @@ def exposure(ctx: AuditContext, findings: list[Finding]) -> RedTeamScenario | No
     if not ctx.by_kind("Route", "Ingress", "Service", "Gateway", "HTTPRoute"):
         return None
     fs = _ids(
-        findings, "KN-N002", "KN-N003", "KN-N004", "KN-N005", "KN-N001", "KN-N007", "KN-N008", "KN-N009", "KN-N010"
+        findings,
+        "KN-N002",
+        "KN-N003",
+        "KN-N004",
+        "KN-N005",
+        "KN-N001",
+        "KN-N007",
+        "KN-N008",
+        "KN-N009",
+        "KN-N010",
+        "KN-N011",
+        "KN-N012",
     )
     verdict, sev = _verdict(fs)
     return RedTeamScenario(
@@ -181,6 +192,9 @@ def privilege_escalation(ctx: AuditContext, findings: list[Finding]) -> RedTeamS
         "KN-S021",
         "KN-S022",
         "KN-S023",
+        "KN-S025",
+        "KN-S028",
+        "KN-ST006",
         "KN-S002",
         "KN-S003",
     )
@@ -230,7 +244,7 @@ def upgrade_block(ctx: AuditContext, findings: list[Finding]) -> RedTeamScenario
 
 
 def secret_leak(ctx: AuditContext, findings: list[Finding]) -> RedTeamScenario | None:
-    fs = _ids(findings, "KN-S013", "KN-S018", "KN-S014")
+    fs = _ids(findings, "KN-S013", "KN-S018", "KN-S026", "KN-S027", "KN-S014")
     fs = [f for f in fs if f.severity >= Severity.LOW]
     if not fs:
         return None
@@ -256,7 +270,7 @@ def secret_leak(ctx: AuditContext, findings: list[Finding]) -> RedTeamScenario |
 
 
 def resource_starvation(ctx: AuditContext, findings: list[Finding]) -> RedTeamScenario | None:
-    fs = _ids(findings, "KN-C004", "KN-C005", "KN-C006", "KN-C003")
+    fs = _ids(findings, "KN-C004", "KN-C005", "KN-C006", "KN-C003", "KN-C014")
     if not any(True for _ in ctx.workloads()):
         return None
     verdict, sev = _verdict(fs)
@@ -267,11 +281,13 @@ def resource_starvation(ctx: AuditContext, findings: list[Finding]) -> RedTeamSc
         sev,
         _evidence(fs),
         "Unbounded memory triggers node OOM kills of unrelated pods; BestEffort pods are evicted first; aggressive "
-        "liveness probes amplify slowness into restarts.",
+        "liveness probes amplify slowness into restarts; a manifest that sets spec.replicas under an HPA scales the "
+        "workload back down on every apply, peak or not.",
         [
             "requests + memory limits on every container",
             "namespace LimitRange and ResourceQuota",
             "liveness checks only the process; failureThreshold >= 3",
+            "no spec.replicas on a workload an HPA scales; minReplicas sets the floor",
         ],
         ["oc adm top pods -n <ns>", "oc get events -n <ns> --field-selector reason=OOMKilling"],
     )

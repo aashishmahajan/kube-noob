@@ -1,0 +1,30 @@
+rule: KN-S026
+good: |
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: web-config
+    namespace: shop
+  data:
+    LOG_LEVEL: info
+    DATABASE_HOST: db.shop.svc
+    tls-secret: web-tls
+    token-ttl: 30m
+    application.properties: |
+      spring.datasource.url=jdbc:postgresql://db.shop.svc:5432/app
+      spring.datasource.username=app
+      spring.datasource.password=${DB_PASSWORD}
+      password.min-length=12
+bad: |
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: web-config
+    namespace: shop
+  data:
+    LOG_LEVEL: info
+    DB_PASSWORD: hunter2
+    DATABASE_URL: postgres://app:s3cr3t@db.shop.svc:5432/app
+    application.properties: |
+      spring.datasource.url=jdbc:postgresql://db.shop.svc:5432/app
+      spring.datasource.password=hunter2

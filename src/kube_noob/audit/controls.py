@@ -22,6 +22,7 @@ TITLES: dict[str, str] = {
     "AC-6": "Least Privilege",
     "AC-6(5)": "Least Privilege | Privileged Accounts",
     "AC-6(10)": "Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions",
+    "AC-14": "Permitted Actions Without Identification or Authentication",
     "CM-2": "Baseline Configuration",
     "CM-3(2)": "Configuration Change Control | Testing, Validation, and Documentation of Changes",
     "CM-6": "Configuration Settings",
@@ -41,6 +42,7 @@ TITLES: dict[str, str] = {
     "SC-39": "Process Isolation",
     "SI-2": "Flaw Remediation",
     "SI-7": "Software, Firmware, and Information Integrity",
+    "SI-10": "Information Input Validation",
 }
 
 _VALIDATION = ("CM-3(2)", "CM-6")
@@ -71,6 +73,10 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S022": ("SI-2", "SC-39", "CM-7"),
     "KN-S023": ("SI-2", "SC-39"),
     "KN-S024": ("SI-2", "SA-22"),  # a component below its fixed releases, from a retired project
+    "KN-S025": ("SI-2", "SI-10", "SC-39"),  # shell syntax in a path kubelet handed to PowerShell
+    "KN-S026": ("IA-5(7)", "SC-28"),
+    "KN-S027": ("IA-5", "AC-6"),  # a non-expiring token in a readable object
+    "KN-S028": ("AC-14", "AC-3", "AC-6"),
     # Network exposure
     "KN-N001": ("SC-7", "SC-7(5)", "AC-4"),
     "KN-N002": ("SC-8", "SC-8(1)"),
@@ -82,12 +88,15 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-N008": ("SC-7", "SC-8", "AC-4"),  # externalIPs let a Service intercept traffic in transit
     "KN-N009": ("CM-7", "SI-2", "SC-7"),
     "KN-N010": ("CM-6", "CM-7", "SI-2"),
+    "KN-N011": ("SI-2", "SI-10", "CM-7"),
+    "KN-N012": ("SC-7", "SC-7(5)", "AC-4"),  # a policy that selects no pod enforces nothing
     # Storage
     "KN-ST001": ("CM-6",),
     "KN-ST002": ("CM-6", "CP-10"),
     "KN-ST003": ("SC-36", "CM-6"),
     "KN-ST004": ("CM-6",),
     "KN-ST005": ("CM-6", "SC-6"),
+    "KN-ST006": ("SI-2", "SI-10", "AC-6"),
     # Reliability and capacity
     "KN-C001": ("CP-10",),
     "KN-C002": ("CP-10",),
@@ -102,6 +111,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-C011": ("CP-10",),
     "KN-C012": ("SC-6",),
     "KN-C013": ("CM-6",),
+    "KN-C014": ("CM-6", "SC-6"),  # each apply resets the capacity the autoscaler set
     # Validation: changes are tested before they reach the cluster
     "KN-V001": _VALIDATION,
     "KN-V002": _VALIDATION,

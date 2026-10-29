@@ -183,22 +183,30 @@ def _workload(bp: Blueprint) -> dict[str, Any]:
         }
         if bp.storage is not None:
             spec["volumeClaimTemplates"] = [{"metadata": {"name": "data"}, "spec": _pvc_spec(bp)}]
-        return {"apiVersion": "apps/v1", "kind": "StatefulSet", "metadata": _meta(bp), "spec": spec}
+        return {
+            "apiVersion": "apps/v1",
+            "kind": "StatefulSet",
+            "metadata": _meta(bp),
+            "spec": _hpa_owns_replicas(bp, spec),
+        }
     strategy: dict[str, Any] = {"type": "RollingUpdate", "rollingUpdate": {"maxSurge": "25%", "maxUnavailable": 0}}
     if bp.storage is not None and bp.storage.access_mode != "ReadWriteMany":
         strategy = {"type": "Recreate"}
-    return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": _meta(bp),
-        "spec": {
-            "replicas": bp.replicas,
-            "revisionHistoryLimit": 5,
-            "selector": {"matchLabels": _selector(bp)},
-            "strategy": strategy,
-            "template": template,
-        },
+    spec = {
+        "replicas": bp.replicas,
+        "revisionHistoryLimit": 5,
+        "selector": {"matchLabels": _selector(bp)},
+        "strategy": strategy,
+        "template": template,
     }
+    return {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": _meta(bp), "spec": _hpa_owns_replicas(bp, spec)}
+
+
+def _hpa_owns_replicas(bp: Blueprint, spec: dict[str, Any]) -> dict[str, Any]:
+    """With an HPA the manifest leaves spec.replicas out, so an apply never resets the autoscaled count (KN-C014)."""
+    if bp.hpa_max_replicas:
+        spec.pop("replicas", None)
+    return spec
 
 
 def _service(bp: Blueprint) -> list[dict[str, Any]]:

@@ -91,10 +91,15 @@ def _render_template(entry: dict[str, Any]) -> str:
     out_lines = []
     for line in text.splitlines():
         m = re.match(rf"^(\s*)(\w+): {_BLOCK}(\w+)$", line)
+        reps = re.match(r"^(\s*)replicas: \{\{ \.Values\.replicaCount \}\}$", line)
         if m:
             indent, key, val = m.groups()
             out_lines.append(f"{indent}{key}:")
             out_lines.append(f"{indent}  {{{{- toYaml .Values.{val} | nindent {len(indent) + 2} }}}}")
+        elif reps:
+            # the HPA owns the replica count when autoscaling is on (KN-C014; the `helm create` scaffold does the same)
+            indent = reps.group(1)
+            out_lines += [f"{indent}{{{{- if not .Values.autoscaling.enabled }}}}", line, f"{indent}{{{{- end }}}}"]
         else:
             out_lines.append(line)
     body = "\n".join(out_lines) + "\n"
@@ -233,6 +238,71 @@ def render_chart(
     return proc.stdout
 
 
+_LOCK_FILES = ("Chart.lock", "requirements.lock")
+# A chart name that is a path: a separator, or '.'/'..' (CVE-2024-25620, CVE-2026-35206).
+_PATH_NAME = re.compile(r"[/\\]|^\.{1,2}\Z")
+MAX_SCHEMA_BYTES = 10 * 1024 * 1024  # the size CVE-2025-32387's advisory gives for the crafted schemas
+MAX_TEMPLATE_BYTES = 2 * 1024 * 1024
+_TEMPLATE_SUFFIXES = (".yaml", ".yml", ".tpl", ".txt", ".json")
+_GET_HOST = re.compile(r"\bgetHostByName\b")
+_LOOKUP = re.compile(r"\{\{-?[^}]*\blookup\b")
+_CRD = re.compile(r"(?m)^kind:\s*[\"']?CustomResourceDefinition[\"']?\s*$")
+_KEEP = re.compile(r"helm\.sh/resource-policy[\"']?\s*:\s*[\"']?keep")
+
+
+def _src(source_id: str) -> str:
+    from kube_noob.catalog import SOURCES
+
+    return SOURCES[source_id].url
+
+
+def _chart_names(chart: Path, meta: dict[str, Any]) -> list[tuple[str, str]]:
+    """(where, name) for the chart, its declared dependencies (name and alias) and the subcharts in charts/."""
+    out = [("Chart.yaml name", str(meta.get("name") or ""))]
+    for dep in meta.get("dependencies") or []:
+        if isinstance(dep, dict):
+            out += [(f"Chart.yaml dependency {key}", str(dep[key])) for key in ("name", "alias") if dep.get(key)]
+    charts = chart / "charts"
+    for sub in sorted(charts.glob("*/Chart.yaml")) if charts.is_dir() else []:
+        try:
+            sub_meta = yaml.safe_load(sub.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(sub_meta, dict):
+            out.append((f"{sub.relative_to(chart)} name", str(sub_meta.get("name") or "")))
+    return out
+
+
+def _template_issues(chart: Path) -> list[str]:
+    issues: list[str] = []
+    templates = chart / "templates"
+    files = sorted(p for p in templates.rglob("*") if p.is_file()) if templates.is_dir() else []
+    for p in files:
+        if p.suffix not in _TEMPLATE_SUFFIXES or p.stat().st_size > MAX_TEMPLATE_BYTES:
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        rel = p.relative_to(chart)
+        if _GET_HOST.search(text):
+            issues.append(
+                f"{rel} calls getHostByName, which sends the name to DNS servers while the chart renders "
+                "(CVE-2023-25165, Helm before 3.11.1; later releases resolve only with --enable-dns). Pass the "
+                f"address in values instead. Source: {_src('ghsa-cve-2023-25165')}"
+            )
+        if _LOOKUP.search(text):
+            issues.append(
+                f"{rel} calls lookup, which always returns an empty result under helm template: helm-audit audited "
+                "a render without the cluster objects lookup reads at install, so review the branches that depend "
+                f"on them. Source: {_src('helm-function-list')}"
+            )
+        if _CRD.search(text) and not _KEEP.search(text):
+            issues.append(
+                f"{rel} defines a CustomResourceDefinition in templates/: it is deleted with the release, and every "
+                "custom resource of that kind with it. Put CRDs in crds/ (Helm installs them first and never "
+                f"upgrades or deletes them) or in a separate chart. Source: {_src('helm-crds')}"
+            )
+    return issues
+
+
 def lint_chart_metadata(chart_dir: str | Path) -> list[str]:
     """Static checks that need no helm binary."""
     issues: list[str] = []
@@ -241,6 +311,39 @@ def lint_chart_metadata(chart_dir: str | Path) -> list[str]:
     if not cy.is_file():
         return [f"{chart}: missing Chart.yaml"]
     meta = yaml.safe_load(cy.read_text(encoding="utf-8")) or {}
+    if not isinstance(meta, dict):
+        return ["Chart.yaml is not a mapping."]
+    for lock in _LOCK_FILES:
+        if (chart / lock).is_symlink():
+            issues.append(
+                f"{lock} is a symlink: CVE-2025-53547 (Helm before 3.17.4 and 3.18.4) writes the lock file through "
+                "the link on `helm dependency update`, so Chart.yaml content lands in the linked file (a shell rc "
+                "file or a script: local code execution). Make it a regular file. Source: "
+                + _src("ghsa-cve-2025-53547")
+            )
+    for where, name in _chart_names(chart, meta):
+        if _PATH_NAME.search(name):
+            issues.append(
+                f"{where} {name!r} is a path ('/', '\\', '.' or '..'): CVE-2024-25620 (Helm before 3.14.1) saved such "
+                "a chart outside its directory, and CVE-2026-35206 (Helm before 3.20.2 and 4.1.4) made helm pull "
+                f"--untar write into the output directory itself. Use a plain chart name. Source: "
+                f"{_src('ghsa-cve-2024-25620')} {_src('ghsa-cve-2026-35206')}"
+            )
+    for dep in meta.get("dependencies") or []:
+        repo = str(dep.get("repository") or "") if isinstance(dep, dict) else ""
+        if repo.lower().startswith("http://"):
+            issues.append(
+                f"Chart.yaml dependency {dep.get('name')!r} comes from {repo}: over plain HTTP anyone on the path can "
+                f"swap the chart; use an https:// repository. Source: {_src('helm-dependencies')}"
+            )
+    schema = chart / "values.schema.json"
+    if schema.is_file() and schema.stat().st_size > MAX_SCHEMA_BYTES:
+        issues.append(
+            f"values.schema.json is {schema.stat().st_size // (1024 * 1024)} MiB: CVE-2025-32387 (Helm before 3.17.3) "
+            "overflowed its stack on schemas with a deeply nested chain of references, which the advisory says are "
+            f"larger than 10 MiB. Keep the schema small. Source: {_src('ghsa-cve-2025-32387')}"
+        )
+    issues += _template_issues(chart)
     if meta.get("apiVersion") != "v2":
         issues.append("Chart.yaml apiVersion should be v2 (Helm 3+).")
     if not meta.get("name"):

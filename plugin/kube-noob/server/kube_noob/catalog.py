@@ -394,6 +394,136 @@ SOURCES: dict[str, Citation] = {
         "https://github.com/kubernetes/kubernetes/issues/137893",
         "link only",
     ),
+    # Gap review 2026-10 (docs/evals/gap-review-2026-10.md): feed issues, their fixes and advisories, by link.
+    "k8s-cve-2023-3676": Citation(
+        "k8s-cve-2023-3676",
+        "Kubernetes CVE feed: CVE-2023-3676 insufficient input sanitization on Windows nodes leads to privilege "
+        "escalation",
+        "https://github.com/kubernetes/kubernetes/issues/119339",
+        "link only",
+    ),
+    "k8s-fix-cve-2023-3676": Citation(
+        "k8s-fix-cve-2023-3676",
+        "kubernetes/kubernetes PR 120127, the CVE-2023-3676 fix: pass the path and subPath to PowerShell in "
+        "environment variables (pkg/volume/util/subpath/subpath_windows.go)",
+        "https://github.com/kubernetes/kubernetes/pull/120127",
+        "link only",
+    ),
+    "k8s-cve-2023-5528": Citation(
+        "k8s-cve-2023-5528",
+        "Kubernetes CVE feed: CVE-2023-5528 insufficient input sanitization in in-tree storage plugin leads to "
+        "privilege escalation on Windows nodes",
+        "https://github.com/kubernetes/kubernetes/issues/121879",
+        "link only",
+    ),
+    "k8s-cve-2026-3864": Citation(
+        "k8s-cve-2026-3864",
+        "Kubernetes CVE feed: CVE-2026-3864 CSI Driver for NFS path traversal via subDir",
+        "https://github.com/kubernetes/kubernetes/issues/137797",
+        "link only",
+    ),
+    "k8s-cve-2026-3865": Citation(
+        "k8s-cve-2026-3865",
+        "Kubernetes CVE feed: CVE-2026-3865 CSI Driver for SMB path traversal via subDir",
+        "https://github.com/kubernetes/kubernetes/issues/138319",
+        "link only",
+    ),
+    "k8s-cve-2026-2270": Citation(
+        "k8s-cve-2026-2270",
+        "Kubernetes CVE feed: CVE-2026-2270 StatefulSet and ControllerRevision write permissions allow "
+        "cross-namespace pod creation",
+        "https://github.com/kubernetes/kubernetes/issues/142097",
+        "link only",
+    ),
+    "k8s-rbac-bootstrap-policy": Citation(
+        "k8s-rbac-bootstrap-policy",
+        "kubernetes/kubernetes bootstrap RBAC policy (view reads ControllerRevisions; edit writes StatefulSets but not "
+        "ControllerRevisions)",
+        "https://github.com/kubernetes/kubernetes/blob/master/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go",
+        "Apache-2.0",
+    ),
+    "ghsa-cve-2025-53547": Citation(
+        "ghsa-cve-2025-53547",
+        "GitHub Security Advisory GHSA-557j-xg8c-q2mm: CVE-2025-53547 Helm chart dependency updating with malicious "
+        "Chart.yaml content and a symlinked Chart.lock",
+        "https://github.com/advisories/GHSA-557j-xg8c-q2mm",
+        "link only",
+    ),
+    "ghsa-cve-2024-25620": Citation(
+        "ghsa-cve-2024-25620",
+        "GitHub Security Advisory GHSA-v53g-5gjp-272r: CVE-2024-25620 Helm dependency management path traversal "
+        "(a relative path in a chart's name)",
+        "https://github.com/advisories/GHSA-v53g-5gjp-272r",
+        "link only",
+    ),
+    "ghsa-cve-2026-35206": Citation(
+        "ghsa-cve-2026-35206",
+        "GitHub Security Advisory GHSA-hr2v-4r36-88hr: CVE-2026-35206 Helm chart extraction output directory "
+        "collapse via a Chart.yaml name dot-segment",
+        "https://github.com/advisories/GHSA-hr2v-4r36-88hr",
+        "link only",
+    ),
+    "ghsa-cve-2023-25165": Citation(
+        "ghsa-cve-2023-25165",
+        "GitHub Security Advisory GHSA-pwcw-6f5g-gxf8: CVE-2023-25165 Helm getHostByName function information "
+        "disclosure",
+        "https://github.com/advisories/GHSA-pwcw-6f5g-gxf8",
+        "link only",
+    ),
+    "ghsa-cve-2025-32387": Citation(
+        "ghsa-cve-2025-32387",
+        "GitHub Security Advisory GHSA-5xqw-8hwv-wg92: CVE-2025-32387 Helm stack overflow on a specially crafted "
+        "JSON Schema",
+        "https://github.com/advisories/GHSA-5xqw-8hwv-wg92",
+        "link only",
+    ),
+    "k8s-configmap": Citation(
+        "k8s-configmap",
+        "Kubernetes ConfigMaps (a ConfigMap does not provide secrecy or encryption; use a Secret)",
+        "https://kubernetes.io/docs/concepts/configuration/configmap/",
+        "CC-BY-4.0",
+    ),
+    "k8s-secret-sa-token": Citation(
+        "k8s-secret-sa-token",
+        "Kubernetes Secrets - ServiceAccount token Secrets (legacy, long-lived credentials; use the TokenRequest API)",
+        "https://kubernetes.io/docs/concepts/configuration/secret/#serviceaccount-token-secrets",
+        "CC-BY-4.0",
+    ),
+    "k8s-rbac-subjects": Citation(
+        "k8s-rbac-subjects",
+        "Kubernetes RBAC - referring to subjects (system:authenticated, system:unauthenticated and "
+        "system:serviceaccounts groups)",
+        "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-subjects",
+        "CC-BY-4.0",
+    ),
+    "k8s-hpa-replicas": Citation(
+        "k8s-hpa-replicas",
+        "Horizontal Pod Autoscaling - Migrating Deployments and StatefulSets to horizontal autoscaling (remove "
+        "spec.replicas)",
+        "https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/"
+        "#migrating-deployments-and-statefulsets-to-horizontal-autoscaling",
+        "CC-BY-4.0",
+    ),
+    "helm-crds": Citation(
+        "helm-crds",
+        "Helm Chart Best Practices - Custom Resource Definitions (the crds/ directory; Helm does not upgrade or delete "
+        "CRDs)",
+        "https://helm.sh/docs/chart_best_practices/custom_resource_definitions/",
+        "Apache-2.0",
+    ),
+    "helm-dependencies": Citation(
+        "helm-dependencies",
+        "Helm Chart Best Practices - Dependencies (https:// repository URLs where possible)",
+        "https://helm.sh/docs/chart_best_practices/dependencies/",
+        "Apache-2.0",
+    ),
+    "helm-function-list": Citation(
+        "helm-function-list",
+        "Helm Template Function List (lookup returns an empty response under helm template; getHostByName needs "
+        "--enable-dns)",
+        "https://helm.sh/docs/chart_template_guide/function_list/",
+        "Apache-2.0",
+    ),
 }
 
 

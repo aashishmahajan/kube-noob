@@ -1,0 +1,31 @@
+rule: KN-S027
+good: |
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: ci-deployer
+    namespace: shop
+  automountServiceAccountToken: false
+  ---
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ci-settings
+    namespace: shop
+  type: Opaque
+bad: |
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: ci-deployer
+    namespace: shop
+  automountServiceAccountToken: false
+  ---
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ci-deployer-token
+    namespace: shop
+    annotations:
+      kubernetes.io/service-account.name: ci-deployer
+  type: kubernetes.io/service-account-token
