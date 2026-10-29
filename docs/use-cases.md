@@ -724,6 +724,14 @@ existing breaker admitted, and nothing blocked with the webhook scaled to zero.
 Install the plugin or add the MCP server (see the [README](../README.md)), then ask for the `getting_started` prompt.
 It reads your saved profile, asks for your role and platform, and suggests the first three tools to use.
 
+### Chat on claude.ai: the Agent Skill
+
+The local MCP server does not run in chat on claude.ai. Upload `kube-noob-skill-<version>.zip` (a release asset, or
+`python scripts/build_skill.py --zip kube-noob-skill.zip` from a checkout) under **Customize > Skills** and turn on
+code execution. Paste a describe, an event or a manifest: Claude runs `kn.py insight` or `kn.py audit_manifests` in
+its sandbox and cites the playbook, rule and issue ids kube-noob returns. The skill is always offline: no web lookups,
+no cluster, no model inside.
+
 ## Model builders
 
 Build the corpus, score answers with the deterministic reward and export datasets: see [training](training.md).

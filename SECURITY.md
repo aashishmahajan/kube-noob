@@ -22,6 +22,11 @@ posture. The local learning file stores only user-confirmed summaries and ids, n
 when cluster access is enabled; the maintainer CLI commands `corpus build --online` and `helm-audit` run `git` and
 `helm template` locally.
 
+The Agent Skill (`skill/kube-noob`) cannot be configured out of this posture: its runner forces the offline lock,
+web and cluster off and no model on every call, ignoring the config file and `KUBE_NOOB_*` variables, imports the
+bundled server source only (it refuses another installed kube-noob), and its tools start no other program and
+open no connection (a test runs them with both refused).
+
 ## Security design
 
 | Area | Control |

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- kube-noob as an Agent Skill (G108): `skill/kube-noob/SKILL.md` and `scripts/kn.py` run the plugin's tools as one
+  command each, JSON out, so kube-noob also works where a local MCP server cannot run (chat on claude.ai, the
+  Claude API's code execution) and where a plugin's install-time dependency resolution is not wanted. It needs Python
+  3.11+ with pydantic, PyYAML, jsonschema and httpx (no MCP SDK, no HTTP stack); it forces the offline lock (no web,
+  no cluster, no model) whatever the config or `KUBE_NOOB_*` variables say, caps input at 5 MiB and reads only the
+  files it is given. Calls go through the new `kube_noob.tool_runner.call`, which the MCP server and the REST routes
+  now share, so validation, `knowledgeAsOf` and the cleaning of instruction-shaped text are the same everywhere.
+  `scripts/build_skill.py --check` (CI and `scripts/check.sh`) holds SKILL.md to the Agent Skills rules and keeps
+  `references/tools.md` equal to the code; releases attach `kube-noob-skill-<version>.zip` for **Customize > Skills**.
+
 - Gap review 2026-10 (G107, `docs/evals/gap-review-2026-10.md`: what kube-noob lacked against the Kubernetes CVE
   feed, the Helm and Argo CD advisories, Helm's best practices, kube-score, Polaris, kube-linter, Checkov and the
   Kyverno library, and what was left out and why). 69 -> 77 rules:

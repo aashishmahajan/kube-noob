@@ -23,7 +23,7 @@ from pydantic_core import PydanticUndefined
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from kube_noob import __version__, sanitize
+from kube_noob import __version__, sanitize, tool_runner
 from kube_noob.audit.engine import list_rules
 from kube_noob.config import Settings
 from kube_noob.errors import KubeNoobError
@@ -117,15 +117,7 @@ def run_tool(spec: ToolSpec, kwargs: dict[str, Any], knowledge: str, via: str = 
     started = time.monotonic()
     outcome = "ok"
     try:
-        validated = spec.model.model_validate(kwargs)
-        result: dict[str, Any] = spec.fn(validated)
-        if isinstance(result, dict):
-            # Every answer says how current kube-noob's knowledge is, so the model can tell the user.
-            result.setdefault("knowledgeAsOf", knowledge)
-            # Text from outside (events, logs, tickets, memory, pages) is data: shapes that try to steer the calling
-            # model are neutralised and flagged before the result leaves the server.
-            result = sanitize.result(result)
-        return result
+        return tool_runner.call(spec, kwargs, knowledge)
     except ValidationError as exc:
         outcome = "invalid-arguments"
         raise CallFailed(400, outcome, f"invalid arguments: {str(exc)[:MAX_ERROR_CHARS]}") from None

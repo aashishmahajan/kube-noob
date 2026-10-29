@@ -72,6 +72,14 @@ plugin ships only the modules of the stdio server: no CLI, model agent, HTTP ser
 no credentials. Personal data is never requested. If text you paste contains some, it is processed in memory
 and not stored, except words you choose to put in a confirmed note or a learner id.
 
+## The Agent Skill
+
+The skill runs where Claude runs code: your computer in Claude Code, a sandbox for chat on claude.ai. It reads only
+the files named in a call, makes no network connections (web, cluster and model are forced off) and sends nothing to
+the maintainer. Like the server, it keeps learning progress and notes you confirm in kube-noob's data folder
+(`KUBE_NOOB_DATA_DIR`, else `~/.local/share/kube-noob`) inside that environment; a claude.ai sandbox discards them
+when it ends.
+
 ## The website (kube-noob.com)
 
 A static site on GitHub Pages, built from this repository's releases. It has no backend, no analytics, no cookies and

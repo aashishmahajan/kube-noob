@@ -5,8 +5,9 @@ cd "$(dirname "$0")/.."
 py="${PYTHON:-python}"
 [ -x .venv/bin/python ] && py=.venv/bin/python
 "$py" scripts/sync_plugin_server.py --check
-"$py" -m ruff check src tests scripts
-"$py" -m ruff format --check src tests scripts
+"$py" scripts/build_skill.py --check
+"$py" -m ruff check src tests scripts skill
+"$py" -m ruff format --check src tests scripts skill
 "$py" -m mypy src
 "$py" -m pytest -q
 "$py" -m kube_noob selftest

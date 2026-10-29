@@ -18,3 +18,4 @@ dist/
 
 # demo video renders
 demos/video/node_modules/
+.claude/worktrees/
