@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Update risks before an OpenShift update, offline (G110): `kube-noob upgrade-risks --from 4.20.3 --to 4.21.4` (and the
+  `upgrade_risks` MCP tool) lists the risks Red Hat declares for that update in the public update graph
+  (openshift/cincinnati-graph-data, 356 risks for targets 4.18.0 to 4.22.17, commit 7572174a, 2026-10-29), as a
+  disconnected cluster would see them only through a local OpenShift Update Service. Each risk has its message, link
+  and fix version, and says whether it applies to every cluster, which single fact decides it with the read-only
+  `oc` command or must-gather file that shows it (installer invoker, platform type, a ClusterOperator, a capability,
+  a node label, assigned egress IPs), or that its PromQL cannot be evaluated offline (shown as written). `from` is
+  matched as the update service matches it, by a linear-time engine that refuses look-around, back-references and
+  oversized patterns. `doctor` and every result's `knowledgeAsOf` show the snapshot date.
 - PRIVACY.md said the website had no backend and that the maintainers receive nothing. Its contact, feedback and
   student-license forms send what you type to a Google Apps Script web app the maintainer runs, which stores it in a
   private Google Sheet. The website section now says what each form keeps, what it is used for and how to have it

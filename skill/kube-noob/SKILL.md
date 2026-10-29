@@ -39,6 +39,7 @@ It reads only the files you name.
 | Anything pasted (events, describe, logs, an alert, a denial, a ticket, a question) | `insight` with `{"text": ...}` and, if known, `"platform"` (`kubernetes`, `openshift`, `rosa-hcp`) and `"version"` |
 | Manifests or `helm template` output to review | `audit_manifests` (`manifests`), then `fix_manifests` for the safe fixes |
 | "Is this a known OpenShift bug?" | `known_issues` with the error text and the cluster version |
+| "What could go wrong updating OpenShift from X to Y?" | `upgrade_risks` with `current` and `target` (x.y.z) |
 | A denied request (Pod Security, SCC, Kyverno, Gatekeeper, VAP, RHACS, quota, RBAC) | `explain_denial` |
 | "Can pod A reach pod B?" | `check_network_policy` |
 | A design or review request | `run_protocol` (Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team) |

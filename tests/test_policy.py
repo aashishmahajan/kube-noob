@@ -642,6 +642,7 @@ def test_cli_drops_terminal_escapes(capsys: pytest.CaptureFixture[str]) -> None:
 def test_explain_stays_fast_on_hostile_input(text: str) -> None:
     import time
 
-    start = time.perf_counter()
+    # CPU time of this process: a busy machine (parallel jobs) must not fail it, a quadratic path still does
+    start = time.process_time()
     explain(text)
-    assert time.perf_counter() - start < 3.0
+    assert time.process_time() - start < 3.0

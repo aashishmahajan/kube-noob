@@ -326,6 +326,14 @@ What changed in Red Hat Jira. Reconcile the local copy of Red Hat's public Jira:
 - `project` (null/string)
 - `since` (string): How far back: 2d, 36h, 90m or a date such as 2026-10-25.
 
+## upgrade_risks
+
+Known risks for an OpenShift update. Before updating OpenShift from one x.y.z version to another: the risks Red Hat declares for that update in the public update graph (conditional updates, as an OpenShift Update Service serves them), from a bundled snapshot, offline. Each risk has its name, message, link, the version that fixes it and a verdict: applies (declared for every cluster), check (one fact decides it, with the read-only command or must-gather file that shows it) or cannot evaluate offline (its PromQL, as written). Whether the update is in your channel is not checked.
+
+- `arch` (null/string): The release architecture (multi for a multi-architecture payload). Without it, every architecture is checked and a risk declared for some of them only says which.
+- `current`* (string): The OpenShift version the cluster runs, x.y.z, e.g. 4.20.3.
+- `target`* (string): The version to update to, x.y.z, e.g. 4.21.4.
+
 ## validate_manifests
 
 Validate manifests. Strict schema validation (Kubernetes 1.35 + OpenShift/OVN-K/StackRox/Gateway API CRDs), apiVersion vs kind, OpenShift-only APIs on vanilla Kubernetes, removed/deprecated APIs, selector wiring.
