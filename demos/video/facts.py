@@ -143,19 +143,26 @@ def parse_transcript(text: str) -> list[dict[str, Any]]:
     return steps
 
 
+_QUANTITY = re.compile(r"(\d+(?:\.\d+)?)([KMGTPE]i|[kMGTPE]|)")
+_UNITS = {"": 1, "k": 10**3, "M": 10**6, "G": 10**9, "T": 10**12, "P": 10**15, "E": 10**18}
+_UNITS.update({f"{u}i": 2 ** (10 * (i + 1)) for i, u in enumerate("KMGTPE")})
+
+
 def _manifest_limit_mib() -> int:
-    """limits.memory of the kube-noob container in the sidecar example, in MiB."""
+    """limits.memory of the kube-noob container in the sidecar example, in MiB (rounded down, as the cgroup is)."""
     import yaml
 
-    units = {"Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "K": 10**3, "M": 10**6, "G": 10**9, "": 1}
     for doc in yaml.safe_load_all(_product(SIDECAR_MANIFEST).read_text(encoding="utf-8")):
         if doc and doc.get("kind") == "Deployment":
             for c in doc["spec"]["template"]["spec"]["containers"]:
-                if c["name"] == "kube-noob":
-                    m = re.fullmatch(r"(\d+)([KMG]i?|)", str(c["resources"]["limits"]["memory"]))
-                    if m:
-                        return int(m.group(1)) * units[m.group(2)] // 2**20
-    raise FactError(f"{SIDECAR_MANIFEST}: no kube-noob container with a memory limit")
+                if c["name"] != "kube-noob":
+                    continue
+                value = str(((c.get("resources") or {}).get("limits") or {}).get("memory", ""))
+                m = _QUANTITY.fullmatch(value)
+                if not m:
+                    raise FactError(f"{SIDECAR_MANIFEST}: kube-noob memory limit {value!r} is not a quantity")
+                return int(float(m.group(1)) * _UNITS[m.group(2)]) // 2**20
+    raise FactError(f"{SIDECAR_MANIFEST}: no kube-noob container")
 
 
 def _change(c: dict[str, Any]) -> str:
@@ -243,7 +250,11 @@ class Facts:
             + (f"critical {counts['critical']} · " if counts["critical"] else "")
             + f"high {counts['high']} · medium {counts['medium']} · low {counts['low']}",
         ]
-        lines += [f"  HIGH  {x['ruleId']}  line {x['line']}  {rules[x['ruleId']]['title']}" for x in high]
+        lines += [
+            f"  {'CRIT' if x['severity'] == 'critical' else 'HIGH'}  {x['ruleId']}  line {x['line']}  "
+            f"{rules[x['ruleId']]['title']}"
+            for x in high
+        ]
         lines += [f"  MED   {x['ruleId']}  line {x['line']}  {rules[x['ruleId']]['title']}" for x in wiring[:1]]
         changes = [_change(c) for c in f["changes"]]
         lines.append("● kube-noob · kubenoob_fix_manifests")
@@ -264,7 +275,7 @@ class Facts:
             elif re.match(r"\[(MEDIUM|LOW)", line):
                 rest += 1
         if rest:
-            lines.append(f"… {rest} medium and low findings and every fix line left out here")
+            lines.append(f"… {rest} medium and low findings, and the fix, RHACS and red-team lines, left out")
         self._recordings["cli:audit"] = lines
 
     def _protocol(self) -> None:

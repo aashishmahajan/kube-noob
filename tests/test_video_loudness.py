@@ -74,3 +74,23 @@ def test_a_finished_file_out_of_spec_is_refused(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="audio 3"):
         loudness.verify(_mux(tmp_path, short, "short.mp4"), voiced=True)
     assert loudness.loudness_spec(voiced=False)[0] == -20  # music alone sits lower
+
+
+def test_normalise_keeps_the_whole_headroom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A pass that lands on the loudness but 0.05 dB into the headroom is not accepted: the AAC encode adds up to
+    # +0.24 dB (measured on the teaser), so the mix gets the limiter again.
+    target, _, tp = loudness.loudness_spec(voiced=True)
+    ceiling = tp - loudness.TP_HEADROOM
+    passes = iter([{"I": -30.0, "TP": -12.0}, {"I": target, "TP": ceiling + 0.05}, {"I": target, "TP": ceiling - 0.2}])
+    filters: list[str] = []
+
+    def run(args: list[str], *, check: bool, capture_output: bool = False) -> None:
+        filters.append(args[args.index("-af") + 1])
+        Path(args[-1]).write_bytes(b"RIFF")
+
+    monkeypatch.setattr(loudness, "measure", lambda path: next(passes))
+    monkeypatch.setattr(loudness, "_run", run)
+    wav = tmp_path / "mix.wav"
+    wav.write_bytes(b"RIFF")
+    result = loudness.normalize(wav, voiced=True)
+    assert result["TP"] <= ceiling and len(filters) == 2 and "alimiter" in filters[1]

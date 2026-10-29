@@ -40,7 +40,7 @@ def _wrap(text: str) -> list[str]:
             lines[-1] += " " + word
         else:
             lines.append(word)
-    if len(lines) != 2:
+    if len(lines) != 2 or max(map(len, lines)) > LINE:  # a word wider than a line: check() refuses the cue
         return lines
     words = text.split(" ")
     cuts = [(" ".join(words[:i]), " ".join(words[i:])) for i in range(1, len(words))]
@@ -71,8 +71,8 @@ def chunks(text: str) -> list[str]:
         for part in parts:
             if not _fits(part):
                 out.extend([piece] if piece else [])
-                out.extend(_halves(part))
-                piece = ""
+                *head, piece = _halves(part)  # the last half can take a short clause that follows it
+                out.extend(head)
             elif piece and not _fits(f"{piece} {part}"):
                 out.append(piece)
                 piece = part
@@ -85,6 +85,8 @@ def chunks(text: str) -> list[str]:
 
 def _durations(lengths: list[int], duration: float) -> list[float]:
     """Time in proportion to length, but at least MIN_CUE per cue, the rest shared by the longer ones."""
+    if MIN_CUE * len(lengths) > duration:  # no way to give every cue MIN_CUE: proportional, and check() says why
+        return [duration * n / sum(lengths) for n in lengths]
     fixed: set[int] = set()
     while True:
         left = duration - MIN_CUE * len(fixed)
@@ -92,7 +94,7 @@ def _durations(lengths: list[int], duration: float) -> list[float]:
         d = [MIN_CUE if i in fixed else left * n / free for i, n in enumerate(lengths)]
         short = {i for i, x in enumerate(d) if x < MIN_CUE - 1e-9} - fixed
         if not short or len(fixed | short) == len(lengths):
-            return d  # a span too short for every cue to get MIN_CUE is refused by check()
+            return d
         fixed |= short
 
 

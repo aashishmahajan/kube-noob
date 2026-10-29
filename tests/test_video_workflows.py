@@ -88,6 +88,10 @@ def test_one_failed_leg_or_one_red_ci_job_does_not_cost_the_release_its_videos()
     assert 'startswith("e2e-kind (OpenShift 4.22")' in run
     assert "connected to kube_noob_mcp ${TAG#v} at" in run
     assert "transcript-for-videos" in str(jobs["attach"]["steps"])  # attached for re-renders of this tag
+    assert "[ -f dist/kube-noob-sidecar-4k.mp4 ]" in attach  # only the one the sidecar video was rendered from
+    facts_step = next(s for s in kind["steps"] if str(s.get("name", "")).startswith("The sidecar video's facts"))
+    assert facts_step["if"] == "matrix.ocp == '4.22'" and "kube_noob.__version__" in facts_step["run"]
+    assert kind["steps"].index(facts_step) > kind["steps"].index(step)  # every ci run checks the new recording
 
 
 def test_the_playwright_version_is_locked() -> None:

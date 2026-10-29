@@ -90,25 +90,25 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .isoWorld { position: absolute; left: 0; top: 0; transform-style: preserve-3d; }
 .box, .bb, .flat { position: absolute; left: 0; top: 0; transform-style: preserve-3d; }
 .face { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.pod .face { background: rgba(45,212,191,.075); border: 2px solid rgba(94,234,212,.62); box-shadow: inset 0 0 42px rgba(45,212,191,.13); }
-.pod .top { background: rgba(45,212,191,.02); }
+.pod .face { background: rgba(var(--kn-teal-rgb), .075); border: 2px solid rgba(var(--kn-teal-rgb), .62); box-shadow: inset 0 0 42px rgba(var(--kn-teal-rgb), .13); }
+.pod .top { background: rgba(var(--kn-teal-rgb), .02); }
 .pod .bottom { background: rgba(8,40,60,.55); }
-.ctr-app .face { background: rgba(26,56,112,.94); border: 2px solid rgba(125,211,252,.85); }
+.ctr-app .face { background: rgba(26,56,112,.94); border: 2px solid rgba(var(--kn-sky-rgb), .85); }
 .ctr-app .top { background: rgba(48,92,170,.96); }
 .ctr-kn .face { background: rgba(14,62,54,.94); border: 2px solid rgba(var(--kn-green-rgb), .9); }
 .ctr-kn .top { background: rgba(24,104,86,.96); }
-.shield .face { background: rgba(94,234,212,.035); border: 2px dashed rgba(94,234,212,.32); }
+.shield .face { background: rgba(var(--kn-teal-rgb), .035); border: 2px dashed rgba(var(--kn-teal-rgb), .32); }
 .shield .top, .shield .bottom { display: none; }
 .mini .face { background: rgba(var(--kn-danger-rgb), .38); border: 1.5px solid rgba(var(--kn-danger-soft-rgb), .85); }
 .door { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #0b1a33; border: 3px solid var(--kn-warning); border-radius: 6px 6px 0 0; }
 .isoFloor { position: absolute; left: 0; top: 0; width: 5200px; height: 5200px; transform-origin: 0 0;
-  background-image: linear-gradient(rgba(94,234,212,.12) 2px, transparent 2px), linear-gradient(90deg, rgba(94,234,212,.12) 2px, transparent 2px);
+  background-image: linear-gradient(rgba(var(--kn-teal-rgb), .12) 2px, transparent 2px), linear-gradient(90deg, rgba(var(--kn-teal-rgb), .12) 2px, transparent 2px);
   background-size: 160px 160px; -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0%, rgba(0,0,0,.6) 30%, transparent 62%); }
 .bbIn { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); text-align: center; white-space: nowrap; }
 .label { font: 600 30px var(--sans); color: var(--kn-ink); padding: 8px 18px; border-radius: 12px; background: rgba(5,12,26,.94);
   border: 1px solid rgba(255,255,255,.12); display: inline-block; }
 .label.mono { font: 500 26px var(--mono); color: var(--kn-green-soft); }
-.flash { width: 220px; height: 220px; border-radius: 50%; background: radial-gradient(circle, rgba(240,253,250,.95), rgba(94,234,212,.5) 35%, transparent 70%); }
+.flash { width: 220px; height: 220px; border-radius: 50%; background: radial-gradient(circle, rgba(240,253,250,.95), rgba(var(--kn-teal-rgb), .5) 35%, transparent 70%); }
 
 /* desk (mcp) */
 #desk .lamp { position: absolute; left: -200px; top: -260px; width: 1300px; height: 1100px; border-radius: 50%;
@@ -131,7 +131,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .speech .q { font: 500 33px/1.38 var(--sans); padding: 28px 40px; }
 .speech .hdr { font: 700 30px var(--sans); padding: 30px 44px 8px; color: #10213f; }
 .speech .row { display: flex; align-items: center; gap: 22px; padding: 14px 44px; font: 500 28px/1.3 var(--sans); }
-.speech .ck { width: 42px; height: 42px; border-radius: 50%; border: 3px solid #94a3b8; flex: none; display: grid; place-items: center; }
+.speech .ck { width: 42px; height: 42px; border-radius: 50%; border: 3px solid var(--kn-muted); flex: none; display: grid; place-items: center; }
 .speech .ck svg { width: 26px; height: 26px; }
 .chip { position: absolute; left: 0; top: 0; font: 600 24px var(--mono); color: #052e16; background: var(--kn-green); padding: 6px 14px; border-radius: 10px;
   box-shadow: 0 0 22px rgba(var(--kn-green-rgb), .6); transform: translate(-50%, -50%); }
@@ -234,8 +234,8 @@ function makeRocket(parent, name) {
   <path d="M90 172 Q103 158 120 158" fill="none" stroke="${KN.tokens.colors.sky}" stroke-width="5" stroke-linecap="round" opacity=".7"/>
   <g class="clip" display="none"><rect x="0" y="0" width="96" height="124" rx="12" fill="#e2eaf6" stroke="#8ea6c8" stroke-width="3"/>
    <rect x="30" y="-8" width="36" height="16" rx="5" fill="#64748b"/>
-   ${[0, 1, 2].map(i => `<rect x="12" y="${24 + i * 32}" width="22" height="22" rx="5" fill="#fff" stroke="#22c55e" stroke-width="3"/>
-   <path class="ck${i}" d="M16 ${35 + i * 32} l5 6 l10 -12" fill="none" stroke="#16a34a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0"/>
+   ${[0, 1, 2].map(i => `<rect x="12" y="${24 + i * 32}" width="22" height="22" rx="5" fill="#fff" stroke="${K.green}" stroke-width="3"/>
+   <path class="ck${i}" d="M16 ${35 + i * 32} l5 6 l10 -12" fill="none" stroke="${KN.tokens.colors.navy}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0"/>
    <rect x="42" y="${31 + i * 32}" width="40" height="8" rx="4" fill="#9aabc4"/>`).join('')}</g>
   <g class="armR"><path class="a1" fill="none" stroke="#9fbbe0" stroke-width="22" stroke-linecap="round"/><path class="a2" fill="none" stroke="#f4f8ff" stroke-width="15" stroke-linecap="round"/><circle class="h" r="14" fill="#f4f8ff" stroke="#9fbbe0" stroke-width="3"/>
    <rect class="thumb" x="-7" y="-36" width="14" height="28" rx="7" fill="#f4f8ff" stroke="#9fbbe0" stroke-width="3" display="none"/></g>
@@ -303,13 +303,13 @@ function tokens(line) {
   if (line.startsWith('/')) return [['tp', '> '], ['tc', line]];
   if (line.startsWith('#') || line.startsWith('… ')) return [['tk', line]];  // a comment, or lines left out
   const out = [];
-  const re = /(\[HIGH[^\]]*\]|\bHIGH\b|\bMED\b|●|score[ =]\d+(\.\d+)?(\/100)?|high=\d+|medium=\d+|low=\d+|\bmodel none\b|\bweb off\b|\bcluster off\b|closed \(listens on 127\.0\.0\.1 only\)|deleted|Error from server \(NotFound\)|not found|\d+ tools|→)/g;
+  const re = /(\[(HIGH|CRITICAL)[^\]]*\]|\b(HIGH|CRIT)\b|\bMED\b|●|score[ =]\d+(\.\d+)?(\/100)?|high=\d+|medium=\d+|low=\d+|\bmodel none\b|\bweb off\b|\bcluster off\b|closed \(listens on 127\.0\.0\.1 only\)|deleted|Error from server \(NotFound\)|not found|\d+ tools|→)/g;
   let last = 0, m;
   while ((m = re.exec(line))) {
     if (m.index > last) out.push(['', line.slice(last, m.index)]);
     const s = m[0];
     let cls = 'tn';
-    if (/HIGH|deleted|NotFound|not found/.test(s)) cls = 'th';
+    if (/HIGH|CRIT|deleted|NotFound|not found/.test(s)) cls = 'th';
     else if (/MED|medium/.test(s)) cls = 'tm';
     else if (s === '●' || /off|none|closed|tools/.test(s)) cls = 'tb';
     else if (s === '→') cls = 'tg';
@@ -506,7 +506,7 @@ function buildIso() {
   ISO.pod = box(w, 0, 0, 0, POD.w, POD.d, POD.h, 'pod');
   ISO.app = box(w, 70, 120, 0, 240, 240, 150, 'ctr-app');
   ISO.kn = box(w, 450, 120, 0, 240, 240, 150, 'ctr-kn');
-  ISO.cable = flat(w, 300, 140, 152, 160, 200, `<svg width="160" height="200" viewBox="0 0 160 200"><path class="c1" d="M10 75 C 50 10, 110 10, 150 75" fill="none" stroke="#5eead4" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/><path class="c2" d="M150 125 C 110 190, 50 190, 10 125" fill="none" stroke="${K.green}" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/></svg>`);
+  ISO.cable = flat(w, 300, 140, 152, 160, 200, `<svg width="160" height="200" viewBox="0 0 160 200"><path class="c1" d="M10 75 C 50 10, 110 10, 150 75" fill="none" stroke="${KN.tokens.colors.teal}" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/><path class="c2" d="M150 125 C 110 190, 50 190, 10 125" fill="none" stroke="${K.green}" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/></svg>`);
   ISO.door = el(w, `<div class="door" style="width:110px;height:150px;transform:translate3d(325px,482px,0) rotateX(90deg)"></div>`);
   const chatBB = billboard(w, 190, 240, 170, `<div class="bbChat" style="position:relative;width:190px;height:200px"></div><div class="label">your app</div>`);
   const chat = makeChat(chatBB.querySelector('.bbChat'));
@@ -846,14 +846,14 @@ const KINDS = {
     an.style.left = '330px'; an.style.width = '1260px'; an.style.top = `${lerp(120, 40, u)}px`; an.style.opacity = u;
     if (!an.dataset.built) {
       an.innerHTML = `<div class="hdr">${esc(sc.answer[0])}</div>` + sc.answer.slice(1).map(a =>
-        `<div class="row"><div class="ck"><svg viewBox="0 0 26 26"><path d="M5 14 l5 6 l11 -14" fill="none" stroke="#16a34a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div>${esc(a)}</div></div>`).join('') + '<div style="height:24px"></div>';
+        `<div class="row"><div class="ck"><svg viewBox="0 0 26 26"><path d="M5 14 l5 6 l11 -14" fill="none" stroke="${KN.tokens.colors.navy}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div>${esc(a)}</div></div>`).join('') + '<div style="height:24px"></div>';
       an.dataset.built = '1';
     }
     an.querySelectorAll('.row').forEach((r, i) => {
       const p = clamp((L - (1.6 + i * 1.3)) / 0.35);
       const ck = r.querySelector('.ck');
-      ck.style.borderColor = p > 0 ? '#22c55e' : '#94a3b8';
-      ck.style.background = p > 0 ? 'rgba(34,197,94,.12)' : 'transparent';
+      ck.style.borderColor = p > 0 ? K.green : KN.tokens.colors.muted;
+      ck.style.background = p > 0 ? `rgba(${K.greenRgb}, ${0.3 + 0.7 * p})` : 'transparent'; // a navy tick on brand green
       ck.firstElementChild.style.opacity = p;
       ck.firstElementChild.style.transform = `scale(${back(p)})`;
       r.style.opacity = 0.45 + 0.55 * sstep(1.2 + i * 1.3, 1.6 + i * 1.3, L);

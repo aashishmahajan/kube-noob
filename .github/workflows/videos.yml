@@ -205,7 +205,7 @@ jobs:
         if: needs.transcript.result == 'success'
         with:
           name: transcript-for-videos  # kept with the release, for re-renders after the ci artifact expires
-          path: dist
+          path: transcript
       - name: Attach the videos to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -216,6 +216,10 @@ jobs:
         run: |
           set -euo pipefail
           if ! ls dist/*.mp4 > /dev/null 2>&1; then echo "::error title=videos::no video rendered"; exit 1; fi
+          # only a transcript the sidecar video was rendered from: a release asset wins on every later re-render
+          if [ -f dist/kube-noob-sidecar-4k.mp4 ] && [ -f transcript/sidecar-transcript-4.22.txt ]; then
+            cp transcript/sidecar-transcript-4.22.txt dist/
+          fi
           (cd dist && sha256sum -- * > SHA256SUMS-videos.txt)
           gh release upload "$TAG" dist/* --repo "$REPO" --clobber
           echo "::notice title=videos::attached $(ls dist | wc -l) files to ${TAG}"

@@ -48,6 +48,22 @@ def test_a_long_clause_is_cut_in_the_middle_and_no_cue_flashes_by() -> None:
     captions.check(cues + [captions.Cue(c.start + 30, c.end + 30, c.text) for c in short])
 
 
+def test_odd_lines_get_cues_or_a_clear_refusal() -> None:
+    # a clause after an over-long one joins its last half instead of standing alone
+    cues = captions.cues(
+        "kube-noob checks the YAML against 61 rules and returns findings with line numbers and fixes, too.", 0, 6
+    )
+    assert cues[-1].text.replace("\n", " ").endswith("and fixes, too.") and len(cues) == 2
+    # a word wider than a line is refused by check(), not a crash inside the wrapping
+    url = captions.cues("Read the guide at https://kube-noob.com/docs/sidecar/openshift-networking-policy now.", 0, 6)
+    with pytest.raises(ValueError, match="does not fit"):
+        captions.check(url)
+    # a span too short for every cue to be read is refused with the reason
+    with pytest.raises(ValueError, match=r"on screen for only"):
+        # one long cue and four short ones in 3 s: the long one would get a negative length
+        captions.check(captions.cues("This opening sentence is much longer than the rest. Yes. No. Ok. Go.", 0, 3.0))
+
+
 def test_bad_cues_are_refused() -> None:
     a, b = captions.cues("First sentence here.", 0, 2), captions.cues("Second sentence here.", 1, 2)
     with pytest.raises(ValueError, match="overlaps"):

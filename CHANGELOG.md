@@ -79,6 +79,17 @@
     - refuses a transcript of another version;
     - reads the facts from the tag's checkout when `pipeline_ref` is set.
   - The loudness normaliser keeps the whole true-peak headroom for the AAC encode.
+  - Second red-team pass:
+    - A word wider than a caption line is refused with the reason instead of crashing the wrapping.
+    - A short clause after a long one joins it, and a span too short to read is refused as such.
+    - Memory limits are read as Kubernetes quantities (0.5Gi, 1Ti).
+    - A critical finding shows as CRIT.
+    - Check marks and iso shapes use brand tokens.
+    - The release keeps a transcript only when the sidecar video rendered from it.
+    - Every ci run checks the fresh sidecar transcript with facts.py, including the version.
+- The KN-S022 fixture puts the cr8escape payload in the sysctl value, as the advisory describes; the API server
+  refused the old one (payload in the name) before admission, so the policy test on kind could not see the policy.
+  The policy test creates every namespace its fixtures name (ingress-nginx for the controller rules).
 
 ## 0.6.0 - 2026-10-29
 

@@ -163,8 +163,8 @@ def test_claudes_answer_quotes_the_example_and_the_audit(facts: vfacts.Facts) ->
     pods = dep["spec"]["template"]["metadata"]["labels"]["app"]
     assert f"selector is app: {svc['spec']['selector']['app']}, but the pods are app: {pods}" in answer
     severity = {
-        m.group(2): {"HIGH": "high", "MED": "medium"}[m.group(1)]
-        for m in (re.match(r"  (HIGH|MED) +(KN-[A-Z]+\d+)", ln) for ln in facts.recording("tool:audit"))
+        m.group(2): {"CRIT": "critical", "HIGH": "high", "MED": "medium"}[m.group(1)]
+        for m in (re.match(r"  (CRIT|HIGH|MED) +(KN-[A-Z]+\d+)", ln) for ln in facts.recording("tool:audit"))
         if m
     }
     claimed = re.findall(r"\(((?:KN-[A-Z]+\d+(?: and )?)+), (high|medium)\)", answer)
@@ -176,11 +176,45 @@ def test_claudes_answer_quotes_the_example_and_the_audit(facts: vfacts.Facts) ->
 def test_a_cut_recording_says_so_on_screen(facts: vfacts.Facts) -> None:
     import build_scenes
 
-    cut = r"… \d+ medium and low findings and every fix line left out here"
+    cut = r"… \d+ medium and low findings, and the fix, RHACS and red-team lines, left out"
     assert re.fullmatch(cut, facts.recording("cli:audit")[-1])
     steps = build_scenes.parse_transcript("# c\n$ cmd\n" + "\n".join(f"line {i}" for i in range(12)), 9)
     assert steps[0]["output"][9:] == ["… 3 more lines"]
     assert build_scenes.parse_transcript("# c\n$ cmd\nok", 9)[0]["output"] == ["ok"]
+    player = (VIDEO / "player.html").read_text(encoding="utf-8")
+    assert "(why:|… )" in player  # the walkthrough draws the marker dim, like a why: line
+    stage = (VIDEO / "stage" / "stage.html").read_text(encoding="utf-8")
+    assert "line.startsWith('… ')" in stage
+
+
+def test_memory_quantities_read_as_the_cgroup_does(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    manifest = (ROOT / vfacts.SIDECAR_MANIFEST).read_text(encoding="utf-8")
+    (tmp_path / "deploy" / "sidecar").mkdir(parents=True)
+    monkeypatch.setattr(vfacts, "PRODUCT", tmp_path)
+    for quantity, mib in (
+        ("256Mi", 256),
+        ("1Gi", 1024),
+        ("0.5Gi", 512),
+        ("268435456", 256),
+        ("512M", 488),
+        ("1Ti", 2**20),
+    ):
+        text = manifest.replace("limits: {memory: 256Mi}}", f"limits: {{memory: {quantity}}}}}")
+        (tmp_path / vfacts.SIDECAR_MANIFEST).write_text(text, encoding="utf-8")
+        assert vfacts._manifest_limit_mib() == mib, quantity
+    (tmp_path / vfacts.SIDECAR_MANIFEST).write_text(
+        manifest.replace(", limits: {memory: 256Mi}}", "}"), encoding="utf-8"
+    )
+    with pytest.raises(vfacts.FactError, match="is not a quantity"):
+        vfacts._manifest_limit_mib()
+
+
+def test_rhacs_claims_are_qualified() -> None:
+    # Only the findings of rules that map to an RHACS policy carry one (16 of the rules at 0.6.0)
+    for script in (ROOT / "demos" / "youtube-walkthrough.md", VIDEO / "stage" / "videos.json"):
+        for line in script.read_text(encoding="utf-8").splitlines():
+            if re.search(r"RHACS policy (it|that) would", line):
+                assert "where there is one" in line, (script.name, line)
 
 
 def test_the_text_to_video_prompts_say_what_the_rendered_videos_say() -> None:
