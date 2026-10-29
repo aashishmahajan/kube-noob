@@ -1,32 +1,40 @@
 // Render one animated video frame by frame:
-//   node capture.js <out-dir> [--scale 2] [--stills t1,t2,...] [--from s] [--to s]
+//   node capture.js <out-dir> [--scale 2] [--stills t1,t2,...] [--from s] [--to s] [--check]
 //
 // Reads <out-dir>/timeline.json and <out-dir>/audio.wav (written by voiceover.py), loads stage.html in Chromium,
 // calls renderAt(t) for every frame at the timeline's fps, screenshots it and pipes the frames to ffmpeg, which
 // muxes the audio (loudness-normalised to -16 LUFS) into <out-dir>/kube-noob-<video>.mp4.
 // The stage is laid out at 1920x1080 and rendered at --scale times that (default 2: 3840x2160, 4K UHD), encoded as
 // H.264 High (x264 preset slow, CRF 16, tuned for animation) with 320 kb/s AAC.
-// --stills writes PNG frames at the given times instead (for checking), --from/--to render a time range.
+// --stills writes PNG frames at the given times instead (for checking), --from/--to render a time range, and --check
+// renders every frame without encoding and fails if a frame breaks a brand layout rule (stage.html layoutIssues()).
 // Needs: Node with the `playwright` package and Chromium, ffmpeg on PATH.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { chromium } = require('playwright');
+const { applyBrand, verifyBrand } = require('../brand');
 
 function args(argv) {
-  const out = { dir: null, stills: null, from: 0, to: null, scale: 2 };
+  const out = { dir: null, stills: null, from: 0, to: null, scale: 2, check: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--stills') out.stills = argv[++i].split(',').map(Number);
     else if (a === '--from') out.from = Number(argv[++i]);
     else if (a === '--to') out.to = Number(argv[++i]);
     else if (a === '--scale') out.scale = Number(argv[++i]);
+    else if (a === '--check') out.check = true;
     else if (!out.dir) out.dir = path.resolve(a);
     else throw new Error(`unexpected argument ${a}`);
   }
   if (!out.dir) throw new Error('usage: node capture.js <out-dir> [--stills t1,t2] [--from s] [--to s]');
   return out;
+}
+
+function sceneAt(tl, t) {
+  const sc = tl.scenes.find(s => t >= s.start && t < s.start + s.dur) || tl.scenes[tl.scenes.length - 1];
+  return sc.kind;
 }
 
 async function main() {
@@ -42,13 +50,37 @@ async function main() {
     'base64');
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
+  await applyBrand(page); // fonts and colours from docs/brand, before the stage's own script runs
   await page.addInitScript(t => { window.__TIMELINE__ = t; }, tl);
   await page.goto('file://' + path.join(__dirname, 'stage.html'));
   await page.waitForFunction(() => window.stageReady === true, null, { timeout: 30000 });
+  await verifyBrand(page); // stops the render when a brand font did not load
   const shot = async t => {
     await page.evaluate(x => window.renderAt(x), t);
     if (errors.length) throw new Error(`stage error at t=${t}: ${errors[0]}`);
   };
+
+  if (a.check) {
+    const issues = new Map(); // issue -> [first, last] time
+    const frames = Math.round(tl.duration * tl.fps);
+    for (let f = 0; f < frames; f++) {
+      const t = f / tl.fps;
+      await shot(t);
+      for (const issue of await page.evaluate(() => window.layoutIssues())) {
+        const key = `${sceneAt(tl, t)}: ${issue.replace(/ \(\d+ px²\)/, '')}`;
+        const span = issues.get(key) || [t, t];
+        span[1] = t;
+        issues.set(key, span);
+      }
+    }
+    await browser.close();
+    if (issues.size) {
+      const lines = [...issues].map(([k, [a0, a1]]) => `  ${k} at ${a0.toFixed(2)}-${a1.toFixed(2)} s`);
+      throw new Error(`${tl.video}: ${issues.size} layout problem(s):\n${lines.join('\n')}`);
+    }
+    console.log(`${tl.video}: ${frames} frames, layout OK`);
+    return;
+  }
 
   if (a.stills) {
     for (const t of a.stills) {

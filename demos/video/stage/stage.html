@@ -10,12 +10,11 @@
 -->
 <style>
 :root {
-  --mono: "DejaVu Sans Mono", "JetBrains Mono", ui-monospace, monospace;
-  --sans: "Inter", "Inter Display", system-ui, sans-serif;
+  /* --sans, --mono and the --kn-* colours come from docs/brand via demos/video/brand.js */
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #050b17; }
-#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: var(--sans); color: #f3f7ff; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--kn-navy-night); }
+#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: var(--sans); color: var(--kn-ink); }
 .layer { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
 #world { transform-origin: 960px 540px; }
 
@@ -35,12 +34,12 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .rack { position: absolute; top: 170px; width: 190px; height: 660px; border-radius: 8px;
   background: linear-gradient(90deg, #0a1428, #10203e); border: 1px solid rgba(120,160,230,.14); }
 .rack::after { content: ""; position: absolute; inset: 18px; opacity: var(--led, .35); will-change: opacity;
-  background: radial-gradient(circle, rgba(74,222,128,.85) 0 2.5px, transparent 3.5px) 0 0 / 36px 28px; }
+  background: radial-gradient(circle, rgba(var(--kn-green-rgb), .85) 0 2.5px, transparent 3.5px) 0 0 / 36px 28px; }
 #rackL { left: 30px; transform: perspective(900px) rotateY(40deg); }
 #rackR { right: 30px; transform: perspective(900px) rotateY(-40deg); }
 #tint { background: radial-gradient(ellipse 1100px 700px at 50% 45%, rgba(239,68,68,.55), rgba(127,29,29,.25) 60%, transparent 100%); mix-blend-mode: screen; }
 #vignette { background: radial-gradient(ellipse 1250px 760px at 50% 50%, transparent 55%, rgba(0,0,0,.6) 100%); pointer-events: none; }
-#black { background: #000; }
+#black { background: #000; z-index: 40; }
 
 /* cubes */
 #cubes { perspective: 1400px; perspective-origin: 960px 470px; }
@@ -66,18 +65,19 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .term .bars i { display: block; height: 13px; border-radius: 7px; margin: 0 0 22px; background: rgba(var(--tc), .62);
   box-shadow: 0 0 14px rgba(var(--tc), .35); }
 .cur { display: inline-block; width: .6em; height: 1.05em; vertical-align: -.17em; background: rgb(var(--tc)); margin-left: 2px; }
-.tp { color: #4ade80; } .tc { color: #f1f6ff; } .th { color: #f87171; font-weight: 700; } .tm { color: #fbbf24; }
-.tk { color: #7f93b3; } .tn { color: #fde68a; } .tb { color: #4ade80; } .tg { color: #86efac; } .tr { color: #fca5a5; }
+.tp { color: var(--kn-green); } .tc { color: var(--kn-ink); } .th { color: var(--kn-danger); font-weight: 700; } .tm { color: var(--kn-warning); }
+.tk { color: var(--kn-muted); } .tn { color: var(--kn-warning); } .tb { color: var(--kn-green); } .tg { color: var(--kn-green-soft); } .tr { color: var(--kn-danger-soft); }
 
 /* caption */
-#caption { position: absolute; left: 0; width: 1920px; text-align: center; color: #f7faff; font-weight: 650;
+/* stacking: terminal 10 < caption 20 < end card 30 < black fade 40, so no window ever covers a caption */
+#caption { position: absolute; z-index: 20; left: 0; width: 1920px; text-align: center; color: var(--kn-ink); font-weight: 650;
   letter-spacing: -0.012em; text-shadow: 0 2px 6px rgba(0,0,0,.55), 0 0 34px rgba(0,0,0,.6); }
 #caption.center { top: 600px; font-size: 66px; line-height: 1.12; transform: translateY(-50%); }
 #caption.top { top: 54px; font-size: 54px; }
 #caption.lower { bottom: 44px; font-size: 40px; }
 #caption.lower span { display: inline-block; padding: 14px 34px; border-radius: 18px; background: rgba(5,12,26,.78);
   border: 1px solid rgba(255,255,255,.09); text-shadow: none; }
-#caption.mono span { font: 500 34px var(--mono); color: #d1fae5; }
+#caption.mono span { font: 500 34px var(--mono); color: var(--kn-green-soft); }
 
 /* chat icon, beam, rocket */
 .chat, .rk, .clipb { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -95,19 +95,19 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .pod .bottom { background: rgba(8,40,60,.55); }
 .ctr-app .face { background: rgba(26,56,112,.94); border: 2px solid rgba(125,211,252,.85); }
 .ctr-app .top { background: rgba(48,92,170,.96); }
-.ctr-kn .face { background: rgba(14,62,54,.94); border: 2px solid rgba(74,222,128,.9); }
+.ctr-kn .face { background: rgba(14,62,54,.94); border: 2px solid rgba(var(--kn-green-rgb), .9); }
 .ctr-kn .top { background: rgba(24,104,86,.96); }
 .shield .face { background: rgba(94,234,212,.035); border: 2px dashed rgba(94,234,212,.32); }
 .shield .top, .shield .bottom { display: none; }
 .mini .face { background: rgba(248,113,113,.38); border: 1.5px solid rgba(254,202,202,.85); }
-.door { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #0b1a33; border: 3px solid #fbbf24; border-radius: 6px 6px 0 0; }
+.door { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #0b1a33; border: 3px solid var(--kn-warning); border-radius: 6px 6px 0 0; }
 .isoFloor { position: absolute; left: 0; top: 0; width: 5200px; height: 5200px; transform-origin: 0 0;
   background-image: linear-gradient(rgba(94,234,212,.12) 2px, transparent 2px), linear-gradient(90deg, rgba(94,234,212,.12) 2px, transparent 2px);
   background-size: 160px 160px; -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0%, rgba(0,0,0,.6) 30%, transparent 62%); }
 .bbIn { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); text-align: center; white-space: nowrap; }
-.label { font: 600 30px var(--sans); color: #e6f3ff; padding: 8px 18px; border-radius: 12px; background: rgba(5,12,26,.7);
+.label { font: 600 30px var(--sans); color: var(--kn-ink); padding: 8px 18px; border-radius: 12px; background: rgba(5,12,26,.94);
   border: 1px solid rgba(255,255,255,.12); display: inline-block; }
-.label.mono { font: 500 26px var(--mono); color: #bbf7d0; }
+.label.mono { font: 500 26px var(--mono); color: var(--kn-green-soft); }
 .flash { width: 220px; height: 220px; border-radius: 50%; background: radial-gradient(circle, rgba(240,253,250,.95), rgba(94,234,212,.5) 35%, transparent 70%); }
 
 /* desk (mcp) */
@@ -133,8 +133,8 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .speech .row { display: flex; align-items: center; gap: 22px; padding: 14px 44px; font: 500 28px/1.3 var(--sans); }
 .speech .ck { width: 42px; height: 42px; border-radius: 50%; border: 3px solid #94a3b8; flex: none; display: grid; place-items: center; }
 .speech .ck svg { width: 26px; height: 26px; }
-.chip { position: absolute; left: 0; top: 0; font: 600 24px var(--mono); color: #052e16; background: #4ade80; padding: 6px 14px; border-radius: 10px;
-  box-shadow: 0 0 22px rgba(74,222,128,.6); transform: translate(-50%, -50%); }
+.chip { position: absolute; left: 0; top: 0; font: 600 24px var(--mono); color: #052e16; background: var(--kn-green); padding: 6px 14px; border-radius: 10px;
+  box-shadow: 0 0 22px rgba(var(--kn-green-rgb), .6); transform: translate(-50%, -50%); }
 .book { position: absolute; left: 0; top: 0; width: 300px; height: 190px; perspective: 900px; transform-origin: 50% 50%; }
 .book .pg { position: absolute; top: 0; width: 150px; height: 190px; background: linear-gradient(90deg, #e9eef6, #ffffff); border: 1px solid #94a3b8; }
 .book .pg.l { left: 0; border-radius: 8px 0 0 8px; } .book .pg.r { left: 150px; border-radius: 0 8px 8px 0; }
@@ -142,21 +142,21 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 .book .pg i { position: absolute; left: 18px; right: 18px; height: 6px; border-radius: 3px; background: #b6c2d6; }
 .book .cover { position: absolute; left: -8px; top: -8px; width: 316px; height: 206px; border-radius: 12px; background: #1d4ed8; }
 .globe { position: absolute; left: 0; top: 0; }
-.pill { position: absolute; left: 0; top: 0; font: 600 24px var(--sans); color: #052e16; background: #4ade80; padding: 6px 16px; border-radius: 999px; }
+.pill { position: absolute; left: 0; top: 0; font: 600 24px var(--sans); color: #052e16; background: var(--kn-green); padding: 6px 16px; border-radius: 999px; }
 
 /* end card */
-#endcard { background: radial-gradient(ellipse 1300px 800px at 40% 40%, #133463 0%, #0b1d3b 55%, #07122a 100%); }
+#endcard { z-index: 30; background: radial-gradient(ellipse 1300px 800px at 40% 40%, var(--kn-navy) 0%, var(--kn-navy-deep) 55%, var(--kn-navy-night) 100%); }
 #endcard .wrap { position: absolute; left: 300px; top: 230px; display: flex; gap: 64px; align-items: center; }
 #endcard img { width: 250px; height: 250px; border-radius: 56px; box-shadow: 0 0 80px rgba(67,233,123,.25); }
-#endcard .wm { font: 800 170px/0.95 "Inter Display", var(--sans); letter-spacing: -0.035em;
-  background: linear-gradient(90deg, #43e97b, #22b8cf 55%, #2f6fed); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: 12px; }
-#endcard .tag { font: 700 50px var(--sans); color: #f3f7ff; margin-top: 14px; letter-spacing: -0.01em; }
-#endcard .plat { font: 500 30px var(--sans); color: #c7d6ec; margin-top: 22px; }
-#endcard .surf { font: 600 27px var(--sans); color: #4ade80; margin-top: 12px; }
-#endcard .cta { display: inline-block; font: 500 32px var(--mono); color: #d1fae5; margin-top: 34px; padding: 12px 24px; border-radius: 14px;
-  background: rgba(2,10,22,.6); border: 1px solid rgba(74,222,128,.4); }
-#endcard .url { font: 600 32px var(--sans); color: #93c5fd; margin-top: 22px; }
-#endcard .credit { position: absolute; left: 0; width: 1920px; bottom: 34px; text-align: center; font: 500 20px var(--sans); color: #7f93b3; }
+#endcard .wm { font: 800 170px/0.95 var(--sans); letter-spacing: -0.035em;
+  background: linear-gradient(90deg, var(--kn-green), var(--kn-teal) 55%, var(--kn-blue)); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: 12px; }
+#endcard .tag { font: 700 50px var(--sans); color: var(--kn-ink); margin-top: 14px; letter-spacing: -0.01em; }
+#endcard .plat { font: 500 30px var(--sans); color: var(--kn-ink-soft); margin-top: 22px; }
+#endcard .surf { font: 600 27px var(--sans); color: var(--kn-green); margin-top: 12px; }
+#endcard .cta { display: inline-block; font: 500 32px var(--mono); color: var(--kn-green-soft); margin-top: 34px; padding: 12px 24px; border-radius: 14px;
+  background: rgba(2,10,22,.6); border: 1px solid rgba(var(--kn-green-rgb), .4); }
+#endcard .url { font: 600 32px var(--sans); color: var(--kn-sky); margin-top: 22px; }
+#endcard .credit { position: absolute; left: 0; width: 1920px; bottom: 34px; text-align: center; font: 500 20px var(--sans); color: var(--kn-muted); }
 </style>
 </head>
 <body>
@@ -175,7 +175,7 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
   <div id="vignette" class="layer"></div>
   <div id="caption"></div>
   <div id="endcard" class="layer">
-    <div class="wrap"><img src="../../../docs/brand/kube-noob-icon.svg" alt="">
+    <div class="wrap"><img alt="">
       <div><div class="wm">kube-noob</div><div class="tag"></div><div class="plat"></div><div class="surf"></div>
         <div class="cta"></div><div class="url"></div></div></div>
     <div class="credit"></div>
@@ -183,6 +183,12 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
   <div id="black" class="layer"></div>
 </div>
 <script>
+// The brand (docs/brand/tokens.json), provided by demos/video/brand.js before this script runs. Without it the stage
+// refuses to start, so nothing is ever rendered off-brand.
+const KN = window.__KN_BRAND__;
+if (!KN) throw new Error('kube-noob brand missing: render this page through demos/video/stage/capture.js');
+const K = { green: KN.tokens.colors.green, greenRgb: KN.rgb.green, blue: KN.tokens.colors.blue };
+
 "use strict";
 const TL = window.__TIMELINE__;
 const D = document;
@@ -213,19 +219,19 @@ function makeRocket(parent, name) {
   const e = el(parent, `<div class="rk"><svg width="240" height="460" viewBox="0 0 240 460">
   <defs>
    <linearGradient id="${id}b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#a9cdfa"/></linearGradient>
-   <linearGradient id="${id}f" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#43e97b"/><stop offset="1" stop-color="#16a3a3"/></linearGradient>
+   <linearGradient id="${id}f" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${K.green}"/><stop offset="1" stop-color="#16a3a3"/></linearGradient>
    <linearGradient id="${id}l" x1=".5" y1="0" x2=".5" y2="1"><stop offset="0" stop-color="#ffe45c"/><stop offset=".55" stop-color="#ff9f1c"/><stop offset="1" stop-color="#ff4d2e" stop-opacity="0"/></linearGradient>
    <radialGradient id="${id}v" cx=".4" cy=".35" r=".75"><stop offset="0" stop-color="#21507e"/><stop offset="1" stop-color="#0a1a2c"/></radialGradient>
   </defs>
   <g class="flame"><path d="M120 318 C86 362 92 410 120 456 C148 410 154 362 120 318 Z" fill="url(#${id}l)"/><path d="M120 332 C106 362 108 392 120 418 C132 392 134 362 120 332 Z" fill="#fff3b0"/></g>
-  <path d="M60 266 L14 328 L14 348 L70 316 Z" fill="url(#${id}f)"/><path d="M180 266 L226 328 L226 348 L170 316 Z" fill="url(#${id}f)"/>
+  <path class="hull" d="M60 266 L14 328 L14 348 L70 316 Z" fill="url(#${id}f)"/><path class="hull" d="M180 266 L226 328 L226 348 L170 316 Z" fill="url(#${id}f)"/>
   <g class="armL"><path class="a1" fill="none" stroke="#9fbbe0" stroke-width="22" stroke-linecap="round"/><path class="a2" fill="none" stroke="#f4f8ff" stroke-width="15" stroke-linecap="round"/><circle class="h" r="14" fill="#f4f8ff" stroke="#9fbbe0" stroke-width="3"/></g>
-  <path d="M120 40 C180 88 194 172 186 276 C184 306 170 328 120 328 C70 328 56 306 54 276 C46 172 60 88 120 40 Z" fill="url(#${id}b)" stroke="#8fb3e3" stroke-width="2"/>
-  <path d="M120 40 C150 64 168 92 176 122 L64 122 C72 92 90 64 120 40 Z" fill="#2f6fed"/>
-  <circle cx="120" cy="198" r="54" fill="#0e2a47"/><circle cx="120" cy="198" r="46" fill="url(#${id}v)"/>
+  <path class="hull" d="M120 40 C180 88 194 172 186 276 C184 306 170 328 120 328 C70 328 56 306 54 276 C46 172 60 88 120 40 Z" fill="url(#${id}b)" stroke="#8fb3e3" stroke-width="2"/>
+  <path d="M120 40 C150 64 168 92 176 122 L64 122 C72 92 90 64 120 40 Z" fill="${K.blue}"/>
+  <circle cx="120" cy="198" r="54" fill="${KN.tokens.colors.navy}"/><circle cx="120" cy="198" r="46" fill="url(#${id}v)"/>
   <g class="eyes"><circle cx="103" cy="190" r="8" fill="#fff"/><circle cx="137" cy="190" r="8" fill="#fff"/></g>
-  <path d="M100 213 Q120 231 140 213" fill="none" stroke="#43e97b" stroke-width="6.5" stroke-linecap="round"/>
-  <path d="M90 172 Q103 158 120 158" fill="none" stroke="#9ccbff" stroke-width="5" stroke-linecap="round" opacity=".7"/>
+  <path d="M100 213 Q120 231 140 213" fill="none" stroke="${K.green}" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M90 172 Q103 158 120 158" fill="none" stroke="${KN.tokens.colors.sky}" stroke-width="5" stroke-linecap="round" opacity=".7"/>
   <g class="clip" display="none"><rect x="0" y="0" width="96" height="124" rx="12" fill="#e2eaf6" stroke="#8ea6c8" stroke-width="3"/>
    <rect x="30" y="-8" width="36" height="16" rx="5" fill="#64748b"/>
    ${[0, 1, 2].map(i => `<rect x="12" y="${24 + i * 32}" width="22" height="22" rx="5" fill="#fff" stroke="#22c55e" stroke-width="3"/>
@@ -235,7 +241,7 @@ function makeRocket(parent, name) {
    <rect class="thumb" x="-7" y="-36" width="14" height="28" rx="7" fill="#f4f8ff" stroke="#9fbbe0" stroke-width="3" display="none"/></g>
   </svg></div>`);
   const q = s => e.querySelector(s);
-  const r = { e, flame: q('.flame'), eyes: q('.eyes'), clip: q('.clip'), thumb: q('.thumb'),
+  const r = { e, hull: [...e.querySelectorAll('.hull')], flying: false, flame: q('.flame'), eyes: q('.eyes'), clip: q('.clip'), thumb: q('.thumb'),
     L: { a1: q('.armL .a1'), a2: q('.armL .a2'), h: q('.armL .h') }, R: { a1: q('.armR .a1'), a2: q('.armR .a2'), h: q('.armR .h') },
     cks: [0, 1, 2].map(i => q('.ck' + i)) };
   if (name) reg(name, e);
@@ -247,9 +253,11 @@ function arm(a, sx, sy, hx, hy, out) {
   const d = `M${sx} ${sy} Q${cx} ${cy} ${hx} ${hy}`;
   a.a1.setAttribute('d', d); a.a2.setAttribute('d', d); a.h.setAttribute('cx', hx); a.h.setAttribute('cy', hy);
 }
-// o: {x, y, rot, sc, t (global time), right: [hx,hy], left: [hx,hy], clip: 0..1, checks: 0..3, thumb: bool, flame}
+// o: {x, y, rot, sc, t (global time), right: [hx,hy], left: [hx,hy], clip: 0..1, checks: 0..3, thumb: bool, flame,
+//     flying: true while it flies past things (the brand rule "never behind or across a window" is for where it rests)}
 function drawRocket(r, o) {
   const sc = o.sc ?? 1;
+  r.flying = Boolean(o.flying);
   r.e.style.display = '';
   r.e.style.transform = `translate(${o.x - 120}px, ${o.y - 200}px) rotate(${o.rot || 0}deg) scale(${sc})`;
   r.e.style.transformOrigin = '120px 200px';
@@ -313,7 +321,7 @@ function tokens(line) {
 }
 function lineLen(line) { return tokens(line).reduce((n, [, s]) => n + s.length, 0); }
 function makeTerm(parent, name, opts) {
-  const e = el(parent, `<div class="term"><div class="hd"><i style="background:#f87171"></i><i style="background:#fbbf24"></i><i style="background:#4ade80"></i>
+  const e = el(parent, `<div class="term"><div class="hd"><i style="background:var(--kn-danger)"></i><i style="background:var(--kn-warning)"></i><i style="background:${K.green}"></i>
      <span class="t"></span><div class="r"><b></b><b></b><b></b><span style="color:rgba(255,255,255,.45);font:400 20px var(--sans);margin-left:6px">×</span></div></div>
      <div class="bd"><div class="sc"></div></div></div>`);
   reg(name, e);
@@ -445,7 +453,7 @@ const FX = $('fx');
 function fxReset() { while (FX.firstChild) FX.removeChild(FX.firstChild); }
 function defsOnce() {
   const d = svgEl(FX, 'defs', {});
-  d.innerHTML = `<linearGradient id="trail" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#4ade80"/></linearGradient>
+  d.innerHTML = `<linearGradient id="trail" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="${K.green}"/></linearGradient>
    <linearGradient id="beamG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="rgba(220,240,255,.85)"/><stop offset="1" stop-color="rgba(220,240,255,0)"/></linearGradient>
    <linearGradient id="beamR" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="rgba(220,240,255,.85)"/><stop offset="1" stop-color="rgba(220,240,255,0)"/></linearGradient>`;
 }
@@ -498,7 +506,7 @@ function buildIso() {
   ISO.pod = box(w, 0, 0, 0, POD.w, POD.d, POD.h, 'pod');
   ISO.app = box(w, 70, 120, 0, 240, 240, 150, 'ctr-app');
   ISO.kn = box(w, 450, 120, 0, 240, 240, 150, 'ctr-kn');
-  ISO.cable = flat(w, 300, 140, 152, 160, 200, `<svg width="160" height="200" viewBox="0 0 160 200"><path class="c1" d="M10 75 C 50 10, 110 10, 150 75" fill="none" stroke="#5eead4" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/><path class="c2" d="M150 125 C 110 190, 50 190, 10 125" fill="none" stroke="#4ade80" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/></svg>`);
+  ISO.cable = flat(w, 300, 140, 152, 160, 200, `<svg width="160" height="200" viewBox="0 0 160 200"><path class="c1" d="M10 75 C 50 10, 110 10, 150 75" fill="none" stroke="#5eead4" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/><path class="c2" d="M150 125 C 110 190, 50 190, 10 125" fill="none" stroke="${K.green}" stroke-width="10" stroke-linecap="round" stroke-dasharray="18 16"/></svg>`);
   ISO.door = el(w, `<div class="door" style="width:110px;height:150px;transform:translate3d(325px,482px,0) rotateX(90deg)"></div>`);
   const chatBB = billboard(w, 190, 240, 170, `<div class="bbChat" style="position:relative;width:190px;height:200px"></div><div class="label">your app</div>`);
   const chat = makeChat(chatBB.querySelector('.bbChat'));
@@ -508,25 +516,25 @@ function buildIso() {
   ISO.loopLabel = billboard(w, 380, 420, 165, `<div class="label mono">127.0.0.1:8080</div>`);
   ISO.minis = MINIS.map(m => ({ ...m, b: box(w, 0, 0, 0, 46, 46, 46, 'mini'),
     f: billboard(w, m.i[0], m.i[1], 120, `<div class="flash"></div>`) }));
-  ISO.lock = billboard(w, 380, 520, 200, `<svg width="90" height="110" viewBox="0 0 90 110"><path d="M22 50 V34 A23 23 0 0 1 68 34 V50" fill="none" stroke="#fbbf24" stroke-width="10"/><rect x="8" y="48" width="74" height="58" rx="12" fill="#fbbf24"/><circle cx="45" cy="74" r="8" fill="#7c2d12"/><rect x="41" y="76" width="8" height="16" rx="3" fill="#7c2d12"/></svg>`);
+  ISO.lock = billboard(w, 380, 520, 200, `<svg width="90" height="110" viewBox="0 0 90 110"><path d="M22 50 V34 A23 23 0 0 1 68 34 V50" fill="none" stroke="${KN.tokens.colors.warning}" stroke-width="10"/><rect x="8" y="48" width="74" height="58" rx="12" fill="${KN.tokens.colors.warning}"/><circle cx="45" cy="74" r="8" fill="#7c2d12"/><rect x="41" y="76" width="8" height="16" rx="3" fill="#7c2d12"/></svg>`);
   ISO.arrows = flat(w, -300, 480, 2, 1700, 1100, `<svg width="1700" height="1100" viewBox="0 0 1700 1100">
-     <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4ade80"/></marker></defs>
-     <path class="ok" d="M680 30 L680 760" stroke="#4ade80" stroke-width="16" fill="none" stroke-linecap="round"/>
-     <path class="no1" d="M720 30 L1450 700" stroke="#f87171" stroke-width="16" fill="none" stroke-linecap="round"/>
-     <path class="no2" d="M640 30 L80 700" stroke="#f87171" stroke-width="16" fill="none" stroke-linecap="round"/></svg>`);
-  ISO.dnsLabel = billboard(w, 380, 1290, 30, `<div class="label mono" style="color:#bbf7d0">DNS :53 only</div>`);
-  ISO.noLabels = [billboard(w, 748, 812, 20, `<div class="label" style="color:#fecaca">✕ internet</div>`),
-                  billboard(w, 88, 812, 20, `<div class="label" style="color:#fecaca">✕ cluster services</div>`)];
+     <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="${K.green}"/></marker></defs>
+     <path class="ok" d="M680 30 L680 760" stroke="${K.green}" stroke-width="16" fill="none" stroke-linecap="round"/>
+     <path class="no1" d="M720 30 L1450 700" stroke="${KN.tokens.colors.danger}" stroke-width="16" fill="none" stroke-linecap="round"/>
+     <path class="no2" d="M640 30 L80 700" stroke="${KN.tokens.colors.danger}" stroke-width="16" fill="none" stroke-linecap="round"/></svg>`);
+  ISO.dnsLabel = billboard(w, 380, 960, 60, `<div class="label mono">DNS :53 only</div>`); // on its line, raised so the line passes under it
+  ISO.noLabels = [billboard(w, 748, 812, 60, `<div class="label" style="color:var(--kn-danger-soft)">✕ internet</div>`),
+                  billboard(w, 88, 812, 60, `<div class="label" style="color:var(--kn-danger-soft)">✕ cluster services</div>`)];
   ISO.gauge = billboard(w, 880, 120, 250, `<svg width="420" height="310" viewBox="0 0 420 310">
-     <rect x="0" y="0" width="420" height="310" rx="26" fill="rgba(5,12,26,.86)" stroke="rgba(74,222,128,.5)" stroke-width="2"/>
+     <rect x="0" y="0" width="420" height="310" rx="26" fill="rgba(5,12,26,.86)" stroke="rgba(${K.greenRgb},.5)" stroke-width="2"/>
      <path d="M80 190 A130 130 0 0 1 340 190" fill="none" stroke="#1e3a5f" stroke-width="24" stroke-linecap="round"/>
-     <path class="arc" d="M80 190 A130 130 0 0 1 340 190" fill="none" stroke="#4ade80" stroke-width="24" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+     <path class="arc" d="M80 190 A130 130 0 0 1 340 190" fill="none" stroke="${K.green}" stroke-width="24" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
      <line class="ndl" x1="210" y1="190" x2="210" y2="96" stroke="#f8fafc" stroke-width="7" stroke-linecap="round"/>
      <circle cx="210" cy="190" r="12" fill="#f8fafc"/>
-     <text x="80" y="226" fill="#8ea3c2" font-family="Inter" font-size="20" text-anchor="middle">0</text>
-     <text x="340" y="226" fill="#8ea3c2" font-family="Inter" font-size="20" text-anchor="middle">256 MiB</text>
-     <text class="val" x="210" y="262" fill="#f8fafc" font-family="Inter" font-weight="800" font-size="44" text-anchor="middle">0 MiB</text>
-     <text x="210" y="292" fill="#bbf7d0" font-family="Inter" font-weight="600" font-size="21" text-anchor="middle">peak memory, limit 256 MiB</text></svg>`);
+     <text x="80" y="226" fill="#8ea3c2" style="font-family: var(--sans)" font-size="20" text-anchor="middle">0</text>
+     <text x="340" y="226" fill="#8ea3c2" style="font-family: var(--sans)" font-size="20" text-anchor="middle">256 MiB</text>
+     <text class="val" x="210" y="262" fill="#f8fafc" style="font-family: var(--sans)" font-weight="800" font-size="44" text-anchor="middle">0 MiB</text>
+     <text x="210" y="292" fill="${KN.tokens.colors.greenSoft}" style="font-family: var(--sans)" font-weight="600" font-size="21" text-anchor="middle">peak memory, limit 256 MiB</text></svg>`);
   reg('iso', iso);
 }
 const ISO_FOCUS = [380, 240];
@@ -551,7 +559,7 @@ function buildDesk() {
   const lap = el(props, `<div class="laptop"><div class="scr"><div class="in"></div></div><div class="base"></div><div class="pad"></div></div>`);
   const r = rng(21);
   const inn = lap.querySelector('.in');
-  const cols = ['#60a5fa', '#4ade80', '#f472b6', '#fbbf24', '#a78bfa', '#94a3b8'];
+  const cols = ['#60a5fa', K.green, '#f472b6', KN.tokens.colors.warning, '#a78bfa', '#94a3b8'];
   for (let i = 0; i < 13; i++) {
     const indent = (i % 4) * 22;
     el(inn, `<i style="left:${24 + indent}px;top:${26 + i * 27}px;width:${80 + r() * 260}px;background:${cols[Math.floor(r() * cols.length)]};opacity:.75"></i>`);
@@ -582,7 +590,7 @@ function book(T, o) {
     p.style.transform = `rotateY(${ang}deg)`;
     p.style.zIndex = ang < -90 ? 1 : 3;
   });
-  b.style.boxShadow = o.glow ? `0 0 ${40 * o.glow}px rgba(74,222,128,${0.6 * o.glow})` : 'none';
+  b.style.boxShadow = o.glow ? `0 0 ${40 * o.glow}px rgba(${K.greenRgb},${0.6 * o.glow})` : 'none';
 }
 
 /* ------------------------------------------------------------------ captions, end card */
@@ -618,7 +626,9 @@ function endcard(L, dur) {
 
 /* ------------------------------------------------------------------ scenes */
 const TERM_A = { x: 440, y: 200, w: 1040, h: 560 };
-const GREEN = { tc: '74,222,128', tx: '214,245,226' }, REDT = { tc: '248,113,113', tx: '254,226,226' };
+// Where the rocket rests beside TERM_A: its hull (fins at +-106 px) stays clear of the terminal's right edge (1480).
+const ROCKET_REST = [1640, 560];
+const GREEN = { tc: K.greenRgb, tx: '214,245,226' }, REDT = { tc: '248,113,113', tx: '254,226,226' };
 let TERM, ROCKET;
 const ORB = { cx: 960, cy: 480, rx: 560, ry: 250 };
 const orb = th => [ORB.cx + ORB.rx * Math.cos(th), ORB.cy + ORB.ry * Math.sin(th)];
@@ -654,7 +664,7 @@ const KINDS = {
     const th0 = 135 * deg, th1 = 372 * deg;
     const start = [-180, 1180], entry = orb(th0);
     const tA = [0.05, 0.55], tB = [0.55, 2.25], tC = [2.25, 2.85];
-    const rest = [1500, 560];
+    const rest = ROCKET_REST;
     let p, rot = 0;
     const pts = [];
     if (L < tA[1]) {
@@ -684,7 +694,7 @@ const KINDS = {
       svgEl(FX, 'path', { d, fill: 'none', stroke: 'url(#trail)', 'stroke-width': 13, 'stroke-linecap': 'round', opacity: 0.95 * fade });
     }
     const settle = L > tC[1] ? Math.sin((L - tC[1]) * 2.2) * 6 : 0;
-    drawRocket(ROCKET, { x: p[0], y: p[1] + settle, rot, sc: 1, t: T, flame: L < tC[1] ? 1.25 : 0.9 });
+    drawRocket(ROCKET, { x: p[0], y: p[1] + settle, rot, sc: 1, t: T, flame: L < tC[1] ? 1.25 : 0.9, flying: L < tC[1] });
   },
   split(L, dur, sc, T) {
     room(T, { color: TEAL.join(',') });
@@ -694,10 +704,10 @@ const KINDS = {
     const lift = Math.sin(T * 1.6) * 7;
     const clip = easeOut(clamp(L / 0.6));
     const R = [lerp(HANDS.restR[0], HANDS.clipR[0], clip), lerp(HANDS.restR[1], HANDS.clipR[1], clip)];
-    drawRocket(ROCKET, { x: 1500, y: 560 + lift, t: T, right: R, clip, checks: clamp((L - 0.9) / 0.55, 0, 3), flame: 0.9 });
+    drawRocket(ROCKET, { x: ROCKET_REST[0], y: ROCKET_REST[1] + lift, t: T, right: R, clip, checks: clamp((L - 0.9) / 0.55, 0, 3), flame: 0.9 });
     // beam: from the clipboard (narrow) back to the chat bubble (wide)
     const a = sstep(0.5, 1.2, L) * (0.75 + 0.25 * Math.sin(T * 3));
-    const x1 = 1500 - 120 + R[0] - 14 + 10, y1 = 560 + lift - 200 + R[1] - 40;
+    const x1 = ROCKET_REST[0] - 120 + R[0] - 14 + 10, y1 = ROCKET_REST[1] + lift - 200 + R[1] - 40;
     const x2 = 120 + 225, y2 = 420 + 78;
     svgEl(FX, 'polygon', { points: `${x1},${y1 - 30} ${x1},${y1 + 30} ${x2},${y2 + 110} ${x2},${y2 - 110}`, fill: 'url(#beamR)', opacity: 0.85 * a });
   },
@@ -709,7 +719,7 @@ const KINDS = {
     drawTerm(TERM, { ...box, ...GREEN, lines: sc.term, sched: sc._s, local: L, fs: 27, title: 'you@laptop: ~' });
     const th = easeOut(clamp((L - 0.4) / 0.6));
     const R = [lerp(HANDS.restR[0], HANDS.thumbR[0], th), lerp(HANDS.restR[1], HANDS.thumbR[1], th)];
-    drawRocket(ROCKET, { x: lerp(1500, 1745, u), y: lerp(560, 760, u) + Math.sin(T * 1.6) * 6, sc: lerp(1, 0.7, u), t: T, right: R, thumb: th > 0.6, flame: 0.8 });
+    drawRocket(ROCKET, { x: lerp(ROCKET_REST[0], 1745, u), y: lerp(ROCKET_REST[1], 760, u) + Math.sin(T * 1.6) * 6, sc: lerp(1, 0.7, u), t: T, right: R, thumb: th > 0.6, flame: 0.8 });
   },
 
   pod(L, dur, sc, T) {
@@ -892,12 +902,13 @@ function renderAt(t) {
 }
 async function init() {
   const e = $('endcard');
-  e.querySelector('.tag').textContent = TL.end.tagline;
-  e.querySelector('.plat').textContent = TL.end.platforms;
-  e.querySelector('.surf').textContent = TL.end.surfaces;
+  e.querySelector('img').src = KN.icon;
+  e.querySelector('.tag').textContent = KN.tokens.tagline;
+  e.querySelector('.plat').textContent = KN.tokens.platforms;
+  e.querySelector('.surf').textContent = KN.tokens.surfaces;
   e.querySelector('.cta').textContent = TL.cta;
-  e.querySelector('.url').textContent = TL.end.url;
-  e.querySelector('.credit').textContent = TL.end.credit;
+  e.querySelector('.url').textContent = KN.tokens.url;
+  e.querySelector('.credit').textContent = TL.credit;
   buildCubes();
   makeChat($('props'), 'chat');
   ROCKET = makeRocket($('front'), 'rocket');
@@ -915,6 +926,53 @@ async function init() {
   window.stageReady = true;
 }
 window.renderAt = renderAt;
+// The brand rule for the mascot, checked on the frame just rendered (capture.js --check runs it on every frame):
+// a resting rocket may not overlap a visible terminal or caption.
+function visible(e) {
+  if (!e || e.style.display === 'none') return false;
+  for (let n = e; n && n !== D.body; n = n.parentElement) {
+    const cs = getComputedStyle(n);
+    if (cs.display === 'none' || Number(cs.opacity) < 0.05) return false;
+  }
+  return true;
+}
+function overlap(a, b) {
+  const w = Math.min(a.right, b.right) - Math.max(a.left, b.left), h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  return w > 0 && h > 0 ? Math.round(w * h) : 0;
+}
+window.layoutIssues = () => [...rocketIssues(), ...captionCovered()];
+function rocketIssues() {
+  if (!ROCKET || ROCKET.flying || !visible(ROCKET.e)) return [];
+  const rs = ROCKET.hull.map(h => h.getBoundingClientRect());
+  const box = { left: Math.min(...rs.map(r => r.left)), top: Math.min(...rs.map(r => r.top)),
+    right: Math.max(...rs.map(r => r.right)), bottom: Math.max(...rs.map(r => r.bottom)) };
+  const out = [];
+  if (TERM && visible(TERM.e)) {
+    const a = overlap(box, TERM.e.getBoundingClientRect());
+    if (a > 0) out.push(`rocket overlaps the terminal (${a} px²)`);
+  }
+  if (visible($('caption'))) { // the caption box spans the frame: compare with its text only
+    const a = overlap(box, textBox($('caption')));
+    if (a > 0) out.push(`rocket overlaps the caption (${a} px²)`);
+  }
+  return out;
+}
+// A caption is never drawn underneath another element (a terminal, a speech bubble).
+function captionCovered() {
+  const c = $('caption');
+  if (!visible(c)) return [];
+  const r = textBox(c);
+  // the first visible thing at the caption's centre, ignoring full-frame layers (the fade to black, the vignette)
+  const stack = D.elementsFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  const top = stack.find(e => e === c || c.contains(e)
+    || (!(e.classList && e.classList.contains('layer')) && e.id !== 'stage' && e !== D.body && e !== D.documentElement
+        && visible(e)));
+  return top && top !== c && !c.contains(top) ? [`caption is covered by ${top.className || top.tagName}`] : [];
+}
+function textBox(e) {
+  const range = D.createRange(); range.selectNodeContents(e);
+  return range.getBoundingClientRect();
+}
 init();
 </script>
 </body>

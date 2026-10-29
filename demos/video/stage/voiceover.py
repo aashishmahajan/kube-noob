@@ -149,13 +149,11 @@ def build(video: str, out: Path, voice: ak.Voice, music_db: float | None) -> dic
     foreground = np.stack([speech, speech], axis=1) * 0.92 + fx
     ak.write_stems(out, foreground, music, music_db)
 
-    end = dict(spec["end"])
-    end["credit"] = f"Apache-2.0 · {voice.credit}"
     timeline = {
         "video": video,
         "title": v["title"],
         "cta": v["cta"],
-        "end": end,
+        "credit": f"kube-noob is open source (Apache-2.0) · {voice.credit}",
         "fps": FPS,
         "duration": total,
         "scenes": scenes,

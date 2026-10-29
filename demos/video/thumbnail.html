@@ -1,15 +1,29 @@
 <!doctype html><html><head><meta charset="utf-8"><style>
-html,body{margin:0;width:1280px;height:720px;background:#0b1020;color:#e6e9f2;font-family:"DejaVu Sans",sans-serif;overflow:hidden}
-.left{position:absolute;left:60px;top:70px;width:700px}
-h1{font-size:92px;line-height:1.02;margin:0;letter-spacing:-2px}
-h1 .no{color:#f87171}.yes{color:#4ade80}
-p{font-size:30px;color:#8a93b2;margin-top:28px}
-.term{position:absolute;right:50px;top:150px;width:470px;background:#111833;border-radius:16px;padding:26px 28px;font-family:"DejaVu Sans Mono",monospace;font-size:21px;line-height:1.55;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-.term .x{color:#f87171;text-decoration:line-through}.term .g{color:#4ade80}.term .d{color:#8a93b2}
-.badge{position:absolute;left:60px;bottom:50px;font-size:26px;background:#1b2447;padding:10px 20px;border-radius:12px}
+/* --sans, --mono and the --kn-* colours come from docs/brand via demos/video/brand.js (thumbnail.js) */
+html,body{margin:0;width:1280px;height:720px;color:var(--kn-ink);font-family:var(--sans);overflow:hidden;
+  background:radial-gradient(ellipse 900px 600px at 30% 35%, var(--kn-navy) 0%, var(--kn-navy-deep) 60%, var(--kn-navy-night) 100%)}
+.left{position:absolute;left:60px;top:64px;width:700px}
+h1{font-size:92px;font-weight:800;line-height:1.02;margin:0;letter-spacing:-2px}
+h1 .no{color:var(--kn-danger)}.yes{color:var(--kn-green)}
+p{font-size:32px;font-weight:600;color:var(--kn-ink-soft);margin-top:30px}
+.term{position:absolute;right:50px;top:150px;width:470px;background:var(--kn-panel);border:1px solid rgba(var(--kn-sky-rgb),.14);border-radius:16px;padding:26px 28px;font-family:var(--mono);font-weight:500;font-size:21px;line-height:1.55;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.term .x{color:var(--kn-danger);text-decoration:line-through}.term .g{color:var(--kn-green)}.term .d{color:var(--kn-muted)}
+.badge{position:absolute;left:60px;bottom:46px;display:flex;align-items:center;gap:18px;font-size:28px;font-weight:600}
+.badge img{width:64px;height:64px;border-radius:15px}
+.badge .wm{font-weight:800;background:linear-gradient(90deg,var(--kn-green),var(--kn-teal) 55%,var(--kn-blue));-webkit-background-clip:text;background-clip:text;color:transparent}
+.badge .url{color:var(--kn-sky)}
 </style></head><body>
 <div class="left"><h1>Your AI ran <span class="no">delete</span> first.<br>Make it run <span class="yes">describe</span>.</h1>
-<p>kube-noob: no AI inside. The Kubernetes<br>rulebook your AI is missing.</p></div>
+<p id="tag"></p></div>
 <div class="term"><div class="x">$ oc delete pod api-1</div><div class="g">$ oc get events -n shop</div><div class="g">$ oc describe pod api-1</div><div class="g">$ oc logs api-1 --previous</div><div class="d">exec / change: asks first</div></div>
-<div class="badge">kube-noob · K8s · OpenShift 4.22 · ROSA HCP · free &amp; open source</div>
+<div class="badge"><img id="icon" alt=""><span class="wm">kube-noob</span><span class="url" id="url"></span></div>
+<script>
+const KN = window.__KN_BRAND__;
+if (!KN) throw new Error('kube-noob brand missing: render this page through demos/video/thumbnail.js');
+document.getElementById('tag').textContent = KN.tokens.tagline;
+document.getElementById('url').textContent = KN.tokens.url;
+const icon = document.getElementById('icon');
+icon.src = KN.icon;
+window.__ready = icon.decode();
+</script>
 </body></html>

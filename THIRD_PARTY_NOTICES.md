@@ -51,6 +51,16 @@ See `src/kube_noob/sources/registry.py`. Sources with non-commercial (ramitsuran
 copyleft (ansible-collections/kubernetes.core, GPL-3.0) or no license (magnologan/awesome-k8s-security) terms are never
 redistributed; Red Hat Jira issue content is used for local retrieval and evaluation only.
 
+## Brand fonts (in the repository, not in the package)
+
+Unmodified web fonts from the upstream release archives, used by the video renders and the brand pages; sources and
+SHA-256 sums in `docs/brand/fonts/PROVENANCE.json`, licence texts next to the fonts.
+
+| Material | Upstream | License | Where |
+|---|---|---|---|
+| Inter 4.1 (`InterVariable.woff2`) | [rsms/inter](https://github.com/rsms/inter) release v4.1 | SIL Open Font License 1.1 | `docs/brand/fonts/` |
+| JetBrains Mono 2.304 (Regular, Medium, SemiBold `.woff2`) | [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) release v2.304 | SIL Open Font License 1.1 | `docs/brand/fonts/` |
+
 ## Used to make the demo videos (downloaded at render time, not bundled)
 
 | Material | Upstream | License | Used by |

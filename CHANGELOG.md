@@ -5,6 +5,15 @@
 - kube-noob.com is built from this repository's releases by a separate site repository; this repository keeps only
   the product. The site's own third-party notices are on the site (`/notices/`).
 - `demos/video/stage/build.sh` honours `KN_SCALE` (1 for 1920x1080, default 2 for 4K).
+- Videos in the brand: `docs/brand/tokens.json` and `docs/brand/BRAND.md` are the one source for the palette (the
+  icon's navy, blue and green), type, tagline and call to action. Inter 4.1 and JetBrains Mono 2.304 are bundled
+  (SHA-256 pinned) and injected under their own family names by `demos/video/brand.js`, so CI renders look like local
+  ones; a render stops if a brand font did not load. The walkthrough, its thumbnail and the three animated videos use
+  them, end on the brand end card with kube-noob.com, and say "Get it at kube-noob dot com" instead of "link below".
+- Animated videos: the mascot rests clear of the terminal, captions are never drawn under a window, and
+  `capture.js --check` fails a video whose frames break either rule. The walkthrough capture gets `--stills`,
+  lossless PNG frames by default and an output file that appears only when the encode succeeded.
+- `tests/test_guidance.py` checks rows G100 and later too (it matched only two-digit ids).
 
 ## 0.6.0 - 2026-10-29
 

@@ -25,7 +25,7 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 | 2 | 5 s | The red glow freezes and fades; small glowing cubes (pods) dissolve into dust, suggesting lost evidence. Slow motion, moody. | The evidence is gone. | It's also the one that destroys your evidence. |
 | 3 | 7 s | A friendly cartoon rocket with a round window and a smile flies in from the lower left on a green-blue arc of light and stops beside the terminal. Clean 3D illustration style, soft rim light. | kube-noob | Meet kube-noob. There's no AI inside it. |
 | 4 | 8 s | Split screen: on the left a chat bubble labelled only with a speech icon, on the right the rocket holding a clipboard with green check marks; a beam connects them. Flat, modern, navy and green palette. | No AI inside. Works with yours. | Your AI does the talking. kube-noob supplies the rules, the read-only steps and the citations. |
-| 5 | 5 s | The terminal window turns calm green; three green lines type out (blank text to overlay later). The rocket gives a thumbs up. | uv tool install kube-noob | Free and open source. Link below. |
+| 5 | 5 s | The terminal window turns calm green; three green lines type out (blank text to overlay later). The rocket gives a thumbs up. | uv tool install kube-noob | Free and open source. Get it at kube-noob dot com. |
 
 ## Video 2: kube-noob as a sidecar (60 seconds)
 
@@ -36,7 +36,7 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 | 3 | 10 s | The pod's outer wall shows a single small door marked with a padlock; arrows to the outside world fade out before reaching it. | No egress. No token to manage. | It needs no network access at all, and there's no Service, Route or token to manage. |
 | 4 | 12 s | Blank glowing terminal window over the isometric scene (overlay the real `kube-noob-sidecar.mp4` segment: audit, rollout, MCP calls, closed port). | Pod Security restricted | We deploy it on a cluster that enforces Pod Security restricted. The app asks it to audit a Deployment and diagnose a crash, over loopback. |
 | 5 | 8 s | A small gauge on the rocket's container settles at a low level, green. | 68 MiB peak · 256 MiB limit | In our test cluster it peaked at sixty-eight mebibytes, well under its limit. |
-| 6 | 12 s | Pull back to show many pods on the grid, each with a tiny rocket beside its app. | deploy/sidecar/app-with-kube-noob-sidecar.yaml | One example manifest, audited for OpenShift 4.20 and later. Link below. |
+| 6 | 12 s | Pull back to show many pods on the grid, each with a tiny rocket beside its app. | deploy/sidecar/app-with-kube-noob-sidecar.yaml | One example manifest, audited for OpenShift 4.20 and later. Get it at kube-noob dot com. |
 
 ## Video 3: kube-noob as tools for Claude (MCP, 60 seconds)
 

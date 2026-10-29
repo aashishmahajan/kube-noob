@@ -1,15 +1,8 @@
 {
-  "_comment": "Scripts for the three animated videos (demos/ai-video-prompts.md, rendered without a video model). 'vo' is spoken by Piper TTS; 'say' overrides it for pronunciation. Terminal lines are copied from real runs: kube-noob 0.2.2 CLI output, the CI sidecar transcript, and the recorded Claude session (demos/video/render.sh).",
-  "end": {
-    "tagline": "No AI inside. Works with yours.",
-    "platforms": "Kubernetes · OpenShift · ROSA HCP · Helm · RHACS",
-    "surfaces": "CLI · Claude plugin · MCP server · OpenShift sidecar",
-    "url": "github.com/aashishmahajan/kube-noob",
-    "credit": "Apache-2.0 · Voice: Piper, LibriTTS voice (CC BY 4.0)"
-  },
+  "_comment": "Scripts for the three animated videos (demos/ai-video-prompts.md, rendered without a video model). 'vo' is spoken by the Kokoro voice (../audio_kit.py); 'say' overrides it for pronunciation. Terminal lines are copied from real runs: kube-noob 0.2.2 CLI output, the CI sidecar transcript, and the recorded Claude session (demos/video/render.sh). The end card (tagline, platforms, surfaces, kube-noob.com) comes from docs/brand/tokens.json.",
   "videos": {
     "teaser": {
-      "title": "kube-noob: no AI inside (30 s)",
+      "title": "kube-noob: no AI inside",
       "cta": "uv tool install kube-noob",
       "scenes": [
         {
@@ -52,7 +45,7 @@
           "caption": "uv tool install kube-noob",
           "captionPos": "lower",
           "captionMono": true,
-          "vo": "Free and open source. Link below.",
+          "vo": "Free and open source. Get it at kube-noob dot com.",
           "term": [
             "$ uv tool install kube-noob",
             "$ kube-noob audit -f deployment.yaml --platform openshift --version 4.22",
@@ -72,7 +65,7 @@
       ]
     },
     "sidecar": {
-      "title": "kube-noob as a sidecar on OpenShift (60 s)",
+      "title": "kube-noob as a sidecar on OpenShift",
       "cta": "deploy/sidecar/app-with-kube-noob-sidecar.yaml",
       "scenes": [
         {
@@ -127,8 +120,8 @@
           "caption": "deploy/sidecar/app-with-kube-noob-sidecar.yaml",
           "captionPos": "lower",
           "captionMono": true,
-          "vo": "One example manifest, audited for OpenShift 4.20 and later. Link below.",
-          "say": "One example manifest, audited for OpenShift four point twenty and later. Link below."
+          "vo": "One example manifest, audited for OpenShift 4.20 and later. Get it at kube-noob dot com.",
+          "say": "One example manifest, audited for OpenShift four point twenty and later. Get it at kube-noob dot com."
         },
         {
           "kind": "end",
@@ -137,7 +130,7 @@
       ]
     },
     "mcp": {
-      "title": "kube-noob as tools for Claude (60 s)",
+      "title": "kube-noob as tools for Claude",
       "cta": "/plugin marketplace add aashishmahajan/kube-noob",
       "scenes": [
         {
@@ -200,7 +193,7 @@
           "min": 6.0,
           "caption": "Add it to Claude Code",
           "captionPos": "lower",
-          "vo": "Add it to Claude Code with two commands. Link below.",
+          "vo": "Add it to Claude Code with two commands. Get it at kube-noob dot com.",
           "term": [
             "/plugin marketplace add aashishmahajan/kube-noob",
             "/plugin install kube-noob@kube-noob"

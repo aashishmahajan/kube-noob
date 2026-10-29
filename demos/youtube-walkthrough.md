@@ -13,20 +13,25 @@ There are two cuts:
 **Title options** (the first is strongest for click-through):
 
 1. Your AI Ran `delete` First. Make It Run `describe`.
-2. No AI Inside: The Kubernetes Rulebook Your AI Is Missing (OpenShift, ROSA HCP, Helm)
-3. Make Claude Debug Kubernetes Like an SRE: Read-Only First, Cited, Offline
+2. The Kubernetes Rulebook Your AI Is Missing (OpenShift, ROSA HCP, Helm)
+3. Make Claude Debug Kubernetes Like an SRE: Read-Only First, Offline
+
+The tagline "No AI inside. Works with yours." and the second headline (option 2) are never used together: the
+headline test in the roadmap decides between them (docs/brand/BRAND.md).
 
 **Thumbnail:** `youtube-thumbnail.png` from the render (`demos/video/thumbnail.html`): "Your AI ran delete first. Make it run describe." with a
-struck-through `oc delete` above `oc get events`, `oc describe` and `oc logs --previous`.
+struck-through `oc delete` above `oc get events`, `oc describe` and `oc logs --previous`, the tagline, and
+kube-noob.com.
 
 **Description:**
 
 ```text
-kube-noob has no AI inside. It is the Kubernetes, OpenShift and ROSA HCP rulebook your AI is missing: audit rules, read-only-first troubleshooting steps, cited docs and graded exercises. Claude or OpenShift Lightspeed calls it as tools; the CLI runs it with no AI at all. Free, open source, and it makes no network calls unless you turn them on.
+kube-noob: no AI inside. Works with yours. Audit rules, read-only-first troubleshooting steps, docs with citations and graded exercises for Kubernetes, OpenShift and ROSA HCP. Claude or OpenShift Lightspeed calls it as tools; the CLI runs it with no AI at all. Free, open source, and it makes no network calls unless you turn them on.
 
 uv tool install kube-noob
 kube-noob demo --list
 
+Website: https://kube-noob.com
 GitHub: https://github.com/aashishmahajan/kube-noob
 PyPI: https://pypi.org/project/kube-noob/
 
@@ -41,7 +46,7 @@ Chapters
 1:44 Check it yourself: 61 real questions
 1:54 Try it
 
-Kubernetes, OpenShift, Helm, ROSA, RHACS and StackRox are trademarks of their owners; kube-noob is independent and not endorsed by them.
+Kubernetes, Helm, OpenShift, ROSA, RHACS, StackRox, OpenShift Lightspeed, Claude, Anthropic, GitHub and AWS are trademarks of their respective owners; kube-noob is independent and not endorsed by them.
 ```
 
 **Tags:** kubernetes, openshift, rosa, rosa hcp, helm, rhacs, stackrox, sre, platform engineering, devops, mcp,
@@ -62,7 +67,7 @@ approximate.
 | 1:09 | When your team confirms a fix, save it. Next time, search finds your team's note next to the docs, with a citation. Secrets, logs and manifests are rejected. |
 | 1:27 | There's no AI inside kube-noob. Claude or Lightspeed does the talking; kube-noob supplies the rules and the citations, or you use the CLI on its own. It makes no network calls and reads no cluster unless you allow it, and `doctor` shows exactly what it can reach. |
 | 1:44 | Don't trust me. Run the self-test: 61 real questions across Kubernetes, Helm, OpenShift 4.22, ROSA HCP and RHACS. |
-| 1:54 | Install it with uv tool install kube-noob, then run kube-noob demo. Link below. |
+| 1:54 | Install it with uv tool install kube-noob, then run kube-noob demo. Get it at kube-noob dot com. |
 
 ## Long cut for Astra (about 5 minutes)
 
@@ -72,7 +77,7 @@ Each scene is one shot. "Screen" means a terminal recording of the command shown
 | # | Length | Screen | On-screen text | Voice-over |
 |---|---|---|---|---|
 | 1 | 0:15 | Thumbnail art, then a terminal typing `oc delete pod api-1` struck through | Your AI ran delete first. | AI assistants jump to the fix. On a shared cluster, the fix is how evidence disappears. |
-| 2 | 0:20 | Title card | kube-noob: no AI inside | kube-noob is not another AI. It is the rulebook your AI is missing, for Kubernetes, OpenShift, ROSA HCP, Helm and RHACS: free, open source, offline, read-only first. |
+| 2 | 0:20 | Title card | kube-noob: no AI inside | kube-noob is not another AI. It is a rulebook your AI calls as tools, for Kubernetes, OpenShift, ROSA HCP, Helm and RHACS: free, open source, offline, read-only first. |
 | 3 | 0:40 | `kube-noob audit -f examples/insecure-deployment.yaml --platform openshift --version 4.22` | Score 37/100: 3 HIGH | It audits YAML for the platform you actually run: 60 rules plus strict schemas, each mapped to the RHACS policy that would fire. |
 | 4 | 0:30 | `kube-noob fix ...` | 4 safe fixes, 4 left for a human | It fixes what is safe to fix mechanically and tells you what needs a human. |
 | 5 | 0:45 | `kube-noob diagnose -f examples/events-scc.txt` | 1. read-only first | Paste events or logs. Read-only steps come first, and anything that changes the cluster asks first. |
@@ -83,4 +88,4 @@ Each scene is one shot. "Screen" means a terminal recording of the command shown
 | 10 | 0:30 | `kube-noob doctor` with and without `KUBE_NOOB_OFFLINE=1` | offline lock ON | Off by default, lockable by admins, provable with doctor. |
 | 11 | 0:20 | Lightspeed and Claude screenshots (your own) | Your AI talks. kube-noob checks. | Claude or Lightspeed does the talking and kube-noob does the checking. Or skip the AI and use the CLI. |
 | 12 | 0:15 | `kube-noob selftest` | 61/61 | Prove it on your machine: 61 real questions. |
-| 13 | 0:10 | End card | uv tool install kube-noob | Link below. Tell me what it should catch next. |
+| 13 | 0:10 | End card | uv tool install kube-noob · kube-noob.com | Get it at kube-noob dot com. Tell me what it should catch next. |

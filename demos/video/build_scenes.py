@@ -14,6 +14,7 @@ Every line on screen is output that a command or a session actually produced.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import textwrap
@@ -21,7 +22,6 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).parent
-REPO = "github.com/aashishmahajan/kube-noob"
 
 CHAPTERS = [
     ("audit", "1. Audit for the platform you run", 16),
@@ -32,32 +32,28 @@ CHAPTERS = [
     ("posture", "6. No AI inside, no network calls: prove it", 9),
 ]
 
+# The title and end cards carry the tagline, platforms, surfaces and kube-noob.com from docs/brand/tokens.json
+# (player.html reads them through brand.js); these are only the lines that differ per video. Plain text.
 WALKTHROUGH_META = {
-    "titleSub": "No AI inside. The Kubernetes, OpenShift and ROSA HCP rulebook<br>your AI is missing: read-only first, "
-    "cited, offline.",
+    "titleSub": "Recorded from the real output of kube-noob {version}, offline",
     "brand": "kube-noob · offline · read-only",
     "endTitle": "Try it in 30 seconds",
     "endCodes": ["uv tool install kube-noob", "kube-noob demo --list"],
-    "endSub": "Use it from Claude or OpenShift Lightspeed, or the CLI with no AI at all<br>"
-    f'<span class="accent">{REPO}</span>',
 }
 MCP_META = {
-    "titleSub": "kube-noob in Claude, end to end.<br>Claude does the thinking; kube-noob supplies the rules.",
+    "titleSub": "In Claude, end to end: Claude does the thinking, kube-noob supplies the rules",
     "brand": "real Claude Code session",
     "endTitle": "Add it to Claude",
     "endCodes": ["/plugin marketplace add aashishmahajan/kube-noob", "/plugin install kube-noob@kube-noob"],
-    "endSub": "Runs on your machine. No AI inside kube-noob, no network calls of its own.<br>"
-    f'<span class="accent">{REPO}</span>',
 }
 SIDECAR_META = {
-    "titleSub": "kube-noob as a sidecar on Kubernetes and OpenShift.<br>Your app calls it on 127.0.0.1; "
-    "nothing else can.",
+    "titleSub": "As a sidecar on Kubernetes and OpenShift: your app calls it on 127.0.0.1, nothing else can",
     "brand": "kube-noob sidecar · recorded on a kind cluster in CI",
     "endTitle": "Run it next to your app",
     "endCodes": ["deploy/sidecar/app-with-kube-noob-sidecar.yaml"],
-    "endSub": "Pod Security restricted · loopback only · no egress · about 85 MiB<br>"
-    f'<span class="accent">{REPO}</span>',
 }
+LICENSE_CREDIT = "kube-noob is open source (Apache-2.0)"
+MUSIC_CREDIT = "Music: generated for kube-noob"
 
 
 def _run(*args: str) -> str:
@@ -84,19 +80,29 @@ def parse_transcript(text: str, max_out: int) -> list[dict[str, object]]:
     return steps
 
 
+def selftest_total(output: str) -> int:
+    """The number of questions in `kube-noob selftest` output ("kube-noob self-test: 63/63 passed")."""
+    m = re.search(r"self-test: \d+/(\d+) passed", output)
+    if not m:
+        raise SystemExit(f"unexpected `kube-noob selftest` output: {output[:200]!r}")
+    return int(m.group(1))
+
+
 def walkthrough() -> list[dict[str, Any]]:
     scenes: list[dict[str, Any]] = [
         {"id": n, "chapter": title, "steps": parse_transcript(_run("demo", n), keep)} for n, title, keep in CHAPTERS
     ]
+    selftest = _run("selftest")
     scenes.append(
         {
             "id": "selftest",
             "chapter": "7. Check it yourself",
             "steps": [
                 {
-                    "caption": "61 real questions across Kubernetes, Helm, OpenShift 4.22, ROSA HCP and RHACS",
+                    "caption": f"{selftest_total(selftest)} real questions across Kubernetes, Helm, OpenShift 4.22, "
+                    "ROSA HCP and RHACS",
                     "command": "kube-noob selftest",
-                    "output": _run("selftest").splitlines(),
+                    "output": selftest.splitlines(),
                 }
             ],
         }
@@ -233,9 +239,13 @@ def sidecar(transcript: Path) -> list[dict[str, Any]]:
 
 def write(out_dir: Path, name: str, scenes: list[dict[str, Any]], meta: dict[str, Any]) -> Path:
     narration = out_dir / "narration.json"  # written by audio_kit.py narrate: hold each scene until its line ends
+    credit = MUSIC_CREDIT
     if narration.is_file():
-        lines = json.loads(narration.read_text())["lines"]
-        meta = {**meta, "minMs": {scene_id: line["minMs"] for scene_id, line in lines.items()}}
+        info = json.loads(narration.read_text())
+        meta = {**meta, "minMs": {scene_id: line["minMs"] for scene_id, line in info["lines"].items()}}
+        credit = info["credit"]
+    version = _run("--version").split()[-1] if "{version}" in meta["titleSub"] else ""
+    meta = {**meta, "titleSub": meta["titleSub"].format(version=version), "credit": f"{LICENSE_CREDIT} · {credit}"}
     html = (
         (HERE / "player.html")
         .read_text()
