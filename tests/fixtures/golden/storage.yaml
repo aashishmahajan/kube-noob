@@ -1,0 +1,163 @@
+# Golden questions: storage (storage). Original text written from the official documentation named in
+# each item's source (license of the source docs: see the source repository). Added 2026-10-29 as misses: graded
+# against kube-noob by an independent agent before any is promoted to pass or abstain.
+- id: stor-001
+  technology: storage
+  kind: error
+  question: 'From the toolbox on our ODF cluster, ceph health detail shows "[WRN] OSD_DOWN: 1 osds down" followed by "osd.3 (root=default,host=worker-2) is down". What does this mean and what should I check first?'
+  answer: 'OSD_DOWN means one or more OSDs are marked down: the ceph-osd daemon or its host may have crashed or been stopped, or peer OSDs cannot reach it over the public or private network. Check that the host is healthy, the daemon is started and the network works; if the daemon crashed, its log file (ceph-osd.* in the Ceph log directory) may contain the cause. A down OSD is also the usual root cause of PG_DEGRADED and PG_AVAILABILITY warnings, which normally clear once the OSD is back.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#osd-down'
+  outOfScope: false
+  status: miss
+- id: stor-002
+  technology: storage
+  kind: error
+  question: 'ceph status on our Rook-Ceph cluster says "HEALTH_WARN 1/3 mons down, quorum a,c" (MON_DOWN). Is the cluster at risk and how urgent is this?'
+  answer: 'MON_DOWN means one or more monitor daemons are down. The cluster keeps working while a majority (more than half) of the provisioned monitors are available, which two of three satisfy, and clients may only need extra time on first connect because they try other monitor addresses. Restore or restart the down monitor as soon as possible, because one more monitor failure would cost the majority and cause an outage.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#mon-down'
+  outOfScope: false
+  status: miss
+- id: stor-003
+  technology: storage
+  kind: error
+  question: 'After a node reboot ceph status shows "Reduced data availability: 24 pgs inactive, 24 pgs peering" and "Degraded data redundancy: 310/930 objects degraded (33.3%), 40 pgs degraded, 40 pgs undersized". What are these two warnings and how do I find the affected PGs?'
+  answer: 'They are PG_AVAILABILITY (some PGs cannot serve I/O, for example because they are stuck peering, stale, incomplete or not active) and PG_DEGRADED (fewer replicas or erasure-code fragments than desired, shown as degraded or undersized PGs). Run ceph health detail to list the affected PGs and ceph tell <pgid> query to inspect the state of a specific one; the states only matter if they do not clear quickly. In most cases the root cause is one or more OSDs being down, so look at OSD_DOWN first.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#pg-availability'
+  outOfScope: false
+  status: miss
+- id: stor-004
+  technology: storage
+  kind: concept
+  question: 'We just got "HEALTH_WARN 1 nearfull osd(s)" (OSD_NEARFULL) and writes still work. How is that different from OSD_BACKFILLFULL and OSD_FULL, and do I need to act now?'
+  answer: 'OSD_NEARFULL is an early warning that an OSD passed the nearfull threshold and the cluster is approaching full. OSD_BACKFILLFULL is the next stage: an OSD is over, or would go over, the backfillfull threshold, so data may be unable to rebalance onto it. OSD_FULL is the one that stops writes. You should act now by checking utilization per pool with ceph df and planning capacity or cleanup, following the Ceph guidance on troubleshooting OSD free space.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#osd-nearfull'
+  outOfScope: false
+  status: miss
+- id: stor-005
+  technology: storage
+  kind: error
+  question: 'Our applications suddenly cannot write to Ceph and ceph health detail says "[ERR] OSD_FULL: 1 full osd(s)". A colleague wants to raise the full ratio a lot so I/O resumes. Is that a good idea, and what should we actually do?'
+  answer: 'OSD_FULL means one or more OSDs passed the full threshold, so the cluster refuses writes. Raising the threshold with ceph osd set-full-ratio is only a short-term workaround to get writes back and should be a small increase, not a fix. The real remedies are deploying more OSDs in appropriate CRUSH failure domains and/or deleting data; use ceph df to see which pools consume space, and check for leftover rados bench objects (names beginning with bench), which can be removed but only very carefully.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#osd-full'
+  outOfScope: false
+  status: miss
+- id: stor-006
+  technology: storage
+  kind: error
+  question: 'ceph health detail shows "[WRN] POOL_NEAR_FULL: 1 pools nearfull" for our replicapool, but ceph df shows lots of free raw capacity. Why is it warning and how do I clear it?'
+  answer: 'POOL_NEAR_FULL means a pool is approaching a configured fullness threshold, and one trigger is the pool quota (warning level set by mon_pool_quota_warn_threshold), which is why a pool can warn even when the cluster has free raw space. Adjust or remove the quota with ceph osd pool set-quota <pool> max_bytes <bytes> or max_objects <objects>; setting a value to 0 disables that quota. The same check can also be raised by the cluster-wide nearfull and full ratios, in which case follow the Ceph capacity and no-free-drive-space guidance instead.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#pool-near-full'
+  outOfScope: false
+  status: miss
+- id: stor-007
+  technology: storage
+  kind: howto
+  question: 'After we rebuilt a worker node, ceph status shows "HEALTH_WARN clock skew detected on mon.b" (MON_CLOCK_SKEW). How do I fix it, and can I just raise mon_clock_drift_allowed?'
+  answer: 'MON_CLOCK_SKEW is raised when the clocks on the monitor hosts differ by more than mon_clock_drift_allowed. The right fix is to synchronise time with chrony (or the legacy ntpd), ideally against several sources and with the monitor hosts also syncing against each other, since agreement between monitors matters even more than absolute accuracy. Raising mon_clock_drift_allowed is only for the rare case where tight sync is impractical, and it must stay well below mon_lease or the monitors will not function properly.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#mon-clock-skew'
+  outOfScope: false
+  status: miss
+- id: stor-008
+  technology: storage
+  kind: howto
+  question: 'ceph status on our Rook cluster shows "HEALTH_WARN 2 daemons have recently crashed" (RECENT_CRASH). How do I see what crashed and clear the warning properly?'
+  answer: 'RECENT_CRASH means daemons crashed recently and nobody has acknowledged it; the cause can be a software bug or hardware such as a failing disk, so investigate before silencing it. In the toolbox, list unacknowledged crashes with ceph crash ls-new, inspect one with ceph crash info <crash-id>, then clear it with ceph crash archive <crash-id> or ceph crash archive-all. Crashes count as recent for two weeks by default (mgr/crash/warn_recent_interval), and archived ones remain visible with ceph crash ls.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#recent-crash'
+  outOfScope: false
+  status: miss
+- id: stor-009
+  technology: storage
+  kind: error
+  question: 'ceph health detail shows "[ERR] OSD_SCRUB_ERRORS: 2 scrub errors" and "[ERR] PG_DAMAGED: Possible data damage: 1 pg inconsistent". What do these mean, and can we just mute them?'
+  answer: 'The two usually appear together: a scrub found inconsistencies in stored data, and the affected PG is flagged inconsistent (or snaptrim_error), or carries the repair flag if a repair is already running. This is a data-integrity warning, so identify the PG and the OSDs behind it rather than muting it, and bring in someone experienced with Ceph before forcing repairs. Failing disks can also show up as OSD_TOO_MANY_REPAIRS, which counts read repairs above a threshold (default 10) because scrub only checks data at rest.'
+  source:
+    repo: ceph/ceph
+    path: doc/rados/operations/health-checks.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/rados/operations/health-checks/#pg-damaged'
+  outOfScope: false
+  status: miss
+- id: stor-010
+  technology: storage
+  kind: error
+  question: 'Our CephFS clients hang and ceph health detail shows "MDS_SLOW_REQUEST 1 MDSs report slow requests: mds.myfs-a(mds.0): 5 slow requests are blocked > 30 secs". What causes this and how do I look at the stuck operations?'
+  answer: 'MDS_SLOW_REQUEST means client requests have taken longer than mds_op_complaint_time (default 30 seconds) to complete. The MDS may be running very slowly, the RADOS cluster may not be acknowledging its journal writes promptly, or there is a bug. List the outstanding metadata operations with the ops admin socket command on that MDS, and look for companion warnings such as MDS_SLOW_METADATA_IO in the same ceph health detail output.'
+  source:
+    repo: ceph/ceph
+    path: doc/cephfs/health-messages.rst
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    url: 'https://docs.ceph.com/en/latest/cephfs/health-messages/#mds-slow-request'
+  outOfScope: false
+  status: miss
+- id: stor-011
+  technology: storage
+  kind: howto
+  question: 'I need to run ceph status and ceph osd status on our Rook-Ceph cluster but there is no Ceph CLI on the nodes. How do I get a shell with the Ceph tools, clean up afterwards, or run it as a one-off?'
+  answer: 'Deploy the Rook toolbox with kubectl create -f deploy/examples/toolbox.yaml, wait for it with kubectl -n rook-ceph rollout status deploy/rook-ceph-tools, then open a shell with kubectl -n rook-ceph exec -it deploy/rook-ceph-tools -- bash and run commands such as ceph status, ceph osd status, ceph df and rados df. When you are done, remove it with kubectl -n rook-ceph delete deploy/rook-ceph-tools. For a one-time run, create deploy/examples/toolbox-job.yaml and read the output with kubectl -n rook-ceph logs -l job-name=rook-ceph-toolbox-job; the kubectl rook-ceph plugin is an alternative that makes the toolbox unnecessary.'
+  source:
+    repo: rook/rook
+    path: Documentation/Troubleshooting/ceph-toolbox.md
+    commit: 61a8fea150f63616ab48853b0dafb1f32933331c
+    url: 'https://rook.io/docs/rook/latest-release/Troubleshooting/ceph-toolbox/'
+  outOfScope: false
+  status: miss
+- id: stor-012
+  technology: storage
+  kind: howto
+  question: 'Three OSDs on different nodes of our Rook cluster keep flapping, and a colleague wants to purge all three at once with the osd-purge job to get rid of the noise. What should we verify first, and is that safe?'
+  answer: 'Not without checks: before removing OSDs, confirm the cluster will still have enough space afterwards and that the remaining OSDs and their PGs are healthy enough to take the rebalanced data. Do not remove too many OSDs at once, and wait for rebalancing between removals. If all PGs are active+clean with no low-space warnings the data is fully replicated and removal is safe, but if an OSD is already failing the PGs will not be perfectly clean and you proceed anyway. On host-based clusters you may also need to stop the Rook operator during the purge so it does not recreate the OSD.'
+  source:
+    repo: rook/rook
+    path: Documentation/Storage-Configuration/Advanced/ceph-osd-mgmt.md
+    commit: 61a8fea150f63616ab48853b0dafb1f32933331c
+    url: 'https://rook.io/docs/rook/latest-release/Storage-Configuration/Advanced/ceph-osd-mgmt/#remove-an-osd'
+  outOfScope: false
+  status: miss
+- id: stor-013
+  technology: storage
+  kind: out-of-scope
+  question: 'I am building a home server with eight SATA drives. Should I buy an LSI 9300-8i HBA flashed to IT mode or a cheaper used 9211-8i, and which cables and PCIe slot layout do you recommend?'
+  answer: 'Choosing a host bus adapter and cabling for a home server is a hardware purchasing question, not a Kubernetes, OpenShift or Rook-Ceph troubleshooting question, so it is outside what this tool covers.'
+  source: {}
+  outOfScope: true
+  status: miss
+- id: stor-014
+  technology: storage
+  kind: out-of-scope
+  question: 'We want to expose a Ceph RGW to 40 internal teams. How should we design the S3 bucket ACLs and bucket policies so that each team only sees its own buckets and a central audit group can read all of them?'
+  answer: 'Designing bucket ACL and access-policy schemes for Ceph object storage is an application and identity design task rather than diagnosing the health of a Rook-Ceph or ODF cluster, so it is outside what this tool covers.'
+  source: {}
+  outOfScope: true
+  status: miss
