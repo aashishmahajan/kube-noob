@@ -15,6 +15,7 @@ kube-noob bundles derived data and links to public sources. Licenses were verifi
 | RHACS default policy names (references only) | stackrox/stackrox `pkg/defaults/policies/files` | Apache-2.0 | `audit/rules.py` |
 | OpenShift 4.20, 4.21 and 4.22 release notes: known and fixed issues (text, issue ids, versions) | openshift/openshift-docs, branches enterprise-4.20 to enterprise-4.22 (commits in each file) | Apache-2.0 | `src/kube_noob/data/known_issues/*.json` |
 | OpenShift update risks (conditional updates) for targets 4.18 and later: `to`, `from`, `url`, `name`, `message`, `fixedIn`, `matchingRules` of 356 `blocked-edges/*.yaml` files, with each file's path | openshift/cincinnati-graph-data @7572174a551561c30e07e9b5ca6f156ef5cd513c (2026-10-29), "OpenShift update graph data (c) Red Hat, Inc. and contributors" | Apache-2.0 | `src/kube_noob/data/upgrade_risks/*.json` |
+| Ceph health check catalogue: health code names, the summary wording `ceph status` prints, and the Rook and ODF alert names, rule lines and runbook links (meanings, causes, fixes and steps are kube-noob's own words) | ceph/ceph @eb3b634b (`doc/rados/operations/health-checks.rst`, `doc/cephfs/health-messages.rst` and the source files cited per entry); rook/rook @61a8fea1 `deploy/charts/rook-ceph-cluster/prometheus/localrules.yaml`; red-hat-storage/ocs-operator @731e93be `internal/controller/storagecluster/prometheus/localcephrules.yaml` | Ceph docs CC BY-SA 3.0 (cited by section and line, not copied); Ceph code LGPL-2.1 or LGPL-3 (names and message wording cited, no code copied); Rook and ocs-operator Apache-2.0 | `src/kube_noob/data/ceph_health.yaml` |
 
 | MITRE ATT&CK for Containers technique ids, names and tactics (18 techniques) | mitre-attack/attack-stix-data `enterprise-attack/enterprise-attack.json` @c2494b29dd268c46a5d0ea0990553e4327cd2253 (Enterprise ATT&CK 20.0) | ATT&CK Terms of Use (below) | `src/kube_noob/vuln/attack.py` |
 
@@ -35,6 +36,7 @@ copyright designation.
 | RHACS default policies (89 policies as an export, `exclusions` removed) | stackrox/stackrox `pkg/defaults/policies/files` @dce8fb594ee287a5386fece8be1df3ee1adedc72 | Apache-2.0 | `tests/fixtures/rhacs/default-policies-export.json` |
 | RPM version comparison vectors (91 cases) | rpm-software-management/rpm `tests/rpmvercmp.at` @4f7be32ef288a231893dd4c45d4ef36584e3d4b6 | facts used as test data (rpm is GPL-2.0-or-later / LGPL-2.0-or-later; no code copied) | `tests/test_vuln.py` |
 | Scanner report, SBOM, VEX and KEV shapes (synthetic CVE-2099-* data) | written to the field names in aquasecurity/trivy, anchore/grype, anchore/syft, stackrox/stackrox protos, Red Hat CSAF VEX and cisagov/kev-data | original fixtures, Apache-2.0 | `tests/fixtures/vuln/generate.py` |
+| Ceph health output shapes (synthetic `ceph health detail`, `ceph status` and their JSON, a Rook CephCluster status) | written to the formats in ceph/ceph `src/mon/HealthMonitor.cc`, `src/mon/Monitor.cc`, `src/mon/health_check.h` @eb3b634b and rook/rook `pkg/apis/ceph.rook.io/v1/types.go` @61a8fea1 | original fixtures, Apache-2.0 | `tests/test_ceph_health.py`, `tests/fixtures/insight/cases.py` |
 
 ## Knowledge base
 

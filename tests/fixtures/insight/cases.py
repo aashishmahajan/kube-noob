@@ -349,6 +349,56 @@ def alert(r: random.Random) -> str:
 
 GENERATORS["alert-payload"] = alert
 
+# Ceph health output (CEPH1), in the shapes Ceph prints at ceph/ceph eb3b634b: `ceph health detail` text
+# (HealthMonitor.cc: "[WRN] CODE: summary", four-space detail lines), `ceph status` (Monitor.cc: summaries under
+# "health:"), `ceph health` (summaries joined by "; ") and the JSON of health_check_t (health_check.h).
+CEPH_CHECKS = [
+    ("WRN", "OSD_DOWN", "{n} osds down", "osd.{i} (root=default,host={host}) is down"),
+    ("WRN", "PG_DEGRADED", "Degraded data redundancy: {a}/{b} objects degraded (3.125%), {n} pgs degraded", None),
+    ("WRN", "PG_AVAILABILITY", "Reduced data availability: {n} pgs inactive", "pg {pg} is stuck inactive for 3m"),
+    ("ERR", "OSD_SCRUB_ERRORS", "{n} scrub errors", None),
+    ("ERR", "PG_DAMAGED", "Possible data damage: {n} pg inconsistent", "pg {pg} is active+clean+inconsistent"),
+    ("WRN", "MON_CLOCK_SKEW", "clock skew detected on mon.{m}", None),
+    ("WRN", "RECENT_CRASH", "{n} daemons have recently crashed", "osd.{i} crashed on host {host}"),
+    ("WRN", "MDS_SLOW_REQUEST", "{n} MDSs report slow requests", "mds.fs-a(mds.0): 7 slow requests are blocked"),
+    ("WRN", "OSD_NEARFULL", "{n} nearfull osd(s)", "osd.{i} is near full"),
+    ("WRN", "POOL_NEARFULL", "{n} pool(s) nearfull", "pool 'ocs-storagecluster-cephblockpool' is nearfull"),
+]
+
+
+def ceph_health(r: random.Random) -> str:
+    picked = r.sample(CEPH_CHECKS, r.randint(1, 3))
+    host = f"worker-{r.randint(0, 5)}"
+    values = {"n": r.randint(1, 40), "a": r.randint(10, 99), "b": r.randint(100, 999), "i": r.randint(0, 11)}
+    values |= {"pg": f"{r.randint(1, 12)}.{r.randrange(16**2):x}", "m": r.choice("abc"), "host": host}
+    checks = [(sev, code, summary.format(**values), (d or "").format(**values)) for sev, code, summary, d in picked]
+    status = "HEALTH_ERR" if any(sev == "ERR" for sev, *_ in checks) else "HEALTH_WARN"
+    shape = r.randrange(5)
+    if shape == 0:
+        lines = [f"{status} " + "; ".join(s for _, _, s, _ in checks)]
+        for sev, code, summary, detail in checks:
+            lines.append(f"[{sev}] {code}: {summary}")
+            lines += [f"    {detail}"] if detail else []
+        return "\n".join(lines) + "\n"
+    if shape == 1:
+        body = "\n".join(f"            {s}" for _, _, s, _ in checks)
+        return (
+            f"  cluster:\n    id:     477e46f1-ae41-4e43-9c8f-{r.randrange(16**12):012x}\n    health: {status}\n{body}\n\n"
+            "  services:\n    mon: 3 daemons, quorum a,b,c (age 3h)\n    osd: 12 osds: 11 up (since 2m), 12 in\n"
+        )
+    if shape == 2:
+        return f"{status} " + "; ".join(s for _, _, s, _ in checks)
+    report = {
+        code: {"severity": f"HEALTH_{'WARN' if sev == 'WRN' else 'ERR'}", "summary": {"message": s, "count": 1}}
+        for sev, code, s, _ in checks
+    }
+    doc = {"status": status, "checks": report, "mutes": []}
+    return json.dumps(doc if shape == 3 else {"fsid": "477e46f1", "health": doc, "election_epoch": 8})
+
+
+# Kinds added after the original 15 are generated after the mixed pastes, so the earlier cases stay the same.
+LATER_GENERATORS = {"ceph-health": ceph_health}
+
 
 def cases(per_kind: int = 22, seed: int = 28) -> list[tuple[str, set[str]]]:
     r = random.Random(seed)
@@ -382,4 +432,6 @@ def cases(per_kind: int = 22, seed: int = 28) -> list[tuple[str, set[str]]]:
                 if k == "policy-denial" and "FailedCreate" in parts[-1]:
                     expect.add("events")
         out.append(("\n\n".join(parts), expect))
+    for kind, later in LATER_GENERATORS.items():
+        out += [(later(r), {kind}) for _ in range(per_kind)]
     return out

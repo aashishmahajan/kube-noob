@@ -1,0 +1,1885 @@
+# Ceph health checks on Rook-Ceph and OpenShift Data Foundation (ODF): what each code means, the likely causes, the
+# read-only steps that confirm it and what usually fixes it. Written for kube-noob in its own words: the Ceph
+# documentation (CC BY-SA 3.0) is cited by file, section and line, never copied. Code names and the wording `ceph status`
+# prints come from Ceph's source at the same commit (LGPL; names and message wording cited by file and line, no code
+# copied). The Rook and ODF alert rules (Apache-2.0) are cited by file and line. Checked 2026-10-29;
+# scripts/verify_ceph_catalogue.py re-checks every citation against checkouts of the three repositories.
+#
+# codes:
+#   code     the name Ceph emits. also: other emitted names that share the advice. aliases: names written in the docs
+#            or in alert rules that Ceph does not emit, read as this code.
+#   doc, src <file key>:<line> in sources.ceph.files. section: the doc heading when it is not the code itself.
+#   summary  how `ceph status` and `ceph health` word the check, matched at the start of a line of a health report:
+#            {n} a number, {names} monitor names, {is} is/are, {has} has/have, {s} an optional s, {crush} a CRUSH type,
+#            {x} a quoted name, {flags} flag names.
+#   meaning, causes, fix  kube-noob's words. A fix never names a command; steps (the library below) only read.
+#   escalate why the usual fix can lose data or access: the answer then says to stop and involve storage support.
+#   after    codes that usually cause this one; when both are present the cause is shown first.
+# alerts:
+#   rules    <source>:<line> of the "- alert:" line in that source's rules file. watches: the codes it maps to.
+#   how      health: the rule reads ceph_health_detail (or the metric of that very check); metric: it reads another
+#            metric that shows the same condition; state: the overall health, no single code.
+#   expr     the code names the rule's expression reads, when they differ from watches.
+version: 1
+sources:
+  ceph:
+    repository: https://github.com/ceph/ceph
+    commit: eb3b634bccd18715735a74cf55808e98c5dbd04b
+    checked: "2026-10-29"
+    files:
+      rados: doc/rados/operations/health-checks.rst
+      cephfs: doc/cephfs/health-messages.rst
+      osdmap: src/osd/OSDMap.cc
+      pgmap: src/mon/PGMap.cc
+      healthmon: src/mon/HealthMonitor.cc
+      authmon: src/mon/AuthMonitor.cc
+      mgrmon: src/mon/MgrMonitor.cc
+      pymodreg: src/mgr/PyModuleRegistry.cc
+      daemonhealth: src/mgr/DaemonHealthMetricCollector.cc
+      mdsbeacon: src/messages/MMDSBeacon.h
+      mdsmap: src/mds/MDSMap.cc
+      fsmap: src/mds/FSMap.cc
+      nvmeofmap: src/mon/NVMeofGwMap.cc
+      crash: src/pybind/mgr/crash/module.py
+      devicehealth: src/pybind/mgr/devicehealth/module.py
+      autoscaler: src/pybind/mgr/pg_autoscaler/module.py
+      telemetry: src/pybind/mgr/telemetry/module.py
+  rook:
+    repository: https://github.com/rook/rook
+    commit: 61a8fea150f63616ab48853b0dafb1f32933331c
+    checked: "2026-10-29"
+    files:
+      rules: deploy/charts/rook-ceph-cluster/prometheus/localrules.yaml
+  odf:
+    repository: https://github.com/red-hat-storage/ocs-operator
+    commit: 731e93be48c7b5a2cbe1ee8db2b9974049c45f0b
+    checked: "2026-10-29"
+    files:
+      rules: internal/controller/storagecluster/prometheus/localcephrules.yaml
+
+# Read-only steps. {ns} is openshift-storage on ODF and rook-ceph on Rook; {osd}, {pg} and {mon} come from the input
+# when it names them. `oc` steps become kubectl on plain Kubernetes. `ceph` and `rados` steps run in the Rook toolbox
+# (deploy/rook-ceph-tools), which needs approval because it executes in a container.
+steps:
+  cephcluster-health:
+    run: oc get cephcluster -n {ns} -o jsonpath='{.status.ceph.details}'
+    why: the health codes Rook copies from Ceph into the CephCluster status, without a shell in the toolbox; paste it back here
+  storagecluster:
+    run: oc get storagecluster -n {ns}
+    why: whether the ODF StorageCluster is Ready or reports an error
+    platforms: [openshift]
+  osd-pods:
+    run: oc get pods -n {ns} -l app=rook-ceph-osd -o wide
+    why: which OSD pods are not Running or not Ready, and on which node
+  osd-pod:
+    run: oc describe pod -n {ns} -l ceph-osd-id={osd}
+    why: the state, last state and events of that OSD's pod
+  osd-logs:
+    run: oc logs -n {ns} deploy/rook-ceph-osd-{osd} --tail=200
+    why: why the OSD daemon stopped, restarts or reports its disk
+  osd-pvcs:
+    run: oc get pvc -n {ns}
+    why: the claims behind OSDs and monitors on PVC-based clusters, and whether they are Bound
+  mon-pods:
+    run: oc get pods -n {ns} -l app=rook-ceph-mon -o wide
+    why: which monitor pods are not Running, and on which node
+  mon-logs:
+    run: oc logs -n {ns} deploy/rook-ceph-mon-{mon} --tail=200
+    why: why that monitor is out of quorum or short of space
+  mgr-pods:
+    run: oc get pods -n {ns} -l app=rook-ceph-mgr -o wide
+    why: whether a manager pod is running
+  mgr-logs:
+    run: oc logs -n {ns} -l app=rook-ceph-mgr --tail=200
+    why: manager and module errors
+  mds-pods:
+    run: oc get pods -n {ns} -l app=rook-ceph-mds -o wide
+    why: which metadata server pods are running
+  mds-logs:
+    run: oc logs -n {ns} -l app=rook-ceph-mds --tail=200
+    why: why a metadata server is slow, read-only or failing
+  operator-logs:
+    run: oc logs -n {ns} deploy/rook-ceph-operator --tail=200
+    why: what Rook last did to the cluster and any error it hit
+  events:
+    run: oc get events -n {ns} --sort-by=.lastTimestamp
+    why: recent warnings in the storage namespace (scheduling, mounts, restarts)
+  nodes:
+    run: oc get nodes -o wide
+    why: whether the nodes that run Ceph daemons are Ready
+  node-usage:
+    run: oc adm top node
+    why: CPU and memory pressure on the nodes (needs cluster metrics)
+  health:
+    run: ceph health detail
+    why: every active code with its detail lines (which OSD, placement group or daemon); paste it back here
+  status:
+    run: ceph status
+    why: the overall picture, including recovery progress
+  versions:
+    run: ceph versions
+    why: which Ceph release each kind of daemon runs
+  osd-tree:
+    run: ceph osd tree
+    why: which OSDs are down or out, and where they sit in the CRUSH tree
+  osd-df:
+    run: ceph osd df
+    why: how full each OSD is compared with the nearfull, backfillfull and full ratios
+  df:
+    run: ceph df detail
+    why: usage, quotas and free space per pool
+  osd-dump:
+    run: ceph osd dump
+    why: the cluster flags and the nearfull, backfillfull and full ratios
+  osd-perf:
+    run: ceph osd perf
+    why: commit and apply latency per OSD, to spot a slow device
+  osd-find:
+    run: ceph osd find {osd}
+    why: the host and address of that OSD
+  osd-metadata:
+    run: ceph osd metadata {osd}
+    why: that OSD's host, devices and object store
+  stuck-inactive:
+    run: ceph pg dump_stuck inactive
+    why: placement groups that cannot serve I/O and the OSDs they last used
+  stuck-unclean:
+    run: ceph pg dump_stuck unclean
+    why: placement groups that have not been clean for a while
+  stuck-degraded:
+    run: ceph pg dump_stuck degraded
+    why: placement groups with missing copies
+  pg-query:
+    run: ceph pg {pg} query
+    why: that placement group's peering state, including which OSDs it waits for
+  pg-unfound:
+    run: ceph pg {pg} list_unfound
+    why: the objects that placement group cannot find
+  pgs-inconsistent:
+    run: ceph pg ls inconsistent
+    why: the placement groups a scrub found inconsistent
+  pg-inconsistent:
+    run: rados list-inconsistent-obj {pg} --format=json-pretty
+    why: which objects differ and on which OSD copy
+  pools:
+    run: ceph osd pool ls detail
+    why: each pool's size, min_size, pg_num, flags, quotas and application
+  autoscale:
+    run: ceph osd pool autoscale-status
+    why: the PG autoscaler's view of each pool
+  crash-new:
+    run: ceph crash ls-new
+    why: crashes not yet archived, with the daemon that crashed
+  crash-info:
+    run: ceph crash info <crash-id>
+    why: where a crash happened (the stack and the daemon's version)
+  mon-dump:
+    run: ceph mon dump
+    why: the monitors, their addresses and the election strategy
+  quorum:
+    run: ceph quorum_status
+    why: which monitors are in quorum and which is leader
+  time-sync:
+    run: ceph time-sync-status
+    why: the clock skew each monitor sees
+  fs-status:
+    run: ceph fs status
+    why: each file system's ranks, MDS daemons, standbys and clients
+  fs-dump:
+    run: ceph fs dump
+    why: "the file system map: failed and damaged ranks, flags and max_mds"
+  mds-damage:
+    run: ceph tell mds.<mds-name> damage ls
+    why: the damage table of an active MDS (names come from ceph fs status)
+  devices:
+    run: ceph device ls
+    why: the devices behind each daemon and their predicted life expectancy
+  device-info:
+    run: ceph device info <device-id>
+    why: the health data and prediction for one device
+  mgr-modules:
+    run: ceph mgr module ls
+    why: which manager modules are enabled or failing
+  ec-profiles:
+    run: ceph osd erasure-code-profile ls
+    why: the erasure-code profiles in use
+  config-down-out:
+    run: ceph config get mon mon_osd_down_out_interval
+    why: how long a down OSD waits before Ceph marks it out
+  config-show:
+    run: ceph config show <daemon-name>
+    why: a daemon's running settings, including debug levels
+
+codes:
+  # --- monitors -------------------------------------------------------------------------------------------------
+  - code: DAEMON_OLD_VERSION
+    doc: rados:29
+    src: [healthmon:885]
+    summary: ["There is a daemon running", "There are daemons running"]
+    meaning: Ceph daemons have run more than one Ceph release for longer than the grace period (a week by default).
+    causes:
+      - an upgrade that stopped part way, so some daemons still run the old image
+      - a daemon whose pod did not restart after the image changed
+    fix: Finish the upgrade so every daemon runs one release; find which daemons are behind and why their pods were not updated.
+    steps: [versions, operator-logs]
+    terms: [ceph, upgrade, version, daemons]
+  - code: MON_DOWN
+    doc: rados:43
+    src: [healthmon:934]
+    summary: ["{n}/{n} mons down, quorum"]
+    meaning: One or more monitors are out of quorum; the cluster works while a majority is up, but one more failure can stop it.
+    causes:
+      - the monitor's pod is not running (node down, pod evicted, its PVC or host path unavailable)
+      - the monitor cannot reach the others on the network (ports, firewall, MTU)
+      - the monitor's store is damaged or its disk is full
+    fix: Get the monitor's pod running on a healthy node; it rejoins quorum on its own.
+    escalate: Removing monitors or rebuilding the monitor map to win quorum back can lose the cluster map; if more than one monitor is down or the cluster stops answering, change nothing yourself.
+    steps: [mon-pods, mon-logs, events, nodes, quorum, mon-dump]
+    terms: [ceph, monitor, quorum, mon]
+  - code: MON_CLOCK_SKEW
+    doc: rados:55
+    src: [healthmon:968]
+    summary: ["clock skew detected on"]
+    meaning: The clocks of the nodes that run the monitors disagree by more than Ceph allows.
+    causes:
+      - time sync (chrony or NTP) not running, or configured differently, on those nodes
+      - a node that cannot reach its time servers
+      - a virtual machine whose clock drifts
+    fix: Fix time synchronisation on the monitor nodes so their clocks agree; the warning clears once they do. Raising the allowed drift only hides it.
+    steps: [time-sync, mon-pods, nodes]
+    terms: [ceph, clock, skew, ntp, chrony]
+  - code: MON_MSGR2_NOT_ENABLED
+    doc: rados:77
+    src: [healthmon:991]
+    meaning: At least one monitor does not listen on the msgr2 protocol, so msgr2 features such as on-the-wire encryption are missing on some connections.
+    causes:
+      - a cluster created on an old release that never enabled msgr2
+      - a monitor configured on a non-standard port
+    fix: Enable msgr2 for the monitors; on Rook and ODF the operator manages monitor addresses, so change it through the cluster's configuration, not by editing the monitor map.
+    steps: [mon-dump, operator-logs]
+    terms: [ceph, msgr2, monitor]
+  - code: MON_DISK_LOW
+    doc: rados:100
+    src: [healthmon:662]
+    summary: ["mon{s} {names} {is} low on available space"]
+    meaning: The filesystem that holds a monitor's database has less free space than the warning level (30% by default).
+    causes:
+      - the monitor's PVC or host path is small or shared with other data
+      - the monitor database grew during a long recovery or many map changes
+      - debug logging left on and filling the same filesystem
+    fix: Free space or give the monitor a larger volume, and find out why the database grew before it reaches the critical level.
+    steps: [mon-pods, osd-pvcs, mon-logs]
+    terms: [ceph, monitor, disk, space]
+  - code: MON_DISK_CRIT
+    doc: rados:124
+    src: [healthmon:655]
+    summary: ["mon{s} {names} {is} very low on available space"]
+    meaning: The filesystem that holds a monitor's database has less free space than the critical level (5% by default).
+    causes:
+      - the same causes as MON_DISK_LOW, left unattended
+    fix: Free space now; a monitor that runs out of disk stops, and losing more monitors loses quorum.
+    steps: [mon-pods, osd-pvcs, mon-logs]
+    after: [MON_DISK_BIG]
+    terms: [ceph, monitor, disk, space]
+  - code: MON_DISK_BIG
+    doc: rados:133
+    src: [healthmon:670]
+    summary: ["mon{s} {names} {is} using a lot of disk space"]
+    meaning: A monitor's database is larger than the warning size (15 GiB by default).
+    causes:
+      - placement groups that have not been active+clean for a long time keep old maps alive
+      - a recent large recovery, expansion or topology change
+      - the database not compacting
+    fix: Get the placement groups back to active+clean so the monitors can trim; if it keeps growing on a healthy cluster, collect the monitor logs for support.
+    steps: [mon-pods, mon-logs, stuck-unclean, status]
+    terms: [ceph, monitor, database, size]
+  - code: MON_NETSPLIT
+    doc: rados:162
+    src: [healthmon:1320]
+    meaning: Some monitors cannot reach each other while each still reaches others, a network partition between them.
+    causes:
+      - a partition between zones, racks or sites
+      - a firewall or policy blocking monitor ports between nodes
+      - a flapping link
+    fix: Repair the network path between the monitors or locations the detail lines name.
+    steps: [mon-pods, nodes, quorum, mon-dump]
+    terms: [ceph, monitor, network, partition]
+  - code: MON_COLOCATED
+    doc: rados:202
+    src: [healthmon:845]
+    meaning: Two or more monitors share one IP address, so one host or network failure can take several down (this check is off by default).
+    causes:
+      - monitors on one node with host networking (Rook's allowMultiplePerNode setting allows several per node)
+      - fewer nodes than monitors
+    fix: Spread the monitors over separate nodes.
+    steps: [mon-pods, mon-dump]
+    terms: [ceph, monitor, placement]
+  - code: AUTH_INSECURE_GLOBAL_ID_RECLAIM
+    doc: rados:219
+    src: [healthmon:725]
+    summary: ["client{s} {is} using insecure global_id reclaim"]
+    meaning: Clients or daemons are connected that reclaim their global_id in the old, insecure way, which the cluster still allows.
+    causes:
+      - old Ceph client libraries or kernel clients
+      - clients (CSI drivers, applications) not yet upgraded with the cluster
+    fix: Upgrade the clients the detail lines name; only then turn insecure reclaim off.
+    steps: [health, versions]
+    terms: [ceph, auth, global_id, client]
+  - code: AUTH_INSECURE_GLOBAL_ID_RECLAIM_ALLOWED
+    doc: rados:274
+    src: [healthmon:735]
+    summary: ["mon{s} {is} allowing insecure global_id reclaim"]
+    meaning: The monitors still allow the insecure global_id reclaim (the default), which can be turned off once no client needs it.
+    causes:
+      - the default left in place after upgrading
+    fix: If AUTH_INSECURE_GLOBAL_ID_RECLAIM is not raised as well, no connected client needs it and it can be turned off; otherwise upgrade those clients first.
+    steps: [health]
+    after: [AUTH_INSECURE_GLOBAL_ID_RECLAIM]
+    terms: [ceph, auth, global_id]
+  - code: AUTH_INSECURE_KEYS_CREATABLE
+    doc: rados:313
+    src: [authmon:515]
+    meaning: The monitors allow keys to be created or rotated with insecure ciphers.
+    causes:
+      - the cluster still allows insecure keys for authentication (AUTH_INSECURE_KEYS_ALLOWED)
+    fix: Resolve AUTH_INSECURE_KEYS_ALLOWED first; the Ceph docs say Rook should automate these cipher changes.
+    steps: [health]
+    after: [AUTH_INSECURE_KEYS_ALLOWED]
+    terms: [ceph, auth, cipher, keys]
+  - code: AUTH_INSECURE_SERVICE_TICKETS
+    doc: rados:339
+    src: [authmon:525]
+    meaning: The monitors issue tickets for Ceph daemons with an insecure cipher.
+    causes:
+      - daemons not yet all on a release that supports the secure cipher
+    fix: Switch the ticket cipher only after every daemon is upgraded; the Ceph docs say Rook should automate this.
+    steps: [versions, health]
+    terms: [ceph, auth, cipher, tickets]
+  - code: AUTH_INSECURE_SERVICE_KEY_TYPE
+    doc: rados:372
+    src: [authmon:608]
+    meaning: Some Ceph daemons authenticate with keys of an insecure type.
+    causes:
+      - daemon keys created before secure key types existed
+    fix: Each listed daemon's key has to be rotated and stored where the daemon reads it; the Ceph docs say Rook should automate this, so check the operator before rotating anything by hand.
+    steps: [health, versions, operator-logs]
+    terms: [ceph, auth, keys, daemons]
+  - code: AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
+    doc: rados:415
+    src: [authmon:646]
+    meaning: The rotating service keys that protect client tickets use an insecure cipher.
+    causes:
+      - AUTH_INSECURE_SERVICE_TICKETS not resolved yet
+    fix: Resolve AUTH_INSECURE_SERVICE_TICKETS first; the old rotating keys then expire on their own. Forcing them out early invalidates every client's tickets.
+    steps: [health]
+    after: [AUTH_INSECURE_SERVICE_TICKETS]
+    terms: [ceph, auth, rotating, keys]
+  - code: AUTH_INSECURE_CLIENT_KEY_TYPE
+    doc: rados:479
+    src: [authmon:600]
+    meaning: Some client credentials use an insecure key type.
+    causes:
+      - client keys created before secure key types existed
+      - legacy clients that cannot use the secure type
+    fix: Rotate each listed client's key and update every place that client reads it; the Ceph docs say Rook should automate this. Leave clients that cannot handle the new type until they are upgraded.
+    steps: [health]
+    terms: [ceph, auth, client, keys]
+  - code: AUTH_INSECURE_KEYS_ALLOWED
+    doc: rados:518
+    src: [authmon:503]
+    meaning: The monitors accept authentication with insecure ciphers.
+    causes:
+      - legacy clients still need them
+      - the default on clusters created before secure ciphers existed
+    fix: Remove the insecure cipher only after every daemon, client and the admin key have secure keys; the Ceph docs say Rook should automate this.
+    escalate: Changing the allowed ciphers before every key is secure can lock daemons, clients and administrators out of the cluster.
+    steps: [health, versions]
+    after: [AUTH_INSECURE_SERVICE_KEY_TYPE, AUTH_INSECURE_CLIENT_KEY_TYPE]
+    terms: [ceph, auth, cipher]
+  - code: AUTH_EMERGENCY_CIPHERS_SET
+    doc: rados:610
+    src: [authmon:519]
+    meaning: The monitors run with emergency cipher settings that override the normal ones; this is meant to be temporary.
+    causes:
+      - someone used the emergency setting to regain access after a cipher change
+    fix: Find out why it was needed, restore the normal cipher settings, then remove the emergency one.
+    steps: [health, mon-dump]
+    terms: [ceph, auth, cipher, emergency]
+  # --- managers -------------------------------------------------------------------------------------------------
+  - code: MGR_DOWN
+    doc: rados:635
+    src: [mgrmon:361]
+    summary: ["no active mgr"]
+    meaning: No Ceph manager is running, so metrics, the dashboard and many status commands stop working, though client I/O and recovery continue.
+    causes:
+      - the manager pod is not running (crash, eviction, node down)
+      - the manager cannot authenticate or reach the monitors
+    fix: Get a manager pod running again; alerts built on Ceph metrics are blind until it is back.
+    steps: [mgr-pods, mgr-logs, events, status]
+    terms: [ceph, manager, mgr]
+  - code: MGR_MODULE_DEPENDENCY
+    doc: rados:651
+    src: [pymodreg:464]
+    summary: ["Module {x} has failed dependency:", "{n} mgr modules have failed dependencies"]
+    meaning: An enabled manager module failed its dependency check.
+    causes:
+      - a package the module needs is missing from the image
+      - a module enabled on an image that does not ship what it needs
+    fix: Read the module's message in the detail lines; on Rook and ODF the image is fixed, so a missing dependency usually means the module should not be enabled there.
+    steps: [mgr-modules, mgr-logs]
+    terms: [ceph, manager, module, dependency]
+  - code: MGR_MODULE_ERROR
+    doc: rados:666
+    src: [pymodreg:481]
+    summary: ["Module {x} has failed:", "{n} mgr modules have failed"]
+    meaning: A manager module hit an unexpected error and stopped.
+    causes:
+      - a bug in the module
+      - modules still starting up after a manager failover
+      - an outside service the module talks to failing
+    fix: Read the module's error in the detail lines; restarting the manager pod often clears a passing failure, and a reproducible one is a bug to report.
+    steps: [mgr-pods, mgr-logs, mgr-modules, crash-new]
+    terms: [ceph, manager, module, error]
+  # --- OSDs -----------------------------------------------------------------------------------------------------
+  - code: OSD_DOWN
+    doc: rados:717
+    src: [osdmap:7995]
+    summary: ["{n} osds down"]
+    meaning: One or more OSDs that hold data are down, so their data has fewer copies until they come back.
+    causes:
+      - the OSD's pod is crashing or not scheduled (node down, out of memory, failing probe)
+      - the OSD's disk or its PVC is gone or failing
+      - the OSD cannot reach its peers on the public or cluster network
+    fix: Bring the OSD back by fixing what stopped its pod or node; Ceph then recovers on its own. Replacing an OSD while data is degraded is riskier.
+    steps: [osd-pods, osd-pod, osd-logs, osd-pvcs, nodes, events, osd-tree, osd-metadata]
+    terms: [ceph, osd, down]
+  - code: OSD_HOST_DOWN
+    also: [OSD_CHASSIS_DOWN, OSD_RACK_DOWN, OSD_ROW_DOWN, OSD_PDU_DOWN, OSD_POD_DOWN, OSD_ROOM_DOWN, OSD_DATACENTER_DOWN, OSD_ZONE_DOWN, OSD_REGION_DOWN, OSD_ROOT_DOWN]
+    doc: rados:729
+    section: OSD_<crush type>_DOWN
+    src: [osdmap:7969]
+    summary: ["{n} {crush}{s} ({n} osds) down"]
+    meaning: Every OSD under one CRUSH bucket (a host, rack, zone or other failure domain) is down, usually a whole node or failure domain.
+    causes:
+      - the node is down, NotReady, or was drained
+      - the zone or rack, or its network, is down
+      - a controller or storage network shared by all those OSDs failed
+    fix: Restore the node or failure domain; with one failure domain down a replicated pool usually keeps serving, but a second failure before it is back can stop I/O.
+    steps: [nodes, osd-pods, events, osd-tree]
+    terms: [ceph, osd, host, node, down]
+  - code: OSD_ORPHAN
+    doc: rados:737
+    src: [osdmap:8009]
+    summary: ["{n} osds exist in the crush map but not in the osdmap"]
+    meaning: An OSD is still in the CRUSH map but no longer exists in the OSD map.
+    causes:
+      - an OSD removal that did not finish
+    fix: Finish removing that OSD with the platform's documented OSD removal procedure.
+    steps: [osd-tree, osd-dump, operator-logs]
+    terms: [ceph, osd, crush, orphan]
+  - code: OSD_OUT_OF_ORDER_FULL
+    doc: rados:748
+    src: [osdmap:8078]
+    summary: ["full ratio(s) out of order"]
+    meaning: The nearfull, backfillfull, full and failsafe ratios are not in ascending order, which makes fullness handling unpredictable.
+    causes:
+      - ratios changed by hand
+    fix: Put the ratios back in ascending order (nearfull below backfillfull below full), after finding who changed them.
+    steps: [osd-dump]
+    terms: [ceph, osd, full, ratio]
+  - code: OSD_FULL
+    doc: rados:765
+    src: [osdmap:8094]
+    summary: ["{n} full osd(s)"]
+    meaning: One or more OSDs passed the full ratio, so the cluster stops accepting writes.
+    causes:
+      - the cluster is out of capacity
+      - data placed unevenly, so a few OSDs filled first
+      - OSDs down or out, so the others carry their data
+    fix: Add capacity (more OSDs) so OSDs fall below the full ratio; freeing space through the applications that own the data also helps.
+    escalate: Raising the full ratio or deleting objects directly in Ceph can leave a full cluster unable to recover.
+    steps: [osd-pods, osd-pvcs, osd-df, df, osd-dump]
+    terms: [ceph, osd, full, capacity]
+  - code: OSD_BACKFILLFULL
+    doc: rados:802
+    src: [osdmap:8104]
+    summary: ["{n} backfillfull osd(s)"]
+    meaning: One or more OSDs passed (or would pass) the backfillfull ratio, so data cannot move onto them and rebalancing may not finish.
+    causes:
+      - the cluster is running out of capacity
+      - data placed unevenly
+    fix: Add capacity before OSDs reach full, starting from the fullest OSDs.
+    steps: [osd-df, df]
+    terms: [ceph, osd, backfillfull, capacity]
+  - code: OSD_NEARFULL
+    doc: rados:820
+    src: [osdmap:8115]
+    summary: ["{n} nearfull osd(s)"]
+    meaning: One or more OSDs passed the nearfull ratio, an early warning that the cluster is filling up.
+    causes:
+      - growth of the stored data
+      - data placed unevenly
+      - an OSD out, so the others carry its data
+    fix: "Plan capacity now: add OSDs or free space before OSDs reach backfillfull and full."
+    steps: [osd-df, df]
+    terms: [ceph, osd, nearfull, capacity]
+  - code: OSDMAP_FLAGS
+    doc: rados:835
+    src: [osdmap:8146]
+    summary: ["{flags} flag(s) set"]
+    meaning: Cluster-wide flags are set that change normal behaviour, such as noout, norebalance, noscrub or pause.
+    causes:
+      - maintenance or an upgrade that set the flags and did not clear them
+      - the cluster reached full (the full flag)
+    fix: Find out who set the flags and why, and clear them when the maintenance is over; flags such as noout and norecover stop Ceph from healing itself.
+    steps: [osd-dump, operator-logs]
+    terms: [ceph, osd, flags, noout]
+  - code: OSD_FLAGS
+    doc: rados:862
+    src: [osdmap:8193]
+    summary: ["{n} OSDs or CRUSH nodes/device-classes have one or more of these flags set"]
+    meaning: Flags such as noup, nodown, noin or noout are set on single OSDs, CRUSH buckets or device classes.
+    causes:
+      - maintenance on a node or device class that was not cleaned up
+    fix: Find out why they were set and clear them after the maintenance.
+    steps: [osd-dump, osd-tree]
+    terms: [ceph, osd, flags]
+  - code: OLD_CRUSH_TUNABLES
+    doc: rados:893
+    src: [osdmap:8205]
+    summary: ["crush map has legacy tunables"]
+    meaning: The CRUSH map uses very old tunables.
+    causes:
+      - a cluster created on an old release and never updated
+    fix: Update the tunables in a planned window; it moves data, so plan it with storage support.
+    steps: [versions, health]
+    terms: [ceph, crush, tunables]
+  - code: OLD_CRUSH_STRAW_CALC_VERSION
+    doc: rados:902
+    src: [osdmap:8215]
+    summary: ["crush map has straw_calc_version=0"]
+    meaning: The CRUSH map uses the old way of weighting straw buckets.
+    causes:
+      - a cluster created on an old release
+    fix: Update the setting in a planned window; it can move data.
+    steps: [health]
+    terms: [ceph, crush, straw]
+  - code: CACHE_POOL_NO_HIT_SET
+    doc: rados:911
+    src: [osdmap:8238]
+    summary: ["{n} cache pools are missing hit_sets"]
+    meaning: A cache-tier pool has no hit set, so the tiering agent cannot find cold objects to flush and evict.
+    causes:
+      - a cache tier configured without hit-set settings
+    fix: Configure hit sets on the cache pool.
+    steps: [pools]
+    terms: [ceph, cache, tier, pool]
+  - code: OSD_NO_SORTBITWISE
+    doc: rados:927
+    src: [osdmap:8248]
+    summary: ["'sortbitwise' flag is not set"]
+    meaning: The sortbitwise flag is not set, and OSDs from Luminous on need it to start.
+    causes:
+      - an old cluster upgraded without setting it
+    fix: Set the flag once no pre-Luminous OSD is running.
+    steps: [osd-dump, versions]
+    terms: [ceph, osd, sortbitwise]
+  - code: OSD_FILESTORE
+    doc: rados:940
+    meaning: OSDs use the deprecated Filestore back end; Reef and later releases need BlueStore.
+    causes:
+      - OSDs created before BlueStore became the default
+    fix: Migrate those OSDs to BlueStore, one at a time, before upgrading to Reef or later; plan it with storage support.
+    steps: [osd-metadata, versions]
+    terms: [ceph, osd, filestore, bluestore]
+  - code: OSD_UPGRADE_FINISHED
+    doc: rados:971
+    src: [osdmap:8256]
+    summary: ["all OSDs are running"]
+    meaning: Every running OSD is newer than the cluster's required OSD release, so that gate can be raised but has not been.
+    causes:
+      - the last step of an upgrade not done
+    fix: Finish the upgrade's last step; on Rook and ODF the operator manages upgrades, so check its logs for why it stopped.
+    steps: [versions, operator-logs]
+    terms: [ceph, osd, upgrade, release]
+  - code: OSD_UNREACHABLE
+    doc: rados:986
+    src: [osdmap:8401]
+    summary: ["{n} osds(s) {is} not reachable"]
+    meaning: An OSD's public address is outside the configured public network, so clients can hang on it until a TCP timeout.
+    causes:
+      - a public network setting that does not match the node or Multus network
+      - an OSD that bound to the wrong interface
+    fix: Make the public network setting and the OSDs' addresses agree (on Rook and ODF, the CephCluster network settings).
+    steps: [osd-dump, osd-pods]
+    terms: [ceph, osd, network, address]
+  - code: POOL_FULL
+    doc: rados:996
+    src: [osdmap:8289, pgmap:3138]
+    summary: ["{n} pool(s) full", "{n} pools full"]
+    meaning: A pool reached its quota, or the OSDs it uses are full, so it no longer accepts writes.
+    causes:
+      - the pool's quota (bytes or objects) reached
+      - the OSDs under the pool passed the full ratio
+    fix: For a quota, raise or remove it, or free space in that pool; if the OSDs are full, handle OSD_FULL first.
+    steps: [df, pools]
+    after: [OSD_FULL]
+    terms: [ceph, pool, full, quota]
+  - code: POOL_NEARFULL
+    src: [osdmap:8302]
+    summary: ["{n} pool(s) nearfull"]
+    meaning: Pools are flagged nearfull because the OSDs they use passed the nearfull ratio.
+    causes:
+      - the OSDs under the pool are nearly full
+    fix: Add capacity or free space before the pool stops taking writes; see OSD_NEARFULL.
+    steps: [osd-df, df]
+    after: [OSD_NEARFULL]
+    terms: [ceph, pool, nearfull, capacity]
+  - code: POOL_BACKFILLFULL
+    src: [osdmap:8295]
+    summary: ["{n} pool(s) backfillfull"]
+    meaning: Pools are flagged backfillfull because the OSDs they use passed the backfillfull ratio.
+    causes:
+      - the OSDs under the pool are nearly full
+    fix: Add capacity; see OSD_BACKFILLFULL.
+    steps: [osd-df, df]
+    after: [OSD_BACKFILLFULL]
+    terms: [ceph, pool, backfillfull, capacity]
+  - code: POOL_NEAR_FULL
+    doc: rados:1942
+    src: [pgmap:3144]
+    summary: ["{n} pools nearfull"]
+    meaning: One or more pools are close to their quota.
+    causes:
+      - the pool's quota (bytes or objects) nearly reached
+    fix: Raise the quota or free space in the pool before it fills.
+    steps: [df, pools]
+    terms: [ceph, pool, quota, nearfull]
+  - code: POOL_NO_REDUNDANCY
+    src: [osdmap:8344]
+    summary: ["{n} pool(s) have no replicas configured"]
+    meaning: A pool keeps only one copy of its data, so losing one OSD loses data.
+    causes:
+      - a test setting (size 1) left in place
+    fix: Raise the pool's replica count if the data matters; until then any disk failure loses data in that pool.
+    steps: [pools]
+    terms: [ceph, pool, replicas, size]
+  # --- BlueStore ------------------------------------------------------------------------------------------------
+  - code: BLUEFS_SPILLOVER
+    doc: rados:1019
+    src: [pgmap:3320]
+    summary: ["{n} OSD(s) experiencing BlueFS spillover"]
+    meaning: An OSD's metadata no longer fits on its fast DB device and spilled onto the slower main device, which can slow it down.
+    causes:
+      - a DB device sized too small for the metadata
+    fix: Size DB devices larger for new OSDs; an existing OSD gets more DB space only by redeploying it, one at a time.
+    steps: [osd-metadata, osd-perf]
+    terms: [ceph, bluestore, bluefs, spillover]
+  - code: BLUESTORE_FREE_FRAGMENTATION
+    aliases: [BLUESTORE_FRAGMENTATION]
+    doc: rados:1085
+    section: BLUESTORE_FRAGMENTATION
+    src: [pgmap:3350]
+    summary: ["{n} OSD(s) experiencing high free space fragmentation of BlueStore"]
+    meaning: The free space on an OSD is badly fragmented, which slows allocation.
+    causes:
+      - long-lived OSDs with many small writes and deletes
+    fix: Usually no action; if performance suffers, redeploying the OSD (one at a time) resets its layout.
+    steps: [osd-perf, osd-metadata]
+    terms: [ceph, bluestore, fragmentation]
+  - code: BLUESTORE_LEGACY_STATFS
+    doc: rados:1124
+    src: [pgmap:3324]
+    summary: ["{n} OSD(s) reporting legacy (not per-pool) BlueStore stats"]
+    meaning: Some OSDs were created before Nautilus and report usage without per-pool detail, so per-pool usage can be wrong.
+    causes:
+      - old OSDs
+    fix: Update those OSDs one at a time with the offline repair the Ceph docs describe, or redeploy them; with Rook or ODF plan it with storage support.
+    steps: [osd-metadata, df]
+    terms: [ceph, bluestore, statfs]
+  - code: BLUESTORE_NO_PER_POOL_OMAP
+    doc: rados:1151
+    src: [pgmap:3330]
+    summary: ["{n} OSD(s) reporting legacy (not per-pool) BlueStore omap usage stats"]
+    meaning: Some OSDs were created before Octopus and do not track omap usage per pool, so per-pool omap figures are estimates.
+    causes:
+      - old OSDs
+    fix: Update those OSDs one at a time with the offline repair, or redeploy them; plan it with storage support.
+    steps: [osd-metadata]
+    terms: [ceph, bluestore, omap]
+  - code: BLUESTORE_NO_PER_PG_OMAP
+    doc: rados:1178
+    src: [pgmap:3328]
+    summary: ["{n} OSD(s) reporting legacy (not per-pg) BlueStore omap"]
+    meaning: Some OSDs were created before Pacific and do not track omap per placement group, which makes moving placement groups slower.
+    causes:
+      - old OSDs
+    fix: Update those OSDs one at a time with the offline repair, or redeploy them; plan it with storage support.
+    steps: [osd-metadata]
+    terms: [ceph, bluestore, omap]
+  - code: BLUESTORE_NO_DB_SHARDING
+    doc: rados:1203
+    src: [pgmap:3332]
+    summary: ["{n} OSD(s) not using RocksDB column family sharding"]
+    meaning: Some OSDs keep their RocksDB database unsharded (created before Pacific), which costs cache efficiency and compaction space.
+    causes:
+      - old OSDs
+    fix: Reshard those OSDs one at a time while they are stopped, or redeploy them; plan it with storage support.
+    steps: [osd-metadata]
+    terms: [ceph, bluestore, rocksdb, sharding]
+  - code: BLUESTORE_LEGACY_MIN_ALLOC_SIZE
+    doc: rados:1234
+    src: [pgmap:3334]
+    summary: ["{n} OSD(s) using a BlueStore allocation unit that differs from the current default"]
+    meaning: Some OSDs use an allocation unit that differs from what a new OSD would get, wasting space on small objects or missing alignment.
+    causes:
+      - HDD OSDs created before Pacific (64 KiB allocation unit)
+      - a deliberate setting that the warning does not know about
+    fix: The unit cannot change in place; redeploy affected OSDs one at a time while the cluster is healthy and has room, or accept it if it was chosen on purpose.
+    steps: [osd-metadata]
+    terms: [ceph, bluestore, allocation]
+  - code: BLUESTORE_DISK_SIZE_MISMATCH
+    doc: rados:1283
+    src: [pgmap:3326]
+    summary: ["{n} OSD(s) have dangerous mismatch between BlueStore block device and free list sizes"]
+    meaning: An OSD's recorded device size disagrees with the real device size, which can make it crash later.
+    causes:
+      - a device or PVC resized underneath the OSD
+      - inconsistent OSD metadata
+    fix: The OSD has to be replaced, one at a time and only while the rest of the cluster is healthy.
+    escalate: Replacing an OSD means destroying and re-creating it; doing that while data is degraded, or on more than one OSD at once, can lose data.
+    steps: [osd-metadata, osd-pvcs, osd-tree, status]
+    terms: [ceph, bluestore, disk, size]
+  - code: BLUESTORE_NO_COMPRESSION
+    doc: rados:1308
+    src: [pgmap:3322]
+    summary: ["{n} OSD(s) have broken BlueStore compression"]
+    meaning: An OSD cannot load a BlueStore compression plugin.
+    causes:
+      - an image or package mismatch
+      - an OSD not restarted after an upgrade
+    fix: Make sure the OSD runs a complete image of the expected release and restart it.
+    steps: [versions, osd-logs]
+    terms: [ceph, bluestore, compression]
+  - code: BLUESTORE_SPURIOUS_READ_ERRORS
+    doc: rados:1321
+    src: [pgmap:3336]
+    summary: ["{n} OSD(s) have spurious read errors"]
+    meaning: An OSD had read errors on its main device that succeeded on retry, a sign of a disk, controller or kernel I/O problem.
+    causes:
+      - a failing disk or controller
+      - a kernel or virtual disk I/O path problem
+    fix: Check the device and the node (hardware health, kernel messages, the virtual disk behind it) and plan to replace a failing device.
+    steps: [osd-metadata, devices, osd-logs, nodes]
+    terms: [ceph, bluestore, read, errors, disk]
+  - code: BLOCK_DEVICE_STALLED_READ_ALERT
+    doc: rados:1350
+    src: [pgmap:3340]
+    summary: ["{n} OSD(s) experiencing stalled read in block device of BlueStore"]
+    meaning: Reads on an OSD's main device stalled repeatedly; the drive may be failing or overloaded.
+    causes:
+      - a failing or overloaded drive
+    fix: Investigate the device and plan to replace it if it is failing, one OSD at a time.
+    steps: [osd-metadata, devices, osd-perf, osd-logs]
+    terms: [ceph, bluestore, stalled, read, disk]
+  - code: WAL_DEVICE_STALLED_READ_ALERT
+    doc: rados:1396
+    src: [pgmap:3342]
+    summary: ["{n} OSD(s) experiencing stalled read in wal device of BlueFS"]
+    meaning: Reads on an OSD's WAL device stalled repeatedly; the device may be failing or overloaded.
+    causes:
+      - a failing or overloaded WAL device
+    fix: Investigate the WAL device and plan to replace it if it is failing.
+    steps: [osd-metadata, devices, osd-perf]
+    terms: [ceph, bluestore, stalled, wal]
+  - code: DB_DEVICE_STALLED_READ_ALERT
+    doc: rados:1405
+    src: [pgmap:3346]
+    summary: ["{n} OSD(s) experiencing stalled read in db device of BlueFS"]
+    meaning: Reads on an OSD's DB device stalled repeatedly; the device may be failing or overloaded.
+    causes:
+      - a failing or overloaded DB device
+    fix: Investigate the DB device and plan to replace it if it is failing.
+    steps: [osd-metadata, devices, osd-perf]
+    terms: [ceph, bluestore, stalled, db]
+  - code: BLUESTORE_SLOW_OP_ALERT
+    doc: rados:1414
+    src: [pgmap:3338]
+    summary: ["{n} OSD(s) experiencing slow operations in BlueStore"]
+    meaning: An OSD logged repeated slow BlueStore operations; its drive may be failing or overloaded.
+    causes:
+      - a failing or overloaded drive
+      - heavy load on the node
+    fix: Check the OSD's device and node load, and plan to replace a failing drive.
+    steps: [osd-perf, osd-metadata, osd-logs, node-usage]
+    terms: [ceph, bluestore, slow, disk]
+  # --- device health --------------------------------------------------------------------------------------------
+  - code: DEVICE_HEALTH
+    doc: rados:1460
+    src: [devicehealth:19]
+    summary: ["{n} device(s) expected to fail soon"]
+    meaning: Device health monitoring predicts that one or more OSD devices will fail soon.
+    causes:
+      - a disk wearing out (from its SMART data or an external prediction)
+    fix: "Replace the device in a planned way: let its data move off first, then replace it, one device at a time."
+    steps: [devices, device-info, osd-pods]
+    terms: [ceph, device, health, smart, disk]
+  - code: DEVICE_HEALTH_IN_USE
+    doc: rados:1497
+    src: [devicehealth:20]
+    summary: ["{n} daemon(s) expected to fail soon and still contain data"]
+    meaning: OSDs predicted to fail were marked out but still hold data.
+    causes:
+      - data still moving off them
+      - not enough free space or failure domains to move the data elsewhere
+    fix: Let the data finish moving, or make room for it (capacity, failure domains), before replacing the devices.
+    steps: [devices, osd-df, status]
+    after: [DEVICE_HEALTH]
+    terms: [ceph, device, health, disk]
+  - code: DEVICE_HEALTH_TOOMANY
+    doc: rados:1516
+    src: [devicehealth:21]
+    summary: ["Too many daemons are expected to fail soon"]
+    meaning: So many devices are predicted to fail that marking them all out would leave too few OSDs in.
+    causes:
+      - a batch of disks of the same age or model wearing out together
+    fix: Add OSDs promptly and replace the failing devices one at a time.
+    escalate: Loosening the limits that stop too many OSDs being marked out at once raises the chance of losing data.
+    steps: [devices, osd-tree, osd-df]
+    terms: [ceph, device, health, disk]
+  # --- data health (pools and placement groups) ----------------------------------------------------------------
+  - code: PG_AVAILABILITY
+    doc: rados:1537
+    src: [pgmap:2670]
+    summary: ["Reduced data availability:"]
+    meaning: Some placement groups cannot serve reads or writes (inactive, peering, stale or incomplete), so I/O to that data blocks.
+    causes:
+      - OSDs are down (the usual cause)
+      - placement groups stuck peering because an OSD they need is down
+      - incomplete placement groups after several OSDs failed
+    fix: Bring the down OSDs back; most placement groups become active again on their own.
+    escalate: When placement groups stay incomplete, down or stale, the tempting fixes (declaring OSDs lost, re-creating placement groups, moving them between OSDs by hand) can lose data.
+    steps: [osd-pods, stuck-inactive, pg-query, osd-tree]
+    after: [OSD_DOWN, OSD_HOST_DOWN]
+    terms: [ceph, pg, inactive, availability]
+  - code: PG_DEGRADED
+    doc: rados:1563
+    src: [pgmap:2675]
+    summary: ["Degraded data redundancy:"]
+    meaning: Some data has fewer copies (or erasure-code chunks) than its pool wants, usually while Ceph recovers after an OSD failure.
+    causes:
+      - OSDs down or out
+      - recovery still running, or slow
+      - not enough OSDs or failure domains to place every copy
+    fix: Bring down OSDs back or let recovery finish; if it makes no progress, find which OSDs the placement groups wait for.
+    steps: [osd-pods, stuck-degraded, osd-tree, status]
+    after: [OSD_DOWN, OSD_HOST_DOWN]
+    terms: [ceph, pg, degraded, recovery]
+  - code: PG_RECOVERY_FULL
+    doc: rados:1592
+    src: [pgmap:2690]
+    summary: ["Full OSDs blocking recovery:"]
+    meaning: Recovery is blocked because OSDs passed the full ratio, so some data stays short of copies.
+    causes:
+      - full OSDs (see OSD_FULL)
+    fix: Add capacity so the OSDs drop below the full ratio; recovery then continues.
+    escalate: Raising the full ratio or deleting objects directly to unblock recovery can lose data.
+    steps: [osd-df, df, status]
+    after: [OSD_FULL]
+    terms: [ceph, pg, recovery, full]
+  - code: PG_BACKFILL_FULL
+    doc: rados:1603
+    src: [pgmap:2680]
+    summary: ["Low space hindering backfill"]
+    meaning: Data cannot move (backfill) because the target OSDs passed the backfillfull ratio.
+    causes:
+      - backfillfull OSDs (see OSD_BACKFILLFULL)
+    fix: Add capacity or free space; see OSD_BACKFILLFULL.
+    steps: [osd-df, df, status]
+    after: [OSD_BACKFILLFULL]
+    terms: [ceph, pg, backfill, full]
+  - code: PG_DAMAGED
+    doc: rados:1614
+    src: [pgmap:2685]
+    summary: ["Possible data damage:"]
+    meaning: Scrubbing found inconsistent copies in some placement groups, or a repair of them is running.
+    causes:
+      - a disk returning bad data
+      - an interrupted write or a bug
+      - snapshot trimming errors
+    fix: Find which objects and which OSD copy differ and check that OSD's disk; deciding which copy is right belongs to someone who knows Ceph.
+    escalate: Repairing a placement group copies one version over the others; if the wrong copy wins, data is lost.
+    steps: [pgs-inconsistent, pg-inconsistent, pg-query, osd-logs]
+    after: [OSD_SCRUB_ERRORS]
+    terms: [ceph, pg, inconsistent, scrub, damage]
+  - code: OSD_SCRUB_ERRORS
+    doc: rados:1625
+    src: [pgmap:2743]
+    summary: ["{n} scrub errors"]
+    meaning: Recent scrubs found inconsistencies between copies of objects.
+    causes:
+      - a disk returning bad data
+      - an interrupted write or a bug
+    fix: "Handle it with PG_DAMAGED: find the inconsistent objects and the OSD copy they point at, and check that disk."
+    escalate: Repairing a placement group copies one version over the others; if the wrong copy wins, data is lost.
+    steps: [pgs-inconsistent, pg-inconsistent, osd-logs]
+    terms: [ceph, scrub, errors, inconsistent]
+  - code: OSD_TOO_MANY_REPAIRS
+    doc: rados:1633
+    src: [pgmap:2946]
+    summary: ["Too many repaired reads on {n} OSDs"]
+    meaning: OSDs had to repair more reads than the threshold (10 by default), so a disk may be failing without scrub errors.
+    causes:
+      - a failing disk
+    fix: Check the OSD's device and node, and plan to replace a failing disk.
+    steps: [osd-metadata, devices, osd-logs]
+    terms: [ceph, osd, repairs, disk]
+  - code: LARGE_OMAP_OBJECTS
+    doc: rados:1652
+    src: [pgmap:2771]
+    summary: ["{n} large omap objects"]
+    meaning: Pools hold objects with very large omap (key-value) data, often object storage bucket indexes that need resharding.
+    causes:
+      - an object storage bucket with many objects and no index resharding
+      - an application storing very many keys on one object
+    fix: The cluster log names the object; for object storage bucket indexes, enable or run resharding.
+    steps: [df, pools]
+    terms: [ceph, omap, rgw, bucket, index]
+  - code: CACHE_POOL_NEAR_FULL
+    doc: rados:1673
+    src: [pgmap:2827]
+    summary: ["{n} cache pools at or near target size"]
+    meaning: A cache-tier pool is near its target size, so writes may block while it flushes.
+    causes:
+      - a cache tier too small for the workload
+      - a slow or unavailable base tier
+    fix: Adjust the cache pool's target size or reduce the load.
+    steps: [df, pools]
+    terms: [ceph, cache, tier, pool]
+  - code: TOO_FEW_PGS
+    doc: rados:1693
+    src: [pgmap:2844]
+    summary: ["too few PGs per OSD"]
+    meaning: There are fewer placement groups per OSD than the minimum, which balances data poorly.
+    causes:
+      - data pools not created yet (expected then)
+      - the PG autoscaler off and pg_num too low
+    fix: Let the PG autoscaler manage pg_num, or raise pg_num on the largest pools.
+    steps: [autoscale, pools]
+    terms: [ceph, pg, autoscaler]
+  - code: POOL_PG_NUM_NOT_POWER_OF_TWO
+    doc: rados:1707
+    src: [osdmap:8323]
+    summary: ["{n} pool(s) have non-power-of-two pg_num"]
+    meaning: A pool's pg_num is not a power of two, so some placement groups hold more data than others.
+    causes:
+      - pg_num set by hand
+    fix: Set pg_num to a nearby power of two, or let the autoscaler manage it.
+    steps: [pools, autoscale]
+    terms: [ceph, pg, pool]
+  - code: POOL_TOO_FEW_PGS
+    doc: rados:1730
+    src: [autoscaler:1090]
+    summary: ["{n} pools have too few placement groups"]
+    meaning: The PG autoscaler, in warn mode, suggests more placement groups for a pool given its data.
+    causes:
+      - the pool grew since pg_num was set
+    fix: Turn the autoscaler on for the pool or set pg_num to its recommendation.
+    steps: [autoscale]
+    terms: [ceph, pg, autoscaler]
+  - code: TOO_MANY_PGS
+    doc: rados:1763
+    src: [pgmap:2857]
+    summary: ["too many PGs per OSD"]
+    meaning: There are more placement groups per OSD than the maximum, so new pools, larger pg_num and more replicas are refused.
+    causes:
+      - many pools with large pg_num on few OSDs
+      - OSDs marked out, so fewer OSDs count
+    fix: Add OSDs (or bring out OSDs back in), or reduce placement groups on pools that do not need them.
+    steps: [autoscale, osd-tree, pools]
+    terms: [ceph, pg, osd]
+  - code: POOL_TOO_MANY_PGS
+    doc: rados:1787
+    src: [autoscaler:1099]
+    summary: ["{n} pools have too many placement groups"]
+    meaning: The PG autoscaler, in warn mode, suggests fewer placement groups for a pool given its data.
+    causes:
+      - pg_num set higher than the pool's data needs
+    fix: Turn the autoscaler on for the pool or set pg_num to its recommendation.
+    steps: [autoscale]
+    terms: [ceph, pg, autoscaler]
+  - code: POOL_TARGET_SIZE_BYTES_OVERCOMMITTED
+    doc: rados:1822
+    src: [autoscaler:1131]
+    summary: ["{n} subtrees have overcommitted pool target_size_bytes"]
+    meaning: Pools' expected sizes (target_size_bytes) add up to more than the storage available.
+    causes:
+      - target_size_bytes set too large
+    fix: Lower or clear target_size_bytes on those pools.
+    steps: [autoscale, pools]
+    terms: [ceph, pool, autoscaler, target]
+  - code: POOL_HAS_TARGET_SIZE_BYTES_AND_RATIO
+    doc: rados:1844
+    src: [autoscaler:1139]
+    summary: ["{n} pools have both target_size_bytes and target_size_ratio set"]
+    meaning: A pool sets both target_size_bytes and target_size_ratio, and only the ratio is used.
+    causes:
+      - both settings applied over time
+    fix: Clear one of the two.
+    steps: [autoscale, pools]
+    terms: [ceph, pool, autoscaler, target]
+  - code: TOO_FEW_OSDS
+    doc: rados:1860
+    src: [pgmap:2869]
+    summary: ["OSD count {n} < osd_pool_default_size"]
+    meaning: There are fewer OSDs than the default pool size, so some data cannot get all its copies.
+    causes:
+      - OSDs not created yet, or failed to start
+    fix: Add OSDs; lower the pool size only on test clusters whose data does not matter.
+    steps: [osd-pods, osd-tree]
+    terms: [ceph, osd, pool, size]
+  - code: SMALLER_PGP_NUM
+    doc: rados:1867
+    src: [pgmap:3059]
+    summary: ["{n} pools have pg_num > pgp_num"]
+    meaning: A pool's pgp_num is below its pg_num, so placement groups were split but data placement was not updated.
+    causes:
+      - pg_num raised without pgp_num
+    fix: Raise pgp_num to match pg_num when the data movement it causes is acceptable.
+    steps: [pools]
+    terms: [ceph, pg, pgp]
+  - code: MANY_OBJECTS_PER_PG
+    doc: rados:1885
+    src: [pgmap:3067]
+    summary: ["{n} pools have many more objects per pg than average"]
+    meaning: A pool has many more objects per placement group than the cluster average, usually too few placement groups for its data.
+    causes:
+      - pg_num too low for the pool's data
+    fix: Let the autoscaler manage the pool or raise its pg_num.
+    steps: [autoscale, pools]
+    terms: [ceph, pg, objects]
+  - code: POOL_APP_NOT_ENABLED
+    doc: rados:1903
+    src: [pgmap:3476]
+    summary: ["{n} pool(s) do not have an application enabled"]
+    meaning: A pool is not tagged with the application that uses it (rbd, cephfs or rgw).
+    causes:
+      - a pool created by hand, or by a tool that did not tag it
+    fix: Tag the pool with its application.
+    steps: [pools]
+    terms: [ceph, pool, application]
+  - code: OBJECT_MISPLACED
+    doc: rados:1964
+    src: [pgmap:3161]
+    summary: ["{n}/{n} objects misplaced"]
+    meaning: Some objects are not yet where CRUSH wants them because data is still moving after a change; no copy is at risk.
+    causes:
+      - rebalancing after OSDs were added, removed or reweighted
+    fix: "Usually nothing: let rebalancing finish."
+    steps: [status]
+    terms: [ceph, misplaced, rebalance]
+  - code: OBJECT_UNFOUND
+    doc: rados:1975
+    src: [pgmap:3175]
+    summary: ["{n}/{n} objects unfound"]
+    meaning: Ceph knows a newer copy of some objects should exist but cannot find it on any OSD that is up, so I/O to those objects blocks.
+    causes:
+      - the OSD with the newest copy is down
+      - several OSDs failed one after another
+    fix: Bring back every down OSD, since one of them may hold the missing copy, and check which OSDs the placement group still wants to ask.
+    escalate: Telling Ceph to give up on unfound objects (rolling them back or forgetting them) loses the newest data for good.
+    steps: [osd-pods, pg-unfound, pg-query, osd-tree]
+    after: [OSD_DOWN, OSD_HOST_DOWN]
+    terms: [ceph, unfound, objects, pg]
+  - code: SLOW_OPS
+    doc: rados:1997
+    src: [daemonhealth:23]
+    summary: ["{n} slow ops, oldest one blocked for"]
+    meaning: Requests to OSDs or monitors are taking a long time to complete.
+    causes:
+      - a slow or failing disk
+      - network problems between OSDs
+      - overload from client I/O or recovery
+      - a bug
+    fix: Check the disks, nodes and network of the daemons the detail lines name; slow ops on a single OSD usually point at its device.
+    steps: [osd-perf, osd-tree, osd-logs, node-usage]
+    after: [OSD_SLOW_PING_TIME_BACK, OSD_SLOW_PING_TIME_FRONT, BLUESTORE_SLOW_OP_ALERT, BLOCK_DEVICE_STALLED_READ_ALERT]
+    terms: [ceph, slow, ops, latency]
+  - code: PG_NOT_SCRUBBED
+    doc: rados:2023
+    src: [pgmap:3425]
+    summary: ["{n} pgs not scrubbed in time"]
+    meaning: Some placement groups have not been scrubbed within the expected interval.
+    causes:
+      - scrubs not keeping up (load, a noscrub flag, short scrub windows)
+      - placement groups that are not clean, which are not scrubbed
+    fix: Clear scrub flags left from maintenance and get placement groups clean; scrubbing then catches up.
+    steps: [osd-dump, status]
+    terms: [ceph, scrub, pg]
+  - code: PG_NOT_DEEP_SCRUBBED
+    doc: rados:2046
+    src: [pgmap:3440]
+    summary: ["{n} pgs not deep-scrubbed in time"]
+    meaning: Some placement groups have not been deep-scrubbed within the expected interval.
+    causes:
+      - large placement groups take longer to deep-scrub than the interval allows
+      - a nodeep-scrub flag left set
+      - the interval changed only for OSDs, so monitors and managers still warn against the default
+    fix: Clear scrub flags and check load; if the interval was changed, make monitors and managers use the same value.
+    steps: [osd-dump, status]
+    terms: [ceph, scrub, deep-scrub, pg]
+  - code: PG_SLOW_SNAP_TRIMMING
+    doc: rados:2160
+    src: [pgmap:3525]
+    summary: ["snap trim queue for {n} pg(s) >="]
+    meaning: Snapshot trimming is falling behind; some placement groups' trim queues exceed the warning threshold.
+    causes:
+      - many snapshots deleted at once (for example by a backup tool)
+      - OSDs too loaded to trim
+    fix: Let trimming catch up and spread out snapshot deletions; check OSD load.
+    steps: [osd-perf, status]
+    terms: [ceph, snapshot, trim]
+  # --- stretch mode ---------------------------------------------------------------------------------------------
+  - code: INCORRECT_NUM_BUCKETS_STRETCH_MODE
+    doc: rados:2182
+    src: [osdmap:8373]
+    summary: ["Stretch mode buckets != 2"]
+    meaning: Stretch mode is on, but the number of dividing CRUSH buckets that hold OSDs is not two.
+    causes:
+      - a CRUSH layout changed after stretch mode was enabled
+    fix: Fix the CRUSH layout so exactly two dividing buckets hold OSDs; plan it with storage support.
+    steps: [osd-tree, mon-dump]
+    terms: [ceph, stretch, crush]
+  - code: STRETCH_MODE_BUCKET_WEIGHT_IMBALANCE
+    doc: rados:2193
+    src: [osdmap:8384]
+    summary: ["Stretch mode buckets differ in weight by more than"]
+    meaning: The two halves of a stretch cluster differ in CRUSH weight by more than allowed (10% by default).
+    causes:
+      - more or larger OSDs added on one side
+    fix: Even out the capacity of the two sides.
+    steps: [osd-tree, osd-df]
+    terms: [ceph, stretch, weight]
+  - code: NONEXISTENT_MON_CRUSH_LOC_STRETCH_MODE
+    doc: rados:2209
+    src: [healthmon:1022]
+    summary: ["{n} monitor(s) have nonexistent CRUSH location"]
+    meaning: A monitor's CRUSH location is not in either half of the stretch cluster, which only the tiebreaker monitor may be.
+    causes:
+      - a monitor location set to a bucket that does not exist
+    fix: Correct the monitors' CRUSH locations.
+    steps: [mon-dump, osd-tree]
+    terms: [ceph, stretch, monitor]
+  - code: DEGRADED_STRETCH_MODE
+    src: [osdmap:8362]
+    summary: ["We are missing stretch mode buckets"]
+    meaning: One side of a stretch cluster is gone, and the cluster runs on the other side with relaxed requirements.
+    causes:
+      - a site or zone, or the network between sites, is down
+    fix: Restore the missing site; Ceph recovers and returns to full stretch mode as it comes back.
+    escalate: Forcing recovery or changing stretch settings while a site is out can lose the data written since.
+    steps: [nodes, mon-pods, osd-tree, status]
+    terms: [ceph, stretch, site]
+  - code: RECOVERING_STRETCH_MODE
+    src: [osdmap:8356]
+    summary: ["We are recovering stretch mode buckets"]
+    meaning: The missing side of a stretch cluster is back and data is being recovered to it.
+    causes:
+      - a site returning after an outage
+    fix: Let recovery finish.
+    steps: [status, osd-tree]
+    after: [DEGRADED_STRETCH_MODE]
+    terms: [ceph, stretch, recovery]
+  # --- NVMe-oF gateways -----------------------------------------------------------------------------------------
+  - code: NVMEOF_SINGLE_GATEWAY
+    doc: rados:2226
+    src: [nvmeofmap:1545]
+    meaning: A gateway group has a single NVMe-oF gateway, so it has no failover.
+    causes:
+      - only one gateway deployed in the group
+    fix: Add a second gateway to the group.
+    steps: [health]
+    terms: [ceph, nvmeof, gateway]
+  - code: NVMEOF_GATEWAY_DOWN
+    doc: rados:2236
+    src: [nvmeofmap:1553]
+    meaning: Some NVMe-oF gateways are unavailable.
+    causes:
+      - a gateway daemon crashed or its node is down
+    fix: Check the gateway daemons and their logs.
+    steps: [health, crash-new]
+    terms: [ceph, nvmeof, gateway]
+  - code: NVMEOF_GATEWAY_DELETING
+    doc: rados:2243
+    src: [nvmeofmap:1562]
+    meaning: Gateways are being deleted and wait for their namespaces to move to another load-balancing group.
+    causes:
+      - a gateway removal in progress
+    fix: Usually wait; if it lasts, look at the load-balancing process.
+    steps: [health]
+    terms: [ceph, nvmeof, gateway]
+  # --- miscellaneous --------------------------------------------------------------------------------------------
+  - code: RECENT_CRASH
+    doc: rados:2255
+    src: [crash:139]
+    summary: ["{n} daemons have recently crashed"]
+    meaning: Ceph daemons crashed recently and the crash reports have not been archived.
+    causes:
+      - a daemon hit a bug (an assert)
+      - a failing disk or memory error crashed an OSD
+      - a daemon aborted on a configuration or environment problem
+    fix: Read the crash reports to see which daemon crashed and where; once understood (and reported if it is a bug), archive them so new crashes stand out.
+    steps: [crash-new, crash-info, events]
+    terms: [ceph, crash, daemon]
+  - code: RECENT_MGR_MODULE_CRASH
+    doc: rados:2300
+    src: [crash:147]
+    summary: ["{n} mgr modules have recently crashed"]
+    meaning: A manager module crashed recently; the module may be disabled, while the rest of the manager keeps working.
+    causes:
+      - a bug in the module
+    fix: Read the crash report and report the bug; archive it once understood.
+    steps: [crash-new, crash-info, mgr-modules, mgr-logs]
+    terms: [ceph, manager, module, crash]
+  - code: TELEMETRY_CHANGED
+    doc: rados:2342
+    src: [telemetry:2117]
+    meaning: Telemetry is on, but its report content changed, so reports stop until telemetry is enabled again.
+    causes:
+      - an upgrade changed what the telemetry report contains
+    fix: Review the new report, then turn telemetry on again or off.
+    steps: [mgr-modules]
+    terms: [ceph, telemetry]
+  - code: AUTH_BAD_CAPS
+    doc: rados:2376
+    src: [authmon:589]
+    summary: ["{n} auth entities have invalid capabilities"]
+    meaning: Some auth users have capabilities the monitors cannot parse, so those users may not be allowed to do anything.
+    causes:
+      - capabilities written in a syntax an older release accepted
+      - capability syntax that changed in an upgrade
+    fix: Correct the capabilities of the users the detail lines name; on Rook and ODF most users belong to the operator, so check it first.
+    steps: [health, operator-logs]
+    terms: [ceph, auth, caps]
+  - code: OSD_NO_DOWN_OUT_INTERVAL
+    doc: rados:2406
+    src: [healthmon:696]
+    summary: ["mon{s} {names} {has} mon_osd_down_out_interval set to 0"]
+    meaning: Down OSDs are never marked out automatically, so Ceph does not start healing on its own.
+    causes:
+      - the interval set to zero on purpose for maintenance and not restored
+    fix: Restore a non-zero interval, unless something else marks OSDs out on purpose.
+    steps: [config-down-out]
+    terms: [ceph, osd, down, out, interval]
+  - code: DASHBOARD_DEBUG
+    doc: rados:2425
+    meaning: The dashboard's debug mode is on, so API errors return tracebacks that may expose sensitive details.
+    causes:
+      - debug mode left on after troubleshooting
+    fix: Turn the dashboard's debug mode off in production.
+    steps: [mgr-modules]
+    terms: [ceph, dashboard, debug]
+  - code: HIGH_DEBUG_LEVEL
+    doc: rados:2439
+    src: [daemonhealth:102]
+    meaning: OSDs or monitors log at a debug level at or above the configured threshold, which can fill disks and slow the daemons.
+    causes:
+      - debug logging left on after troubleshooting
+    fix: Lower the debug levels back to their defaults; they also revert on their own after the reset timeout, when one is set.
+    steps: [config-show]
+    terms: [ceph, debug, logging]
+  - code: BLAUM_ROTH_W_IS_NOT_PRIME
+    doc: rados:2467
+    src: [healthmon:1489]
+    summary: ["1 or more EC profiles have a w value"]
+    meaning: An erasure-coded pool uses the blaum_roth technique with a w value where w+1 is not prime, which can corrupt data during recovery.
+    causes:
+      - an erasure-code profile created with that combination
+    fix: Move the data to a new pool with a valid profile before any recovery is needed.
+    escalate: Moving data between pools and retiring the old pool is where data gets lost.
+    steps: [ec-profiles, pools]
+    terms: [ceph, erasure, profile]
+  - code: DEPRECATED_EC_PLUGIN
+    doc: rados:2488
+    src: [healthmon:1498]
+    summary: ["1 or more EC profiles are using a plugin"]
+    meaning: Erasure-code profiles use plugins or techniques that are deprecated and due to be removed.
+    causes:
+      - profiles created with the SHEC or CLAY plugin, or a Jerasure technique other than reed_sol_van
+    fix: Plan to move those pools to supported profiles before upgrading to the release that removes them.
+    steps: [ec-profiles, pools]
+    terms: [ceph, erasure, plugin]
+  # --- CephFS metadata servers ----------------------------------------------------------------------------------
+  - code: MDS_TRIM
+    doc: cephfs:75
+    src: [mdsbeacon:62]
+    summary: ["{n} MDSs behind on trimming"]
+    meaning: A metadata server's journal is longer than it should be because it cannot write metadata back fast enough.
+    causes:
+      - slow RADOS underneath (slow ops, degraded placement groups)
+      - a very busy file system
+      - a bug
+    fix: Look at OSD health and slow ops first; the MDS catches up once RADOS keeps up.
+    steps: [fs-status, mds-logs, osd-perf]
+    after: [SLOW_OPS, MDS_SLOW_METADATA_IO]
+    terms: [cephfs, mds, trim, journal]
+  - code: MDS_CLIENT_LATE_RELEASE
+    also: [MDS_CLIENT_LATE_RELEASE_MANY]
+    aliases: [MDS_HEALTH_CLIENT_LATE_RELEASE, MDS_HEALTH_CLIENT_LATE_RELEASE_MANY]
+    doc: cephfs:90
+    section: MDS_HEALTH_CLIENT_LATE_RELEASE, MDS_HEALTH_CLIENT_LATE_RELEASE_MANY
+    src: [mdsbeacon:64]
+    summary: ["{n} clients failing to respond to capability release", "{n} MDSs have many clients failing to respond to capability release"]
+    meaning: A CephFS client does not give back capabilities (locks) when the MDS asks, so other clients wait.
+    causes:
+      - a hung or very busy client node or pod
+      - an old or buggy kernel client
+    fix: Find the client the detail lines name (its host or pod) and fix or restart it; evicting a client interrupts its applications, so involve its owner.
+    steps: [fs-status, mds-logs]
+    terms: [cephfs, mds, client, capability]
+  - code: MDS_CLIENT_RECALL
+    also: [MDS_CLIENT_RECALL_MANY]
+    aliases: [MDS_HEALTH_CLIENT_RECALL_MANY]
+    doc: cephfs:103
+    section: MDS_CLIENT_RECALL, MDS_HEALTH_CLIENT_RECALL_MANY
+    src: [mdsbeacon:63]
+    summary: ["{n} clients failing to respond to cache pressure", "{n} MDSs have many clients failing to respond to cache pressure"]
+    meaning: A CephFS client does not shrink its cache when the MDS asks, so the MDS cannot stay within its memory limit.
+    causes:
+      - a hung or very busy client
+      - an old or buggy client
+    fix: Find the client the detail lines name and fix or restart it, involving its owner.
+    steps: [fs-status, mds-logs]
+    terms: [cephfs, mds, client, cache]
+  - code: MDS_CLIENT_OLDEST_TID
+    also: [MDS_CLIENT_OLDEST_TID_MANY]
+    doc: cephfs:120
+    section: MDS_CLIENT_OLDEST_TID, MDS_CLIENT_OLDEST_TID_MANY
+    src: [mdsbeacon:67]
+    summary: ["{n} clients failing to advance oldest client/flush tid", "{n} MDSs have clients failing to advance oldest client/flush tid"]
+    meaning: A CephFS client is not reporting which requests have finished, so the MDS keeps their records.
+    causes:
+      - a buggy client
+    fix: Update or restart the client the detail lines name.
+    steps: [fs-status, mds-logs]
+    terms: [cephfs, mds, client]
+  - code: MDS_DAMAGE
+    doc: cephfs:137
+    src: [mdsbeacon:69, mdsmap:544]
+    summary: ["{n} MDSs report damaged metadata", "{n} mds daemon{s} damaged"]
+    meaning: The MDS found corrupt or missing metadata; access to the damaged part returns errors, or a whole rank is marked damaged.
+    causes:
+      - lost or damaged objects in the metadata pool
+      - earlier RADOS problems (unfound objects, inconsistent placement groups)
+    fix: List the damage and fix the RADOS problem underneath first.
+    escalate: The CephFS metadata repair and journal recovery tools can lose files when used wrongly.
+    steps: [fs-status, mds-damage, mds-logs, health]
+    after: [OBJECT_UNFOUND, PG_DAMAGED]
+    terms: [cephfs, mds, damage, metadata]
+  - code: MDS_READ_ONLY
+    aliases: [MDS_HEALTH_READ_ONLY]
+    doc: cephfs:150
+    section: MDS_HEALTH_READ_ONLY
+    src: [mdsbeacon:70]
+    summary: ["{n} MDSs are read only"]
+    meaning: An MDS went read-only, so clients cannot change file system metadata.
+    causes:
+      - a write error to the metadata pool (full OSDs, pool full, RADOS errors)
+      - an administrator forced read-only mode
+    fix: Fix the write problem underneath (fullness, OSDs), then restart the MDS.
+    steps: [fs-status, df, mds-logs]
+    after: [OSD_FULL, POOL_FULL]
+    terms: [cephfs, mds, readonly]
+  - code: MDS_SLOW_REQUEST
+    doc: cephfs:162
+    src: [mdsbeacon:71]
+    summary: ["{n} MDSs report slow requests"]
+    meaning: Client requests to an MDS take longer than the complaint time (30 seconds by default).
+    causes:
+      - slow RADOS underneath (slow ops, degraded placement groups)
+      - an overloaded MDS
+      - a bug
+    fix: Check OSD health and slow ops first, then the MDS's load.
+    steps: [fs-status, osd-perf, mds-pods, mds-logs]
+    after: [MDS_SLOW_METADATA_IO, SLOW_OPS]
+    terms: [cephfs, mds, slow, requests]
+  - code: MDS_SLOW_METADATA_IO
+    doc: cephfs:62
+    section: Daemon-reported health checks
+    src: [mdsbeacon:73]
+    summary: ["{n} MDSs report slow metadata IOs"]
+    meaning: An MDS's own reads and writes to the metadata pool are slow.
+    causes:
+      - slow OSDs behind the metadata pool
+    fix: Look at the OSDs behind the metadata pool (slow ops, disks, network).
+    steps: [osd-perf, fs-status, mds-logs]
+    after: [SLOW_OPS]
+    terms: [cephfs, mds, slow, metadata]
+  - code: MDS_CACHE_OVERSIZED
+    doc: cephfs:176
+    src: [mdsbeacon:72]
+    summary: ["{n} MDSs report oversized cache"]
+    meaning: An MDS cannot trim its cache to its memory limit and may run out of memory.
+    causes:
+      - clients holding many capabilities
+      - a cache limit too small for the workload
+    fix: Find clients that do not release capabilities, and size the MDS memory and cache limit together.
+    steps: [fs-status, mds-pods, node-usage]
+    after: [MDS_CLIENT_RECALL]
+    terms: [cephfs, mds, cache, memory]
+  - code: FS_WITH_FAILED_MDS
+    doc: cephfs:189
+    src: [fsmap:624]
+    summary: ["{n} filesystem{s} {has} a failed mds daemon"]
+    meaning: A file system has a failed MDS rank and no standby to take it over.
+    causes:
+      - MDS pods not running
+      - too few MDS daemons for active plus standby
+    fix: Get the MDS pods running, and keep at least one standby.
+    steps: [fs-status, mds-pods, mds-logs, events]
+    terms: [cephfs, mds, failed, standby]
+  - code: MDS_INSUFFICIENT_STANDBY
+    doc: cephfs:200
+    src: [fsmap:641]
+    summary: ["insufficient standby MDS daemons available"]
+    meaning: Fewer standby MDS daemons are available than the file system wants.
+    causes:
+      - standby MDS pods not running or not scheduled
+      - a wanted standby count higher than the MDS daemons deployed
+    fix: Get the standby MDS pods running, or set the wanted count to what is deployed.
+    steps: [fs-status, mds-pods]
+    terms: [cephfs, mds, standby]
+  - code: FS_DEGRADED
+    doc: cephfs:212
+    src: [mdsmap:557]
+    summary: ["{n} filesystem{s} {is} degraded"]
+    meaning: A file system has ranks that are failed, damaged or not yet active (for example replaying), so clients may pause.
+    causes:
+      - an MDS taking over a rank (usually brief)
+      - MDS pods not running
+      - a damaged rank
+    fix: Usually wait while an MDS takes over; if it lasts, check the MDS pods and any damage.
+    steps: [fs-status, mds-pods, mds-logs]
+    after: [MDS_DAMAGE, FS_WITH_FAILED_MDS]
+    terms: [cephfs, mds, degraded]
+  - code: MDS_UP_LESS_THAN_MAX
+    doc: cephfs:223
+    src: [mdsmap:588]
+    summary: ["{n} filesystem{s} {is} online with fewer MDS than max_mds"]
+    meaning: Fewer MDS ranks are active than max_mds asks for.
+    causes:
+      - MDS pods not running
+      - max_mds higher than the MDS daemons deployed
+    fix: Get more MDS daemons running, or lower max_mds to what is deployed.
+    steps: [fs-status, mds-pods]
+    terms: [cephfs, mds, max_mds]
+  - code: MDS_ALL_DOWN
+    doc: cephfs:234
+    src: [mdsmap:599]
+    summary: ["{n} filesystem{s} {is} offline"]
+    meaning: No MDS rank is active, so the file system is offline.
+    causes:
+      - all MDS pods down
+      - the file system marked down or not joinable
+      - every rank damaged
+    fix: Get the MDS pods running and check for damage; the file system comes back when a rank becomes active.
+    escalate: If MDS pods run but no rank becomes active, the CephFS recovery tools and resetting the file system can lose metadata.
+    steps: [fs-status, fs-dump, mds-pods, mds-logs, events]
+    after: [MDS_DAMAGE]
+    terms: [cephfs, mds, offline]
+  - code: MDS_CLIENTS_LAGGY
+    also: [MDS_CLIENTS_LAGGY_MANY]
+    doc: cephfs:244
+    src: [mdsbeacon:74]
+    summary: ["{n} client(s) laggy due to laggy OSDs"]
+    meaning: Some clients are laggy, and the MDS does not evict them because OSDs are laggy too.
+    causes:
+      - laggy OSDs (network cuts, slow disks)
+    fix: Fix the laggy OSDs (network, disks) first.
+    steps: [osd-perf, osd-tree, fs-status]
+    after: [SLOW_OPS, OSD_SLOW_PING_TIME_BACK, OSD_SLOW_PING_TIME_FRONT]
+    terms: [cephfs, mds, client, laggy]
+  - code: MDS_CLIENTS_BROKEN_ROOTSQUASH
+    doc: cephfs:256
+    src: [mdsbeacon:76]
+    summary: ["{n} MDS report clients with broken root_squash implementation"]
+    meaning: Clients restricted with root_squash run a version with a bug that can lose their changes.
+    causes:
+      - clients older than the fix
+    fix: Upgrade those clients, or stop using root_squash for them until they are upgraded.
+    steps: [fs-status, versions]
+    terms: [cephfs, mds, root_squash, client]
+  - code: MDS_ESTIMATED_REPLAY_TIME
+    doc: cephfs:273
+    src: [mdsbeacon:77]
+    summary: ["{n} estimated journal replay time"]
+    meaning: An MDS is replaying its journal, and this shows the estimated time left.
+    causes:
+      - an MDS restart or takeover with a long journal
+    fix: Usually wait; a replay that never finishes points at a long journal (see MDS_TRIM) or slow RADOS.
+    steps: [fs-status, mds-logs]
+    terms: [cephfs, mds, replay, journal]
+  # --- OSD heartbeats (raised by the monitor, not in the health-checks page) ------------------------------------
+  - code: OSD_SLOW_PING_TIME_BACK
+    src: [pgmap:2993]
+    summary: ["Slow OSD heartbeats on back"]
+    meaning: Heartbeats between OSDs on the cluster (back) network are slow.
+    causes:
+      - a congested or faulty cluster network
+      - an MTU mismatch between nodes
+      - overloaded nodes
+    fix: Check the cluster network between the OSDs the detail lines name.
+    steps: [nodes, node-usage, osd-tree]
+    terms: [ceph, osd, heartbeat, network]
+  - code: OSD_SLOW_PING_TIME_FRONT
+    src: [pgmap:3001]
+    summary: ["Slow OSD heartbeats on front"]
+    meaning: Heartbeats between OSDs on the public (front) network are slow.
+    causes:
+      - a congested or faulty public network
+      - an MTU mismatch between nodes
+      - overloaded nodes
+    fix: Check the public network between the OSDs the detail lines name.
+    steps: [nodes, node-usage, osd-tree]
+    terms: [ceph, osd, heartbeat, network]
+
+alerts:
+  # --- overall state --------------------------------------------------------------------------------------------
+  - alert: CephHealthError
+    rules: [rook:9]
+    how: state
+    note: The cluster has been in HEALTH_ERR for a while; the alert does not say which check, so read the codes first.
+    steps: [cephcluster-health, health]
+  - alert: CephHealthWarning
+    rules: [rook:19]
+    how: state
+    note: The cluster has been in HEALTH_WARN for a while; the alert does not say which check, so read the codes first.
+    steps: [cephcluster-health, health]
+  - alert: CephClusterErrorState
+    rules: [odf:240]
+    how: state
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephClusterErrorState.md
+    note: ODF's storage cluster has been in HEALTH_ERR for more than 10 minutes; the alert does not say which check, so read the codes first.
+    steps: [cephcluster-health, storagecluster, health]
+  - alert: CephClusterWarningState
+    rules: [odf:252]
+    how: state
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephClusterWarningState.md
+    note: ODF's storage cluster has been in HEALTH_WARN for more than 15 minutes; the alert does not say which check, so read the codes first.
+    steps: [cephcluster-health, storagecluster, health]
+  - alert: CephMonHighNumberOfLeaderChanges
+    rules: [odf:102]
+    how: state
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephMonHighNumberOfLeaderChanges.md
+    note: The monitors keep electing a new leader, which points at monitor pods restarting, an unstable network between them, or slow monitor disks.
+    steps: [mon-pods, mon-logs, quorum, time-sync]
+  # --- monitors -------------------------------------------------------------------------------------------------
+  - alert: CephMonDownQuorumAtRisk
+    rules: [rook:30]
+    watches: [MON_DOWN]
+    how: health
+  - alert: CephMonDown
+    rules: [rook:46]
+    watches: [MON_DOWN]
+    how: metric
+  - alert: CephMonQuorumAtRisk
+    rules: [odf:78]
+    watches: [MON_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephMonQuorumAtRisk.md
+    note: ODF's alert text only says to contact support; one more monitor failure loses quorum, so collect the evidence below and involve storage support.
+  - alert: CephMonQuorumLost
+    rules: [odf:90]
+    watches: [MON_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephMonQuorumLost.md
+    note: ODF's alert text only says to contact support; with fewer than two monitor pods running the cluster has no quorum, so collect the evidence below and involve storage support.
+  - alert: CephMonDiskspaceCritical
+    rules: [rook:57]
+    watches: [MON_DISK_CRIT]
+    how: health
+  - alert: CephMonDiskspaceLow
+    rules: [rook:68]
+    watches: [MON_DISK_LOW]
+    how: health
+  - alert: CephMonClockSkew
+    rules: [rook:78]
+    watches: [MON_CLOCK_SKEW]
+    how: health
+  - alert: CephMonVersionMismatch
+    rules: [odf:276]
+    watches: [DAEMON_OLD_VERSION]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephMonVersionMismatch.md
+  # --- managers -------------------------------------------------------------------------------------------------
+  - alert: CephMgrIsAbsent
+    rules: [odf:38]
+    watches: [MGR_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephMgrIsAbsent.md
+    note: Prometheus cannot scrape the Ceph manager, so no Ceph metric (and no other Ceph alert) is current.
+  - alert: CephMgrIsMissingReplicas
+    rules: [odf:50]
+    watches: [MGR_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephMgrIsMissingReplicas.md
+  - alert: CephMgrPrometheusModuleInactive
+    rules: [rook:357]
+    watches: [MGR_DOWN]
+    how: metric
+    note: Prometheus cannot reach the manager's metrics endpoint; either no manager runs or its prometheus module is off.
+  - alert: CephMgrModuleCrash
+    rules: [rook:346]
+    watches: [RECENT_MGR_MODULE_CRASH]
+    how: health
+  # --- OSDs -----------------------------------------------------------------------------------------------------
+  - alert: CephOSDDown
+    rules: [rook:109, odf:190]
+    watches: [OSD_DOWN]
+    how: health
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDDown.md
+  - alert: CephOSDDownHigh
+    rules: [rook:90]
+    watches: [OSD_DOWN]
+    how: metric
+    note: At least 10% of the OSDs are down.
+  - alert: CephOSDHostDown
+    rules: [rook:99]
+    watches: [OSD_HOST_DOWN]
+    how: health
+  - alert: CephNodeDown
+    rules: [odf:116]
+    watches: [OSD_HOST_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephNodeDown.md
+  - alert: CephOSDDiskNotResponding
+    rules: [odf:166]
+    watches: [OSD_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDDiskNotResponding.md
+    note: An OSD is still in the cluster but down; its disk is not responding.
+  - alert: CephOSDDiskUnavailable
+    rules: [odf:178]
+    watches: [OSD_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDDiskUnavailable.md
+    note: An OSD is down and already marked out, so Ceph is moving its data; replacing the device is a documented procedure to plan with storage support.
+  - alert: CephOSDFlapping
+    rules: [rook:221, odf:142]
+    watches: [OSD_DOWN]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDFlapping.md
+    note: An OSD keeps going down and up; look at its pod's restarts and its logs.
+  - alert: CephOSDNearFull
+    rules: [rook:120, odf:154]
+    watches: [OSD_NEARFULL]
+    how: health
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDNearFull.md
+    note: Rook's rule reads OSD_NEARFULL; ODF's rule of the same name fires at 75% use of one OSD.
+  - alert: CephOSDCriticallyFull
+    rules: [odf:130]
+    watches: [OSD_NEARFULL]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDCriticallyFull.md
+    note: One OSD is more than 80% used.
+  - alert: CephOSDFull
+    rules: [rook:131]
+    watches: [OSD_FULL]
+    how: health
+  - alert: CephOSDBackfillFull
+    rules: [rook:142]
+    watches: [OSD_BACKFILLFULL]
+    how: health
+  - alert: CephOSDTooManyRepairs
+    rules: [rook:152]
+    watches: [OSD_TOO_MANY_REPAIRS]
+    how: health
+  - alert: CephOSDTimeoutsPublicNetwork
+    rules: [rook:162]
+    watches: [OSD_SLOW_PING_TIME_FRONT]
+    how: health
+  - alert: CephOSDTimeoutsClusterNetwork
+    rules: [rook:171]
+    watches: [OSD_SLOW_PING_TIME_BACK]
+    how: health
+  - alert: CephOSDInternalDiskSizeMismatch
+    rules: [rook:180]
+    watches: [BLUESTORE_DISK_SIZE_MISMATCH]
+    how: health
+  - alert: CephOSDReadErrors
+    rules: [rook:231]
+    watches: [BLUESTORE_SPURIOUS_READ_ERRORS]
+    how: health
+  - alert: CephOSDSlowOps
+    rules: [odf:202]
+    watches: [SLOW_OPS]
+    how: health
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDSlowOps.md
+  - alert: CephOSDVersionMismatch
+    rules: [odf:264]
+    watches: [DAEMON_OLD_VERSION]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephOSDVersionMismatch.md
+  - alert: CephDeviceFailurePredicted
+    rules: [rook:190]
+    watches: [DEVICE_HEALTH]
+    how: health
+  - alert: CephDeviceFailurePredictionTooHigh
+    rules: [rook:200]
+    watches: [DEVICE_HEALTH_TOOMANY]
+    how: health
+  - alert: CephDeviceFailureRelocationIncomplete
+    rules: [rook:211]
+    watches: [DEVICE_HEALTH_IN_USE]
+    how: health
+  - alert: CephSlowOps
+    rules: [rook:605]
+    watches: [SLOW_OPS]
+    how: health
+  - alert: CephDaemonSlowOps
+    rules: [rook:615]
+    watches: [SLOW_OPS]
+    how: metric
+  - alert: CephDaemonCrash
+    rules: [rook:724]
+    watches: [RECENT_CRASH]
+    how: health
+  # --- placement groups and objects -----------------------------------------------------------------------------
+  - alert: CephPGsInactive
+    rules: [rook:369]
+    watches: [PG_AVAILABILITY]
+    how: metric
+  - alert: CephPGsUnclean
+    rules: [rook:379]
+    watches: [PG_DEGRADED]
+    how: metric
+  - alert: CephPGsDamaged
+    rules: [rook:389]
+    watches: [PG_DAMAGED, OSD_SCRUB_ERRORS]
+    how: health
+  - alert: CephPGRecoveryAtRisk
+    rules: [rook:400]
+    watches: [PG_RECOVERY_FULL]
+    how: health
+  - alert: CephPGUnavailableBlockingIO
+    rules: [rook:411]
+    watches: [PG_AVAILABILITY]
+    expr: [PG_AVAILABILITY, OSD_DOWN]
+    how: health
+    note: The rule fires when PG_AVAILABILITY is raised and OSD_DOWN is not, so no down OSD explains the blocked I/O.
+  - alert: CephPGBackfillAtRisk
+    rules: [rook:422]
+    watches: [PG_BACKFILL_FULL]
+    how: health
+  - alert: CephPGNotScrubbed
+    rules: [rook:433]
+    watches: [PG_NOT_SCRUBBED]
+    how: health
+  - alert: CephPGsHighPerOSD
+    rules: [rook:443]
+    watches: [TOO_MANY_PGS]
+    how: health
+  - alert: CephPGNotDeepScrubbed
+    rules: [rook:453]
+    watches: [PG_NOT_DEEP_SCRUBBED]
+    how: health
+  - alert: CephDataRecoveryTakingTooLong
+    rules: [odf:214]
+    watches: [PG_DEGRADED]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephDataRecoveryTakingTooLong.md
+    note: ODF's alert text only says to contact support; the rule fires while placement groups are undersized, so find what stops recovery before involving storage support.
+  - alert: CephPGRepairTakingTooLong
+    rules: [odf:226]
+    watches: [PG_DAMAGED]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephPgRepairTakingTooLong.md
+    note: ODF's alert text only says to contact support; the rule fires while placement groups are inconsistent, so collect the evidence below and involve storage support.
+  - alert: CephObjectMissing
+    rules: [rook:711]
+    watches: [OBJECT_UNFOUND]
+    how: health
+    note: The rule fires only while every OSD is up, so no down OSD can supply the missing copy.
+  # --- CephFS ---------------------------------------------------------------------------------------------------
+  - alert: CephFilesystemDamaged
+    rules: [rook:269]
+    watches: [MDS_DAMAGE]
+    how: health
+  - alert: CephFilesystemOffline
+    rules: [rook:280]
+    watches: [MDS_ALL_DOWN]
+    how: health
+  - alert: CephFilesystemDegraded
+    rules: [rook:291]
+    watches: [FS_DEGRADED]
+    how: health
+  - alert: CephFilesystemMDSRanksLow
+    rules: [rook:302]
+    watches: [MDS_UP_LESS_THAN_MAX]
+    how: health
+  - alert: CephFilesystemInsufficientStandby
+    rules: [rook:312]
+    watches: [MDS_INSUFFICIENT_STANDBY]
+    how: health
+  - alert: CephFilesystemFailureNoStandby
+    rules: [rook:322]
+    watches: [FS_WITH_FAILED_MDS]
+    how: health
+  - alert: CephFilesystemReadOnly
+    rules: [rook:333]
+    watches: [MDS_READ_ONLY]
+    expr: [MDS_HEALTH_READ_ONLY]
+    how: health
+    note: The rule reads MDS_HEALTH_READ_ONLY, but the MDS reports this condition as MDS_READ_ONLY (src/messages/MMDSBeacon.h at the cited Ceph commit), so the alert may never fire; check the health codes directly.
+  - alert: CephMdsMissingReplicas
+    rules: [odf:64]
+    watches: [MDS_INSUFFICIENT_STANDBY]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephMdsMissingReplicas.md
+    note: Fewer than two metadata servers report in, so there is no active plus standby pair.
+  # --- capacity and pools ---------------------------------------------------------------------------------------
+  - alert: CephClusterNearFull
+    rules: [odf:290]
+    watches: [OSD_NEARFULL]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephClusterNearFull.md
+    note: More than 75% of the cluster's raw capacity is used; ODF's alert says it becomes read-only at 85%.
+  - alert: CephClusterCriticallyFull
+    rules: [odf:302]
+    watches: [OSD_NEARFULL]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephClusterCriticallyFull.md
+    note: More than 80% of the cluster's raw capacity is used; ODF's alert says it becomes read-only at 85%.
+  - alert: CephClusterReadOnly
+    rules: [odf:314]
+    watches: [OSD_FULL]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephClusterReadOnly.md
+    note: At least 85% of the cluster's raw capacity is used, the point where ODF's alert says writes stop.
+  - alert: CephPoolBackfillFull
+    rules: [rook:575]
+    watches: [POOL_BACKFILLFULL]
+    how: health
+  - alert: CephPoolFull
+    rules: [rook:583, odf:340]
+    watches: [POOL_FULL]
+    how: health
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephPoolFull.md
+  - alert: CephPoolNearFull
+    rules: [rook:594, odf:328]
+    watches: [POOL_NEAR_FULL, POOL_NEARFULL]
+    how: health
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephPoolNearFull.md
+    note: Rook's rule reads POOL_NEAR_FULL (a pool near its quota); ODF's rule of the same name reads POOL_NEARFULL (the pool's OSDs nearly full).
+  - alert: CephPoolQuotaBytesNearExhaustion
+    rules: [odf:354]
+    watches: [POOL_NEAR_FULL]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephPoolQuotaBytesNearExhaustion.md
+    note: A pool has used more than 70% of its byte quota.
+  - alert: CephPoolQuotaBytesCriticallyExhausted
+    rules: [odf:366]
+    watches: [POOL_FULL]
+    how: metric
+    runbook: https://github.com/openshift/runbooks/blob/master/alerts/openshift-container-storage-operator/CephPoolQuotaBytesCriticallyExhausted.md
+    note: A pool has used more than 90% of its byte quota.

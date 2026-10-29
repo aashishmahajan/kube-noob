@@ -151,8 +151,9 @@ class DiagnoseIn(_In):
         ...,
         min_length=3,
         max_length=MAX_DIAGNOSE_TEXT,
-        description="Events, `describe` output, logs, CLI errors, status JSON or an Alertmanager webhook payload "
-        "(its alerts are read as text; an `openshift_version` or `version` label gives the version).",
+        description="Events, `describe` output, logs, CLI errors, status JSON, Ceph health output (`ceph health "
+        "detail`, `ceph status`, their JSON or a CephCluster) or an Alertmanager webhook payload (its alerts are read "
+        "as text; an `openshift_version` or `version` label gives the version).",
     )
     platform: PlatformT | None = None
     version: str | None = Field(
@@ -274,8 +275,9 @@ class InsightIn(_In):
         ...,
         min_length=3,
         max_length=MAX_DIAGNOSE_TEXT,
-        description="Anything pasted: events, describe output, logs, an Alertmanager payload, a policy denial, a "
-        "ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.",
+        description="Anything pasted: events, describe output, logs, an Alertmanager payload, Ceph health output "
+        "(ceph health detail or ceph status, text or JSON), a policy denial, a ticket, manifests or a Helm template, a "
+        "build log, a Containerfile, an SBOM or scanner report, or a question.",
     )
     platform: PlatformT | None = None
     version: str | None = Field(None, max_length=20, pattern=r"^\d+\.\d+(\.\d+)?$")

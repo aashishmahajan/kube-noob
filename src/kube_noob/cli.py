@@ -80,6 +80,10 @@ def _print_insight(res: dict[str, Any]) -> None:
             _tprint(f"  {'':15} cause: {f['cause'][:150]}")
         if f.get("fix"):
             _tprint(f"  {'':15} fix: {f['fix'][:150]}")
+        if f.get("escalate"):
+            _tprint(f"  {'':15} escalate: {f['escalate'][:400]}")
+        for c in f.get("diagnosticCommands", [])[:2]:
+            _tprint(f"  {'':15} in the toolbox (needs approval): {c['command']}")
     if res.get("readOnlyNextSteps"):
         _tprint("read-only next steps:")
         for st in res["readOnlyNextSteps"]:
