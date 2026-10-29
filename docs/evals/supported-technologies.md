@@ -16,12 +16,12 @@ is exactly what it carries for that technology:
 
 | Technology | Playbooks | Knowledge documents | Reported issues | Rules and engines |
 |---|---|---|---|---|
-| Kubernetes (upstream, kubectl, kubeadm) | 49 that apply everywhere | 43 (incl. the Helm, RHACS and policy-engine docs), incl. pods, probes, DNS, Services, Ingress, storage, scheduling, RBAC, Pod Security, TLS, kubelet, etcd backup, kubeconfig exec, kubeadm first-day problems, Deployment rollouts, invalid UTF-8 in runtime requests | none (upstream Kubernetes bugs not indexed) | audit rules and strict schemas (Kubernetes 1.35), removed APIs, NetworkPolicy reachability, Pod Security and RBAC denial explainers |
+| Kubernetes (upstream, kubectl, kubeadm) | 49 that apply everywhere | 46 (incl. the Helm, RHACS and policy-engine docs), incl. kubectl output and scripting (jsonpath, custom-columns, `--sort-by`, `--field-selector`, logs, `wait`, `exec`, `diff`), pods, probes, DNS, Services, Ingress, storage, scheduling, RBAC, Pod Security, TLS, kubelet, etcd backup, kubeconfig exec, kubeadm first-day problems, Deployment rollouts, invalid UTF-8 in runtime requests | none (upstream Kubernetes bugs not indexed) | audit rules and strict schemas (Kubernetes 1.35), removed APIs, NetworkPolicy reachability, Pod Security and RBAC denial explainers |
 | OpenShift 4.x | 49 shared + 10 OpenShift-only (SCC, Route 503, ClusterOperator, arbitrary UID, EgressIP, build image quota, CNI not ready, OLM OperatorGroup, image prune registry, CRI-O storage) | 13 OpenShift docs (SCC, Routes, operators, DeploymentConfig, EgressFirewall, EgressIP, arbitrary UID, install and bootstrap, ClusterOperator conditions and stuck updates, etcd quota, pod security label sync, service serving certificates, overview) | 921 bugs from the 4.20-4.22 release notes | SCC, Route and EgressFirewall schemas; must-gather analysis; SCC denial explainer |
 | ROSA HCP and classic | shared + 9 ROSA playbooks (HCP nodes, OCM5011 capacity, OCM5010 subnet tags, ELB service-linked role, user-role not linked, expired rosa token, Karpenter discovery tag and CreateTags) | 5 (ROSA HCP, EFS, egress zero, HCP lifecycle: console, subnet tags, upgrades, break glass, deletion; troubleshooting: install logs, quota, private NLB) | HyperShift bugs within the OpenShift release notes | ROSA HCP self-test cases |
-| Helm 3 | DBG-HELM-LOCK, DBG-HELM-OWNERSHIP, DBG-HELM-REPO-EXISTS, DBG-HELM-REMOVED-API, DBG-HELM-YAML, DBG-IMMUTABLE-SELECTOR | 5 (basics, troubleshooting, values and templates, CLI operations: `--set` syntax, OCI, rollback, three-way merge, paths; chart authoring: `crds/`, hooks, library charts, whitespace, comments) | none | chart audit and generation |
+| Helm 3 | DBG-HELM-LOCK, DBG-HELM-OWNERSHIP, DBG-HELM-REPO-EXISTS, DBG-HELM-REMOVED-API, DBG-HELM-YAML, DBG-IMMUTABLE-SELECTOR | 6 (basics, troubleshooting, values and templates, CLI operations: `--set` syntax, OCI, rollback, three-way merge, paths; chart authoring: `crds/`, hooks, library charts, whitespace, comments; template functions: `range`, `toYaml`, `default`, `required`, `tpl`, `.Files`, `lookup`, subchart values) | none | chart audit and generation |
 | RHACS / StackRox | DBG-STACKROX-ADMISSION + 6 (break glass, webhook failure policy, Scanner registry and CVE data, Collector to Sensor, roxctl image check) | 6 (overview, admission denials, enforcement, policy rules and scope, roxctl in CI, secured cluster troubleshooting) | none (ROX bugs only through a Jira sync) | RHACS policy comparison, scanner-report and image reads |
-| Admission policy engines (Pod Security, VAP, Kyverno, Gatekeeper, SCC) | DBG-PSA, DBG-WEBHOOK, DBG-SCC, DBG-VAP | Pod Security, ValidatingAdmissionPolicy, Kyverno, Gatekeeper, RBAC, SCC, OpenShift pod security sync | none | denial explainers for each engine; generated VAP and Kyverno policies |
+| Admission policy engines (Pod Security, VAP, Kyverno, Gatekeeper, SCC) | DBG-PSA, DBG-WEBHOOK, DBG-SCC, DBG-VAP | Pod Security, ValidatingAdmissionPolicy, Kyverno, Gatekeeper (denials, and Rego in ConstraintTemplates, audit, `spec.match`, ExpansionTemplate, install), RBAC, SCC, OpenShift pod security sync | none | denial explainers for each engine; generated VAP and Kyverno policies |
 | OpenShift Data Foundation, Ceph | storage playbooks (PVC pending, multi-attach, mount) | storage access modes | ODF bugs not indexed | none |
 
 ## How well it answers: measured per technology
@@ -181,6 +181,32 @@ graders who saw the question, the accepted answer and what kube-noob showed:
 Nearly every helpful answer is an OpenShift bug matched in the release notes. Nothing helpful came for ODF/Rook
 storage (0 of 8), Kyverno and Gatekeeper usage (0 of 8), Helm templating (0 of 8), kubectl and YAML how-tos (0 of
 8) or workload debugging (0 of 8). Changes for these are tuned on the train half only and measured on the test half.
+
+### After QA9: documents for the weak technologies (2026-10-29)
+
+Seven documents were drafted from official sources by writers given only train-half topics: Helm template
+functions, Gatekeeper usage, Kyverno usage, Rook-Ceph operations, Rook-Ceph troubleshooting, kubectl output and
+scripting, and Jobs/CronJobs and kustomize. On real posts, related reading that does not answer the question is worse
+than nothing. On the test half (two blinded graders), the Rook-Ceph pair, Jobs and kustomize, and Kyverno usage did
+more harm than good, so they are held back. Helm template functions, Gatekeeper usage and kubectl output ship. The
+132 test rows that decided this are retired.
+
+A second change came from the train half: in a long post, a document's subject words do not count toward the words
+it must share with the post (G103). Two graders scored it 69 and 61 better, 25 and 25 worse.
+
+Two graders compared the shipped change with the previous answers on the 122 changed test rows that decided
+nothing:
+
+| Verdict | Grader A | Grader B |
+|---|---|---|
+| Better | 54 | 53 |
+| Worse | 31 | 27 |
+| Same | 37 | 42 |
+
+Most of the gain is fewer misleading answers: the subject rule removes word-matched sections, and unrelated
+OpenShift bugs drop out. Lexical agreement with accepted answers on the test half did not move (160 and 158 of
+1,178 rows not retired). Rook-Ceph and Kyverno remain the weakest technologies. They come next through a Ceph
+health-code catalogue and a Kyverno migration check, with their documents re-gated on the train half.
 
 ## How these numbers move
 

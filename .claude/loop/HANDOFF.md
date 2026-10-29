@@ -2,7 +2,7 @@
 
 Read this first, then `.claude/loop/STATE.md` (the queue, decisions, verification sources, iteration log) and
 `.claude/commands/build-loop.md` (how one item is built, verified and shipped). This file says what is in flight
-right now; STATE.md says what is done. Updated 2026-10-28 late night (QA8 round 2 committed: triage tuned on a training set, plain-word signals kept only where blinded graders found real posts better, default causes, names in steps; row 20y waits for CI. Next: row 20w remaining ranking items).
+right now; STATE.md says what is done. Updated 2026-10-29 (RT9 red team fixed, QA9 documents measured and partly shipped, 0.6.0 release prep; earlier: QA8 round 2 committed: triage tuned on a training set, plain-word signals kept only where blinded graders found real posts better, default causes, names in steps; row 20y waits for CI. Next: row 20w remaining ranking items).
 
 ## Repository and branch
 
@@ -28,6 +28,16 @@ right now; STATE.md says what is done. Updated 2026-10-28 late night (QA8 round 
   STATE row 15m is `in-progress` until CI is green.
 
 ## In flight (finish these first)
+
+-3. 0.6.0 release fix (owner asked 2026-10-29: tag the code and fix why the plugin release is pending). Root cause:
+   main is 0.5.0 (073fe80, never tagged, so PyPI stops at 0.4.0), the Claude plugin directory follows main and last
+   reviewed v0.2.3, and 86+ commits (including the plugin fixes) are only on this branch. Steps: `python
+   scripts/bump_version.py 0.6.0 "<note>"` on the branch, check.sh, CI green, then a pull request to main. Tag pushes
+   are refused to this session ("Create Public Surface"): the owner tags v0.5.0 at 073fe80 and v0.6.0 after the merge,
+   then presses "Check for new commits" in the plugin portal.
+-2. QA9 held drafts live in /home/claude/kube-noob-local/held-docs (not in the repo): Rook-Ceph operations and
+   troubleshooting, Jobs/kustomize, Kyverno usage. Bring each back only after its `requires` gate is tuned on the
+   train half and blinded graders on the test half find it better more often than worse (CEPH1, POL4 in STATE).
 
 -1. QA8 (row 20y), round 2 committed. Mark done when CI is green on that commit. How to keep tuning triage:
    tune `Cause.when` patterns and playbook signals on `tests/fixtures/triage-train` only

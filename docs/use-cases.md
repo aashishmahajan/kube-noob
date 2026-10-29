@@ -51,7 +51,8 @@ To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It ex
 Not sure what you have? `insight` names it first (events, logs, a denial, manifests, a ticket, a build log, a
 question; several at once), runs every analyser that applies and merges the answer: findings with their source,
 read-only next steps, and what it did not analyse and why. Input with no evidence gets the read-only commands that
-collect some.
+collect some. A document is related reading for a long pasted post only when it shares words with the post beyond
+the name of its subject: every Gatekeeper post says "gatekeeper".
 
 ```bash
 kube-noob insight -f whatever-you-copied.txt

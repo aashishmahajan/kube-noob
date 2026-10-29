@@ -538,6 +538,7 @@ def _containerfile(kit: Any, text: str) -> dict[str, Any] | str:
 # (scripts/eval_questions.py), documents sharing one incidental word answered almost none of them. A one-line question
 # typed to kube-noob needs one shared word that is not everyday English ("why does my pod stay Pending?" -> pending).
 MIN_DOC_TERMS = 2
+LONG_POST = 300  # characters: past a title and a sentence or two, a post repeats its subject's name in passing
 _STOP = frozenset(
     """
     the and for with from that this these those there their they them what when where which while does doing done
@@ -924,6 +925,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         res = budget.run("search", lambda: kit.search(tk.SearchIn(query=query, limit=8)))
         seen: set[str] = set()
         typed = "\n" not in query  # a question typed to kube-noob, not a pasted post
+        long_post = not typed and len(text.strip()) > LONG_POST
         asked = _specific_terms(query, kubernetes_words=typed)
         words = {f for t in tokenize(query) for f in _forms(t)}
         need = MIN_DOC_TERMS
@@ -953,7 +955,11 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
             chunk = store.get(h["chunkId"])
             body = chunk.text if chunk is not None else h.get("text") or ""  # the whole chunk: search results are cut
             shared = asked & _specific_terms(f"{h.get('title') or ''} {body}", kubernetes_words=typed)
-            if len(shared) < need:  # a document that shares one incidental word with a post does not answer it
+            # The first word group a document requires names its subject ("rook", "ceph", "kyverno"): every post
+            # about that subject shares those words, so in a long pasted post they say nothing about which section
+            # answers it (a typed question or a title with one line is short: each of its words counts).
+            subject = set(((getattr(chunk, "extra", None) or {}).get("requires") or [[]])[0]) if long_post else set()
+            if len(shared - subject) < need:  # one incidental shared word does not make a document an answer
                 continue
             if not fits(chunk, words):
                 continue

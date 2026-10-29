@@ -30,7 +30,7 @@ cases:
   - {id: helm-lock, category: helm, kind: search, query: "helm upgrade failed another operation install upgrade rollback is in progress", expect: [helm-troubleshooting]}
   - {id: helm-rollback, category: helm, kind: search, query: "how to roll back a Helm release to a previous revision", expect: [helm, helm-troubleshooting]}
   - {id: helm-4-vs-3, category: helm, kind: search, query: "Helm 4 vs Helm 3 differences", expect: [helm]}
-  - {id: helm-lookup, category: helm, kind: search, query: "helm lookup function returns empty during helm template", expect: [helm-troubleshooting, helm]}
+  - {id: helm-lookup, category: helm, kind: search, query: "helm lookup function returns empty during helm template", expect: [helm-troubleshooting, helm, helm-template-functions]}
   - {id: helm-values, category: helm, kind: search, query: "values precedence --set versus -f values file", expect: [helm-templates-values, helm-troubleshooting, helm]}
   - {id: dx-helm-lock, category: helm, kind: diagnose, text: "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress", expect: DBG-HELM-LOCK}
   - {id: dx-helm-kind, category: helm, kind: diagnose, text: "Error: INSTALLATION FAILED: unable to build kubernetes objects from release manifest: resource mapping not found for name: \"x\" namespace: \"\" from \"\": no matches for kind \"PodSecurityPolicy\" in version \"policy/v1beta1\"", expect: DBG-NO-MATCHES-KIND}

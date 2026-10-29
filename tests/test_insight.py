@@ -300,3 +300,26 @@ def test_cli_text_json_file_and_capture(tmp_path: Path, capsys: pytest.CaptureFi
     assert main(["insight", " "]) == 2
     assert main(["insight", "-f", str(tmp_path / "missing.txt")]) == 2
     assert main(["insight", "why does my pod stay Pending?", "--version", "4.20; ls"]) == 4  # invalid input
+
+
+def test_a_long_pasted_post_needs_more_than_the_documents_subject_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every Gatekeeper post shares "gatekeeper" and "rego" with every Gatekeeper section: in a long pasted post those
+    words say nothing about which section answers it (two blinded graders on the community train half: 69 and 61
+    answers better, 25 worse). A typed question, or a title with a line or two, is short, and each word counts."""
+    kit = tk.Toolkit(load_settings(overrides={"dataDir": str(tmp_path), "learningEnabled": False}))
+
+    def gatekeeper_docs(text: str) -> list[str]:
+        out = kit.insight(tk.InsightIn(text=text))["findings"]
+        return [str(f["id"]) for f in out if f["source"] == "doc" and str(f["id"]).startswith("kn:gatekeeper-")]
+
+    post = (
+        "OPA Gatekeeper for a small team\nWe are thinking about OPA Gatekeeper with Rego for a small team. Is it "
+        "worth learning Rego?"
+    )
+    assert len(post) <= ins.LONG_POST and gatekeeper_docs(post)  # short: "gatekeeper" and "rego" count
+    monkeypatch.setattr(ins, "LONG_POST", 0)  # the same words in a long post: only the subject's name is shared
+    assert gatekeeper_docs(post) == []
+    typed = "How do I make a Gatekeeper constraint apply to Deployments, not only Pods?"
+    assert gatekeeper_docs(typed)

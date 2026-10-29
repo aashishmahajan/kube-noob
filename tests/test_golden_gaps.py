@@ -344,7 +344,7 @@ def test_helm_releases_missing_after_helm_2_point_at_namespaces(kit: tk.Toolkit)
     # document, and the namespace note was one bullet among command changes. Helm 3 keeps releases per namespace
     # (helm-www e5a4c62 faq/changes_since_helm2.md "Release Names are now scoped to the Namespace").
     text = "Since we moved from Helm 2 to Helm 3, helm list is empty although the apps still run. Where did they go?"
-    assert _top(kit, text)[:1] == ["kn:helm-templates-values#6"]  # "helm list shows few or no releases"
+    assert _top(kit, text)[:1] == ["kn:helm-templates-values#6"]  # "helm list is empty or shows few releases"
 
 
 def test_a_comment_inside_a_code_block_is_not_a_heading() -> None:

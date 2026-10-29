@@ -41,7 +41,9 @@ The built-in knowledge docs (`src/kube_noob/data/knowledge/`) are original text 
 Kubernetes documentation (CC BY 4.0, (c) The Kubernetes Authors), Red Hat OpenShift / ROSA documentation
 (docs.redhat.com, CC BY-SA 3.0; source repository openshift/openshift-docs, Apache-2.0), Red Hat Cloud Experts
 (rh-mobb/documentation, Apache-2.0), openshift/hypershift and openshift/rosa (Apache-2.0), Helm documentation
-(helm/helm-www, MIT, (c) 2017 Microsoft Corporation), and stackrox/stackrox (Apache-2.0).
+(helm/helm-www, MIT, (c) 2017 Microsoft Corporation), stackrox/stackrox (Apache-2.0), Kyverno documentation and
+policy library (kyverno/website and kyverno/policies, Apache-2.0), OPA Gatekeeper and Open Policy Agent documentation
+(open-policy-agent/gatekeeper and open-policy-agent/opa, Apache-2.0), and Rook documentation (rook/rook, Apache-2.0).
 
 ## Corpus sources (downloaded by the user / CI, not bundled)
 

@@ -315,9 +315,7 @@
   source: {}
   outOfScope: true
   platform: rosa-hcp
-  status: miss
-  gap: 'abstain: kn:rosa-troubleshooting#0 (ROSA install log and quota check) should not have fired on an app-level localhost
-    connection error'
+  status: abstain
 - id: rosa-020
   technology: rosa-hcp
   kind: out-of-scope

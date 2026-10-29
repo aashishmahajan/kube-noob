@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- New documents for the weakest technologies in the owner's by-technology file, written from each project's own
+  docs by writers that never saw the test half, every claim checked against the cited lines: Helm template functions
+  (`range`, `toYaml` and `nindent`, `default` and `required`, `tpl`, `.Files`, `lookup`, subchart values), Gatekeeper
+  usage (Rego in ConstraintTemplates, audit results, `spec.match`, ExpansionTemplate for workloads, install on
+  OpenShift) and kubectl output and scripting (jsonpath, custom-columns, `--sort-by`, `--field-selector`, logs, `wait`,
+  `exec`, `diff`). Four more drafts are held back because blinded graders on real posts found them worse more often
+  than better: Rook-Ceph operations, Rook-Ceph troubleshooting, Jobs/CronJobs and kustomize, and Kyverno usage. In a
+  long pasted post (over 300 characters), the words that name a document's subject ("gatekeeper", "rego", "helm",
+  "chart") no longer count toward the words the document must share with the post, because every post about that
+  subject shares them. A typed question or a short post still counts every word. Measured on the owner's two answered
+  files with two blinded graders per row:
+  - the subject rule on the train half: 69 and 61 answers better, 25 and 25 worse;
+  - the shipped change against the previous answers on the test half, every changed row not used for a decision
+    (122): 54 and 53 better, 31 and 27 worse. The 132 test rows that decided which drafts ship are retired.
+  - Reported-issue answers fell from 523 to 515, because the new documents explain words that had looked rare.
+  - Golden: unchanged in scope (89 of 96); out of scope 22 of 23 (rosa-019 now abstains).
 - Red team of the 0.6.0 candidate (an independent agent that built and installed the wheel): no high findings, two
   medium, three low, all fixed. A must-gather namespace with a trailing newline (`"shop\n"`) passed the name check,
   because Python's `$` also matches before a final newline, and split a printed read-only step into two shell lines

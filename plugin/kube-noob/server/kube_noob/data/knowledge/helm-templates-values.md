@@ -74,7 +74,7 @@ installed; `helm get values <release>` shows the values a release was installed 
 - `--create-namespace` creates a missing namespace on install.
 - `helm search repo <name> --versions` lists every version of a chart in the repositories you added.
 
-## `helm list` shows few or no releases: releases live in a namespace
+## `helm list` is empty or shows few releases: releases live in a namespace
 
 Helm 2 kept every release in Tiller's namespace. Helm 3 stores each release in the namespace of the release itself,
 and `helm list` shows only the releases in your current namespace (the one `kubectl config view --minify` shows).
