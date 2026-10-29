@@ -11,8 +11,24 @@
   ones; a render stops if a brand font did not load. The walkthrough, its thumbnail and the three animated videos use
   them, end on the brand end card with kube-noob.com, and say "Get it at kube-noob dot com" instead of "link below".
 - Animated videos: the mascot rests clear of the terminal, captions are never drawn under a window, and
-  `capture.js --check` fails a video whose frames break either rule. The walkthrough capture gets `--stills`,
-  lossless PNG frames by default and an output file that appears only when the encode succeeded.
+  `capture.js --check` fails a video whose frames break either rule. The walkthrough capture gets `--stills`; both
+  captures write an output file only when the encode succeeded, from JPEG quality 100 frames (51.8 dB PSNR against
+  lossless PNG frames after the CRF 16 encode, three times faster in 4K; `--frames png` for lossless).
+- Video numbers come from the code: `demos/video/facts.py` fills every count, score and line number in the scripts
+  when a video is built, and records the terminal lines (the CLI audit, Claude's audit and fix tool calls, the
+  sidecar session from the CI transcript). The published videos had drifted: 23 MCP tools and a 68 MiB peak in the
+  sidecar video (0.6.0: 41 tools, 92 MiB), findings at lines 21, 23, 24 in the Claude video (23, 25, 26), "sixty
+  rules" (61), "61 real questions" (63), "4 safe fixes" (5). `tests/test_video_facts.py` fails a script that types a
+  number, names a rule the audit does not find, or uses a fact that does not exist.
+- `videos.json` is checked against `demos/video/stage/videos.schema.json` before any voice is spoken.
+- Sound: every mix is normalised to the brand loudness before encoding (one linear gain, plus an oversampled
+  true-peak limiter only when the gain needs it; the single loudnorm pass had left the teaser at -17.6 LUFS), and
+  each finished video is measured (`demos/video/loudness.py`): -16 LUFS within 0.5 LU, true peak at most -1.5 dBTP,
+  audio as long as the picture, or the build fails.
+- Captions: every video gets a WebVTT file from its voice-over timings (two lines of 42 characters, timed to the
+  voice), for the website, YouTube and LinkedIn. The walkthrough render also writes `youtube-description.txt` with
+  its numbers filled and the chapters at the real scene times (the script's had drifted by up to 8 seconds); its end
+  card now lasts 12 seconds, long enough to be a YouTube chapter and carry an end screen.
 - `tests/test_guidance.py` checks rows G100 and later too (it matched only two-digit ids).
 
 ## 0.6.0 - 2026-10-29

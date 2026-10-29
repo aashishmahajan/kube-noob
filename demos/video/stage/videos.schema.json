@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kube-noob.com/schemas/videos.schema.json",
+  "title": "kube-noob animated video scripts (demos/video/stage/videos.json)",
+  "description": "Checked by voiceover.py before any voice is spoken or frame rendered. Scene kinds are the scene functions in stage.html (KINDS); tests/test_video_facts.py keeps the two lists equal.",
+  "type": "object",
+  "required": ["videos"],
+  "additionalProperties": false,
+  "properties": {
+    "_comment": { "type": "string" },
+    "videos": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/video" }
+    }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 400 },
+    "line": { "type": "string", "maxLength": 300 },
+    "video": {
+      "type": "object",
+      "required": ["title", "cta", "scenes"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 3, "maxLength": 80, "not": { "pattern": "\\(\\d+ s\\)" } },
+        "cta": { "$ref": "#/$defs/text" },
+        "scenes": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/scene" },
+          "contains": { "properties": { "kind": { "const": "end" } } },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "required": ["kind", "min"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": ["alarm", "dust", "arrive", "split", "install", "pod", "loopback", "lock", "sidecarTerm", "gauge",
+            "pullback", "desk", "beam", "mcpTerm", "explain", "local", "cta", "end"]
+        },
+        "min": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 },
+        "caption": { "$ref": "#/$defs/text" },
+        "captionPos": { "enum": ["center", "top", "lower"] },
+        "captionMono": { "type": "boolean" },
+        "capAt": { "type": "number", "minimum": 0 },
+        "vo": { "$ref": "#/$defs/text", "not": { "pattern": "(?i)link below" } },
+        "say": { "$ref": "#/$defs/text", "not": { "pattern": "(?i)link below" } },
+        "term": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/line" } },
+        "bubble": { "$ref": "#/$defs/text" },
+        "answer": { "type": "array", "minItems": 2, "maxItems": 6, "items": { "$ref": "#/$defs/text" } },
+        "gauge": {
+          "type": "object",
+          "required": ["value", "limit", "unit"],
+          "additionalProperties": false,
+          "properties": {
+            "value": { "type": "string" },
+            "limit": { "type": "string" },
+            "unit": { "enum": ["MiB"] }
+          }
+        }
+      },
+      "dependentRequired": { "say": ["vo"] },
+      "allOf": [
+        { "if": { "properties": { "kind": { "enum": ["alarm", "dust", "install", "sidecarTerm", "mcpTerm", "cta"] } } },
+          "then": { "required": ["term"] } },
+        { "if": { "properties": { "kind": { "const": "desk" } } }, "then": { "required": ["bubble"] } },
+        { "if": { "properties": { "kind": { "const": "explain" } } }, "then": { "required": ["answer"] } },
+        { "if": { "properties": { "kind": { "const": "gauge" } } }, "then": { "required": ["gauge"] } },
+        { "if": { "properties": { "kind": { "const": "end" } } },
+          "then": { "not": { "anyOf": [{ "required": ["vo"] }, { "required": ["caption"] }] } } }
+      ]
+    }
+  }
+}

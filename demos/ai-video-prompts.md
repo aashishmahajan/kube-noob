@@ -12,10 +12,14 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
   `kube-noob-walkthrough.mp4`, `kube-noob-mcp.mp4` or `kube-noob-sidecar.mp4` (`demos/video/render.sh`).
 - **No real logos or people.** Do not ask for the Kubernetes, OpenShift, Red Hat, AWS or Anthropic logos, or for a
   real person's likeness. The prompts use generic shapes instead (pods and clusters are "glowing cubes").
-- **Brand look:** deep navy background (#0b1020), green for safe actions (#4ade80), red for destructive ones
-  (#f87171), the rocket mascot from `docs/brand/kube-noob-icon.svg` (upload it as a reference image where the tool
-  allows).
-- **Format:** 16:9, 1920x1080, 24 or 30 fps; for LinkedIn and Shorts, also render 1:1 or 9:16 crops.
+- **Brand look** ([docs/brand/BRAND.md](../docs/brand/BRAND.md)): deep navy background (#050B17 to the brand navy
+  #0E2A47), the brand green #43E97B for safe actions, the status red #F87171 only for a destructive command, Inter
+  and JetBrains Mono, the rocket mascot from `docs/brand/kube-noob-icon.svg` (upload it as a reference image where
+  the tool allows) resting clear of windows and captions, and the end card with kube-noob.com.
+- **Format:** 16:9, 3840x2160 master (1920x1080 for the web), 30 fps. Square (1:1) and vertical (9:16) cuts need
+  their own layout, not a crop of the 16:9 frame.
+- **Numbers:** in braces, filled from the code (`python demos/video/facts.py fill demos/ai-video-prompts.md`); the
+  sidecar's come from the transcript recorded on a kind cluster in CI.
 
 ## Video 1: launch teaser (30 seconds)
 
@@ -35,7 +39,7 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 | 2 | 10 s | A short glowing cable loops between the two containers inside the pod only. Outside the pod, other glowing cubes try to reach the rocket and bounce off a transparent shield. | 127.0.0.1 only | It listens on 127.0.0.1, so only containers in that pod can call it. |
 | 3 | 10 s | The pod's outer wall shows a single small door marked with a padlock; arrows to the outside world fade out before reaching it. | No egress. No token to manage. | It needs no network access at all, and there's no Service, Route or token to manage. |
 | 4 | 12 s | Blank glowing terminal window over the isometric scene (overlay the real `kube-noob-sidecar.mp4` segment: audit, rollout, MCP calls, closed port). | Pod Security restricted | We deploy it on a cluster that enforces Pod Security restricted. The app asks it to audit a Deployment and diagnose a crash, over loopback. |
-| 5 | 8 s | A small gauge on the rocket's container settles at a low level, green. | 68 MiB peak · 256 MiB limit | In our test cluster it peaked at sixty-eight mebibytes, well under its limit. |
+| 5 | 8 s | A small gauge on the rocket's container settles at a low level, green. | {sidecar.peak} MiB peak · {sidecar.limit} MiB limit | In our test cluster it peaked at {sidecar.peak} mebibytes, well under its limit. |
 | 6 | 12 s | Pull back to show many pods on the grid, each with a tiny rocket beside its app. | deploy/sidecar/app-with-kube-noob-sidecar.yaml | One example manifest, audited for OpenShift 4.20 and later. Get it at kube-noob dot com. |
 
 ## Video 3: kube-noob as tools for Claude (MCP, 60 seconds)
@@ -44,6 +48,6 @@ all three locally with `demos/video/stage/build.sh` (same scenes and voice-over,
 |---|---|---|---|---|
 | 1 | 8 s | A laptop on a desk at night, a code editor glowing; a speech bubble rises from the screen. Warm desk lamp, navy room. | Ask in your own words | Paste a Deployment into Claude and ask what's wrong for OpenShift 4.22. |
 | 2 | 12 s | From the laptop, a thin beam goes to the rocket mascot sitting on the desk next to the laptop (not in the cloud). The rocket flips through a thick rulebook. | Runs on your machine | The kube-noob plugin runs on your machine. Claude calls its tools: audit, fix, diagnose. |
-| 3 | 15 s | Blank glowing terminal window (overlay the real `kube-noob-mcp.mp4` segment: tool calls and the score). | 37/100 · 3 high findings | kube-noob checks the YAML against sixty rules and returns findings with line numbers and fixes. Same answer every time. |
+| 3 | 15 s | Blank glowing terminal window (overlay the real `kube-noob-mcp.mp4` segment: tool calls and the score). | {audit.score}/100 · {audit.high} high findings | kube-noob checks the YAML against {rules} rules and returns findings with line numbers and fixes. Same answer every time. |
 | 4 | 15 s | The speech bubble fills with neat green check marks while the rulebook closes. | Claude explains. kube-noob checks. | Claude explains the result in plain language and cites the rule ids. |
 | 5 | 10 s | The laptop's network icon stays dim while the rocket works; a tiny label reads "local". | No AI inside kube-noob | There's no model inside kube-noob, and it makes no network calls of its own. |

@@ -1,0 +1,56 @@
+
+# Audit the sidecar example for OpenShift 4.20 before deploying it
+$ kube-noob audit -f deploy/sidecar/app-with-kube-noob-sidecar.yaml --platform openshift --version 4.20 --fail-on medium
+kube-noob audit | platform=openshift k8s=1.33 | score=100.0 | 
+
+# A namespace that enforces Pod Security 'restricted'
+$ kubectl create namespace team-tools && kubectl label namespace team-tools pod-security.kubernetes.io/enforce=restricted
+namespace/team-tools created
+namespace/team-tools labeled
+
+# Deploy the app with kube-noob as a sidecar
+$ kubectl apply -f /tmp/sidecar-kind.yaml
+serviceaccount/assistant created
+service/assistant created
+deployment.apps/assistant created
+poddisruptionbudget.policy/assistant created
+networkpolicy.networking.k8s.io/assistant created
+
+# Both containers start under the restricted policy
+$ kubectl -n team-tools rollout status deploy/assistant --timeout=180s && kubectl -n team-tools get pods
+Waiting for deployment "assistant" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "assistant" rollout to finish: 1 of 2 updated replicas are available...
+deployment "assistant" successfully rolled out
+NAME                        READY   STATUS    RESTARTS   AGE
+assistant-8979fcdc7-r44dw   2/2     Running   0          12s
+assistant-8979fcdc7-wwkc8   2/2     Running   0          12s
+
+# The app calls kube-noob on 127.0.0.1 inside its own pod: audit, diagnose, cited search
+$ kubectl -n team-tools exec -i deploy/assistant -c assistant -- python3 - < scripts/sidecar_client.py
+connected to kube_noob_mcp 0.6.0 at http://127.0.0.1:8080/mcp: 41 tools
+audit: score 41.0/100, high=3 medium=6
+  [HIGH] KN-S002: Container 'api' explicitly allows privilege escalation.
+  [HIGH] KN-S004: Container 'api' sets runAsUser: 1000; restricted-v2 will reject IDs outside the namespace range.
+  [HIGH] KN-S013: Container 'api' sets DB_PASSWORD as a literal value.
+diagnose: DBG-OOM - Container killed for exceeding memory (OOMKilled / exit 137)
+  read-only first: oc describe pod api-7d9f -n <namespace>
+  read-only first: oc adm top pod api-7d9f -n <namespace> --containers
+cited: [kn:ocp-scc#1] SecurityContextConstraints (SCC) on OpenShift > restricted-v2 (default for authenticated users on new 4.11+ clusters)
+cited: [kn:openshift#4] OpenShift Container Platform - what it adds on top of Kubernetes > Security defaults
+posture: web off, cluster off, model none
+
+# Nothing outside the pod can reach it: port 8080 on the pod IP is closed
+$ kubectl -n team-tools exec deploy/assistant -c assistant -- python3 -c "import socket; ip=socket.gethostbyname(socket.gethostname()); s=socket.socket(); r=s.connect_ex((ip, 8080)); print('pod IP', ip, 'port 8080:', 'closed (listens on 127.0.0.1 only)' if r else 'OPEN'); raise SystemExit(0 if r else 1)"
+pod IP 10.244.0.16 port 8080: closed (listens on 127.0.0.1 only)
+
+# Memory used by the kube-noob container after those calls
+$ kubectl -n team-tools exec deploy/assistant -c kube-noob -- python3 -c "import pathlib as p; f=lambda n: int(p.Path('/sys/fs/cgroup', n).read_text()) // 2**20 if p.Path('/sys/fs/cgroup', n).exists() else None; print('current', f('memory.current'), 'MiB; peak', f('memory.peak'), 'MiB; limit 256 MiB')"
+current 92 MiB; peak 92 MiB; limit 256 MiB
+
+# kube-noob runs as non-root with a read-only root filesystem
+$ kubectl -n team-tools exec deploy/assistant -c kube-noob -- python3 -c "import os; print('uid', os.getuid(), '- root filesystem writable:', os.access('/', os.W_OK))"
+uid 1001 - root filesystem writable: False
+
+# Traffic policy: ingress only to the app port, egress DNS only
+$ kubectl -n team-tools get networkpolicy assistant -o jsonpath='{.spec.policyTypes}{"\n"}'
+["Ingress","Egress"]

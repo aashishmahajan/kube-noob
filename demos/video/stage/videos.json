@@ -1,5 +1,5 @@
 {
-  "_comment": "Scripts for the three animated videos (demos/ai-video-prompts.md, rendered without a video model). 'vo' is spoken by the Kokoro voice (../audio_kit.py); 'say' overrides it for pronunciation. Terminal lines are copied from real runs: kube-noob 0.2.2 CLI output, the CI sidecar transcript, and the recorded Claude session (demos/video/render.sh). The end card (tagline, platforms, surfaces, kube-noob.com) comes from docs/brand/tokens.json.",
+  "_comment": "Scripts for the three animated videos (demos/ai-video-prompts.md, rendered without a video model). 'vo' is spoken by the Kokoro voice (../audio_kit.py); 'say' overrides it for pronunciation. Numbers are never typed: {name} is filled from the code and a terminal line '@name' is a recording made when the video is built (../facts.py); the sidecar's come from the transcript recorded on a kind cluster in CI. Checked against videos.schema.json before rendering. The end card (tagline, platforms, surfaces, kube-noob.com) comes from docs/brand/tokens.json.",
   "videos": {
     "teaser": {
       "title": "kube-noob: no AI inside",
@@ -48,14 +48,7 @@
           "vo": "Free and open source. Get it at kube-noob dot com.",
           "term": [
             "$ uv tool install kube-noob",
-            "$ kube-noob audit -f deployment.yaml --platform openshift --version 4.22",
-            "kube-noob audit | platform=openshift k8s=1.35 | score=37.0 | low=5 medium=7 high=3",
-            "[HIGH    ] KN-S013   Deployment/shop/orders-api L23",
-            "           Container 'api' sets DB_PASSWORD as a literal value.",
-            "[HIGH    ] KN-S004   Deployment/shop/orders-api L25",
-            "           Container 'api' sets runAsUser: 1000; restricted-v2 will reject IDs outside the namespace range.",
-            "[HIGH    ] KN-S002   Deployment/shop/orders-api L26",
-            "           Container 'api' explicitly allows privilege escalation."
+            "@cli:audit"
           ]
         },
         {
@@ -95,24 +88,20 @@
           "captionPos": "lower",
           "vo": "On a test cluster that enforces Pod Security restricted, the app asks it to audit a Deployment and diagnose a crash, over localhost.",
           "term": [
-            "$ kubectl -n team-tools exec -i deploy/assistant -c assistant -- python3 - < scripts/sidecar_client.py",
-            "connected to kube_noob_mcp 0.2.2 at http://127.0.0.1:8080/mcp: 23 tools",
-            "audit: score 41.0/100, high=3 medium=6",
-            "  [HIGH] KN-S002: Container 'api' explicitly allows privilege escalation.",
-            "  [HIGH] KN-S004: Container 'api' sets runAsUser: 1000; restricted-v2 will reject IDs outside the namespace range.",
-            "  [HIGH] KN-S013: Container 'api' sets DB_PASSWORD as a literal value.",
-            "diagnose: DBG-OOM - Container killed for exceeding memory (OOMKilled / exit 137)",
-            "  read-only first: oc describe pod api-7d9f -n <namespace>",
-            "posture: web off, cluster off, model none",
-            "# Nothing outside the pod can reach it: port 8080 on the pod IP is closed",
-            "pod IP 10.244.0.8 port 8080: closed (listens on 127.0.0.1 only)"
+            "@sidecar:client"
           ]
         },
         {
           "kind": "gauge",
           "min": 7.0,
-          "caption": "68 MiB peak · 256 MiB limit",
-          "vo": "In our test cluster it peaked at sixty-eight mebibytes, well under its limit."
+          "caption": "{sidecar.peak} MiB peak · {sidecar.limit} MiB limit",
+          "vo": "In our test cluster it peaked at {sidecar.peak} mebibytes, well under its limit.",
+          "say": "In our test cluster it peaked at {sidecar.peak:words} mebibytes, well under its limit.",
+          "gauge": {
+            "value": "{sidecar.peak}",
+            "limit": "{sidecar.limit}",
+            "unit": "MiB"
+          }
         },
         {
           "kind": "pullback",
@@ -151,21 +140,13 @@
         {
           "kind": "mcpTerm",
           "min": 13.0,
-          "caption": "37/100 · 3 high findings",
+          "caption": "{audit.score}/100 · {audit.high} high findings",
           "captionPos": "lower",
-          "vo": "kube-noob checks the YAML against sixty rules and returns findings with line numbers and fixes. Same answer every time.",
-          "say": "kube noob checks the YAML against sixty rules, and returns findings with line numbers and fixes. Same answer every time.",
+          "vo": "kube-noob checks the YAML against {rules} rules and returns findings with line numbers and fixes. Same answer every time.",
+          "say": "kube noob checks the YAML against {rules:words} rules, and returns findings with line numbers and fixes. Same answer every time.",
           "term": [
             "> Review deployment.yaml in this folder for OpenShift 4.22 with the kube-noob tools.",
-            "● kube-noob · kubenoob_audit_manifests (platform: openshift, version: 4.22)",
-            "  score 37 · high 3 · medium 7 · low 5",
-            "  HIGH  KN-S013  line 21  Secret value hard-coded in environment",
-            "  HIGH  KN-S004  line 23  Fixed UID/fsGroup conflicts with OpenShift restricted-v2 SCC",
-            "  HIGH  KN-S002  line 24  Privilege escalation not disabled",
-            "  MED   KN-V011  line 32  Service selects no pods in this bundle",
-            "● kube-noob · kubenoob_fix_manifests",
-            "  runAsUser: 1000 → removed · allowPrivilegeEscalation → false · seccomp → RuntimeDefault",
-            "  score after the automatic fixes: 59"
+            "@tool:audit"
           ]
         },
         {

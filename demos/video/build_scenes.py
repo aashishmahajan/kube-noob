@@ -53,6 +53,7 @@ SIDECAR_META = {
     "endCodes": ["deploy/sidecar/app-with-kube-noob-sidecar.yaml"],
 }
 LICENSE_CREDIT = "kube-noob is open source (Apache-2.0)"
+END_CARD_MS = 12_000
 MUSIC_CREDIT = "Music: generated for kube-noob"
 
 
@@ -244,6 +245,9 @@ def write(out_dir: Path, name: str, scenes: list[dict[str, Any]], meta: dict[str
         info = json.loads(narration.read_text())
         meta = {**meta, "minMs": {scene_id: line["minMs"] for scene_id, line in info["lines"].items()}}
         credit = info["credit"]
+    # The end card stays long enough to be a YouTube chapter (10 s) and to carry YouTube's end screen (5-20 s).
+    hold = meta.get("minMs", {})
+    meta = {**meta, "minMs": {**hold, "end": max(END_CARD_MS, hold.get("end", 0))}}
     version = _run("--version").split()[-1] if "{version}" in meta["titleSub"] else ""
     meta = {**meta, "titleSub": meta["titleSub"].format(version=version), "credit": f"{LICENSE_CREDIT} · {credit}"}
     html = (

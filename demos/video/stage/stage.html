@@ -525,6 +525,8 @@ function buildIso() {
   ISO.dnsLabel = billboard(w, 380, 960, 60, `<div class="label mono">DNS :53 only</div>`); // on its line, raised so the line passes under it
   ISO.noLabels = [billboard(w, 748, 812, 60, `<div class="label" style="color:var(--kn-danger-soft)">✕ internet</div>`),
                   billboard(w, 88, 812, 60, `<div class="label" style="color:var(--kn-danger-soft)">✕ cluster services</div>`)];
+  // the gauge's numbers come from the sidecar transcript recorded in CI (videos.json gauge, filled by facts.py)
+  const G = (TL.scenes.find(s => s.gauge) || { gauge: { value: 0, limit: 1, unit: 'MiB' } }).gauge;
   ISO.gauge = billboard(w, 880, 120, 250, `<svg width="420" height="310" viewBox="0 0 420 310">
      <rect x="0" y="0" width="420" height="310" rx="26" fill="rgba(5,12,26,.86)" stroke="rgba(${K.greenRgb},.5)" stroke-width="2"/>
      <path d="M80 190 A130 130 0 0 1 340 190" fill="none" stroke="#1e3a5f" stroke-width="24" stroke-linecap="round"/>
@@ -532,9 +534,9 @@ function buildIso() {
      <line class="ndl" x1="210" y1="190" x2="210" y2="96" stroke="#f8fafc" stroke-width="7" stroke-linecap="round"/>
      <circle cx="210" cy="190" r="12" fill="#f8fafc"/>
      <text x="80" y="226" fill="#8ea3c2" style="font-family: var(--sans)" font-size="20" text-anchor="middle">0</text>
-     <text x="340" y="226" fill="#8ea3c2" style="font-family: var(--sans)" font-size="20" text-anchor="middle">256 MiB</text>
-     <text class="val" x="210" y="262" fill="#f8fafc" style="font-family: var(--sans)" font-weight="800" font-size="44" text-anchor="middle">0 MiB</text>
-     <text x="210" y="292" fill="${KN.tokens.colors.greenSoft}" style="font-family: var(--sans)" font-weight="600" font-size="21" text-anchor="middle">peak memory, limit 256 MiB</text></svg>`);
+     <text x="340" y="226" fill="#8ea3c2" style="font-family: var(--sans)" font-size="20" text-anchor="middle">${G.limit} ${G.unit}</text>
+     <text class="val" x="210" y="262" fill="#f8fafc" style="font-family: var(--sans)" font-weight="800" font-size="44" text-anchor="middle">0 ${G.unit}</text>
+     <text x="210" y="292" fill="${KN.tokens.colors.greenSoft}" style="font-family: var(--sans)" font-weight="600" font-size="21" text-anchor="middle">peak memory, limit ${G.limit} ${G.unit}</text></svg>`);
   reg('iso', iso);
 }
 const ISO_FOCUS = [380, 240];
@@ -783,11 +785,11 @@ const KINDS = {
     ISO.cable.style.display = '';
     ISO.gauge.style.display = '';
     ISO.gauge.style.opacity = sstep(0.4, 0.9, L);
-    const v = 68 * easeOut(clamp((L - 0.8) / 1.4));
+    const G = sc.gauge, v = G.value * easeOut(clamp((L - 0.8) / 1.4));
     const sv = ISO.gauge.querySelector('svg');
-    sv.querySelector('.arc').setAttribute('stroke-dasharray', `${(v / 256 * 100).toFixed(2)} 100`);
-    sv.querySelector('.ndl').setAttribute('transform', `rotate(${-90 + 180 * v / 256} 210 190)`);
-    sv.querySelector('.val').textContent = `${Math.round(Math.max(0, v))} MiB`;
+    sv.querySelector('.arc').setAttribute('stroke-dasharray', `${(v / G.limit * 100).toFixed(2)} 100`);
+    sv.querySelector('.ndl').setAttribute('transform', `rotate(${-90 + 180 * v / G.limit} 210 190)`);
+    sv.querySelector(".val").textContent = `${Math.round(Math.max(0, v))} ${G.unit}`;
   },
   pullback(L, dur, sc, T) {
     room(T, { color: TEAL.join(','), floor: false, racks: false });
