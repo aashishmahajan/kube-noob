@@ -33,9 +33,19 @@ the 0.2.2 CLI, the CI sidecar transcript and the recorded Claude session.
 | Teaser: no AI inside | 30 s | `demos/video/stage/build.sh <out-dir> teaser` |
 | kube-noob as a sidecar | 56 s | `demos/video/stage/build.sh <out-dir> sidecar` |
 | kube-noob as tools for Claude (MCP) | 57 s | `demos/video/stage/build.sh <out-dir> mcp` |
+| Compliance regimes: FedRAMP, EU AI Act, GDPR | 71 s | `python3 demos/video/stage/compliance.py <out-dir>` then `node demos/video/stage/capture.js <out-dir>` |
 
 Needs python3 with `numpy` and `kokoro-onnx` (`pip install kokoro-onnx numpy`), Node with Playwright and Chromium,
 and ffmpeg. Scenes, captions and voice-over lines are in [video/stage/videos.json](video/stage/videos.json).
+
+The compliance video's script is in its own file, [video/stage/compliance.json](video/stage/compliance.json), because
+every claim in it names a NIST SP 800-53 control id and `videos.json` may type no digits. It runs through the same
+schema, voice, music, caption and loudness path; `compliance.py` is the `voiceover.py` step for it. Each claim traces
+to a file in the repository: FedRAMP wording and the control ids to [docs/compliance.md](../docs/compliance.md),
+read-only and never-reads-Secrets to [docs/safety-contract.md](../docs/safety-contract.md), the DNS-only chart
+NetworkPolicy to [SECURITY.md](../SECURITY.md), and no accounts / no telemetry / on your machine only to
+[PRIVACY.md](../PRIVACY.md). The scene before the end card carries the disclaimer; `compliance.py` refuses a script
+without it.
 
 ### Voice and music
 
