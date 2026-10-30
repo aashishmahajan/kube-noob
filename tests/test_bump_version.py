@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import sys
 import tomllib
@@ -84,8 +85,10 @@ def test_bump_updates_every_reference(repo: Path) -> None:
     else:
         assert "patched UBI" in changelog
     for f in FILES:
-        # CHANGELOG keeps history; uv.lock may hold dependency versions that contain the old string (checked above).
-        assert old not in (repo / f).read_text() or f in {"CHANGELOG.md", "plugin/kube-noob/uv.lock"}, f
+        # CHANGELOG keeps history; uv.lock may hold dependency versions that contain the old string (checked above);
+        # "(from 0.2.3)" says which release a feature arrived in, not the current version.
+        text = re.sub(r"\(from \d+\.\d+\.\d+\)", "", (repo / f).read_text())
+        assert old not in text or f in {"CHANGELOG.md", "plugin/kube-noob/uv.lock"}, f
 
 
 def test_a_minor_bump_moves_the_major_minor_image_tag(repo: Path) -> None:
