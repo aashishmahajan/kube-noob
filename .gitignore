@@ -19,3 +19,6 @@ dist/
 # demo video renders
 demos/video/node_modules/
 .claude/worktrees/
+
+# graphify code-graph output (regenerate with: graphify update src/kube_noob)
+graphify-out/
