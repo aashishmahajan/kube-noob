@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-10-30
 
 - Plugin and catalog readiness (independent review against the directory's and the OpenShift Helm charts
   repository's requirements): the Claude plugin no longer ships the HTTP client, the REST routes or Helm rendering
