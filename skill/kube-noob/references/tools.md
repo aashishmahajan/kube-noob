@@ -165,7 +165,7 @@ Get an exercise. Exercise prompt, starter YAML, hints and points.
 
 ## learn_lesson
 
-Open a lesson. Lesson content with objectives, key points and citations.
+Open a lesson. Lesson content with objectives, key points and citations. On the shared server, pass a real learner id to track progress (the "local" default is refused there).
 
 - `learner` (null/string)
 - `lesson_id`* (string)
@@ -178,7 +178,7 @@ Learner progress. Credits earned and completed items.
 
 ## learn_quiz
 
-Quiz. Fetch a quiz question (no choice) or answer it (choice index).
+Quiz. Fetch a quiz question (no choice) or answer it (choice index). Answering on the shared server needs a real learner id (the "local" default is refused there).
 
 - `choice` (integer/null): Omit to fetch the question; set to answer it.
 - `learner` (string)
@@ -186,7 +186,7 @@ Quiz. Fetch a quiz question (no choice) or answer it (choice index).
 
 ## learn_submit
 
-Submit an exercise answer. Grade YAML offline with the audit engine; awards credits and returns feedback.
+Submit an exercise answer. Grade YAML offline with the audit engine; awards credits and returns feedback. On the shared server, pass a real learner id (the "local" default is refused there).
 
 - `answer`* (string)
 - `exercise_id`* (string)

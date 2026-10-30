@@ -214,6 +214,16 @@ def test_the_backend_never_asks_to_watch(access: Any) -> None:
     assert "watch" not in access.verbs and not access.mentions_watch
 
 
+def test_the_chart_grants_no_watch_the_backend_never_uses(rules: list[Any]) -> None:
+    """`watch` is an allowed read verb (``READ``), but the backend only ever gets and lists (the test above). A
+    chart rule granting `watch` anyway would be an unused permission, so the read rules in rbac.yaml stay exactly
+    `get, list`."""
+    read_rules = [r for r in rules if r.template == "rbac.yaml"]
+    assert read_rules, "rbac.yaml should still define read rules"
+    for r in read_rules:
+        assert set(r.verbs) == {"get", "list"}, (r.role, r.resources, r.verbs)
+
+
 def test_secrets_is_never_a_readable_resource(rules: list[Any]) -> None:
     assert "secrets" not in ALLOWED_RESOURCES
     assert all(d.plural != "secrets" for d in ALLOWED_RESOURCES.values())

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- `insight` (the free-text question router) now routes to `upgrade_risks` and `policy_migrate_check`: a typed,
+  single-line question naming two exact `x.y.z` versions ("is it safe to upgrade from 4.20.3 to 4.21.4?") gets the
+  upgrade-risk verdict, trying both version orderings since the phrasing may name the target first; an incomplete
+  version ("4.14") is never guessed at, it is reported as skipped instead. Pasted text containing a legacy Kyverno
+  `apiVersion: kyverno.io/v1` policy (any `kind:` recognised by `policy_migrate_check`) now routes to the CEL
+  migration check automatically. Neither path can crash `insight()`: both wrap the tool's own `ValueError` and fall
+  back to a skip entry, matching the existing pattern for `code`, `vulnerabilities` and `containerfile`.
+- SAFE2: `learn_lesson`, `learn_submit` and `learn_quiz` took a `learner` id defaulting to (or accepting) `"local"`,
+  the single-user stdio convenience. On the shared HTTP server (service or sidecar, meant for several learners
+  through one deployment) that default let any caller who forgot to pass their own id silently share — and
+  overwrite — one progress file. The shared server now refuses `"local"` for these three and asks for a real
+  learner id; local stdio use is unaffected, and reading a quiz question (no choice) still needs no id.
+- The Helm chart's read `Role`/`ClusterRole` granted `watch` on every resource it reads, alongside `get` and
+  `list`. The cluster backend has never asked the API server for `watch` (confirmed by `scripts/safety_contract.py`,
+  which fails the build if it ever does), so the grant was unused: removed, tightening every read rule to `get,
+  list` only. No behaviour changes; `docs/safety-contract.md` is regenerated.
+
 ## 0.7.0 - 2026-10-30
 
 - Plugin and catalog readiness (independent review against the directory's and the OpenShift Helm charts

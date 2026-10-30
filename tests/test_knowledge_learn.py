@@ -72,6 +72,37 @@ def test_tutor_flow_and_credits(tmp_path: Path) -> None:
         t.progress("../../etc/passwd")
 
 
+def test_shared_server_rejects_the_default_learner_for_writes(tmp_path: Path) -> None:
+    """learn_submit/learn_quiz/learn_lesson take a `learner` id and default it to (or accept) "local", the
+    single-user stdio convenience. On a shared, multi-tenant HTTP server that default would let every caller who
+    forgets to pass their own id silently collide in the same progress file (SAFE2). The shared toolkit must
+    refuse the default and ask for a real id; local stdio keeps "local" working exactly as before."""
+    from kube_noob import toolkit as tk
+    from kube_noob.config import load_settings
+
+    ex = exercises()["ocp-ex-secure-route"]
+    answer = "```yaml\n" + generate(Blueprint.model_validate(ex["reference"])).yaml() + "```"
+
+    local = tk.Toolkit(load_settings(overrides={"dataDir": str(tmp_path / "local")}), shared=False)
+    assert local.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer))["passed"]
+
+    shared = tk.Toolkit(load_settings(overrides={"dataDir": str(tmp_path / "shared")}), shared=True)
+    with pytest.raises(ValueError, match="learner"):
+        shared.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer))
+    with pytest.raises(ValueError, match="learner"):
+        shared.quiz(tk.QuizIn(question_id="ocp-q-route-group", choice=1))
+    with pytest.raises(ValueError, match="learner"):
+        shared.lesson(tk.LessonIn(lesson_id="ocp-102-scc", learner="local"))
+
+    # reading a quiz question (no choice) never touches progress, so no learner id is needed even on shared.
+    assert shared.quiz(tk.QuizIn(question_id="ocp-q-route-group"))["id"] == "ocp-q-route-group"
+    # a real, caller-supplied learner id still works on the shared server, isolated in its own progress file.
+    out = shared.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer, learner="student-7"))
+    assert out["passed"] and out["totalCredits"] == 15
+    assert shared.quiz(tk.QuizIn(question_id="ocp-q-route-group", choice=1, learner="student-7"))["correct"]
+    assert shared.lesson(tk.LessonIn(lesson_id="ocp-102-scc", learner="student-7"))["citations"]
+
+
 def test_citation_extraction() -> None:
     assert extract_citations("see [kn:ocp-scc#0] and [kn:ocp-scc#0], [kn:rosa-hcp#2]") == [
         "kn:ocp-scc#0",

@@ -147,6 +147,12 @@ _EVENT_FIELDS = re.compile(
 )
 _QUESTION = re.compile(r"^(?:how|why|what|when|where|which|can|could|should|is|are|does|do|will|my|i )\b", re.I)
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+# A typed question about moving between two OpenShift releases. Only a full x.y.z is trusted (the risk snapshot is
+# keyed on exact patch versions and a wrong one is worse than no answer); "4.14 to 4.15" with no patch is named in
+# ``skipped`` instead of guessed. Scoped to short typed questions only (never a pasted log full of chart/image tags).
+_UPGRADE_WORD = re.compile(r"(?i)\b(?:upgrad(?:e|ing|ed|e path)|updat(?:e|ing|ed))\b")
+_VERSION3 = re.compile(r"\b(\d{1,4}\.\d{1,4}\.\d{1,6})\b")
+_VERSION_LOOSE = re.compile(r"\b\d{1,4}\.\d{1,4}(?:\.\d{1,6})?\b")
 
 
 def _asks_last(text: str) -> bool:
@@ -578,6 +584,33 @@ def _containerfile(kit: Any, text: str) -> dict[str, Any] | str:
         return f"not audited: {str(exc).splitlines()[0][:300]}"
 
 
+def _upgrade_risk(kit: Any, a: str, b: str) -> dict[str, Any] | str:
+    """The two x.y.z versions found in the question, tried as (current, target) and then swapped: a phrasing like
+    "upgrading to 4.15.20 from 4.14.30" names the target first, and only one order can ever be a real upgrade (the
+    model rejects current >= target), so trying both costs nothing and never risks the wrong direction."""
+    from kube_noob import toolkit as tk
+
+    reason = "not evaluated"
+    for current, target in ((a, b), (b, a)):
+        try:
+            req = tk.UpgradeRisksIn(current=current, target=target)
+        except ValueError as exc:
+            reason = str(exc).splitlines()[0][:200]
+            continue
+        return dict(kit.upgrade_risks(req))
+    return reason
+
+
+def _policy_migrate(kit: Any, manifests: str) -> dict[str, Any] | str:
+    from kube_noob import toolkit as tk
+
+    try:
+        req = tk.PolicyMigrateCheckIn(policies=manifests[: tk.MAX_MANIFEST_CHARS])
+    except ValueError as exc:
+        return str(exc).splitlines()[0][:300]
+    return dict(kit.policy_migrate_check(req))
+
+
 # A document is offered for a pasted post only when it shares at least this many specific words with it (base forms,
 # not everyday English or everyday Kubernetes words, not version numbers): measured on 25,292 community questions
 # (scripts/eval_questions.py), documents sharing one incidental word answered almost none of them. A one-line question
@@ -664,6 +697,16 @@ _POLICY_SIDE = re.compile(
     r"(?i)\b(?:edit|modify|disable|bypass|exempt\w*|exceptions?|turn (?:it )?off|loosen|relax|override|options|"
     r"friendlier|clearer|message(?:Expression)?|break[- ]?glass)\b"
 )
+
+# A legacy Kyverno policy document (not already the CEL types, whose apiGroup is policies.kyverno.io): a pasted
+# ClusterPolicy, Policy, ClusterCleanupPolicy, CleanupPolicy or PolicyException is worth checking against the CEL
+# migration, since Kyverno v1.19 is the last release with full support for the legacy group. Checked as two separate
+# lines (not one anchored block) because kind: can come before or after apiVersion: and several documents may be
+# concatenated; a false match only costs one extra call, since policy_migrate_check itself lists and skips anything
+# that is not a legacy Kyverno policy.
+_LEGACY_KYVERNO_API = re.compile(r"(?m)^apiVersion:\s*kyverno\.io/v\S+\s*$")
+_LEGACY_KYVERNO_KIND = re.compile(r"(?m)^kind:\s*(?:Cluster)?(?:Cleanup)?Policy(?:Exception)?\s*$")
+_MIGRATE_RANK = {"blocked": 2, "manual": 3, "inverted": 14, "direct": 16}
 
 
 def _engine_playbook_first(findings: list[dict[str, Any]], text: str) -> None:
@@ -1037,6 +1080,41 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                 }
             )
         _explain_first(findings, query, asked)
+        if typed and _UPGRADE_WORD.search(query):
+            versions = _VERSION3.findall(query)
+            if len(versions) >= 2:
+                rep = budget.run("upgrade-risk", lambda: _upgrade_risk(kit, versions[0], versions[1]))
+                if isinstance(rep, str):
+                    ran.remove("upgrade-risk")
+                    skipped.append({"kind": "upgrade-risk", "why": rep})
+                elif rep:
+                    edge = rep["edge"]
+                    counts = rep["counts"]
+                    title = (
+                        f"{edge['from']} to {edge['to']}: {counts['applies']} risk(s) always apply, "
+                        f"{counts['check']} need a fact checked"
+                        if rep["covered"]
+                        else f"{edge['from']} to {edge['to']}: {rep.get('note') or 'not in the bundled snapshot'}"
+                    )
+                    findings.append(
+                        {
+                            "source": "upgrade-risk",
+                            "id": f"{edge['from']}->{edge['to']}",
+                            "title": title,
+                            "fix": "kube-noob upgrade-risks for the per-risk evidence and the read-only check for "
+                            "each one that needs a fact about the cluster.",
+                            "rank": 2 if counts["applies"] else (4 if counts["check"] else 16),
+                        }
+                    )
+                    context["upgradeRisk"] = rep
+            elif _VERSION_LOOSE.search(query):
+                skipped.append(
+                    {
+                        "kind": "upgrade-risk",
+                        "why": "name the exact patch version on both sides (x.y.z, e.g. 4.14.30 to 4.15.20): the "
+                        "risk snapshot is keyed on patch versions and a guessed one could hide or invent a risk.",
+                    }
+                )
     if "manifests" in names:
         from kube_noob.errors import ManifestError
 
@@ -1077,6 +1155,25 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
                     "<ns>/<workload> --to <ns>/<workload> --port <port> -f <file>",
                 }
             )
+        if _LEGACY_KYVERNO_API.search(manifests) and _LEGACY_KYVERNO_KIND.search(manifests):
+            mig = budget.run("policy-migrate", lambda: _policy_migrate(kit, manifests))
+            if isinstance(mig, str):
+                ran.remove("policy-migrate")
+                skipped.append({"kind": "policy-migrate", "why": mig})
+            elif mig:
+                for p in mig["policies"][:10]:
+                    findings.append(
+                        {
+                            "source": "policy-migrate",
+                            "id": p["policy"],
+                            "title": f"{p['policy']}: {p['verdict']} mapping to "
+                            + (", ".join(p.get("targets") or []) or "no CEL type"),
+                            "fix": "kube-noob policy migrate-check for the field-by-field mapping and draft CEL "
+                            "policy; Kyverno v1.19 is the last release with full ClusterPolicy/Policy support.",
+                            "rank": _MIGRATE_RANK.get(str(p["verdict"]), 16),
+                        }
+                    )
+                context["policyMigrate"] = mig["summary"]
     if "helm-chart" in names:
         skipped.append(
             {

@@ -30,6 +30,9 @@ kube-noob learn progress --learner alice
 - Each learner earns credits for passing exercises and quizzes. Progress lives in their data directory.
 - A submission exits 0 when it passes, so instructors can grade a folder of answers in a script.
 - In Claude, the `tutor` prompt runs the same loop conversationally, one concept at a time.
+- Running kube-noob as a shared server for a whole class (one deployment, several learners connecting over HTTP)?
+  Every caller must pass its own `learner`; the server refuses the CLI's single-user `"local"` default so no
+  learner's progress is ever silently shared with another's.
 
 Start with `kube-noob demo learn` to see a full lesson-and-grade cycle in seconds.
 

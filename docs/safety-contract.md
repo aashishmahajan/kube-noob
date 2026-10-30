@@ -145,31 +145,31 @@ Read statically from `deploy/helm/kube-noob/templates/rbac.yaml`, `rbac-tiers.ya
 | `rbac-tiers.yaml` | `Role <fullname>-dry-run` | `apps` | `deployments`, `statefulsets`, `daemonsets` | `create`, `patch` | `dryRun.enabled` | no |
 | `rbac-tiers.yaml` | `Role <fullname>-probe` | `core` | `pods/ephemeralcontainers` | `patch` | `probe.enabled` | no |
 | `rbac-tiers.yaml` | `Role <fullname>-probe` | `batch` | `jobs` | `create`, `delete` | `probe.enabled` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `core` | `pods`, `pods/log`, `services`, `endpoints`, `events`, `configmaps`, `persistentvolumeclaims`, `resourcequotas`, `limitranges`, `serviceaccounts`, `persistentvolumes`, `nodes`, `namespaces` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `apps` | `deployments`, `replicasets`, `statefulsets`, `daemonsets` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `apps.openshift.io` | `deploymentconfigs` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `autoscaling` | `horizontalpodautoscalers` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `batch` | `jobs`, `cronjobs` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `config.openshift.io` | `clusteroperators`, `clusterversions` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `k8s.ovn.org` | `egressfirewalls` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `networking.k8s.io` | `ingresses`, `networkpolicies` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `platform.stackrox.io` | `centrals`, `securedclusters` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `policy` | `poddisruptionbudgets` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `rbac.authorization.k8s.io` | `roles`, `rolebindings`, `clusterroles`, `clusterrolebindings` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `route.openshift.io` | `routes` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `security.openshift.io` | `securitycontextconstraints` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `ClusterRole <fullname>-read` | `storage.k8s.io` | `storageclasses` | `get`, `list`, `watch` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `core` | `pods`, `pods/log`, `services`, `endpoints`, `events`, `configmaps`, `persistentvolumeclaims`, `resourcequotas`, `limitranges`, `serviceaccounts` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `apps` | `deployments`, `replicasets`, `statefulsets`, `daemonsets` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `apps.openshift.io` | `deploymentconfigs` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `autoscaling` | `horizontalpodautoscalers` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `batch` | `jobs`, `cronjobs` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `k8s.ovn.org` | `egressfirewalls` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `networking.k8s.io` | `ingresses`, `networkpolicies` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `platform.stackrox.io` | `centrals`, `securedclusters` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `policy` | `poddisruptionbudgets` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `rbac.authorization.k8s.io` | `roles`, `rolebindings` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
-| `rbac.yaml` | `Role <fullname>-read` | `route.openshift.io` | `routes` | `get`, `list`, `watch` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `core` | `pods`, `pods/log`, `services`, `endpoints`, `events`, `configmaps`, `persistentvolumeclaims`, `resourcequotas`, `limitranges`, `serviceaccounts`, `persistentvolumes`, `nodes`, `namespaces` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `apps` | `deployments`, `replicasets`, `statefulsets`, `daemonsets` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `apps.openshift.io` | `deploymentconfigs` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `autoscaling` | `horizontalpodautoscalers` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `batch` | `jobs`, `cronjobs` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `config.openshift.io` | `clusteroperators`, `clusterversions` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `k8s.ovn.org` | `egressfirewalls` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `networking.k8s.io` | `ingresses`, `networkpolicies` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `platform.stackrox.io` | `centrals`, `securedclusters` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `policy` | `poddisruptionbudgets` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `rbac.authorization.k8s.io` | `roles`, `rolebindings`, `clusterroles`, `clusterrolebindings` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `route.openshift.io` | `routes` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `security.openshift.io` | `securitycontextconstraints` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `storage.k8s.io` | `storageclasses` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `core` | `pods`, `pods/log`, `services`, `endpoints`, `events`, `configmaps`, `persistentvolumeclaims`, `resourcequotas`, `limitranges`, `serviceaccounts` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `apps` | `deployments`, `replicasets`, `statefulsets`, `daemonsets` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `apps.openshift.io` | `deploymentconfigs` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `autoscaling` | `horizontalpodautoscalers` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `batch` | `jobs`, `cronjobs` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `k8s.ovn.org` | `egressfirewalls` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `networking.k8s.io` | `ingresses`, `networkpolicies` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `platform.stackrox.io` | `centrals`, `securedclusters` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `policy` | `poddisruptionbudgets` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `rbac.authorization.k8s.io` | `roles`, `rolebindings` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
+| `rbac.yaml` | `Role <fullname>-read` | `route.openshift.io` | `routes` | `get`, `list` | `config.clusterEnabled` and `not (rbac.scope = "cluster")` | no |
 
 ### Write verbs
 
