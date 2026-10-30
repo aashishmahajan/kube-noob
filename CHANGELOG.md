@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **Bundled YAML that only some parsers accepted broke `diagnose` and `known_issues` after 0.7.0.** The Ceph
+  catalogue `data/ceph_health.yaml` shipped 195 scalars of the form `src: [healthmon:885]`. A colon with no space
+  after it inside a flow sequence is ambiguous YAML: PyYAML's own scanner reads it as the string `"healthmon:885"`,
+  and the stricter libyaml in the browser runtime refuses the whole document with "found unexpected ':'". Because
+  `signals/ceph.py` prefers `CSafeLoader` when libyaml is present, and `signals.catalogue()` is on the path of both
+  `diagnose` and `known_issues`, those two tools raised a `ScannerError` on any install whose libyaml is the strict
+  one — including every visitor to the playground on kube-noob.com, whose deploy went red and left the site serving
+  0.6.0. Every such scalar is now quoted (`examples/problems.yaml` had one too, and one term list said `137` where
+  it meant `"137"`); the parsed values are unchanged. Guarded by
+  `tests/test_distribution.py::test_bundled_yaml_parses_under_every_yaml_parser`, which reads the YAML scanner's own
+  tokens instead of trusting whichever parser happens to be installed — the libyaml in CI accepts `[x:1]`, so a
+  parse-it-and-see test would not have caught this. It also rejects a `key: value` pair sitting directly in a `[ ]`
+  sequence (`[rule:]`, `[rule:1, x]`), which PyYAML turns into a single-pair mapping and a stricter libyaml refuses,
+  and it covers `.yml` files and the YAML front matter of the 64 bundled knowledge documents. The Ceph catalogue now
+  also falls back to PyYAML's scanner rather than raising, so a future disagreement degrades instead of breaking the
+  tools.
+- The Claude plugin asks for its one optional path through a `userConfig` option (`must_gather_dir`, passed to the
+  server as `${user_config.must_gather_dir}`) rather than reading a variable out of the user's machine, which is what
+  the plugin directory's review asks for. An option the user leaves unset arrives as the literal placeholder text, so
+  `kube_noob.config` now treats a value still holding `${` as unset: without that the server refused to start, since
+  `mustGather.allowedDir` must be an absolute path. The plugin declares no secret-valued option and is started with
+  the web, the cluster and the model off, so `apiKeyEnv`, `rhacs.tokenEnv` and `ci.githubTokenEnv` are unreachable
+  from it; `tests/test_distribution.py::test_the_plugin_asks_the_user_and_reads_no_secret_from_their_machine` holds
+  that. The plugin README now also states plainly why the launcher is `uv run --frozen` and what that costs at review
+  time.
+- **kube-noob.com follows a release instead of a schedule.** `release.yml` gained a `site` job that asks the site
+  repository to publish the new release, and it runs after the videos are attached rather than straight after the
+  release: a site built the moment the release existed would publish a Videos page saying the release had none, and
+  the fallback deploy would then skip it as already live — which is exactly the page 0.7.0 shipped. It cannot be a
+  workflow listening for `release: published`, because GitHub starts no workflow for a release created with
+  `GITHUB_TOKEN`. The new `site-sync.yml` is the alarm for that path failing: it fails loudly when the published site
+  has stayed behind the latest release past a grace period set above the fallback's own worst case, and offers the
+  same request on demand for a release whose dispatch never happened. The site's fallback schedule went from daily to
+  six-hourly, it now deploys on that request, and the ref it is asked to build is checked for shape and existence
+  before anything is checked out.
+- `docs/openshift-release.md`: what it actually takes to ship kube-noob through Red Hat's channels — the community
+  tier of `openshift-helm-charts/charts` as the one path a single maintainer can finish, Artifact Hub after it, and
+  an honest account of why certification (a Corporate Account, a certified image first, a support relationship) and
+  an Operator are not worth planning around.
+
 - `insight` (the free-text question router) now routes to `upgrade_risks` and `policy_migrate_check`: a typed,
   single-line question naming two exact `x.y.z` versions ("is it safe to upgrade from 4.20.3 to 4.21.4?") gets the
   upgrade-risk verdict, trying both version orderings since the phrasing may name the target first; an incomplete

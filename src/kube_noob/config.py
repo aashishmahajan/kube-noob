@@ -519,6 +519,19 @@ def _env_bool(name: str) -> bool | None:
     raise ConfigError(f"{name} must be one of true/false/1/0/yes/no/on/off, got {raw!r}")
 
 
+def _env(name: str) -> str | None:
+    """An environment override, or None when it is absent, empty, or an unsubstituted placeholder.
+
+    The Claude plugin asks the user for a path through ``userConfig`` and passes it in as ``${user_config.<key>}``
+    (plugin/kube-noob/.claude-plugin/plugin.json). An option the user left unset must not arrive here as the literal
+    text of the placeholder and be taken for a path, so anything still holding ``${`` counts as unset.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip() or "${" in raw:
+        return None
+    return raw
+
+
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for k, v in override.items():
@@ -551,17 +564,18 @@ def _env_overrides() -> dict[str, Any]:
         ("KUBE_NOOB_DEFAULT_PLATFORM", ("defaultPlatform",)),
         ("KUBE_NOOB_SERVER_HOST", ("server", "host")),
     ):
-        val = os.environ.get(env)
+        val = _env(env)
         if val:
             cur = o
             for part in path[:-1]:
                 cur = cur.setdefault(part, {})
             cur[path[-1]] = val
-    must_gather = os.environ.get("KUBE_NOOB_MUST_GATHER_DIR")
+    must_gather = _env("KUBE_NOOB_MUST_GATHER_DIR")
     if must_gather:
         o["mustGather"] = {"allowedDir": must_gather}
+    # an explicit empty value still clears the configured paths; only an unsubstituted placeholder is ignored
     memory = os.environ.get("KUBE_NOOB_MEMORY_PATHS")
-    if memory is not None:
+    if memory is not None and "${" not in memory:
         o["memory"] = {"paths": [p for p in memory.split(os.pathsep) if p.strip()]}
     port = os.environ.get("KUBE_NOOB_SERVER_PORT")
     if port:
