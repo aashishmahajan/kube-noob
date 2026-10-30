@@ -1,0 +1,81 @@
+{
+  "_comment": "The compliance video's script. Same shape as one entry of videos.json and checked against the same videos.schema.json ($defs/video), but kept in its own file because every claim here names a NIST SP 800-53 control (AC-6, SC-7, AU-12), and videos.json may type no digits (tests/test_video_facts.py). Every claim is traceable: FedRAMP wording and the control ids to docs/compliance.md, the read-only and never-reads-Secrets invariants to docs/safety-contract.md, the DNS-only chart NetworkPolicy and no-outbound-connections posture to SECURITY.md, and the no-accounts/no-telemetry/on-your-machine-only wording to PRIVACY.md. The last scene before the end card carries the disclaimer; do not remove it.",
+  "title": "kube-noob and three compliance regimes",
+  "cta": "docs/compliance.md",
+  "scenes": [
+    {
+      "kind": "arrive",
+      "min": 5.0,
+      "caption": "Built for platforms that get audited",
+      "vo": "kube-noob runs on platforms that get audited. Here is how its design reads against three regimes.",
+      "say": "kube noob runs on platforms that get audited. Here is how its design reads against three regimes."
+    },
+    {
+      "kind": "lock",
+      "min": 8.0,
+      "caption": "FedRAMP authorises services. This is not one.",
+      "vo": "kube-noob holds no FedRAMP authorisation. FedRAMP authorises cloud service offerings, assessed by a third party.",
+      "say": "kube noob holds no FedRAMP authorisation. FedRAMP authorises cloud service offerings, assessed by a third party."
+    },
+    {
+      "kind": "explain",
+      "min": 10.0,
+      "caption": "Deployable inside a boundary you already had",
+      "vo": "It widens nothing: no outbound calls of its own, no third-party processor, no new trust boundary.",
+      "say": "It widens nothing: no outbound calls of its own, no third party processor, no new trust boundary.",
+      "answer": [
+        "Inside your existing authorised boundary",
+        "No outbound network calls of its own",
+        "No third-party processor, no new trust boundary",
+        "Read-only, never reads Secrets — AC-6 Least Privilege",
+        "Chart NetworkPolicy allows DNS only — SC-7 Boundary Protection",
+        "Tool calls logged, never their content — AU-12"
+      ]
+    },
+    {
+      "kind": "beam",
+      "min": 7.0,
+      "caption": "No model. No inference.",
+      "vo": "The EU AI Act follows the system that infers. kube-noob contains no model and makes no inferences of its own.",
+      "say": "The E U A I Act follows the system that infers. kube noob contains no model, and makes no inferences of its own."
+    },
+    {
+      "kind": "desk",
+      "min": 7.0,
+      "caption": "The thinking happens in your assistant",
+      "bubble": "Your assistant reasons and writes. kube-noob answers with deterministic rules, under your own AI governance.",
+      "vo": "Your assistant does the reasoning, under your own governance. kube-noob returns the same rules every time.",
+      "say": "Your assistant does the reasoning, under your own governance. kube noob returns the same rules every time."
+    },
+    {
+      "kind": "local",
+      "min": 9.0,
+      "caption": "GDPR: your processing, not our badge",
+      "vo": "GDPR compliance describes your processing, not a badge a tool holds. kube-noob has no accounts and no telemetry, and your data stays on your own infrastructure.",
+      "say": "G D P R compliance describes your processing, not a badge a tool holds. kube noob has no accounts and no telemetry, and your data stays on your own infrastructure."
+    },
+    {
+      "kind": "cta",
+      "min": 6.0,
+      "caption": "docs/compliance.md",
+      "captionPos": "lower",
+      "captionMono": true,
+      "vo": "The control mapping is in the repository. Read it at kube-noob dot com.",
+      "term": [
+        "$ uv tool install kube-noob",
+        "$ kube-noob audit -f k8s/ --format json",
+        "$ kube-noob doctor"
+      ]
+    },
+    {
+      "kind": "pullback",
+      "min": 6.5,
+      "caption": "Design properties, not a certification and not legal advice. kube-noob holds no FedRAMP, EU AI Act or GDPR certification.",
+      "captionPos": "lower"
+    },
+    {
+      "kind": "end",
+      "min": 4.5
+    }
+  ]
+}

@@ -19,3 +19,10 @@ dist/
 # demo video renders
 demos/video/node_modules/
 .claude/worktrees/
+
+# graphify code-graph output (regenerate with: graphify update src/kube_noob), built at repo root. Anchored, not
+# a bare "graphify-out" pattern: that would also hide any future real source path named graphify-out (the same
+# bug class /build/ above guards against, per test_no_source_file_is_ignored_by_git -- which is also why there is
+# no entry here for a graphify-out symlink under src/kube_noob/: anything under src/ must never be gitignored, so
+# that symlink is a disposable local convenience only, never created by this repo's own tooling.
+/graphify-out

@@ -40,6 +40,28 @@ def test_plugin_pins_the_release() -> None:
     assert pins and set(pins) == {__version__}, "README.md uvx pin for other MCP clients"
 
 
+def test_the_plugin_asks_the_user_and_reads_no_secret_from_their_machine() -> None:
+    """The plugin directory's review prefers a value the user is asked for (a ``userConfig`` option) over one the
+    server reads out of the machine's environment. The plugin asks for one optional path and nothing else: it holds no
+    secret-valued option, and it starts the server with the web, the cluster and the model off, so the configuration
+    that reads a provider key, an RHACS token or a GitHub token (``apiKeyEnv``, ``rhacs.tokenEnv``,
+    ``ci.githubTokenEnv`` in kube_noob.config) is unreachable from it."""
+    plugin = json.loads((ROOT / "plugin/kube-noob/.claude-plugin/plugin.json").read_text())
+    mcp = json.loads((ROOT / "plugin/kube-noob/.mcp.json").read_text())
+    env = mcp["mcpServers"]["kube-noob"]["env"]
+    assert env["KUBE_NOOB_WEB_ENABLED"] == "false"
+    assert env["KUBE_NOOB_CLUSTER_ENABLED"] == "false"
+    assert env["KUBE_NOOB_LLM_PROVIDER"] == "none"
+    options = plugin.get("userConfig", {})
+    assert not [k for k, v in options.items() if v.get("sensitive")], "the plugin must ask for no secret"
+    # every ${user_config.x} the server is started with has to be an option that exists, or the user is handed a
+    # variable holding the literal placeholder (config._env ignores one, but a typo would silently do nothing)
+    referenced = set(re.findall(r"\$\{user_config\.([A-Za-z0-9_]+)\}", json.dumps(mcp)))
+    assert referenced <= set(options), f"{referenced - set(options)} is not in plugin.json userConfig"
+    secrets = [k for k in env if k.endswith("_API_KEY") or "TOKEN" in k or "SECRET" in k or "PASSWORD" in k]
+    assert secrets == [], f"the plugin server is started with a secret-bearing variable: {secrets}"
+
+
 def test_chart_and_image_versions() -> None:
     chart = yaml.safe_load((ROOT / "deploy/helm/kube-noob/Chart.yaml").read_text())
     assert chart["appVersion"] == __version__ and chart["annotations"]["charts.openshift.io/name"] == "kube-noob"
@@ -191,3 +213,94 @@ def test_no_source_file_is_ignored_by_git() -> None:
     ).stdout.split()
     hidden = [p for p in out if "__pycache__" not in p and not p.endswith((".pyc", ".DS_Store"))]
     assert hidden == [], f"ignored by .gitignore, so never committed or packaged: {hidden[:10]}"
+
+
+# A bundled YAML file is parsed by whatever YAML parser the machine running kube-noob happens to have: the pure-Python
+# PyYAML scanner, or libyaml through CSafeLoader (which signals/ceph.py and mustgather/analyse.py prefer for its
+# start-up time). Those two do not agree on every document. `src: [healthmon:885]` in data/ceph_health.yaml parses as
+# the string "healthmon:885" under the PyYAML scanners this repository's CI happens to have, and under the stricter
+# libyaml in the browser runtime (Pyodide) it raises "found unexpected ':'" -- which took out `diagnose` and
+# `known_issues` on kube-noob.com's playground and in the plugin on any machine with that libyaml, after 0.7.0 shipped
+# the Ceph catalogue. A colon inside an unquoted scalar in a flow collection is ambiguous (it reads as a single-pair
+# mapping), so the fix is to quote it and the guard is this test, which reads the text rather than trusting whichever
+# parser is installed here.
+# `key: value` inside {} is an ordinary flow mapping and portable; the hazard is a colon with no space after it, which
+# a flow context may read as a single-pair mapping instead of as part of the scalar. The tokens come from PyYAML's own
+# scanner rather than a regular expression, so a bracket inside prose (a folded block scalar, a quoted string) is not
+# mistaken for a flow collection.
+_GLUED_COLON = re.compile(r":(?!\s|$)")
+
+
+def _ambiguous_flow_scalars(text: str) -> list[tuple[int, str]]:
+    """Every colon inside a flow collection that is not followed by a space.
+
+    One rule, because libyaml versions disagree on which of these they refuse and bundled data has to satisfy all of
+    them: the 0.2.5 here accepts `[k:1]` and refuses `[k:]`, while the 0.1.7 in the browser runtime refuses
+    `[healthmon:885]` as well. PyYAML resolves the same text two ways -- `[healthmon:885]` stays one plain scalar,
+    `[k:1]` and `[k:]` become a single-pair mapping -- so both are checked: the scalar by its text, the mapping by
+    the character after its value indicator. `[k: 1]` and `{k: }`, where the colon is followed by a space, are
+    ordinary portable YAML and are left alone.
+    """
+    out: list[tuple[int, str]] = []
+    stack: list[str] = []
+    for token in yaml.scan(text, Loader=yaml.SafeLoader):
+        if isinstance(token, yaml.tokens.FlowSequenceStartToken | yaml.tokens.FlowMappingStartToken):
+            stack.append("flow")
+        elif isinstance(token, yaml.tokens.FlowSequenceEndToken | yaml.tokens.FlowMappingEndToken):
+            if stack:
+                stack.pop()
+        elif stack and isinstance(token, yaml.tokens.ValueToken):
+            after = text[token.end_mark.index : token.end_mark.index + 1]
+            if after and not after.isspace():
+                out.append((token.start_mark.line + 1, f"a colon glued to {after!r} in a flow collection"))
+        elif (
+            stack
+            and isinstance(token, yaml.tokens.ScalarToken)
+            and token.style is None
+            and _GLUED_COLON.search(token.value)
+        ):
+            out.append((token.start_mark.line + 1, token.value))
+    return out
+
+
+def _yaml_front_matter(text: str) -> str:
+    """The YAML block at the top of a knowledge document, exactly as knowledge/store.py parses it at runtime.
+
+    The offset has to match `parse_front_matter`: searching from 3 instead of 4 ends the block at the opening `---`
+    of a document whose first body line is `---`, and the test would then scan an empty string.
+    """
+    if not text.startswith("---\n"):
+        return ""
+    end = text.find("\n---", 4)
+    return text[4:end] if end > 0 else ""
+
+
+def test_bundled_yaml_parses_under_every_yaml_parser() -> None:
+    roots = (
+        ROOT / "src" / "kube_noob",
+        ROOT / "plugin" / "kube-noob" / "server" / "kube_noob",
+        ROOT / "examples",
+    )
+    documents: list[tuple[str, str]] = []
+    for root in roots:
+        for suffix in ("*.yaml", "*.yml"):
+            documents += [(str(p.relative_to(ROOT)), p.read_text(encoding="utf-8")) for p in sorted(root.rglob(suffix))]
+        # a knowledge document's front matter is YAML that knowledge/store.py parses at runtime like any other
+        for path in sorted(root.rglob("*.md")):
+            front = _yaml_front_matter(path.read_text(encoding="utf-8"))
+            if front:
+                documents.append((f"{path.relative_to(ROOT)} (front matter)", front))
+    assert len(documents) > 50, f"only {len(documents)} bundled documents found: this test would pass by doing nothing"
+    loaders = [getattr(yaml, name) for name in ("CSafeLoader", "SafeLoader") if hasattr(yaml, name)]
+    ambiguous: list[str] = []
+    for name, text in documents:
+        for number, scalar in _ambiguous_flow_scalars(text):
+            ambiguous.append(f"{name}:{number}: {scalar}")
+        # cheap, and no more than that: the libyaml on this machine accepts [x:1], so it would not have caught the
+        # incident above. The scanner check is what guards it; this only catches a file that is broken everywhere.
+        for loader in loaders:
+            list(yaml.load_all(text, Loader=loader))
+    assert ambiguous == [], (
+        "quote these scalars: a colon in an unquoted scalar inside [] or {} is ambiguous, and a stricter "
+        f"libyaml than this machine's refuses the file ({len(ambiguous)} found): {ambiguous[:6]}"
+    )

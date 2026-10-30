@@ -8,7 +8,7 @@ cases:
     platform: openshift
     expect:
       playbook: DBG-PULLSECRET
-      mention: [system:image-puller, oc secrets link]
+      mention: ["system:image-puller", oc secrets link]
       notMention: ["-n from"]
   - id: pull-secret-events
     input: |

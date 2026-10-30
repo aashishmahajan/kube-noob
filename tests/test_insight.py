@@ -227,6 +227,62 @@ def test_questions_get_documents_and_evidence_gathering_steps(kit: tk.Toolkit) -
     assert k8s["readOnlyNextSteps"][0]["command"].startswith("kubectl ")
 
 
+def test_upgrade_questions_route_to_upgrade_risks(kit: tk.Toolkit) -> None:
+    # 4.20.3 -> 4.21.4 is the vendored index's own worked example (tests/test_upgrade_risks.py): one risk, "applies".
+    out = kit.insight(tk.InsightIn(text="is it safe to upgrade from 4.20.3 to 4.21.4?"))
+    assert "upgrade-risk" in out["ran"]
+    risk = next(f for f in out["findings"] if f["source"] == "upgrade-risk")
+    assert risk["id"] == "4.20.3->4.21.4"
+    assert "1 risk(s) always apply" in risk["title"] and "0 need a fact checked" in risk["title"]
+    assert out["context"]["upgradeRisk"]["edge"] == {"from": "4.20.3", "to": "4.21.4", "architecture": None}
+
+    # the target named first still resolves: only one order can ever be a real upgrade, so both are tried.
+    swapped = kit.insight(tk.InsightIn(text="upgrading to 4.21.4 from 4.20.3, any risk?"))
+    hit = next(f for f in swapped["findings"] if f["source"] == "upgrade-risk")
+    assert hit["id"] == "4.20.3->4.21.4"
+
+
+def test_upgrade_question_without_a_patch_version_is_not_guessed(kit: tk.Toolkit) -> None:
+    out = kit.insight(tk.InsightIn(text="is it safe to upgrade from 4.14 to 4.15?"))
+    assert "upgrade-risk" not in out["ran"]
+    assert not [f for f in out["findings"] if f["source"] == "upgrade-risk"]
+    hint = next(s for s in out["skipped"] if s["kind"] == "upgrade-risk")
+    assert "exact patch version" in hint["why"]
+    # a pasted log is never scanned for upgrade intent, however many version-looking numbers it holds.
+    pasted = kit.insight(tk.InsightIn(text="upgrading nginx:4.20.3 to nginx:4.21.4\nreason: Pulling\n"))
+    assert "upgrade-risk" not in pasted["ran"]
+    assert not [s for s in pasted["skipped"] if s["kind"] == "upgrade-risk"]
+
+
+LEGACY_KYVERNO_POLICY = """\
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-team-label
+spec:
+  rules:
+  - name: check-team
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    validate:
+      message: team label required
+      pattern:
+        metadata:
+          labels:
+            team: "?*"
+"""
+
+
+def test_a_pasted_legacy_kyverno_policy_routes_to_the_cel_migration_check(kit: tk.Toolkit) -> None:
+    out = kit.insight(tk.InsightIn(text=LEGACY_KYVERNO_POLICY))
+    assert "policy-migrate" in out["ran"]
+    mig = next(f for f in out["findings"] if f["source"] == "policy-migrate")
+    assert mig["id"] == "ClusterPolicy/require-team-label" and "ValidatingPolicy" in mig["title"]
+    assert out["context"]["policyMigrate"]["policies"] == 1
+
+
 def test_pending_kinds_are_named_with_what_to_do_today(kit: tk.Toolkit) -> None:
     helm = kit.insight(tk.InsightIn(text="apiVersion: v2\nname: web\nversion: 0.1.0\n"))
     assert helm["ran"] == [] and helm["skipped"][0]["kind"] == "helm-chart"

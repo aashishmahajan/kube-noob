@@ -44,10 +44,22 @@ def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
     assert args[-4:] == ["python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]
     assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "never installs from an index"
     env = spec["env"]
-    # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm.
-    assert set(env) == {"KUBE_NOOB_WEB_ENABLED", "KUBE_NOOB_CLUSTER_ENABLED", "KUBE_NOOB_LLM_PROVIDER"}
+    # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm. An exact
+    # allowlist, not a KUBE_NOOB_ prefix check: the prefix would also admit KUBE_NOOB_SERVER_HOST=0.0.0.0, a redirect
+    # in KUBE_NOOB_LLM_BASE_URL, or KUBE_NOOB_ANYTHING=${GITHUB_TOKEN}, which would forward a secret off the user's
+    # machine -- the very thing the userConfig option exists to avoid.
+    assert set(env) == {
+        "KUBE_NOOB_WEB_ENABLED",
+        "KUBE_NOOB_CLUSTER_ENABLED",
+        "KUBE_NOOB_LLM_PROVIDER",
+        "KUBE_NOOB_MUST_GATHER_DIR",
+    }
     assert env["KUBE_NOOB_WEB_ENABLED"] == "false" and env["KUBE_NOOB_CLUSTER_ENABLED"] == "false"
     assert env["KUBE_NOOB_LLM_PROVIDER"] == "none"
+    # every value is either a literal or this plugin's own userConfig option: never another variable of the machine's
+    for key, value in env.items():
+        for ref in re.findall(r"\$\{([^}]*)\}", value):
+            assert ref.startswith("user_config."), f"{key} forwards ${{{ref}}} from the user's environment"
     entry = (PLUGIN / "server" / "kube_noob_plugin.py").read_text()
     assert "from kube_noob.server.stdio import main as serve" in entry and "expected the bundled server" in entry
 
@@ -121,7 +133,18 @@ def test_icon_is_small_and_carries_no_shell_like_text() -> None:
 
 def test_manifest_uses_only_fields_the_plugin_reference_defines() -> None:
     manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
-    known = {"name", "version", "description", "author", "homepage", "repository", "license", "keywords", "icon"}
+    known = {
+        "name",
+        "version",
+        "description",
+        "author",
+        "homepage",
+        "repository",
+        "license",
+        "keywords",
+        "icon",
+        "userConfig",
+    }
     # The directory's listing fields (plugin manifest reference, "Directory listing fields"): https URLs, plugin.json
     # only; Claude Code ignores them at load time.
     listing = {"documentationUrl", "supportUrl", "privacyPolicyUrl", "termsOfServiceUrl"}
@@ -132,6 +155,26 @@ def test_manifest_uses_only_fields_the_plugin_reference_defines() -> None:
     assert manifest["homepage"].startswith("https://github.com/aashishmahajan/kube-noob")
     assert (ROOT / "PRIVACY.md").is_file()
     assert "No AI inside" in manifest["description"]
+    # userConfig: the plugin manifest reference's own option keys, and nothing kube-noob would have to be trusted
+    # with. `sensitive` is deliberately absent everywhere (test_distribution holds that too): the plugin asks for a
+    # folder, never a credential.
+    option_keys = {
+        "type",
+        "title",
+        "description",
+        "required",
+        "default",
+        "options",
+        "multiple",
+        "sensitive",
+        "min",
+        "max",
+    }
+    for name, option in manifest.get("userConfig", {}).items():
+        assert re.fullmatch(r"[a-z0-9_]+", name), name
+        assert set(option) <= option_keys, set(option) - option_keys
+        assert option["type"] in {"string", "number", "boolean", "directory", "file"}
+        assert option["title"] and option["description"]
 
 
 def _bundled_text() -> dict[str, str]:

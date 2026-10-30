@@ -37,9 +37,41 @@ from typing import Any
 
 MAX_SIGNALS = 20
 MAX_DEPTH = 40
+MAX_JSON_DEPTH = 64  # brackets deep that pasted JSON may nest before it is refused unread (real payloads: under 10)
 MAX_SCAN = 4_000_000  # characters of one string scanned; the rest is kept as is (results are bounded upstream)
 MAX_BASE64 = 20  # base64 runs decoded per string
 MARKER = "[removed: {what}]"
+
+
+def json_nesting_ok(text: str, limit: int = MAX_JSON_DEPTH) -> bool:
+    """Whether pasted JSON is shallow enough to hand to ``json.loads``, counted before parsing it.
+
+    ``json.loads`` recurses, and what stops it differs by interpreter: CPython 3.13 and earlier raise
+    ``RecursionError`` at about a thousand levels, which every caller here catches. CPython 3.14 relies on the C
+    stack instead, so in the WebAssembly runtime that kube-noob.com's playground uses, a deeply nested paste
+    overflows the stack and surfaces as a raw JavaScript ``RangeError`` that the runtime calls fatal -- taking out
+    ``diagnose`` and ``known_issues`` for a paste that merely starts with a bracket. Counting the brackets first
+    refuses that input the same way on every interpreter, before anything recurses.
+    """
+    depth = 0
+    in_string = escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch in "{[":
+            depth += 1
+            if depth > limit:
+                return False
+        elif ch in "}]":
+            depth -= 1
+    return True
 
 
 def _chars(*points: int | tuple[int, int]) -> str:

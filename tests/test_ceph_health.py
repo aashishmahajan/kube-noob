@@ -601,3 +601,29 @@ def test_catalogue_is_well_formed_and_cited() -> None:
     data = ROOT / "src" / "kube_noob" / "data" / "ceph_health.yaml"
     assert data.stat().st_size < 256 * 1024
     assert cat.sources["ceph"].commit == "eb3b634bccd18715735a74cf55808e98c5dbd04b"
+
+
+def test_the_catalogue_still_loads_when_the_faster_parser_refuses_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """G121: signals/ceph.py prefers libyaml for its start-up time, and libyaml versions disagree with PyYAML's own
+    scanner about some documents -- one such disagreement took out diagnose and known_issues after 0.7.0, because
+    both reach this catalogue. The data is now kept free of those shapes, and if a stricter parser still objects the
+    tools degrade to the slower scanner rather than raising."""
+    import yaml
+
+    from kube_noob.signals import ceph
+
+    class Refuses(yaml.SafeLoader):
+        def get_single_data(self) -> Any:
+            raise yaml.scanner.ScannerError(None, None, "found unexpected ':'", None)
+
+    ceph.catalogue.cache_clear()
+    monkeypatch.setattr(ceph, "_LOADER", Refuses)
+    assert len(ceph.catalogue().codes) > 100
+
+    # with no faster parser to fall back from, a refusal is a bug in our own data and must surface
+    ceph.catalogue.cache_clear()
+    monkeypatch.setattr(yaml, "SafeLoader", Refuses)
+    monkeypatch.setattr(ceph, "_LOADER", Refuses)
+    with pytest.raises(yaml.YAMLError):
+        ceph.catalogue()
+    ceph.catalogue.cache_clear()

@@ -1,0 +1,100 @@
+name: site-sync
+
+# kube-noob.com is built from this repository's latest release by the private aashishmahajan/kube-noob-site
+# repository, which pushes the result to aashishmahajan/kube-noob-www. Nothing used to tell the site when a release
+# happened: it only looked on its own daily schedule, so the website could sit a day behind the code -- and did,
+# serving 0.6.0 for a day after 0.7.0 was released, because the deploy that would have published 0.7.0 failed and
+# nothing was watching.
+#
+# The release itself now asks the site to publish it: release.yml's `site` job, which runs after the videos are
+# attached. This workflow is the alarm for that going wrong, plus a way to ask by hand:
+#
+#   drift   fails when the published site has stayed behind the latest release past the grace period. A deploy that
+#           breaks, or a dispatch that never happened, then shows up as a red run here instead of being noticed by a
+#           reader of a stale page.
+#   notify  the same request release.yml makes, on demand, for a release that was published before this existed or
+#           whose dispatch failed. It is never triggered by an event: GitHub starts no workflow for a release created
+#           with GITHUB_TOKEN, which is how release.yml creates it.
+#
+# SITE_DISPATCH_TOKEN is a fine-grained personal access token scoped to aashishmahajan/kube-noob-site with
+# Contents: write (sending a repository_dispatch is a write), and nothing else. Without it both jobs still work: the
+# request is skipped with a warning, and the site publishes the release on its own six-hourly schedule.
+#
+# Neither job can touch this repository: the workflow asks for no write permission and checks nothing out.
+
+on:
+  schedule:
+    # Comfortably after each of the site's own fallback deploy slots (:37 past every sixth hour) plus its build time,
+    # so a scheduled check never reads a deploy that is still running.
+    - cron: "11 3,9,15,21 * * *"
+  workflow_dispatch:
+    inputs:
+      notify:
+        description: "Also ask kube-noob-site to publish the latest release now"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  SITE_REPO: aashishmahajan/kube-noob-site
+  WWW_REPO: aashishmahajan/kube-noob-www
+  # Must exceed the worst case for the fallback path: a release published just after a deploy slot waits up to six
+  # hours for the next one, plus up to an hour to build. Below that, a release with no dispatch would make this job
+  # red before the site had its own chance to publish it.
+  GRACE_MINUTES: "540"
+
+jobs:
+  notify:
+    if: inputs.notify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask kube-noob-site to publish the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          tag=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          if [ -z "${DISPATCH_TOKEN}" ]; then
+            echo "::warning title=site-sync::no SITE_DISPATCH_TOKEN secret: cannot ask for ${tag}. The site publishes it on its own schedule, within about six hours."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/dispatch.out -w '%{http_code}' -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${SITE_REPO}/dispatches" \
+            -d "$(jq -nc --arg ref "${tag}" '{event_type: "product-release", client_payload: {ref: $ref}}')")
+          if [ "${code}" != "204" ]; then
+            echo "::error title=site-sync::${SITE_REPO} refused the publish request (HTTP ${code}): $(tr '\n' ' ' < /tmp/dispatch.out)"
+            exit 1
+          fi
+          echo "asked ${SITE_REPO} to publish ${tag}"
+
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The published site must not be behind the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          published=$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json publishedAt --jq .publishedAt)
+          live=$(curl -fsSL "https://raw.githubusercontent.com/${WWW_REPO}/main/build.json" || echo '{}')
+          ref=$(printf '%s' "${live}" | jq -r '.productRef // ""')
+          built=$(printf '%s' "${live}" | jq -r '.built // ""')
+          echo "::notice title=site-sync::latest release ${tag} (${published}), kube-noob.com serves ${ref:-none} (built ${built:-never})"
+          if [ "${ref}" = "${tag}" ]; then
+            echo "kube-noob.com is on ${tag}"
+            exit 0
+          fi
+          age=$(( ( $(date -u +%s) - $(date -u -d "${published}" +%s) ) / 60 ))
+          if [ "${age}" -lt "${GRACE_MINUTES}" ]; then
+            echo "${tag} was published ${age} minutes ago; the site has ${GRACE_MINUTES} to publish it"
+            exit 0
+          fi
+          echo "::error title=site-sync::kube-noob.com still serves ${ref:-nothing} ${age} minutes after ${tag} was released. The deploy in ${SITE_REPO} has failed or never ran: check its Actions tab, then re-run this workflow with notify."
+          exit 1

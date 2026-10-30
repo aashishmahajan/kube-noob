@@ -71,6 +71,18 @@ def test_settings_and_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert load_settings(overrides={}).must_gather.allowed_dir == tmp_path
 
 
+def test_an_unset_plugin_option_does_not_stop_the_server_starting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """G122: the plugin passes this folder in as ${user_config.must_gather_dir}. An option the user left unset
+    arrives as the literal placeholder, and allowedDir must be absolute, so taking it for a path refused every
+    start. Only that spelling is ignored: a path a user wrote containing ${ is still their path."""
+    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "${user_config.must_gather_dir}")
+    assert load_settings(overrides={}).must_gather.allowed_dir is None
+    monkeypatch.setenv("KUBE_NOOB_MEMORY_PATHS", "${user_config.memory_paths}")
+    assert load_settings(overrides={}).memory.paths == []
+    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "/srv/${odd}/must-gather")
+    assert str(load_settings(overrides={}).must_gather.allowed_dir) == "/srv/${odd}/must-gather"
+
+
 def test_mcp_server_and_plugin(tmp_path: Path) -> None:
     import importlib.util
     import sys

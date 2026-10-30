@@ -106,9 +106,15 @@ def blip(total: float, at: float) -> np.ndarray:
 
 
 def build(
-    video: str, out: Path, voice: ak.Voice, music_db: float | None, facts: vfacts.Facts | None = None
+    video: str,
+    out: Path,
+    voice: ak.Voice,
+    music_db: float | None,
+    facts: vfacts.Facts | None = None,
+    spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    v = load(video, facts or vfacts.Facts())
+    # spec is an already loaded and checked script (compliance.py passes one from its own file); otherwise videos.json.
+    v = spec if spec is not None else load(video, facts or vfacts.Facts())
     scenes = [dict(s) for s in v["scenes"]]
     clips = iter([voice.say(s.get("say") or s["vo"]) for s in scenes if s.get("vo")])
     t = 0.0

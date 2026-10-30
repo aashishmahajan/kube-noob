@@ -431,7 +431,7 @@ signals:
     sources: [kubelet-sync]
   - id: pod_reason:OOMKilled
     aliases: [out of memory, exit code 137, oom killed]
-    terms: [oomkilled, memory, limit, 137]
+    terms: [oomkilled, memory, limit, "137"]
     playbooks: [DBG-OOM]
     sources: [crio]
   - id: pod_reason:ImagePullBackOff

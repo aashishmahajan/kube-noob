@@ -134,6 +134,90 @@ def test_kyverno_policy_violation_event() -> None:
     assert "KN-S003" in d["relatedRules"]
 
 
+def test_a_validatingpolicy_denial_gets_the_cel_crd_not_the_legacy_one() -> None:
+    (d,) = _only(
+        'Error from server: admission webhook "vpol.validate.kyverno.svc-fail" denied the request: Policy '
+        "require-team-label failed: label 'team' is required",
+        "kyverno",
+    )
+    assert d["policy"] == "require-team-label" and d["details"]["policyKind"] == "ValidatingPolicy"
+    commands = [s["command"] for s in d["readOnlyNextSteps"]]
+    assert "kubectl get validatingpolicies.policies.kyverno.io require-team-label -o yaml" in commands
+    assert "kubectl get policyexceptions.policies.kyverno.io -A" in commands
+    assert any(
+        "PolicyException" in c["change"] and "kind: ValidatingPolicy" in c["change"] for c in d["proposedChanges"]
+    )
+
+
+def test_an_imagevalidatingpolicy_denial_gets_signing_fixes_not_the_generic_one() -> None:
+    (d,) = _only(
+        'Error from server: admission webhook "ivpol.validate.kyverno.svc-fail" denied the request: Policy '
+        "verify-image-signatures failed: Image signature verification failed; verification details: failed to "
+        'verify cosign signatures: no matching signatures: attestor "key" could not be verified',
+        "kyverno",
+    )
+    assert d["policy"] == "verify-image-signatures" and d["details"]["policyKind"] == "ImageValidatingPolicy"
+    commands = [s["command"] for s in d["readOnlyNextSteps"]]
+    assert "kubectl get imagevalidatingpolicies.policies.kyverno.io verify-image-signatures -o yaml" in commands
+    fixes = " ".join(c["change"] for c in d["proposedChanges"] if not c.get("needsPolicyOwner"))
+    assert "cosign sign" in fixes
+    assert "Change the object so it satisfies the rule" not in fixes
+
+
+def test_a_namespaced_imagevalidatingpolicy_webhook_name_is_recognised() -> None:
+    (d,) = _only(
+        'admission webhook "nivpol.validate.kyverno.svc-fail" denied the request: Policy ns-verify failed: '
+        "attestation missing provenance",
+        "kyverno",
+    )
+    assert d["details"]["policyKind"] == "NamespacedImageValidatingPolicy"
+    assert "attestation" in " ".join(c["change"] for c in d["proposedChanges"] if not c.get("needsPolicyOwner"))
+
+
+def test_a_mutatingpolicy_denial_names_its_resource_and_explains_what_a_mutate_failure_means() -> None:
+    (d,) = _only(
+        'Error from server: admission webhook "mpol.validate.kyverno.svc-fail" denied the request: Resource: '
+        "default/my-pod, Kind: Pod, Errors: [Policy add-sidecar: failed to evaluate mutation expression: no "
+        "matching variable found for name 'request']",
+        "kyverno",
+    )
+    assert d["policy"] == "add-sidecar" and d["details"]["policyKind"] == "MutatingPolicy"
+    assert d["resource"] == "Pod/my-pod" and d["namespace"] == "default"
+    assert "CEL mutate expression" in d["meaning"]
+    commands = [s["command"] for s in d["readOnlyNextSteps"]]
+    assert "kubectl get mutatingpolicies.policies.kyverno.io add-sidecar -o yaml" in commands
+    fixes = " ".join(c["change"] for c in d["proposedChanges"] if not c.get("needsPolicyOwner"))
+    assert "matchConditions" in fixes
+    assert "Change the object so it satisfies the rule" not in fixes
+
+
+def test_a_mutatingpolicy_denial_with_two_failing_policies_splits_into_two() -> None:
+    out = explain(
+        'admission webhook "nmpol.validate.kyverno.svc-fail" denied the request: Resource: team-a/web, Kind: '
+        "Deployment, Errors: [Policy inject-env: bad expr, Policy add-label: missing field]"
+    )
+    policies = [d["policy"] for d in out["denials"]]
+    assert policies == ["inject-env", "add-label"], out["denials"]
+    assert all(d["details"]["policyKind"] == "NamespacedMutatingPolicy" for d in out["denials"])
+
+
+def test_a_deletingpolicy_has_no_admission_webhook_so_nothing_to_explain() -> None:
+    # DeletingPolicy is a background cleanup controller (runs on a cron schedule, deletes matching resources),
+    # never an admission webhook -- there is no "denied the request" message for it to produce. Confirmed against
+    # kyverno/kyverno's own docs and its pkg/config/config.go webhook-name constants (no DeletingPolicy entry).
+    out = explain("my DeletingPolicy keeps deleting resources I didn't expect it to touch")
+    assert out["denials"] == [] and "note" in out
+
+
+def test_an_unmodelled_cel_webhook_name_still_falls_back_instead_of_crashing() -> None:
+    (d,) = _only(
+        'admission webhook "gpol.validate.kyverno.svc-fail" denied the request: Policy gen-configmap failed: '
+        "some generate error",
+        "kyverno",
+    )
+    assert d["policy"] == "gen-configmap" and "policyKind" not in d.get("details", {})
+
+
 def test_gatekeeper_lists_each_constraint_and_warn_mode() -> None:
     priv, team = _only(GATEKEEPER, "gatekeeper")
     assert priv["policy"] == "psp-privileged-container" and priv["relatedRules"] == ["KN-S001"]

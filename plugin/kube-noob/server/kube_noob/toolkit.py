@@ -1498,18 +1498,30 @@ class Toolkit:
     def tracks(self, p: LearnerIn) -> dict[str, Any]:
         return {"tracks": self.tutor.tracks(p.learner)}
 
+    def _require_real_learner(self, learner: str | None) -> None:
+        """ "local" is the single-user stdio convenience. On the shared HTTP server it would let every caller who
+        forgets to pass their own id silently share (and overwrite) one progress file (SAFE2)."""
+        if self.shared and learner == "local":
+            raise ValueError(
+                'the shared server needs its own learner id for this; "local" is the single-user stdio default '
+                "and would mix this caller's progress into every other caller's"
+            )
+
     def lesson(self, p: LessonIn) -> dict[str, Any]:
+        self._require_real_learner(p.learner)
         return self.tutor.lesson(p.lesson_id, p.learner)
 
     def exercise(self, p: ExerciseIn) -> dict[str, Any]:
         return self.tutor.exercise(p.exercise_id)
 
     def submit(self, p: SubmitIn) -> dict[str, Any]:
+        self._require_real_learner(p.learner)
         return self.tutor.submit(p.exercise_id, p.answer, p.learner)
 
     def quiz(self, p: QuizIn) -> dict[str, Any]:
         if p.choice is None:
             return self.tutor.quiz_question(p.question_id)
+        self._require_real_learner(p.learner)
         return self.tutor.answer_quiz(p.question_id, p.choice, p.learner)
 
     def progress(self, p: LearnerIn) -> dict[str, Any]:
@@ -1930,7 +1942,8 @@ class Toolkit:
             ToolSpec(
                 "learn_lesson",
                 "Open a lesson",
-                "Lesson content with objectives, key points and citations.",
+                "Lesson content with objectives, key points and citations. On the shared server, pass a real "
+                'learner id to track progress (the "local" default is refused there).',
                 LessonIn,
                 self.lesson,
                 read_only=False,
@@ -1945,7 +1958,8 @@ class Toolkit:
             ToolSpec(
                 "learn_submit",
                 "Submit an exercise answer",
-                "Grade YAML offline with the audit engine; awards credits and returns feedback.",
+                "Grade YAML offline with the audit engine; awards credits and returns feedback. On the shared "
+                'server, pass a real learner id (the "local" default is refused there).',
                 SubmitIn,
                 self.submit,
                 read_only=False,
@@ -1953,7 +1967,8 @@ class Toolkit:
             ToolSpec(
                 "learn_quiz",
                 "Quiz",
-                "Fetch a quiz question (no choice) or answer it (choice index).",
+                "Fetch a quiz question (no choice) or answer it (choice index). Answering on the shared server "
+                'needs a real learner id (the "local" default is refused there).',
                 QuizIn,
                 self.quiz,
                 read_only=False,

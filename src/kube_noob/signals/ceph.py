@@ -305,7 +305,20 @@ _LOADER: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)  # libyaml when pre
 @functools.cache
 def catalogue() -> Catalogue:
     raw = resources.files("kube_noob").joinpath("data", "ceph_health.yaml").read_text(encoding="utf-8")
-    return Catalogue.model_validate(yaml.load(raw, Loader=_LOADER))  # noqa: S506 - a safe loader, bundled data
+    try:
+        data = yaml.load(raw, Loader=_LOADER)  # noqa: S506 - a safe loader, bundled data
+    except yaml.YAMLError:
+        # libyaml and PyYAML's own scanner do not agree on every document, and this catalogue is bundled data that
+        # every install parses: `diagnose` and `known_issues` both reach it through signals.catalogue. One such
+        # disagreement (an unquoted colon in a flow sequence, which the libyaml in the browser runtime refuses) broke
+        # both tools after 0.7.0, so the file is now kept free of them by
+        # tests/test_distribution.py::test_bundled_yaml_parses_under_every_yaml_parser -- and if a stricter parser
+        # still objects to something, the tools keep working on the scanner that ships with PyYAML rather than
+        # raising. No fallback for a file this is not: the data is ours, and a parse failure here is a bug in it.
+        if _LOADER is yaml.SafeLoader:
+            raise
+        data = yaml.load(raw, Loader=yaml.SafeLoader)
+    return Catalogue.model_validate(data)
 
 
 @functools.cache

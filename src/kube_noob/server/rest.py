@@ -21,6 +21,7 @@ from pydantic.json_schema import models_json_schema
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from kube_noob import sanitize
 from kube_noob.toolkit import ToolSpec
 
 API_VERSION = "1.0.0"  # the contract's version, not the package's: it changes only when a route or a body changes
@@ -156,6 +157,8 @@ def register(
             if is_post:
                 raw = await request.body()
                 if raw.strip():
+                    if not sanitize.json_nesting_ok(raw.decode("utf-8", "replace")):
+                        return JSONResponse({"error": "the body is not JSON"}, status_code=400)
                     try:
                         arguments = json.loads(raw)
                     except (ValueError, RecursionError):

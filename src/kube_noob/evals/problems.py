@@ -33,6 +33,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from kube_noob import sanitize
 from kube_noob.config import Settings
 
 MAX_CASES = 2_000
@@ -132,6 +133,8 @@ def parse(text: str, name: str = "") -> list[Case]:
         for n, line in enumerate(text.splitlines(), 1):
             if not line.strip():
                 continue
+            if not sanitize.json_nesting_ok(line):
+                raise ValueError(f"{name} line {n}: not JSON (or nested too deeply)")
             try:
                 raw.append(json.loads(line))
             except (ValueError, RecursionError) as exc:

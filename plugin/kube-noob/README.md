@@ -52,6 +52,13 @@ cache, and runs Python isolated (`-I`), so nothing from your working directory o
 Python 3.11 or later is installed, uv downloads its managed CPython once. Nothing else is downloaded, and no LLM SDK
 is installed.
 
+That launcher is a deliberate trade. A plugin that runs a file with plain arguments is reviewed automatically, but it
+needs its dependencies to already be on the machine; `uv run --frozen` is held for a human reviewer instead, and in
+exchange every dependency arrives at the exact version and SHA-256 hash recorded in the `uv.lock` beside this file,
+chosen by nobody at install time. The alternative — vendoring `mcp`, `pydantic`, `starlette` and `uvicorn` into the
+plugin — would not fit the directory's file-count and file-size limits. So the plugin ships its own source and locks
+everything it does not ship.
+
 ## What it accesses
 
 - Network: none of its own. The plugin has no web client and no cluster access, and the server never calls a model;
@@ -60,6 +67,9 @@ is installed.
   confirmed; never logs, manifests or secrets) in `~/.local/share/kube-noob`, which survives plugin upgrades.
 - To read your cluster (read-only, never Secrets) or allowlisted documentation sites, use the kube-noob CLI
   (`pipx install kube-noob`) or the in-cluster service; the plugin stays offline.
+- Asks you for one optional setting, a must-gather folder, and reads no variable out of your environment for it. The
+  plugin never asks for a token, a key or a password: it starts the server with the web, the cluster and the model
+  off, so the settings that would read one are unreachable.
 - No telemetry and no accounts. Details: [PRIVACY.md](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md).
 
 ## Skills
