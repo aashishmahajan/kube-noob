@@ -37,6 +37,11 @@ right now; STATE.md says what is done. Updated 2026-10-29 late (PR #6 merged: Ag
 
 ## In flight (finish these first)
 
+-4. 0.7.0 (2026-10-30): bumped and merged (PR #9, main 16d270b; CI, CodeQL, scorecard green on it). Only the tag is
+   left, an owner action (tag pushes are refused to sessions): `git tag v0.7.0 16d270b && git push origin v0.7.0`.
+   The release workflow then publishes PyPI, the image and chart, the MCP Registry, the GitHub release with the
+   videos and the Homebrew formula; the site deploys from it the same day. Do not bump again before that tag.
+
 -3. 0.6.0 release fix (owner asked 2026-10-29: tag the code and fix why the plugin release is pending). Root cause:
    main is 0.5.0 (073fe80, never tagged, so PyPI stops at 0.4.0), the Claude plugin directory follows main and last
    reviewed v0.2.3, and 86+ commits (including the plugin fixes) are only on this branch. Steps: `python
