@@ -18,6 +18,16 @@
   `list`. The cluster backend has never asked the API server for `watch` (confirmed by `scripts/safety_contract.py`,
   which fails the build if it ever does), so the grant was unused: removed, tightening every read rule to `get,
   list` only. No behaviour changes; `docs/safety-contract.md` is regenerated.
+- `kube-noob debug policy` (the admission-denial explainer) now recognises Kyverno's CEL policy types —
+  `ValidatingPolicy`, `MutatingPolicy` and `ImageValidatingPolicy` (and their `Namespaced*` variants) — instead of
+  only the generic fallback it fell back to before. It names the right `policies.kyverno.io` CRD (not the legacy
+  `ClusterPolicy`) in every suggested command and exception, gives `ImageValidatingPolicy` denials real signing and
+  attestation fixes (`cosign sign`/`cosign attest`) instead of the generic "change the object" fallback, and for
+  `MutatingPolicy` extracts the resource and explains that the denial is the policy's own CEL expression failing to
+  evaluate, not the object being wrong. Grounded against the Kyverno source (webhook names, message formats, CRD
+  kinds), not guessed: see the comment above `_CEL_KIND` in `src/kube_noob/debug/policy.py`. `DeletingPolicy` is
+  deliberately not covered — it has no admission webhook (it runs on a cron schedule against existing resources),
+  so there is no denial for it to explain; a prior brainstorming note assumed otherwise and is corrected.
 
 ## 0.7.0 - 2026-10-30
 

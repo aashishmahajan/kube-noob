@@ -225,6 +225,55 @@ _KYV_EVENT = re.compile(
 _KYV_PATH = re.compile(r"failed at path (?P<path>/[^\s']*)")
 _KYV_TOKEN = re.compile(r"(?P<name>" + _NAME + r"):\s+(?=(?P<next>'|" + _NAME + r":))")
 
+# --- Kyverno CEL policy types (policies.kyverno.io/v1): ValidatingPolicy, MutatingPolicy, ImageValidatingPolicy ----
+#
+# Grounded against the Kyverno source (kyverno/kyverno, read-only clone, 2026-10-30): webhook names are
+# pkg/config/config.go's *WebhookName constants with a "-fail"/"-ignore" suffix built in
+# pkg/controllers/webhook/validating.go; the "Policy %s failed: %s" message is
+# pkg/webhooks/resource/vpol/handler.go and pkg/webhooks/resource/ivpol/handler.go (identical format, confirmed by
+# pkg/webhooks/resource/ivpol/diagnostics_test.go); MutatingPolicy's distinct "Resource: ns/name, Kind: K,
+# Errors: [...]" wrapper is pkg/webhooks/resource/mpol/handler.go's admissionResponse, only raised when a mutate
+# rule errors with failurePolicy: Fail (a successful or Ignore-failed mutation never denies). CRD kind/plural names
+# are each policy type's config/crds/policies.kyverno.io/policies.kyverno.io_*.yaml. DeletingPolicy is deliberately
+# absent here: kyverno.io's own docs ("Unlike admission policies that react to API requests, DeletingPolicy... Runs
+# periodically at scheduled times") confirm it has no admission webhook and so never produces a denial to explain.
+_CEL_KIND: dict[str, tuple[str, str]] = {  # webhook-name prefix -> (Kind, CRD plural)
+    "vpol": ("ValidatingPolicy", "validatingpolicies"),
+    "nvpol": ("NamespacedValidatingPolicy", "namespacedvalidatingpolicies"),
+    "mpol": ("MutatingPolicy", "mutatingpolicies"),
+    "nmpol": ("NamespacedMutatingPolicy", "namespacedmutatingpolicies"),
+    "ivpol": ("ImageValidatingPolicy", "imagevalidatingpolicies"),
+    "nivpol": ("NamespacedImageValidatingPolicy", "namespacedimagevalidatingpolicies"),
+}
+_CEL_WEBHOOK = re.compile(
+    r'admission webhook "(?P<prefix>n?(?:vpol|ivpol|mpol))\.(?:validate|mutate)\.kyverno\.svc[^"]*" '
+    r"denied the request: (?P<rest>.+)",
+    re.DOTALL,
+)
+_CEL_POLICY_ERR = re.compile(r"\bPolicy (?P<policy>" + _NAME + r") (?:failed|error): ")
+# MutatingPolicy's own format has no "failed"/"error" word (pkg/webhooks/resource/mpol/handler.go:
+# fmt.Sprintf("Policy %s: %s", name, msg)) -- distinct from vpol/ivpol's "Policy %s failed: %s".
+_MPOL_POLICY_ERR = re.compile(r"\bPolicy (?P<policy>" + _NAME + r"): ")
+_MPOL_WRAP = re.compile(
+    r"^Resource: (?P<ns>[^/,]*)/(?P<name>[^,]+), Kind: (?P<kind>[^,]+), Errors: \[(?P<body>.*)\]\.?\s*\Z", re.DOTALL
+)
+_IMAGE_VERIFY_TOPICS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(p, re.IGNORECASE), fix)
+    for p, fix in (
+        (
+            r"cosign|sigstore|keyless|no matching signatures|signature verification",
+            "Sign the image (`cosign sign` for key-based, or `cosign sign --yes` with OIDC for keyless) with the "
+            "same key or identity the policy's attestors.signer / attestors.keyless expects, then push the "
+            "signature to the registry before retrying.",
+        ),
+        (
+            r"attestor|attestation|in-?toto|sbom|provenance",
+            "Produce and attach the missing attestation (`cosign attest` for in-toto/SBOM/provenance), signed by "
+            "the identity the policy's attestors entry names, then push it to the registry.",
+        ),
+    )
+)
+
 
 def _quote_closed(msg: str) -> bool:
     if not msg.startswith("'"):
@@ -285,6 +334,74 @@ def _kyverno_entries(rest: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _kyverno_cel(text: str, platform: str | None) -> list[Denial]:
+    """Denials from Kyverno's policies.kyverno.io CEL policy types: ValidatingPolicy, MutatingPolicy,
+    ImageValidatingPolicy (and their Namespaced variants). See the grounding note above ``_CEL_KIND``.
+    """
+    m = _CEL_WEBHOOK.search(text)
+    if not m:
+        return []
+    kind, plural = _CEL_KIND[m["prefix"]]
+    kc = _kubectl(platform, text)
+    rest = m["rest"].strip()
+    resource = ns = None
+    body = rest
+    wrap = _MPOL_WRAP.match(rest)  # MutatingPolicy's distinct "Resource: ns/name, Kind: K, Errors: [...]" shape
+    if wrap:
+        ns = wrap["ns"].strip() or None
+        resource = f"{wrap['kind'].strip()}/{wrap['name'].strip()}"
+        body = wrap["body"]
+    pieces = list((_MPOL_POLICY_ERR if wrap else _CEL_POLICY_ERR).finditer(body))
+    entries: list[tuple[str, str]] = (
+        [
+            (pm["policy"], body[pm.end() : (pieces[i + 1].start() if i + 1 < len(pieces) else len(body))].strip())
+            for i, pm in enumerate(pieces)
+        ]
+        if pieces
+        else [("", body.strip())]
+    )
+    is_mutating = kind.endswith("MutatingPolicy")
+    out: list[Denial] = []
+    for policy, raw in entries:
+        msg = raw.strip().rstrip(",").strip().rstrip(".") + "."
+        rules, fixes = _topics(policy, msg)
+        if kind.endswith("ImageValidatingPolicy"):
+            fixes += [fix for pat, fix in _IMAGE_VERIFY_TOPICS if pat.search(msg)]
+        d = Denial("kyverno", msg, policy=policy or None, resource=resource, namespace=ns, related_rules=rules)
+        d.details["policyKind"] = kind
+        who = f"Kyverno {kind} {policy}" if policy else f"A Kyverno {kind}"
+        d.meaning = f"{who} rejected {resource or 'the request'}: {msg}" + (
+            " A MutatingPolicy denial means its own CEL mutate expression failed to evaluate (failurePolicy: Fail), "
+            "not necessarily that the object is wrong."
+            if is_mutating
+            else ""
+        )
+        if policy:
+            d.checks.append(f"{kc} get {plural}.policies.kyverno.io {policy} -o yaml")
+        d.checks += [
+            f"{kc} get policyreports.wgpolicyk8s.io -n {_ns(ns)}",
+            f"{kc} get policyexceptions.policies.kyverno.io -A",
+        ]
+        d.checks.append("kube-noob audit -f <manifest.yaml>")
+        d.fixes = fixes or (
+            [
+                f"Ask the owner of {policy or 'the policy'} to check why its CEL mutate expression failed on this "
+                "object (missing field, type mismatch) and either fix the expression or narrow its matchConditions "
+                "to exclude objects like this one."
+            ]
+            if is_mutating
+            else [f"Change {resource or 'the object'} so it satisfies the rule the message describes."]
+        )
+        d.approvals.append(
+            f"If this workload really needs an exception, ask the owner of {policy or 'the policy'} for a "
+            f"policies.kyverno.io PolicyException scoped to this workload only, naming the policy in "
+            f"spec.policyRefs (kind: {kind}, name: {policy or '<policy>'}) and matching it with a CEL "
+            "matchConditions expression; the PolicyReport then shows result: skip."
+        )
+        out.append(d)
+    return out
+
+
 def _kyverno(text: str, platform: str | None) -> list[Denial]:
     out: list[Denial] = []
     kc = _kubectl(platform, text)
@@ -297,10 +414,16 @@ def _kyverno(text: str, platform: str | None) -> list[Denial]:
         entries = _kyverno_entries(text[block.end() :])
     for m in _KYV_EVENT.finditer(text):
         entries.append((m["policy"], m["rule"], _unquote(m["msg"])))
-    if not entries and re.search(r"admission webhook \"[^\"]*kyverno[^\"]*\" denied the request", text):
-        msg = text.split("denied the request:", 1)[1].strip().splitlines()[0] if "denied the request:" in text else ""
-        pm = re.search(r"\b[Pp]olicy (" + _NAME + r")", msg)  # "Policy require-team-label failed" (ValidatingPolicy)
-        entries.append((pm.group(1) if pm else "", "", msg or "Kyverno denied the request."))
+    if not entries:
+        cel = _kyverno_cel(text, platform)
+        if cel:
+            out.extend(cel)
+        elif re.search(r"admission webhook \"[^\"]*kyverno[^\"]*\" denied the request", text):
+            msg = (
+                text.split("denied the request:", 1)[1].strip().splitlines()[0] if "denied the request:" in text else ""
+            )
+            pm = re.search(r"\b[Pp]olicy (" + _NAME + r")", msg)  # generic fallback for an unrecognised webhook name
+            entries.append((pm.group(1) if pm else "", "", msg or "Kyverno denied the request."))
     seen: set[tuple[str, str]] = set()
     for policy, rule, raw in entries:
         if (policy, rule) in seen:
