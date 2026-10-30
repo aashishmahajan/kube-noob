@@ -209,6 +209,25 @@ def test_hostile_yaml_is_refused_not_crashed(tmp_path: Path) -> None:
     assert a.findings == []
 
 
+def test_a_file_only_one_yaml_parser_accepts_is_still_read(tmp_path: Path) -> None:
+    """G121, on the operator's own evidence rather than our data. analyse prefers libyaml for its speed, and libyaml
+    versions refuse documents PyYAML's scanner accepts -- an unspaced colon in a flow collection, which libyaml
+    before 0.2 refuses outright. Recording such a file as unparsed loses a real finding quietly: `failing()` does not
+    look at unparsed, so a --fail-on gate would still exit clean. A file either parser can read is read."""
+    b = _bundle(
+        tmp_path,
+        {
+            "cluster-scoped-resources/core/nodes/flow.yaml": "kind: Node\nmetadata: {name: n, labels: {app:}}\n",
+            "cluster-scoped-resources/core/nodes/alias.yaml": "kind: Node\nmetadata: &m {name: n}\nspec: *m\n",
+        },
+    )
+    a = analyse.analyse(b)
+    why = {u["path"].rsplit("/", 1)[-1]: u["reason"] for u in a.unparsed}
+    assert "flow.yaml" not in why, f"a readable file was dropped: {why}"
+    # the retry walks the same events, so the refusals the caps exist for still stand
+    assert why["alias.yaml"].startswith("uses YAML aliases")
+
+
 def test_untrusted_names_and_text(tmp_path: Path) -> None:
     evil = "$(touch PWNED)"
     secret = "pass" + "word=" + "hunter2-" + "x" * 8

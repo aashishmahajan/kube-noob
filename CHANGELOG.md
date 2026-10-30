@@ -18,6 +18,23 @@
   and it covers `.yml` files and the YAML front matter of the 64 bundled knowledge documents. The Ceph catalogue now
   also falls back to PyYAML's scanner rather than raising, so a future disagreement degrades instead of breaking the
   tools.
+- **A second way the browser runtime differed, found by building it rather than reasoning about it.** `json.loads`
+  recurses, and what stops it is not the same everywhere: up to CPython 3.13 it raises `RecursionError`, which every
+  caller here catches, while from 3.14 it relies on the C stack. The WebAssembly runtime behind kube-noob.com's
+  playground is 3.14, so a 40 KB paste of nothing but brackets overflowed its stack and surfaced as a fatal
+  JavaScript `RangeError` — taking down `diagnose` and `known_issues` for any paste beginning with a bracket, the
+  same two tools as the YAML bug above and from an unrelated cause. `tests/test_red_team_rt1.py` already asserted
+  such input is refused cleanly; that test passes on 3.13 and fails on 3.14. `sanitize.json_nesting_ok` now counts
+  brackets before anything is parsed, at the four places a user's text reaches `json.loads` (the Alertmanager
+  payload reader, `insight`, the eval case loader and the REST body), so the refusal is the same on every
+  interpreter. 3.14 joins the CI matrix, advisory until its first green run.
+- **A must-gather file that only one YAML parser accepts is no longer thrown away.** `mustgather/analyse.py` prefers
+  libyaml for its speed, and libyaml before 0.2 refuses a flow collection holding an unspaced colon — `{image:
+  reg/app:v1}` — which PyYAML's own scanner reads without complaint. Such a file was recorded as `unparsed`, its
+  findings silently absent, and because `failing()` does not look at `unparsed` a `--fail-on` gate still exited
+  clean: a wrong answer rather than an error, on the operator's own evidence. A file either parser can read is now
+  read by whichever one can; the alias, depth and document-count refusals still apply on the retry, and a file
+  neither can read is still reported.
 - The Claude plugin asks for its one optional path through a `userConfig` option (`must_gather_dir`, passed to the
   server as `${user_config.must_gather_dir}`) rather than reading a variable out of the user's machine, which is what
   the plugin directory's review asks for. An option the user leaves unset arrives as the literal placeholder text, so

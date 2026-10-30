@@ -232,25 +232,27 @@ _GLUED_COLON = re.compile(r":(?!\s|$)")
 
 
 def _ambiguous_flow_scalars(text: str) -> list[tuple[int, str]]:
-    """Every spot in one YAML document where a colon inside a flow collection is open to interpretation.
+    """Every colon inside a flow collection that is not followed by a space.
 
-    Two shapes, because PyYAML resolves the same hazard two different ways. ``[healthmon:885]`` stays one plain
-    scalar, so it is caught by looking at the scalar's text. ``[rule:]`` and ``[rule:1, x]`` instead become a
-    single-pair mapping inside the sequence, so there is no scalar to look at and the key token is the evidence. A
-    stricter libyaml refuses both.
+    One rule, because libyaml versions disagree on which of these they refuse and bundled data has to satisfy all of
+    them: the 0.2.5 here accepts `[k:1]` and refuses `[k:]`, while the 0.1.7 in the browser runtime refuses
+    `[healthmon:885]` as well. PyYAML resolves the same text two ways -- `[healthmon:885]` stays one plain scalar,
+    `[k:1]` and `[k:]` become a single-pair mapping -- so both are checked: the scalar by its text, the mapping by
+    the character after its value indicator. `[k: 1]` and `{k: }`, where the colon is followed by a space, are
+    ordinary portable YAML and are left alone.
     """
     out: list[tuple[int, str]] = []
     stack: list[str] = []
     for token in yaml.scan(text, Loader=yaml.SafeLoader):
-        if isinstance(token, yaml.tokens.FlowSequenceStartToken):
-            stack.append("sequence")
-        elif isinstance(token, yaml.tokens.FlowMappingStartToken):
-            stack.append("mapping")
+        if isinstance(token, yaml.tokens.FlowSequenceStartToken | yaml.tokens.FlowMappingStartToken):
+            stack.append("flow")
         elif isinstance(token, yaml.tokens.FlowSequenceEndToken | yaml.tokens.FlowMappingEndToken):
             if stack:
                 stack.pop()
-        elif isinstance(token, yaml.tokens.KeyToken) and stack and stack[-1] == "sequence":
-            out.append((token.start_mark.line + 1, "a key: value pair sitting directly in a [ ] sequence"))
+        elif stack and isinstance(token, yaml.tokens.ValueToken):
+            after = text[token.end_mark.index : token.end_mark.index + 1]
+            if after and not after.isspace():
+                out.append((token.start_mark.line + 1, f"a colon glued to {after!r} in a flow collection"))
         elif (
             stack
             and isinstance(token, yaml.tokens.ScalarToken)
@@ -262,10 +264,14 @@ def _ambiguous_flow_scalars(text: str) -> list[tuple[int, str]]:
 
 
 def _yaml_front_matter(text: str) -> str:
-    """The YAML block at the top of a knowledge document, which knowledge/store.py parses at runtime."""
+    """The YAML block at the top of a knowledge document, exactly as knowledge/store.py parses it at runtime.
+
+    The offset has to match `parse_front_matter`: searching from 3 instead of 4 ends the block at the opening `---`
+    of a document whose first body line is `---`, and the test would then scan an empty string.
+    """
     if not text.startswith("---\n"):
         return ""
-    end = text.find("\n---", 3)
+    end = text.find("\n---", 4)
     return text[4:end] if end > 0 else ""
 
 

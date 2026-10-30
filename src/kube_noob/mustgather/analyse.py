@@ -76,6 +76,8 @@ TEXT_LIMIT = 400
 _LOADER: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _OPEN = (yaml.MappingStartEvent, yaml.SequenceStartEvent)
 _CLOSE = (yaml.MappingEndEvent, yaml.SequenceEndEvent)
+# everything a parser can raise on a file that is not readable YAML; _Refused (a ValueError) is always caught first
+_BAD_YAML = (yaml.YAMLError, RecursionError, ValueError, TypeError, OverflowError)
 _NAME = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?\Z")
 _LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\Z")
 _REASON = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}\Z")
@@ -321,26 +323,44 @@ class _Loader:
         self.parsed += len(data)
         text = data.decode("utf-8", "replace")
         try:
-            depth = docs = 0
-            for event in yaml.parse(text, Loader=_LOADER):
-                if isinstance(event, _OPEN):
-                    depth += 1
-                    if depth > MAX_YAML_DEPTH:
-                        raise _Refused(f"nested deeper than {MAX_YAML_DEPTH} levels (not read)")
-                elif isinstance(event, _CLOSE):
-                    depth -= 1
-                elif isinstance(event, yaml.AliasEvent):
-                    raise _Refused("uses YAML aliases, which oc never writes (not read)")
-                elif isinstance(event, yaml.DocumentStartEvent):
-                    docs += 1
-                    if docs > MAX_DOCUMENTS:
-                        raise _Refused(f"more than {MAX_DOCUMENTS} YAML documents (not read)")
-            return list(yaml.load_all(text, Loader=_LOADER))
+            return self._documents(text, _LOADER)
         except _Refused as exc:
             self._fail(path, str(exc))
-        except (yaml.YAMLError, RecursionError, ValueError, TypeError, OverflowError):
-            self._fail(path, "not valid YAML (not read)")
+            return []
+        except _BAD_YAML:
+            pass
+        # libyaml and PyYAML's own scanner do not accept the same documents: libyaml before 0.2 refuses a flow
+        # collection holding an unspaced colon, such as `{image: reg/app:v1}`, which the scanner reads without
+        # complaint. This is the operator's own must-gather, not our data, so a parser disagreement must not lose
+        # their evidence: a file that only one of the two can read is read by that one. The caps above still apply,
+        # because the retry walks the same events. Only a file neither can read is recorded as unparsed.
+        if _LOADER is not yaml.SafeLoader:
+            try:
+                return self._documents(text, yaml.SafeLoader)
+            except _Refused as exc:
+                self._fail(path, str(exc))
+                return []
+            except _BAD_YAML:
+                pass
+        self._fail(path, "not valid YAML (not read)")
         return []
+
+    def _documents(self, text: str, loader: Any) -> list[Any]:
+        depth = docs = 0
+        for event in yaml.parse(text, Loader=loader):
+            if isinstance(event, _OPEN):
+                depth += 1
+                if depth > MAX_YAML_DEPTH:
+                    raise _Refused(f"nested deeper than {MAX_YAML_DEPTH} levels (not read)")
+            elif isinstance(event, _CLOSE):
+                depth -= 1
+            elif isinstance(event, yaml.AliasEvent):
+                raise _Refused("uses YAML aliases, which oc never writes (not read)")
+            elif isinstance(event, yaml.DocumentStartEvent):
+                docs += 1
+                if docs > MAX_DOCUMENTS:
+                    raise _Refused(f"more than {MAX_DOCUMENTS} YAML documents (not read)")
+        return list(yaml.load_all(text, Loader=loader))
 
 
 def _items(doc: Any, kind: str) -> Iterator[dict[str, Any]]:

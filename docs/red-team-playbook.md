@@ -82,9 +82,34 @@ it fixed, so any finding that can become an assertion should become one in the s
 makes the gap visible over the fix that makes it smaller — the drift alarm in `site-sync.yml` does not stop a deploy
 failing, it stops a deploy failing unnoticed, which is what actually went wrong.
 
+## What pass 1 found, once it stopped guessing
+
+The environment-divergence pass was worth running because it refused to reason about the browser runtime and built
+it instead: Pyodide 314.0.7, the version in the site's `deploy.yml`, loaded with a freshly built wheel. That runtime
+is **Python 3.14 with libyaml 0.1.7**, against 3.13 and libyaml 0.2.5 on a development machine — two divergences in
+one runtime, and it found a second live bug on the first of them.
+
+`json.loads` recurses, and what stops it is not the same everywhere. Up to CPython 3.13 it raises `RecursionError`
+at about a thousand levels, which every caller here catches. On 3.14 it relies on the C stack, so a deeply nested
+paste overflows the WebAssembly stack and surfaces as a raw JavaScript `RangeError` the runtime calls fatal. A 40 KB
+paste of nothing but brackets took out `diagnose` and `known_issues` in the browser — the same two tools as the YAML
+bug, in the same runtime, from an unrelated cause. The repository already had a test asserting such input is
+"refused cleanly"; it passed on 3.13 and failed on 3.14. The fix counts brackets before parsing
+(`sanitize.json_nesting_ok`), so the refusal no longer depends on the interpreter.
+
+The libyaml divergence showed up a second time too, on the operator's own evidence rather than ours: a must-gather
+file holding `{image: reg/app:v1}` was recorded as unparsed, one finding disappeared, and `--fail-on` still exited
+clean, because `failing()` does not look at `unparsed`. A file either parser can read is now read by whichever one
+can.
+
+Both are the same lesson as the first bug, which is why the pass is worth repeating rather than reading: **the ways
+four runtimes can disagree are not guessable, so build the runtime and ask it.**
+
 ## The open one
 
 The product repository still never runs its own wheel in the runtime that broke. The site repository does, which is
-where this was finally caught — after release. A CI job here that loads the built wheel into Pyodide and calls
-`diagnose` and `known_issues` would have held 0.7.0 back. That is the highest-value guard not yet built, and it is
-ranked where rule 4 puts it: it closes the class for every tool at once, not one tool's data.
+where the first bug was finally caught — after release. A CI job here that loads the built wheel into Pyodide and
+calls `diagnose` and `known_issues` would have held 0.7.0 back, and would have caught the JSON bug too. That is the
+highest-value guard not yet built, and it is ranked where rule 4 puts it: it closes the class for every tool at
+once, not one tool's data. Python 3.14 is now in the CI matrix as a step towards it, advisory until its first green
+run — half the divergence, without the browser.

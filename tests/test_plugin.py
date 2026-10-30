@@ -44,12 +44,22 @@ def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
     assert args[-4:] == ["python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]
     assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "never installs from an index"
     env = spec["env"]
-    # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm. Only
-    # kube-noob's own settings belong here, which is what keeps UV_*, PIP_* and npm_config_* out by construction.
-    assert all(k.startswith("KUBE_NOOB_") for k in env), set(env)
-    assert {"KUBE_NOOB_WEB_ENABLED", "KUBE_NOOB_CLUSTER_ENABLED", "KUBE_NOOB_LLM_PROVIDER"} <= set(env)
+    # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm. An exact
+    # allowlist, not a KUBE_NOOB_ prefix check: the prefix would also admit KUBE_NOOB_SERVER_HOST=0.0.0.0, a redirect
+    # in KUBE_NOOB_LLM_BASE_URL, or KUBE_NOOB_ANYTHING=${GITHUB_TOKEN}, which would forward a secret off the user's
+    # machine -- the very thing the userConfig option exists to avoid.
+    assert set(env) == {
+        "KUBE_NOOB_WEB_ENABLED",
+        "KUBE_NOOB_CLUSTER_ENABLED",
+        "KUBE_NOOB_LLM_PROVIDER",
+        "KUBE_NOOB_MUST_GATHER_DIR",
+    }
     assert env["KUBE_NOOB_WEB_ENABLED"] == "false" and env["KUBE_NOOB_CLUSTER_ENABLED"] == "false"
     assert env["KUBE_NOOB_LLM_PROVIDER"] == "none"
+    # every value is either a literal or this plugin's own userConfig option: never another variable of the machine's
+    for key, value in env.items():
+        for ref in re.findall(r"\$\{([^}]*)\}", value):
+            assert ref.startswith("user_config."), f"{key} forwards ${{{ref}}} from the user's environment"
     entry = (PLUGIN / "server" / "kube_noob_plugin.py").read_text()
     assert "from kube_noob.server.stdio import main as serve" in entry and "expected the bundled server" in entry
 

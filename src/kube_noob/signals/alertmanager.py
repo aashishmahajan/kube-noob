@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from kube_noob import sanitize
+
 MAX_PAYLOAD = 2_000_000  # bytes of JSON read; anything longer is treated as text
 MAX_ALERTS = 500
 MAX_LABELS = 64
@@ -103,6 +105,8 @@ def _alerts(doc: Any) -> list[dict[str, Any]] | None:
 def _load(text: str) -> tuple[Any, list[dict[str, Any]]] | None:
     head = text.lstrip()[:1]
     if head not in {"{", "["} or len(text) > MAX_PAYLOAD:
+        return None
+    if not sanitize.json_nesting_ok(text):
         return None
     try:
         doc = json.loads(text)

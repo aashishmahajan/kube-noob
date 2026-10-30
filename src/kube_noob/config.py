@@ -519,15 +519,20 @@ def _env_bool(name: str) -> bool | None:
     raise ConfigError(f"{name} must be one of true/false/1/0/yes/no/on/off, got {raw!r}")
 
 
+_PLACEHOLDER = "${user_config."
+
+
 def _env(name: str) -> str | None:
-    """An environment override, or None when it is absent, empty, or an unsubstituted placeholder.
+    """An environment override, or None when it is absent, empty, or an unsubstituted ``userConfig`` placeholder.
 
     The Claude plugin asks the user for a path through ``userConfig`` and passes it in as ``${user_config.<key>}``
     (plugin/kube-noob/.claude-plugin/plugin.json). An option the user left unset must not arrive here as the literal
-    text of the placeholder and be taken for a path, so anything still holding ``${`` counts as unset.
+    text of the placeholder and be taken for a path: ``mustGather.allowedDir`` has to be absolute, so the server
+    would refuse to start. Only that one spelling is ignored, not every ``${``, because a value a user wrote by hand
+    may legitimately contain one -- a URL with credentials in it, say -- and silently dropping it would be worse.
     """
     raw = os.environ.get(name)
-    if raw is None or not raw.strip() or "${" in raw:
+    if raw is None or not raw.strip() or _PLACEHOLDER in raw:
         return None
     return raw
 
@@ -575,7 +580,7 @@ def _env_overrides() -> dict[str, Any]:
         o["mustGather"] = {"allowedDir": must_gather}
     # an explicit empty value still clears the configured paths; only an unsubstituted placeholder is ignored
     memory = os.environ.get("KUBE_NOOB_MEMORY_PATHS")
-    if memory is not None and "${" not in memory:
+    if memory is not None and _PLACEHOLDER not in memory:
         o["memory"] = {"paths": [p for p in memory.split(os.pathsep) if p.strip()]}
     port = os.environ.get("KUBE_NOOB_SERVER_PORT")
     if port:

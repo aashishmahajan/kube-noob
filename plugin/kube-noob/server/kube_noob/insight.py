@@ -19,6 +19,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from kube_noob import sanitize
+
 MAX_TEXT = 2_000_000
 ANALYSER_TEXT = 200_000  # characters each text analyser reads (the end of the input, where failures usually are)
 
@@ -186,6 +188,8 @@ def _json(text: str) -> Any:
         if start < 0 or "\n" not in s[:start]:
             return None
         s = s[start:]
+    if not sanitize.json_nesting_ok(s):
+        return None
     try:
         return json.JSONDecoder().raw_decode(s)[0]
     except (ValueError, RecursionError):

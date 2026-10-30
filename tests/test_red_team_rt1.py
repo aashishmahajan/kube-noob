@@ -369,3 +369,33 @@ def test_deeply_nested_jsonl_cases_are_refused_cleanly(tmp_path: Path, capsys: p
     f.write_text(json.dumps({"input": "x"})[:-1] + ', "deep": ' + "[" * 20_000 + "]" * 20_000 + "}\n")
     assert main(["selftest", "--cases", str(f)]) == 2
     assert "line 1: not JSON (or nested too deeply)" in capsys.readouterr().err
+
+
+def test_deep_json_is_refused_by_counting_brackets_not_by_recursing() -> None:
+    """The refusal above must not depend on the interpreter. json.loads recurses, and what stops it differs:
+    CPython 3.13 raises RecursionError at about a thousand levels, while 3.14 relies on the C stack, so in the
+    WebAssembly runtime the playground uses a deep paste overflows the stack and surfaces as a fatal JavaScript
+    RangeError -- taking out diagnose and known_issues for any paste that starts with a bracket. The brackets are
+    counted before anything is parsed, so every interpreter refuses the same input."""
+    from kube_noob import sanitize
+    from kube_noob.signals import alertmanager
+
+    deep = '{"alerts": ' + "[" * 20_000 + "]" * 20_000 + "}"
+    assert not sanitize.json_nesting_ok(deep)
+
+    parsed = []
+    real = json.loads
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        parsed.append(1)
+        return real(*args, **kwargs)
+
+    json.loads = counting
+    try:
+        assert alertmanager._load(deep) is None
+    finally:
+        json.loads = real
+    assert parsed == [], "the payload reached json.loads instead of being refused on its bracket count"
+
+    payload = json.dumps({"alerts": [{"labels": {"alertname": "KubeNodeNotReady"}, "status": "firing"}]})
+    assert sanitize.json_nesting_ok(payload) and alertmanager._load(payload) is not None

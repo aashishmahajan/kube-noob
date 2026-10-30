@@ -245,8 +245,12 @@ kube-noob calls no model, but the model that calls kube-noob reads its results, 
 
 Where it is applied (found in the code):
 
+- `kube_noob/evals/problems.py` `parse` calls `sanitize.json_nesting_ok`
+- `kube_noob/insight.py` `_json` calls `sanitize.json_nesting_ok`
 - `kube_noob/server/mcp_app.py` `CallFailed.__init__` calls `sanitize.clean`
 - `kube_noob/server/mcp_app.py` `build_server.knowledge_doc` calls `sanitize.clean`
+- `kube_noob/server/rest.py` `register.endpoint.handle` calls `sanitize.json_nesting_ok`
+- `kube_noob/signals/alertmanager.py` `_load` calls `sanitize.json_nesting_ok`
 - `kube_noob/tool_runner.py` `call` calls `sanitize.result`
 
 Finding kinds it reports (read from its source): `bidi-override`, `instruction`, `instruction-hint`, `markdown-image`, `markdown-link`, `role-marker`, `tool-call`, `unicode-tags`, `zero-width`.

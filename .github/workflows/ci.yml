@@ -35,7 +35,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        # 3.14 is a shipped target that nothing here used to run: the plugin's `uv run` may pick it, and the
+        # WebAssembly runtime behind kube-noob.com's playground is 3.14. The one thing that differed there --
+        # json.loads relying on the C stack rather than raising RecursionError, which made a deep paste fatal in the
+        # browser -- is fixed and guarded (sanitize.json_nesting_ok). Advisory until it has had one green run on a
+        # runner with every optional dependency installed, then drop the continue-on-error below.
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    continue-on-error: ${{ matrix.python == '3.14' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
