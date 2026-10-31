@@ -306,3 +306,26 @@ def test_bundled_yaml_parses_under_every_yaml_parser() -> None:
         "quote these scalars: a colon in an unquoted scalar inside [] or {} is ambiguous, and a stricter "
         f"libyaml than this machine's refuses the file ({len(ambiguous)} found): {ambiguous[:6]}"
     )
+
+
+def test_the_release_job_survives_a_release_the_maintainer_made_first() -> None:
+    """`gh release create` fails when the release already exists, and a maintainer creating it by hand -- to write
+    their own notes, or because a tag push looked like it did nothing -- is an ordinary thing to do. It happened on
+    v0.7.1: the release existed, `github-release` failed, and `videos` and `site` were skipped behind it, so the
+    release carried no wheel, no chart and no videos, and kube-noob.com was never told the version had changed. The
+    step has to attach the assets either way; only the notes differ.
+    """
+    release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())["jobs"]
+    steps = release["github-release"]["steps"]
+    publish = next(s for s in steps if "release" in str(s.get("name", "")).lower() and "run" in s)
+    script = publish["run"]
+    assert "gh release upload" in script, "the step cannot attach assets to a release that already exists"
+    assert "gh release create" in script, "the step must still create the release when there is none"
+    assert "--clobber" in script, "re-running the job must replace an asset rather than fail on it"
+    # The two paths are chosen, not both attempted: `create` on an existing release is an error, not a no-op.
+    assert "gh release view" in script or "if " in script, "the step must branch on whether the release exists"
+
+    for job in ("videos", "site"):
+        assert release[job]["needs"] == "github-release" or "github-release" in release[job]["needs"], (
+            f"{job} no longer waits for github-release; the ordering is what keeps the Videos page honest"
+        )
