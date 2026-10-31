@@ -16,6 +16,7 @@ Ground rules:
 - **No network at query time** unless guarded by `webEnabled`. Use `kube_noob.net.http_client` only.
 - Respect licenses: new corpus sources need an SPDX license and a correct `redistributable` flag.
 - Sign off commits (`git commit -s`) to certify the Developer Certificate of Origin.
+- **Working through an AI agent?** [AGENTS.md](AGENTS.md) has what agents get wrong here: the one command that decides whether a change is done, the generated plugin copy that must never be edited, and the gates that exist specifically to catch generated code.
 
 Refresh vendored schemas: `python scripts/vendor_schemas.py --k8s v1.35.0` (updates `PROVENANCE.json`).
 

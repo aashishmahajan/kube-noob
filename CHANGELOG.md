@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `AGENTS.md` (and a one-line `CLAUDE.md` pointing at it) says what an agent working on this repository gets
+  wrong: that `scripts/check.sh`'s exit status is the answer and piping it through `tail` replaces that status, that
+  `plugin/kube-noob/server/` is a generated copy whose omissions are deliberate, which gates exist specifically to
+  catch generated code, and what each exit code means. `tests/test_agents_md.py` holds the file to its own claims --
+  every test, script and exit code it names has to exist, because an instruction file is acted on without question
+  and a stale claim in one is worse than no claim.
+
 - **One unreadable file used to decide the result for a whole directory of manifests.** `audit -f DIR` and
   `gate -f DIR` concatenated every `.yaml` in the tree before anything parsed it, so a file that was not UTF-8 or
   not YAML aborted the audit of every other file -- and reported a line number of the combined text, which is no
