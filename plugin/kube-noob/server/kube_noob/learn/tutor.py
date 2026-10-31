@@ -10,6 +10,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
@@ -73,8 +74,18 @@ class Progress:
 
 
 class Tutor:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, *, record: bool = True) -> None:
+        """``record=False``: teach and grade, keep nothing.
+
+        A shared HTTP server has one static bearer token and many callers, so the learner id comes from the caller
+        and binds to no identity: any caller can write and read any other's progress, and the red team showed one
+        caller's wrong answer taking the credit for another's right one. Everything these methods return -- lesson
+        text, grading feedback, whether an answer was correct -- is computable without state; only the tally needs
+        the file. So the tally is what a shared server does without.
+        """
         self.dir = data_dir / "progress"
+        self.record = record
+        self._lock = threading.Lock()
 
     def _path(self, learner: str) -> Path:
         if not _LEARNER.match(learner):
@@ -95,6 +106,8 @@ class Tutor:
         return Progress(learner, 0, {}, {}, [])
 
     def save(self, prog: Progress) -> None:
+        if not self.record:
+            return
         self.dir.mkdir(parents=True, exist_ok=True)
         p = self._path(prog.learner)
         fd, tmp = tempfile.mkstemp(dir=self.dir, prefix=".progress.", suffix=".tmp")
@@ -185,17 +198,18 @@ class Tutor:
         ev = evaluate(answer, ex["checks"])
         points = int(ex.get("points", 10))
         earned = round(points * ev.score) if ev.parsed else 0
-        prog = self.load(learner)
-        prev = prog.completed_exercises.get(exercise_id, {})
-        best = max(int(prev.get("bestPoints", 0)), earned)
-        prog.credits += best - int(prev.get("bestPoints", 0))
-        prog.completed_exercises[exercise_id] = {
-            "passed": bool(prev.get("passed")) or ev.passed,
-            "bestPoints": best,
-            "attempts": int(prev.get("attempts", 0)) + 1,
-            "lastAttempt": datetime.now(UTC).isoformat(timespec="seconds"),
-        }
-        self.save(prog)
+        with self._lock:
+            prog = self.load(learner)
+            prev = prog.completed_exercises.get(exercise_id, {})
+            best = max(int(prev.get("bestPoints", 0)), earned)
+            prog.credits += best - int(prev.get("bestPoints", 0))
+            prog.completed_exercises[exercise_id] = {
+                "passed": bool(prev.get("passed")) or ev.passed,
+                "bestPoints": best,
+                "attempts": int(prev.get("attempts", 0)) + 1,
+                "lastAttempt": datetime.now(UTC).isoformat(timespec="seconds"),
+            }
+            self.save(prog)
         feedback = []
         if ev.report:
             for f in ev.report.findings:
@@ -219,6 +233,7 @@ class Tutor:
             "checks": [o.as_dict() for o in ev.outcomes],
             "feedback": feedback[:20],
             "hints": [] if ev.passed else ex.get("hints", []),
+            **self._recording(),
         }
 
     def quiz_question(self, qid: str) -> dict[str, Any]:
@@ -234,12 +249,15 @@ class Tutor:
         if not 0 <= choice < len(q["choices"]):
             raise ValueError(f"choice must be 0..{len(q['choices']) - 1}")
         correct = choice == int(q["answer"])
-        prog = self.load(learner)
-        first = qid not in prog.answered_quiz
-        if correct and first:
-            prog.credits += int(q.get("points", 2))
-        prog.answered_quiz.setdefault(qid, {"correct": correct, "at": datetime.now(UTC).isoformat(timespec="seconds")})
-        self.save(prog)
+        with self._lock:
+            prog = self.load(learner)
+            first = qid not in prog.answered_quiz
+            if correct and first:
+                prog.credits += int(q.get("points", 2))
+            prog.answered_quiz.setdefault(
+                qid, {"correct": correct, "at": datetime.now(UTC).isoformat(timespec="seconds")}
+            )
+            self.save(prog)
         return {
             "id": qid,
             "correct": correct,
@@ -248,11 +266,25 @@ class Tutor:
             "source": q.get("source"),
             "creditsAwarded": int(q.get("points", 2)) if correct and first else 0,
             "totalCredits": prog.credits,
+            **self._recording(),
+        }
+
+    def _recording(self) -> dict[str, Any]:
+        if self.record:
+            return {}
+        return {
+            "recorded": False,
+            "note": "this shared server records no progress: a learner id comes from the caller and binds to no "
+            "identity here, so a tally kept against one could have been written by anyone. Run kube-noob locally, "
+            "or use the plugin, to keep your own.",
         }
 
     def progress(self, learner: str) -> dict[str, Any]:
-        prog = self.load(learner)
         total_points = sum(int(e.get("points", 10)) for e in exercises().values()) + sum(
             int(q.get("points", 2)) for q in quizzes().values()
         )
+        if not self.record:
+            # Handing over a tally anyone could have written, to anyone who asks for it, is worse than none.
+            return {"learner": learner, "maxCredits": total_points, **self._recording()}
+        prog = self.load(learner)
         return {**prog.as_dict(), "maxCredits": total_points}

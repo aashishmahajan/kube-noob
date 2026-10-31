@@ -26,6 +26,9 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "plugin/kube-noob/pyproject.toml": (r'^version = "(?P<v>[^"]+)"$',),
     "plugin/kube-noob/uv.lock": (r'^name = "kube-noob-plugin"\nversion = "(?P<v>[^"]+)"$',),
     "plugin/kube-noob/server/kube_noob/__init__.py": (r'__version__ = "(?P<v>[^"]+)"',),
+    # When the plugin's launcher becomes `uvx kube-noob==<version> mcp` (from 0.7.1; plugin/kube-noob/README.md says
+    # why not before), add plugin/kube-noob/.mcp.json here with this same pattern, and to FILES in
+    # tests/test_bump_version.py. A stale pin there would install the previous release.
     "README.md": (r"kube-noob==(?P<v>\d+\.\d+\.\d+)",),
     "deploy/helm/kube-noob/Chart.yaml": (r"^version: (?P<v>\S+)$", r'^appVersion: "(?P<v>[^"]+)"$'),
     "deploy/sidecar/app-with-kube-noob-sidecar.yaml": (r"ghcr\.io/aashishmahajan/kube-noob:(?P<v>\d+\.\d+\.\d+)",),

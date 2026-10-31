@@ -570,11 +570,29 @@ def _store_key(data_dir: Path | None) -> str:
                 continue
             st = f.stat()
             h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns}".encode())
+    # learning.json feeds the index through local_chunks (the team's confirmed notes), so a new note has to
+    # invalidate the cache. Its size and mtime will not do: almost every tool call rewrites the file to bump a
+    # counter or record a confirmation, none of which changes a single indexed chunk, and keying on the file meant
+    # rebuilding the whole index on nearly every request. Key on the notes themselves.
     learning = data_dir / "learning.json"
     if learning.is_file():
-        st = learning.stat()
-        h.update(f"learning:{st.st_size}:{st.st_mtime_ns}".encode())
+        h.update(b"learning:")
+        h.update(_notes_fingerprint(learning))
     return h.hexdigest()
+
+
+def _notes_fingerprint(learning: Path) -> bytes:
+    """The part of ``learning.json`` that reaches the index, hashed. A damaged file falls back to its size and
+    mtime, which is the old behaviour: rebuilding too often is safe, serving a stale index is not."""
+    try:
+        data = json.loads(learning.read_text(encoding="utf-8"))
+        notes = data["notes"] if isinstance(data, dict) else None
+        if not isinstance(notes, list):
+            raise ValueError("no notes list")
+        return hashlib.sha256(json.dumps(notes, sort_keys=True, default=str).encode()).digest()
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        st = learning.stat()
+        return f"{st.st_size}:{st.st_mtime_ns}".encode()
 
 
 def get_store(data_dir: Path | None = None) -> KnowledgeStore:

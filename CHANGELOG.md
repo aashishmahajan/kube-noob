@@ -2,6 +2,144 @@
 
 ## Unreleased
 
+- **A burst of connections that send nothing makes the HTTP server answer 503 to everything**, probes included,
+  and nothing reclaims them: uvicorn counts connections towards `limit_concurrency`, and `timeout_keep_alive`
+  applies between requests on a keep-alive connection, not to a connection that never made one. Measured on the
+  real server: 70 idle sockets, still 503 after 16 seconds, recovering only when they close. kube-noob cannot close
+  that in process, so the parts it does own are now consistent with it. Buffered-body memory is the concurrency
+  limit times the body limit, and that product used to be 64 x 8 MiB = 512 MiB against a 512Mi container -- exactly
+  the ceiling the kernel kills at; with the 1.5 MiB limit it is 96 MiB, and a test keeps the two numbers from
+  drifting apart again. The liveness probe is now four times more forgiving than readiness (120s against 30s), so
+  sustained overload takes the pod out of the endpoints instead of restarting a pod whose restart frees no
+  connection and drops the work in flight. And SECURITY.md states the limitation: expose the port through a proxy,
+  ingress or mesh that enforces a header-read and idle timeout. The default sidecar binds 127.0.0.1, where only
+  containers in the same pod can reach it.
+
+- **A shared server offered three tools that wrote per-caller state it had no identity to key on.** The filter
+  meant to keep write tools off the HTTP server was a denylist of three names, and three more had been added since:
+  `learn_lesson`, `learn_submit` and `learn_quiz` each wrote `progress/<learner>.json`. The server has one static
+  bearer token, so the learner id comes from the caller and binds to nothing -- the red team showed one caller's
+  wrong answer taking the credit for another's right one, and anybody reading anybody's tally. The filter is now the
+  `read_only` flag each tool already carries, so a write tool added later is excluded by construction. The three
+  tools stay on the shared server and grade, mark and teach identically, but record nothing and say so in the
+  result; `learn_progress` returns no tally there rather than one anyone could have written. That makes the old
+  SAFE2 guard -- which refused the `"local"` learner id on a shared server -- pointless, so it is gone: it only
+  caught the caller who forgot to pass an id, never the one who passed somebody else's.
+- A local progress file is read and written under a lock. Fifteen concurrent answers used to store between two and
+  eight of them, because load and save took none; one person with two clients open is enough for that, and a lost
+  credit is a silent wrong answer.
+
+- **An unauthenticated caller could kill the HTTP server through its health endpoints.** `/healthz` and `/readyz`
+  skip the bearer token so the kubelet can probe them, and skipped it for every method -- while the body limit sat
+  inside the auth middleware and buffered up to 8 MiB per connection before the router answered 405. Fifty such
+  connections took the process from 96 MiB to 522 MiB, and in a 512Mi cgroup matching the chart's own limit the
+  kernel killed it. A probe sends no body, so a body on those paths is now refused before it is read. The comment
+  claiming "a caller without the token cannot make the server buffer requests" was false, and is now true.
+- **The request body limit was six times larger than any valid request.** Every tool argument is capped at
+  1,000,000 characters, so an 8 MiB body could never succeed -- but it was buffered, copied by `request.body()`,
+  copied again by the decode, and then bracket-scanned in pure Python, which stalled the event loop for 0.41s per
+  body and up to 7.9s under load, against the chart's 3s probe timeout. The limit is 1.5 MiB, which still leaves
+  room for JSON-RPC framing around a maximum-length argument.
+- **The JSON nesting guard checked a different string from the one the parser read.** `json.loads` accepts bytes and
+  sniffs UTF-16 and UTF-32, while the guard counted brackets on a UTF-8 decoding of those bytes -- and a backslash
+  followed by a NUL desynchronises in-string tracking, so `{"s": "a\"b", "d": [[[...]]]}` in UTF-16 passed a guard
+  that refused the same text in UTF-8. The guard exists because deep nesting overflows the C stack on CPython 3.14
+  as a fatal error rather than a `RecursionError`, so a bypass of it is the whole defect. The body is now decoded
+  once, by the same rule the parser uses, and only that string is counted and parsed. A legitimate UTF-16 body is
+  still understood rather than refused.
+- Two `Authorization` headers are refused instead of resolved. `dict(scope["headers"])` keeps the last value while a
+  proxy in front reads the first, so "wrong, right" authenticated and "right, wrong" did not. Neither resolution is
+  the right one for a request that is never legitimate.
+- The audit line is documented as content-free -- "which tool, argument names and sizes" -- and on the REST path the
+  names come from the caller's body before it is validated. One request with an 8 MiB key name wrote an 18 MiB log
+  line and spent 9s of CPU. Names are truncated and the count capped, with the number dropped recorded.
+- **The shared server rebuilt the whole knowledge index on nearly every request.** `learning.json` feeds the index
+  (the team's confirmed notes become searchable chunks), so it belonged in the cache key -- but the key used its size
+  and mtime, and almost every tool call rewrites that file to bump a counter, which changes no chunk at all. The
+  result was 157ms and 6.2 req/s with learning on against 11ms and 89.8 req/s with it off. The key now covers the
+  notes themselves: a new note is searchable at once, a counter costs nothing, and a file that cannot be read as
+  notes falls back to its stat rather than serving a stale index.
+
+- **A reachability verdict that ignored the admin tiers was not incomplete, it was wrong.** `check_network_policy`
+  and `cluster_check_traffic` listed `AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` under "not evaluated" --
+  but an ANP `Deny` blocks traffic every NetworkPolicy in the namespace allows, an ANP `Allow` permits traffic every
+  NetworkPolicy denies, and a BANP decides the traffic no NetworkPolicy selects at all. So the tool answered
+  "allowed" for connections that do not flow, and sent an operator looking in the namespace for a decision a
+  platform team had made cluster-wide. All three tiers are now evaluated in order: ANP by `priority` ascending then
+  rule order, first match wins, with `Pass` ending the tier; then the NetworkPolicies, whose answer is final where
+  one selects the pod; then the BANP, whose no-match is an allow. Each verdict names the tier that decided it.
+  A manifest the API server would itself refuse -- a priority outside 0-1000, a BANP not named `default`, an action
+  that is not one of the API's three -- is reported as a mistake instead of being evaluated or read as the nearest
+  valid action, a priority above OVN-Kubernetes's supported 99 says that the cluster ignores the policy, and a
+  `nodes` or `networks` peer says it is not evaluated offline rather than being guessed either way. The live check
+  reads both tiers once (they are cluster-scoped), and a cluster without the `network-policy-api` CRDs answers 404,
+  which is a note, not a failure.
+- A denied verdict now proposes a change that would actually work. An `AdminNetworkPolicy` `Deny` cannot be undone
+  by a NetworkPolicy -- the admin tier runs first and has already decided -- so proposing one was worse than
+  proposing nothing: the operator applies it, the traffic still fails, and the next verdict is not believed. The
+  proposal now names the cluster-scoped policy and rule that decided, and says a cluster administrator has to change
+  it. A baseline denial still gets a NetworkPolicy, with the reason it works: any NetworkPolicy that selects the pod
+  takes the decision away from the baseline.
+- `rbac.yaml` says its read rules are "mirrored from `kube_noob.debug.cluster.ALLOWED_RESOURCES`", and nothing
+  checked that claim. `tests/test_safety_contract.py::test_the_chart_read_rules_mirror_the_backends_allowlist` does
+  now, in both directions: a resource the backend may read but the chart does not grant fails only on a live cluster
+  as a 403 somebody has to diagnose, and a grant the backend never uses is standing access for nothing.
+
+- `AGENTS.md` (and a one-line `CLAUDE.md` pointing at it) says what an agent working on this repository gets
+  wrong: that `scripts/check.sh`'s exit status is the answer and piping it through `tail` replaces that status, that
+  `plugin/kube-noob/server/` is a generated copy whose omissions are deliberate, which gates exist specifically to
+  catch generated code, and what each exit code means. `tests/test_agents_md.py` holds the file to its own claims --
+  every test, script and exit code it names has to exist, because an instruction file is acted on without question
+  and a stale claim in one is worse than no claim.
+
+- **One unreadable file used to decide the result for a whole directory of manifests.** `audit -f DIR` and
+  `gate -f DIR` concatenated every `.yaml` in the tree before anything parsed it, so a file that was not UTF-8 or
+  not YAML aborted the audit of every other file -- and reported a line number of the combined text, which is no
+  line of any file you can open. Worse, a NUL byte took `gate` out with an uncaught `yaml.reader.ReaderError` and
+  left exit 1, the same code as "findings at or above `--fail-on`": a pipeline reported policy violations for a gate
+  that had audited nothing. Files are now read one at a time, an unreadable one is named with its reason, and the
+  exit code is 5. `--skip-unreadable` audits the rest and lists them under `unreadable` in the report; `--fail-on`
+  still bites on the files that were read.
+
+- **An API key was reachable by an endpoint that was never meant to have it.** `key_env` had a single global default,
+  so `llm.provider: openai-compatible` with no `apiKeyEnv` read `ANTHROPIC_API_KEY` and sent it as a bearer token to
+  whatever `llm.baseUrl` named -- a third-party gateway included. The default is now per provider and only `anthropic`
+  has one: an `openai-compatible` request with no `apiKeyEnv` carries no `Authorization` header at all, and says so
+  when the endpoint answers 401. `apiKeyEnv` is also narrowed to `*_API_KEY`, which closes the other half of the same
+  hole: `KUBE_NOOB_*` used to be accepted, so a configuration file could aim the model client at
+  `KUBE_NOOB_HTTP_TOKEN`, the MCP server's own bearer token held by the same process.
+- **An endpoint could get the key echoed back out of kube-noob.** Error bodies were quoted verbatim, so a gateway
+  that includes the `Authorization` header in a 400 or 401 put the key on stderr, into logs and into CI output. Every
+  body kube-noob quotes is now redacted first. `ANTHROPIC_BASE_URL` from the environment is held to the same
+  clear-text rule as `llm.baseUrl` -- the SDK reads it directly, so `http://` to a non-local host bypassed the check
+  that exists precisely to stop the key travelling in the clear.
+- A 200 from a model endpoint that is not the documented shape, and a redirect loop, now end in a message instead of
+  a traceback. A model endpoint is not trusted input: a proxy, a captive portal or a different API version can all
+  answer 200 with something else, and `content` missing or a string was an `AttributeError` on the way out.
+
+- **A must-gather analysis now says what it could not see.** "No findings" meant either nothing is wrong or nothing
+  could be read, and the exit code said the same for both: `failing()` counts findings and never looked at
+  `unparsed`, so a `--fail-on` gate passed over a must-gather whose ClusterOperator, Node and ClusterVersion files
+  were truncated. Everything needed to tell the two apart was already recorded and simply never reached the verdict.
+  `completeness` now reports the analysers that had data, how many files could not be read, and whether the evidence
+  is whole; the text output states it in words rather than leaving it to five `not read:` lines; and
+  `--require-complete` exits 5 on a partial run. 5 is distinct on purpose -- 1 stays findings at or above
+  `--fail-on`, and 2, 3 and 4 already mean a config or missing file, a clarification and a refused input. Without the
+  flag nothing changes, so no existing gate shifts under anyone.
+
+## 0.7.1 - 2026-10-31
+
+- **Two holes in the Jira corpus scrubber let person-shaped text reach stored tickets**, which is what the
+  `corpus-refresh` privacy gate has been refusing since 2026-10-28 with 123 findings. `_ACCOUNT` required the id to
+  start within one punctuation character of `accountId`, so the JSON spelling `{"accountId": "5b10..."}` -- quote,
+  colon, space -- kept a real Atlassian account id. And `scrub()` ran before `unname()`, so a display name it could
+  not recognise as a person (a non-ASCII one is neither email- nor handle-shaped) survived the scrub and was only
+  then swapped for its label, leaving text like "ping Commenter A at quay.io" that reads as a spelled-out email.
+  `anonymise()` now runs the chain in an order that holds -- scrub, unname, handles, scrub again -- and the widened
+  `_ACCOUNT` accepts any mix of quote, colon, equals and space before the id. The audit that gates the corpus is
+  deliberately not loosened: it may still over-flag a bare 24-character hex string that is not an account id, and
+  telling those apart needs the real tickets.
+
 - **Bundled YAML that only some parsers accepted broke `diagnose` and `known_issues` after 0.7.0.** The Ceph
   catalogue `data/ceph_health.yaml` shipped 195 scalars of the form `src: [healthmon:885]`. A colon with no space
   after it inside a flow sequence is ambiguous YAML: PyYAML's own scanner reads it as the string `"healthmon:885"`,
@@ -35,15 +173,16 @@
   clean: a wrong answer rather than an error, on the operator's own evidence. A file either parser can read is now
   read by whichever one can; the alias, depth and document-count refusals still apply on the retry, and a file
   neither can read is still reported.
-- The Claude plugin asks for its one optional path through a `userConfig` option (`must_gather_dir`, passed to the
-  server as `${user_config.must_gather_dir}`) rather than reading a variable out of the user's machine, which is what
-  the plugin directory's review asks for. An option the user leaves unset arrives as the literal placeholder text, so
-  `kube_noob.config` now treats a value still holding `${` as unset: without that the server refused to start, since
-  `mustGather.allowedDir` must be an absolute path. The plugin declares no secret-valued option and is started with
-  the web, the cluster and the model off, so `apiKeyEnv`, `rhacs.tokenEnv` and `ci.githubTokenEnv` are unreachable
-  from it; `tests/test_distribution.py::test_the_plugin_asks_the_user_and_reads_no_secret_from_their_machine` holds
-  that. The plugin README now also states plainly why the launcher is `uv run --frozen` and what that costs at review
-  time.
+- The Claude plugin asks the user for nothing, which is a stronger answer to the plugin directory's "ask through a
+  `userConfig` option rather than reading the machine" review note than adding one. An earlier attempt at this added
+  an option for a must-gather folder; that was wrong, and is reverted. `scripts/sync_plugin_server.py` deliberately
+  leaves `kube_noob.mustgather` out of the plugin because the directory asks plugins not to read the user's files on
+  their own, so the option asked for access the plugin does not have and offered a tool it does not ship. The plugin
+  declares no `userConfig`, is started with the web, the cluster and the model off (so `apiKeyEnv`, `rhacs.tokenEnv`
+  and `ci.githubTokenEnv` are unreachable from it), and a test now holds all three facts together, including that
+  the must-gather module stays out of the copy. `kube_noob.config` still treats a blank environment variable as
+  unset rather than as a setting of "": `mustGather.allowedDir` has to be an absolute path, so a shell exporting the
+  variable unconditionally used to stop the server starting.
 - **kube-noob.com follows a release instead of a schedule.** `release.yml` gained a `site` job that asks the site
   repository to publish the new release, and it runs after the videos are attached rather than straight after the
   release: a site built the moment the release existed would publish a Videos page saying the release had none, and

@@ -46,6 +46,7 @@ class Source:
     text: str
     chart: str | None = None  # the chart directory this was rendered from (findings point at its templates)
     skip: str | None = None  # why the file is not audited (not a manifest, a Helm template)
+    unreadable: str | None = None  # why the file could not be read at all (bytes YAML refuses, a parse error)
     start: int = 0  # first line of this file in the combined input (1-based)
     lines: int = 0
 
@@ -63,6 +64,21 @@ def _classify(path: Path | None, text: str) -> str | None:
         return None  # audited, so the parse error is reported
     if not any(isinstance(d, dict) and "apiVersion" in d and "kind" in d for d in docs):
         return "not a Kubernetes manifest (no document with apiVersion and kind)"
+    return None
+
+
+def unreadable_reason(text: str) -> str | None:
+    """Why YAML cannot read this text at all, or None. Separate from ``_classify``: a file that is not a manifest was
+    read and understood, while this one was not read, which is not the same answer and must not share its exit code.
+    Collecting it per file keeps one bad file in a directory from deciding the outcome for every other file, and keeps
+    the reason attached to a path the user can open instead of a line of the combined input."""
+    try:
+        list(yaml.safe_load_all(text))
+    except yaml.YAMLError as exc:
+        first = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
+        mark = getattr(exc, "problem_mark", None)
+        where = f" (line {mark.line + 1})" if mark is not None else ""
+        return f"{first}{where}"
     return None
 
 
@@ -93,6 +109,7 @@ def collect(paths: list[str], read: Any) -> list[Source]:
     """Manifest files from paths (directories: their *.yaml and *.yml, sorted), ``-`` for stdin."""
     out: list[Source] = []
     total = 0
+    bad: dict[str, str | None] = {}
     for raw in paths:
         items: list[tuple[str, str, str | None]]
         if raw == "-":
@@ -111,13 +128,16 @@ def collect(paths: list[str], read: Any) -> list[Source]:
                 for f in files:
                     text = f.read_text(encoding="utf-8", errors="replace")
                     items.append((_uri(f), text, _classify(f, text)))
+                for uri, text, why in items:
+                    if why is None:
+                        bad[uri] = unreadable_reason(text)
             elif p.is_file():
                 items = [(_uri(p), p.read_text(encoding="utf-8", errors="replace"), None)]
             else:
                 raise GateError(f"{raw}: no such file or directory")
         for uri, text, why in items:
             total += len(text)
-            out.append(Source(uri, text, skip=why))
+            out.append(Source(uri, text, skip=why, unreadable=bad.get(uri)))
             if len(out) > MAX_FILES or total > MAX_TOTAL:
                 raise GateError(f"more than {MAX_FILES} files or {MAX_TOTAL:,} characters: gate one release at a time")
     return out
@@ -230,8 +250,11 @@ def run(
     scanner_reports = scanner_reports or []
     sarif_reports = sarif_reports or []
     skipped = [{"file": s.uri, "why": s.skip} for s in sources if s.skip]
-    sources = [s for s in sources if not s.skip]
+    unreadable = [{"file": s.uri, "why": s.unreadable} for s in sources if s.unreadable and not s.skip]
+    sources = [s for s in sources if not s.skip and not s.unreadable]
     if not sources and not containerfiles and not scanner_reports and not sarif_reports:
+        if unreadable:
+            raise GateError("nothing could be read: " + "; ".join(f"{u['file']}: {u['why']}" for u in unreadable))
         raise GateError(
             "nothing to check: pass manifests with -f, Containerfiles with --containerfile, --scanner-report or "
             "--sarif-report"
@@ -334,6 +357,7 @@ def run(
         "failures": failures,
         "files": [s.uri for s in sources],
         "skipped": skipped,
+        "unreadable": unreadable,
         "containerfiles": [u for u, _ in containerfiles],
         "counts": counts,
         "excepted": excepted,

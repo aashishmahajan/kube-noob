@@ -192,3 +192,26 @@ def test_hostile_people_never_reach_the_copy() -> None:
         if any("confirmed the fix" in str(c["body"]) for c in comments):  # versions and addresses are not people
             assert "4.21.3" in rec["text"] and "10.0.12.5" in rec["text"]
     assert leaked == []
+
+
+def test_an_account_id_and_a_non_ascii_name_leave_nothing_person_shaped() -> None:
+    """Two holes the corpus-refresh privacy gate caught, both of which reached stored text.
+
+    scrub() ran before unname(), so a display name it could not recognise as a person (a non-ASCII one) survived
+    into the text and was only then swapped for its label, leaving "ping Commenter A at quay.io" -- which the audit
+    reads as a spelled-out email. And _ACCOUNT missed the JSON spelling `{"accountId": "5b10..."}`, where a space
+    follows the colon, so a real Atlassian account id stayed in the copy. Both are checked here on the same path the
+    sync writes, so the gate cannot go red on them again.
+    """
+    from kube_noob.sources.jira import anonymise
+
+    by_name = {"José Pérez": "Commenter A", "Müller": "Commenter B"}
+    text = (
+        'José Pérez wrote: {"accountId": "5b10ac8d82e05b22cc7d4ef5"} and also accountId = "557058:0a1b2c3d-4e5f" '
+        "then asked Müller to retry; contact ops at example dot com"
+    )
+    out = anonymise(text, by_name)
+    assert "5b10ac8d82e05b22cc7d4ef5" not in out, out
+    assert "557058:0a1b2c3d-4e5f" not in out, out
+    assert "José" not in out and "Müller" not in out, out
+    assert "Commenter A" in out and "Commenter B" in out

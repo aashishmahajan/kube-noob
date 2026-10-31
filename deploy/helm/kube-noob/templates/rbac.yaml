@@ -37,6 +37,11 @@ rules:
     resources: [roles, rolebindings{{ if .cluster }}, clusterroles, clusterrolebindings{{ end }}]
     verbs: [get, list]
 {{- if .cluster }}
+  # The two cluster-scoped network policy tiers, read for `policy reach --live`. Cluster-scoped, so this grant only
+  # exists in the ClusterRole; a cluster without the network-policy-api CRDs answers 404 and the check says so.
+  - apiGroups: [policy.networking.k8s.io]
+    resources: [adminnetworkpolicies, baselineadminnetworkpolicies]
+    verbs: [get, list]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get, list]

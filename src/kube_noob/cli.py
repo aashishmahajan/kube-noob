@@ -27,9 +27,60 @@ def _read(path: str) -> str:
         return sys.stdin.read()
     p = Path(path)
     if p.is_dir():
-        parts = [f.read_text(encoding="utf-8") for f in sorted(p.rglob("*")) if f.suffix in {".yaml", ".yml"}]
-        return "\n---\n".join(parts)
+        return "\n---\n".join(text for _, text in _dir_yaml(p)[0])
     return p.read_text(encoding="utf-8")
+
+
+def _dir_yaml(d: Path) -> tuple[list[tuple[str, str]], list[dict[str, str]]]:
+    """Every ``*.yaml``/``*.yml`` under ``d``, and the ones that could not be read.
+
+    Read per file, because the files used to be concatenated before anything looked at them: one file that was not
+    UTF-8 or not YAML then decided the outcome for every other file in the directory, and said so against a line of
+    the combined text rather than against a path anyone could open.
+    """
+    from kube_noob.gate import unreadable_reason
+
+    ok: list[tuple[str, str]] = []
+    bad: list[dict[str, str]] = []
+    for f in sorted(d.rglob("*")):
+        if f.suffix not in {".yaml", ".yml"} or not f.is_file():
+            continue
+        rel = str(f.relative_to(d))
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError) as exc:
+            bad.append({"path": rel, "why": f"not readable as UTF-8 text: {exc}"})
+            continue
+        why = unreadable_reason(text)
+        if why:
+            bad.append({"path": rel, "why": why})
+        else:
+            ok.append((rel, text))
+    return ok, bad
+
+
+def _manifest_input(a: argparse.Namespace) -> tuple[str, list[dict[str, str]]]:
+    """The manifest text for the audit family, with the files in a directory that could not be read."""
+    p = Path(a.file) if a.file != "-" else None
+    if p is None or not p.is_dir():
+        return _read(a.file), []
+    ok, bad = _dir_yaml(p)
+    if not ok:
+        named = "; ".join(f"{b['path']}: {b['why']}" for b in bad)
+        raise ConfigError(
+            f"{a.file}: no readable manifest here" + (f" ({named})" if named else " (no .yaml or .yml files)")
+        )
+    return "\n---\n".join(text for _, text in ok), bad
+
+
+def _refuse_unreadable(bad: list[dict[str, str]], flag: str = "--skip-unreadable") -> None:
+    for b in bad:
+        print(f"error: {b['path']}: {b['why']}", file=sys.stderr)
+    print(
+        f"error: {len(bad)} file(s) could not be read, so this is not a clean result; pass {flag} to audit the rest "
+        "and list these in the report",
+        file=sys.stderr,
+    )
 
 
 _PATHLIKE = re.compile(r"[/\\]|\.[A-Za-z0-9]{1,5}$")
@@ -312,6 +363,9 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         _tprint(gate.markdown(report, top=50))
     else:
         _emit(report, fmt)
+    if report.get("unreadable") and not a.skip_unreadable:
+        _refuse_unreadable([{"path": u["file"], "why": u["why"]} for u in report["unreadable"]])
+        return 5
     return 0 if report["passed"] else 1
 
 
@@ -793,6 +847,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     a = manifests_cmd("audit", "Validate + audit + calibrate + red-team manifests")
     a.add_argument("--min-severity", default="low", choices=["info", "low", "medium", "high", "critical"])
+    a.add_argument(
+        "--skip-unreadable",
+        action="store_true",
+        help="audit the files that could be read and list the rest under 'unreadable' in the report; without it a "
+        "directory holding a file that is not UTF-8 or not YAML exits 5, so a gate never reads a partial audit as a "
+        "clean one (exit 1 stays findings at or above --fail-on)",
+    )
     a.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     a.add_argument(
         "--exceptions",
@@ -837,6 +898,13 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
     gt.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
+    gt.add_argument(
+        "--skip-unreadable",
+        action="store_true",
+        help="gate the files that could be read and list the rest under 'unreadable' in the report; without it a "
+        "file that is not UTF-8 or not YAML exits 5, which a pipeline can tell apart from 1 (findings at or above "
+        "--fail-on)",
+    )
     gt.add_argument("--chart-path", default=None, help="the chart in the repository: findings point at its templates")
     gt.add_argument("--sarif", default=None, help="write SARIF 2.1.0 here (GitHub code scanning)")
     gt.add_argument("--summary", default=None, help="write the Markdown summary here ($GITHUB_STEP_SUMMARY)")
@@ -1098,6 +1166,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="never",
         choices=["low", "medium", "high", "critical", "never"],
         help="exit 1 when a finding is at or above this severity",
+    )
+    mga.add_argument(
+        "--require-complete",
+        action="store_true",
+        help="exit 5 when the must-gather was missing analysers or held files that could not be read, so a gate "
+        "never reads a blind run as a clean one (exit 1 stays findings at or above --fail-on)",
     )
     mga.add_argument(
         "--report",
@@ -1735,7 +1809,10 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     platform = getattr(a, "platform", None) or s.default_platform
 
     if a.cmd in {"audit", "validate", "redteam", "fix"}:
-        text = _read(a.file)
+        text, unreadable = _manifest_input(a)
+        if unreadable and not getattr(a, "skip_unreadable", False):
+            _refuse_unreadable(unreadable)
+            return 5
         if a.cmd == "audit":
             from kube_noob.audit.exceptions import ExceptionsError
 
@@ -1752,9 +1829,12 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                 )
             except ExceptionsError as exc:
                 raise ConfigError(f"{a.exceptions}: {exc}") from exc
+            rep["unreadable"] = unreadable
             if a.format == "text":
                 _print_report(rep)
                 _print_exceptions(rep)
+                for b in unreadable:
+                    print(f"not read: {b['path']} ({b['why']})", file=sys.stderr)
             else:
                 _emit(rep, fmt)
             if rep.get("exceptions") and not rep["exceptions"]["gate"]:
@@ -2007,7 +2087,20 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _tprint(text)
         else:
             _emit({**bundle.as_dict(), **rep}, fmt)
-        return 1 if analyse.failing(analysis, a.fail_on) else 0
+        if analyse.failing(analysis, a.fail_on):
+            return 1
+        # A gate that passes on evidence nobody could read is a false all-clear, and exit 0 cannot say which one it
+        # was. 5 rather than 2: 1 is findings at or above --fail-on, and 2, 3 and 4 already mean a config or missing
+        # file, a clarification, and a refused input. 5 means the run itself is not trustworthy enough to act on.
+        if getattr(a, "require_complete", False) and not analysis.completeness()["complete"]:
+            c = analysis.completeness()
+            print(
+                f"refusing a clean verdict: {c['analysersRead']} of {c['analysersExpected']} analysers had data and "
+                f"{c['unreadableFiles']} file(s) could not be read",
+                file=sys.stderr,
+            )
+            return 5
+        return 0
     if a.cmd == "admission":
         return _admission_cmd(a, s, fmt)
     if a.cmd == "build":

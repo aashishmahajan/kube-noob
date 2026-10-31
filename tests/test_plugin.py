@@ -33,6 +33,15 @@ def test_bundled_server_matches_the_source() -> None:
 
 
 def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
+    """The plugin runs its own vendored source with every dependency fixed by hash.
+
+    A pinned package launcher (`uvx kube-noob==<version> mcp`) is what the plugin directory clears automatically,
+    where this form is held for a human reviewer, so it is the intended default -- but not before 0.7.1. The
+    published 0.7.0 has no `mustGather.enabled`, so installing it would offer `analyze_must_gather`, the one tool
+    that opens a path on the machine, which this plugin has never had. Switching first and releasing after would
+    widen the plugin in the middle of its security review. The env below already carries the switch, so the swap is
+    a two-line change once the release that honours it exists.
+    """
     spec = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["kube-noob"]
     assert spec["command"] == "uv"
     args = spec["args"]
@@ -42,20 +51,24 @@ def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
     assert args[args.index("--project") + 1] == "${CLAUDE_PLUGIN_ROOT}"
     # -I: no current directory, PYTHONPATH or user site on sys.path; -B: no .pyc files written into the plugin root
     assert args[-4:] == ["python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]
-    assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "never installs from an index"
+    assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "not from an index before 0.7.1"
+    readme = (PLUGIN / "README.md").read_text()
+    assert "uvx kube-noob==<version> mcp" in readme, "the planned default has to stay documented"
     env = spec["env"]
-    # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm. An exact
-    # allowlist, not a KUBE_NOOB_ prefix check: the prefix would also admit KUBE_NOOB_SERVER_HOST=0.0.0.0, a redirect
-    # in KUBE_NOOB_LLM_BASE_URL, or KUBE_NOOB_ANYTHING=${GITHUB_TOKEN}, which would forward a secret off the user's
-    # machine -- the very thing the userConfig option exists to avoid.
+    # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm. This
+    # matters more now that the default launcher resolves from an index: UV_INDEX_URL or PIP_INDEX_URL here would
+    # redirect the install itself. An exact allowlist, not a KUBE_NOOB_ prefix check, because the prefix would also
+    # admit KUBE_NOOB_SERVER_HOST=0.0.0.0, a redirect in KUBE_NOOB_LLM_BASE_URL, or KUBE_NOOB_ANYTHING=${GITHUB_TOKEN},
+    # which would forward a secret off the user's machine.
     assert set(env) == {
         "KUBE_NOOB_WEB_ENABLED",
         "KUBE_NOOB_CLUSTER_ENABLED",
         "KUBE_NOOB_LLM_PROVIDER",
-        "KUBE_NOOB_MUST_GATHER_DIR",
+        "KUBE_NOOB_MUST_GATHER_ENABLED",
     }
     assert env["KUBE_NOOB_WEB_ENABLED"] == "false" and env["KUBE_NOOB_CLUSTER_ENABLED"] == "false"
     assert env["KUBE_NOOB_LLM_PROVIDER"] == "none"
+    assert env["KUBE_NOOB_MUST_GATHER_ENABLED"] == "false"
     # every value is either a literal or this plugin's own userConfig option: never another variable of the machine's
     for key, value in env.items():
         for ref in re.findall(r"\$\{([^}]*)\}", value):

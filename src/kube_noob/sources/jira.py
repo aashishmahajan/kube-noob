@@ -56,7 +56,10 @@ _NON_PRODUCT_HINT = re.compile(r"(?i)\b(ocp|openshift|k8s|kubernetes|rhel|go|gol
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _ACCOUNT = re.compile(
     r"\[~[^\]\s]{1,120}\]"  # [~accountid:...] and Server-style [~jsmith]
-    r"|accountId[\"=:]\s*\"?[0-9a-f:-]{10,}\"?"
+    # accountId followed by any mix of quote, colon, equals and space, then the id. The earlier form demanded the id
+    # start within one punctuation character, so the JSON spelling `{"accountId": "5b10..."}` -- a quote, a colon and
+    # a space -- kept its id, and the corpus-refresh privacy gate caught it in stored text.
+    r"|accountId[\"'=:\s]{1,6}[0-9a-f][0-9a-f:-]{9,}"
     r"|https?://[^\s/]+/(?:jira/)?(?:people|secure/ViewProfile\.jspa\?name=)[^\s)\]>\"']*",  # profile links
     re.IGNORECASE,
 )
@@ -133,6 +136,18 @@ def scrub(text: str) -> str:
     text = _QUOTE_HEADER.sub(lambda m: f"{m.group(1)} someone wrote:", text)
     text = _CLOSING.sub(lambda m: f"{m.group(1)}someone", text)
     return _SIGNATURE.sub("-- \n<signature>", text)
+
+
+def anonymise(text: str, by_name: dict[str, str]) -> str:
+    """Every person-shaped thing out of one piece of ticket text, in the order that actually holds.
+
+    ``scrub`` runs twice on purpose. It cannot recognise every display name as a person -- a non-ASCII one is not
+    email-shaped or handle-shaped -- so a name survives the first pass and ``unname`` then swaps it for its label.
+    That is what leaves text like "ping Commenter A at quay.io", which reads as a spelled-out email to the audit
+    that gates the corpus. Scrubbing again after the names are labels removes what only becomes visible then, and
+    the pass is cheap because the first one has already taken out the emails, phones, ids and profile links.
+    """
+    return scrub(scrub_handles(unname(scrub(text), by_name)))
 
 
 def scrub_handles(text: str) -> str:
@@ -477,23 +492,19 @@ def issue_to_record(
         room = max(max_text // 2, max_text - len(desc_text) - 600)
         comment_text = "...\n" + comment_text[-room:].split("\n", 1)[-1]
         cut = True
-    full = scrub_handles(
-        unname(
-            scrub(
-                "\n".join(header)
-                + "\n\n## Description\n\n"
-                + desc_text.strip()
-                + ("\n\n## Comments\n\n" + comment_text if comment_text else "")
-            ),
-            by_name,
-        )
+    full = anonymise(
+        "\n".join(header)
+        + "\n\n## Description\n\n"
+        + desc_text.strip()
+        + ("\n\n## Comments\n\n" + comment_text if comment_text else ""),
+        by_name,
     )
     text = full[:max_text]
     cut = cut or len(full) > max_text
     status_category = _obj(_obj(f.get("status")).get("statusCategory")).get("key")
     return {
         "id": f"jira-{key}",
-        "title": scrub_handles(unname(scrub(f"{key}: {f.get('summary', '')}"), by_name)),
+        "title": anonymise(f"{key}: {f.get('summary', '')}", by_name),
         "text": text,
         "url": f"{base_url.rstrip('/')}/browse/{key}",
         "sourceId": f"jira:{project}",

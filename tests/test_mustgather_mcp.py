@@ -71,14 +71,12 @@ def test_settings_and_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert load_settings(overrides={}).must_gather.allowed_dir == tmp_path
 
 
-def test_an_unset_plugin_option_does_not_stop_the_server_starting(monkeypatch: pytest.MonkeyPatch) -> None:
-    """G122: the plugin passes this folder in as ${user_config.must_gather_dir}. An option the user left unset
-    arrives as the literal placeholder, and allowedDir must be absolute, so taking it for a path refused every
-    start. Only that spelling is ignored: a path a user wrote containing ${ is still their path."""
-    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "${user_config.must_gather_dir}")
+def test_a_blank_variable_is_an_unset_one_not_a_refused_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """allowedDir has to be an absolute path, so a shell that exports KUBE_NOOB_MUST_GATHER_DIR unconditionally used
+    to make the server refuse to start rather than fall back to the default. Blank is unset; a real path, including
+    an odd one, is still the user's path."""
+    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "   ")
     assert load_settings(overrides={}).must_gather.allowed_dir is None
-    monkeypatch.setenv("KUBE_NOOB_MEMORY_PATHS", "${user_config.memory_paths}")
-    assert load_settings(overrides={}).memory.paths == []
     monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "/srv/${odd}/must-gather")
     assert str(load_settings(overrides={}).must_gather.allowed_dir) == "/srv/${odd}/must-gather"
 
@@ -124,3 +122,23 @@ def test_a_toolkit_without_the_must_gather_package_still_lists_its_tools(
     monkeypatch.setattr(importlib.util, "find_spec", missing)
     names = _names(_kit(tmp_path, shared=False))
     assert "analyze_must_gather" not in names and "diagnose" in names
+
+
+def test_must_gather_can_be_withdrawn_by_configuration_not_only_by_packaging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """analyze_must_gather is the only tool that opens a path on the machine rather than reading text it was handed,
+    so a deployment that must not touch the user's files has to be able to say so. It used to be withheld only by
+    scripts/sync_plugin_server.py leaving kube_noob.mustgather out of the plugin copy -- a packaging accident, not a
+    policy, and one that stops holding the moment the plugin installs the published package instead."""
+    from kube_noob import toolkit as tk
+
+    offered = {s.name for s in tk.Toolkit(load_settings(overrides={})).specs()}
+    assert "analyze_must_gather" in offered
+
+    off = tk.Toolkit(load_settings(overrides={"mustGather": {"enabled": False}}))
+    assert "analyze_must_gather" not in {s.name for s in off.specs()}
+
+    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_ENABLED", "false")
+    assert "analyze_must_gather" not in {s.name for s in tk.Toolkit(load_settings(overrides={})).specs()}
+    assert load_settings(overrides={}).must_gather.enabled is False

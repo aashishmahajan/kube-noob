@@ -72,11 +72,13 @@ def test_tutor_flow_and_credits(tmp_path: Path) -> None:
         t.progress("../../etc/passwd")
 
 
-def test_shared_server_rejects_the_default_learner_for_writes(tmp_path: Path) -> None:
-    """learn_submit/learn_quiz/learn_lesson take a `learner` id and default it to (or accept) "local", the
-    single-user stdio convenience. On a shared, multi-tenant HTTP server that default would let every caller who
-    forgets to pass their own id silently collide in the same progress file (SAFE2). The shared toolkit must
-    refuse the default and ask for a real id; local stdio keeps "local" working exactly as before."""
+def test_a_shared_server_grades_the_same_way_and_records_nothing(tmp_path: Path) -> None:
+    """Replaces the SAFE2 guard, which refused the "local" learner id on a shared server so that callers who
+    forgot to pass their own could not collide in one progress file. The guard was too narrow: a caller who passes
+    *any* id gets a file, and with one static bearer token an id binds to no identity, so one caller could write
+    and read another's. A shared server now records no progress at all, which makes the id harmless and the guard
+    pointless -- the grading, the feedback and the right answer are all computed without it.
+    """
     from kube_noob import toolkit as tk
     from kube_noob.config import load_settings
 
@@ -84,23 +86,23 @@ def test_shared_server_rejects_the_default_learner_for_writes(tmp_path: Path) ->
     answer = "```yaml\n" + generate(Blueprint.model_validate(ex["reference"])).yaml() + "```"
 
     local = tk.Toolkit(load_settings(overrides={"dataDir": str(tmp_path / "local")}), shared=False)
-    assert local.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer))["passed"]
+    kept = local.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer))
+    assert kept["passed"] and kept["totalCredits"] == 15 and "recorded" not in kept
+    assert local.progress(tk.LearnerIn(learner="local"))["credits"] == 15
 
-    shared = tk.Toolkit(load_settings(overrides={"dataDir": str(tmp_path / "shared")}), shared=True)
-    with pytest.raises(ValueError, match="learner"):
-        shared.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer))
-    with pytest.raises(ValueError, match="learner"):
-        shared.quiz(tk.QuizIn(question_id="ocp-q-route-group", choice=1))
-    with pytest.raises(ValueError, match="learner"):
-        shared.lesson(tk.LessonIn(lesson_id="ocp-102-scc", learner="local"))
-
-    # reading a quiz question (no choice) never touches progress, so no learner id is needed even on shared.
+    shared_dir = tmp_path / "shared"
+    shared = tk.Toolkit(load_settings(overrides={"dataDir": str(shared_dir)}), shared=True)
+    # Every id, including the old default, is accepted and graded identically.
+    for learner in (None, "local", "student-7"):
+        kw = {} if learner is None else {"learner": learner}
+        out = shared.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer, **kw))
+        assert out["passed"], out
+        assert out["recorded"] is False and "shared" in out["note"]
+        marked = shared.quiz(tk.QuizIn(question_id="ocp-q-route-group", choice=1, **kw))
+        assert marked["correct"] and marked["recorded"] is False
+        assert shared.lesson(tk.LessonIn(lesson_id="ocp-102-scc", **kw))["citations"]
     assert shared.quiz(tk.QuizIn(question_id="ocp-q-route-group"))["id"] == "ocp-q-route-group"
-    # a real, caller-supplied learner id still works on the shared server, isolated in its own progress file.
-    out = shared.submit(tk.SubmitIn(exercise_id="ocp-ex-secure-route", answer=answer, learner="student-7"))
-    assert out["passed"] and out["totalCredits"] == 15
-    assert shared.quiz(tk.QuizIn(question_id="ocp-q-route-group", choice=1, learner="student-7"))["correct"]
-    assert shared.lesson(tk.LessonIn(lesson_id="ocp-102-scc", learner="student-7"))["citations"]
+    assert not (shared_dir / "progress").exists(), "a shared server wrote a progress file"
 
 
 def test_citation_extraction() -> None:

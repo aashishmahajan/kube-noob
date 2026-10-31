@@ -14,10 +14,11 @@ cluster:
 llm:                           # used by `kube-noob ask` / `train bench`, never by the MCP server
   provider: none               # none | anthropic (pip install 'kube-noob[ask]') | openai-compatible
   model: claude-fable-5-1
-  apiKeyEnv: ANTHROPIC_API_KEY
+  apiKeyEnv: ANTHROPIC_API_KEY  # must name a *_API_KEY variable; only `anthropic` has a default
   # provider: openai-compatible
   # baseUrl: http://localhost:8000/v1   # vLLM / Ollama / your fine-tuned kube-noob model (https, loopback or *.svc;
   #                                     # set allowInsecureBaseUrl: true for other plain-http endpoints)
+  # apiKeyEnv: VLLM_API_KEY             # required if that endpoint wants a key: ANTHROPIC_API_KEY is never sent to it
 judge:
   provider: none               # eval-only LLM judge; never exported as training labels
 server:

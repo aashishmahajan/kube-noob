@@ -88,10 +88,12 @@ class ClusterSettings(_Base):
     max_log_lines: int = Field(default=200, ge=1, le=5000)
 
 
-# apiKeyEnv may only name a model provider's key variable (ending in _API_KEY, or starting with KUBE_NOOB_), so a
-# configuration file cannot point the model client at an unrelated variable. The default per provider is set in
-# kube_noob.agent.providers, which is the only code that reads it.
-_KEY_VAR = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)\Z")
+# apiKeyEnv may only name a model provider's key variable (ending in _API_KEY), so a configuration file cannot point
+# the model client at an unrelated variable - above all not at the HTTP service's own bearer token (server.authTokenEnv
+# and its default), which the same process holds and which a model endpoint has no business receiving. The default per
+# provider is set in kube_noob.agent.providers, which is the only code that reads it, and there is no default for an
+# endpoint kube-noob did not choose.
+_KEY_VAR = re.compile(r"^[A-Z][A-Z0-9_]*_API_KEY\Z")
 _CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
 
 
@@ -111,7 +113,9 @@ def is_local_url(url: str | None) -> bool:
         return host == "localhost" or host.endswith(_LOCK_LOCAL_SUFFIXES)
 
 
-def _check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> None:
+def check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> None:
+    """Reject an endpoint that would carry the API key in clear text or embed credentials in the URL. Public so the
+    providers can hold a base URL that arrived from the environment to the same rule as one from the config file."""
     if base_url is None:
         return
     parts = urlsplit(base_url)
@@ -142,7 +146,7 @@ class _LLMEndpoint(_Base):
     @classmethod
     def _key_env(cls, v: str | None) -> str | None:
         if v is not None and not _KEY_VAR.match(v):
-            raise ValueError(f"apiKeyEnv {v!r} must name a model provider key variable (*_API_KEY or KUBE_NOOB_*)")
+            raise ValueError(f"apiKeyEnv {v!r} must name a model provider key variable (*_API_KEY)")
         return v
 
 
@@ -156,7 +160,7 @@ class LLMSettings(_LLMEndpoint):
 
     @model_validator(mode="after")
     def _endpoint(self) -> LLMSettings:
-        _check_endpoint(self.base_url, self.allow_insecure_base_url, "llm")
+        check_endpoint(self.base_url, self.allow_insecure_base_url, "llm")
         return self
 
 
@@ -168,7 +172,7 @@ class JudgeSettings(_LLMEndpoint):
 
     @model_validator(mode="after")
     def _endpoint(self) -> JudgeSettings:
-        _check_endpoint(self.base_url, self.allow_insecure_base_url, "judge")
+        check_endpoint(self.base_url, self.allow_insecure_base_url, "judge")
         return self
 
 
@@ -358,8 +362,15 @@ class MemorySettings(_Base):
 class MustGatherSettings(_Base):
     """Where the ``analyze_must_gather`` MCP tool may read must-gathers. The local stdio server reads any path the
     user names (it runs as the user) unless this is set; the HTTP server offers the tool only when it is set, and
-    then only for paths that resolve inside it (links resolved first). ``$KUBE_NOOB_MUST_GATHER_DIR`` overrides it."""
+    then only for paths that resolve inside it (links resolved first). ``$KUBE_NOOB_MUST_GATHER_DIR`` overrides it.
 
+    ``enabled: false`` (``$KUBE_NOOB_MUST_GATHER_ENABLED=false``) withdraws the tool entirely. It is the only tool
+    that opens a path on the machine rather than reading text it was handed, so a deployment that must not touch the
+    user's files turns it off here and says so: the Claude plugin does. Until this existed the plugin relied on
+    `scripts/sync_plugin_server.py` leaving the module out of its copy, which is a packaging accident rather than a
+    stated policy -- and it stopped holding the moment the plugin installed the published package instead."""
+
+    enabled: bool = True
     allowed_dir: Path | None = None
 
     @field_validator("allowed_dir")
@@ -519,20 +530,15 @@ def _env_bool(name: str) -> bool | None:
     raise ConfigError(f"{name} must be one of true/false/1/0/yes/no/on/off, got {raw!r}")
 
 
-_PLACEHOLDER = "${user_config."
-
-
 def _env(name: str) -> str | None:
-    """An environment override, or None when it is absent, empty, or an unsubstituted ``userConfig`` placeholder.
+    """An environment override, or None when it is absent or blank.
 
-    The Claude plugin asks the user for a path through ``userConfig`` and passes it in as ``${user_config.<key>}``
-    (plugin/kube-noob/.claude-plugin/plugin.json). An option the user left unset must not arrive here as the literal
-    text of the placeholder and be taken for a path: ``mustGather.allowedDir`` has to be absolute, so the server
-    would refuse to start. Only that one spelling is ignored, not every ``${``, because a value a user wrote by hand
-    may legitimately contain one -- a URL with credentials in it, say -- and silently dropping it would be worse.
+    A variable set to the empty string, or to whitespace, is an unset variable rather than a setting of "": a shell
+    that exports one unconditionally should not make the server refuse to start, which is what an empty
+    ``mustGather.allowedDir`` did (it has to be an absolute path).
     """
     raw = os.environ.get(name)
-    if raw is None or not raw.strip() or _PLACEHOLDER in raw:
+    if raw is None or not raw.strip():
         return None
     return raw
 
@@ -578,9 +584,12 @@ def _env_overrides() -> dict[str, Any]:
     must_gather = _env("KUBE_NOOB_MUST_GATHER_DIR")
     if must_gather:
         o["mustGather"] = {"allowedDir": must_gather}
-    # an explicit empty value still clears the configured paths; only an unsubstituted placeholder is ignored
+    mg_enabled = _env_bool("KUBE_NOOB_MUST_GATHER_ENABLED")
+    if mg_enabled is not None:
+        o.setdefault("mustGather", {})["enabled"] = mg_enabled
+    # an explicit empty value still clears the configured paths, so this one keeps reading the variable directly
     memory = os.environ.get("KUBE_NOOB_MEMORY_PATHS")
-    if memory is not None and _PLACEHOLDER not in memory:
+    if memory is not None:
         o["memory"] = {"paths": [p for p in memory.split(os.pathsep) if p.strip()]}
     port = os.environ.get("KUBE_NOOB_SERVER_PORT")
     if port:

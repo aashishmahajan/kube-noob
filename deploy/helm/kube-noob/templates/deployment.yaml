@@ -270,9 +270,14 @@ spec:
             failureThreshold: 3
           livenessProbe:
             httpGet: {path: /healthz, port: http}
-            periodSeconds: 15
+            # Deliberately slower and more forgiving than readiness. Under load every request answers 503, the
+            # probes included: uvicorn counts connections towards its concurrency limit and nothing reclaims one
+            # that never sent a request, so a burst of idle sockets starves the pool. Readiness failing is the right
+            # answer there -- stop sending this pod traffic. Liveness failing restarts it, which frees no connection
+            # and drops the work in flight, so liveness gives readiness (30s) four times as long before it does.
+            periodSeconds: 20
             timeoutSeconds: 3
-            failureThreshold: 3
+            failureThreshold: 6
           startupProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 5

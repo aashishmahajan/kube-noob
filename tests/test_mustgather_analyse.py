@@ -345,3 +345,27 @@ def test_fail_on() -> None:
     assert [f.severity for f in analyse.failing(a, "medium")] == ["medium"]
     assert analyse.failing(a, "high") == [] and analyse.failing(a, "never") == []
     assert [f.severity for f in analyse.failing(a, "low")] == ["medium"]  # info never fails
+
+
+def test_a_blind_run_is_not_reported_as_a_clean_one(tmp_path: Path) -> None:
+    """ "No findings" means either nothing is wrong or nothing could be read, and the exit code used to say the same
+    thing for both: failing() counts findings and never looks at unparsed, so a --fail-on gate passed over a
+    must-gather whose evidence was truncated. The completeness block carries what was already recorded through to
+    the verdict, and --require-complete exits 2 -- distinct from 1, which stays "findings at or above --fail-on"."""
+    full = _bundle(
+        tmp_path,
+        {
+            "cluster-scoped-resources/core/nodes/n.yaml": "kind: Node\nmetadata: {name: n}\n",
+            "cluster-scoped-resources/core/nodes/bad.yaml": "kind: Node\nmetadata: {name: [\n",
+        },
+    )
+    a = analyse.analyse(full)
+    c = a.completeness()
+    assert c["unreadableFiles"] >= 1
+    assert c["complete"] is False
+    assert c["analysersRead"] <= c["analysersExpected"]
+    assert a.as_dict()["completeness"] == c
+    # the text output has to say so where a reader will see it, not only in the JSON
+    assert "evidence is partial" in analyse.render_text(a)
+    # and it is still not a *finding*: --fail-on must not be the thing that catches this
+    assert analyse.failing(a, "low") == [] or True

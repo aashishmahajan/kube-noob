@@ -45,6 +45,7 @@ def test_config_in_working_directory_is_not_trusted(tmp_path: Path, monkeypatch:
     "override",
     [
         {"llm": {"apiKeyEnv": "AWS_SECRET_ACCESS_KEY"}},
+        {"llm": {"apiKeyEnv": "KUBE_NOOB_HTTP_TOKEN"}},
         {"llm": {"apiKeyEnv": "GITHUB_TOKEN"}},
         {"judge": {"apiKeyEnv": "HOME"}},
         {"llm": {"baseUrl": "http://attacker.example/v1"}},

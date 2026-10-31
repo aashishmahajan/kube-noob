@@ -38,9 +38,11 @@ WORKLOAD_KINDS = (
     "Pod",
 )
 _KIND_RANK = {k.lower(): i for i, k in enumerate(WORKLOAD_KINDS)}
+ANP_KIND = "AdminNetworkPolicy"
+BANP_KIND = "BaselineAdminNetworkPolicy"
 OTHER_POLICY_KINDS = {
-    "AdminNetworkPolicy",
-    "BaselineAdminNetworkPolicy",
+    ANP_KIND,
+    BANP_KIND,
     "EgressFirewall",
     "EgressNetworkPolicy",
     "CiliumNetworkPolicy",
@@ -49,7 +51,6 @@ OTHER_POLICY_KINDS = {
     "MultiNetworkPolicy",
 }
 NOT_EVALUATED = (
-    "AdminNetworkPolicy and BaselineAdminNetworkPolicy (cluster-scoped, evaluated before and after NetworkPolicies)",
     "OpenShift EgressFirewall / EgressNetworkPolicy (egress to destinations outside the cluster)",
     "CNI-specific policies (Cilium, Calico) and firewalls or security groups outside the cluster",
     "pods with hostNetwork: true (NetworkPolicy does not apply to them on most network plugins)",
@@ -183,6 +184,8 @@ class Inventory:
         self.namespace_labels: dict[str, dict[str, str]] = {}
         self.other_policies: list[str] = []
         self.notes: list[str] = []
+        self.admin: list[dict[str, Any]] = []
+        self.baseline: list[dict[str, Any]] = []
         for obj in objects:
             if not isinstance(obj, dict):
                 continue
@@ -201,6 +204,13 @@ class Inventory:
             elif kind in OTHER_POLICY_KINDS:
                 ns = meta.get("namespace")
                 self.other_policies.append(f"{kind}/{ns + '/' if ns else ''}{name}")
+        from kube_noob.debug.anp import collect
+
+        self.admin, self.baseline = collect(self, objects)
+        admin_kinds = {ANP_KIND, BANP_KIND}
+        if self.admin or self.baseline:
+            # Evaluated now, so they must not also be listed as policies that were only found.
+            self.other_policies = [p for p in self.other_policies if p.split("/", 1)[0] not in admin_kinds]
 
     @classmethod
     def from_yaml(cls, text: str, default_namespace: str = "default") -> Inventory:
@@ -337,17 +347,60 @@ def _port_matches(rule_ports: Any, port: int | str, protocol: str, dest: Endpoin
 def _direction(
     inv: Inventory, subject: Endpoint, other: Endpoint, direction: str, port: int | str, protocol: str, dest: Endpoint
 ) -> dict[str, Any]:
+    """Does this traffic leave ``subject`` (Egress) or reach it (Ingress)?
+
+    Three tiers decide, in order: AdminNetworkPolicy, then the NetworkPolicies in the namespace, then
+    BaselineAdminNetworkPolicy where no NetworkPolicy selects the pod. ``kube_noob.debug.anp`` has the semantics.
+    """
+    from kube_noob.debug.anp import tier_after, tier_before
+
+    admin = tier_before(inv, inv.admin, subject, other, direction, port, protocol, dest)
+    if admin.outcome in ("allow", "deny"):
+        return {
+            "evaluated": True,
+            "tier": ANP_KIND,
+            "isolated": admin.outcome == "deny",
+            "allowed": admin.outcome == "allow",
+            "policy": admin.policy,
+            "rule": admin.rule,
+            "reason": admin.reason,
+        }
+    np = _networkpolicy_tier(inv, subject, other, direction, port, protocol, dest)
+    if admin.outcome == "passed":
+        np["passedBy"] = admin.policy
+        np["reason"] = f"{admin.reason} {np['reason']}"
+    if np.get("isolated") or not np.get("evaluated"):
+        return np
+    base = tier_after(inv, inv.baseline, subject, other, direction, port, protocol, dest)
+    if base.outcome in ("allow", "deny"):
+        return {
+            "evaluated": True,
+            "tier": BANP_KIND,
+            "isolated": base.outcome == "deny",
+            "allowed": base.outcome == "allow",
+            "policy": base.policy,
+            "rule": base.rule,
+            "reason": f"{np['reason']} {base.reason}",
+        }
+    return np
+
+
+def _networkpolicy_tier(
+    inv: Inventory, subject: Endpoint, other: Endpoint, direction: str, port: int | str, protocol: str, dest: Endpoint
+) -> dict[str, Any]:
     """Does ``subject``'s namespace let this traffic out (Egress) or in (Ingress)?"""
     word = direction.lower()
     if subject.external:
         return {
             "evaluated": False,
+            "tier": "NetworkPolicy",
             "allowed": True,
             "reason": f"{subject.describe()} is outside the cluster; no NetworkPolicy governs its {word}.",
         }
     if subject.host_network:
         return {
             "evaluated": False,
+            "tier": "NetworkPolicy",
             "allowed": True,
             "reason": f"{subject.describe()} uses hostNetwork; NetworkPolicy does not apply to its {word} on most "
             "network plugins.",
@@ -362,6 +415,7 @@ def _direction(
     if not selecting:
         return {
             "evaluated": True,
+            "tier": "NetworkPolicy",
             "isolated": False,
             "allowed": True,
             "policies": [],
@@ -417,7 +471,14 @@ def _direction(
             f"select{'s' if len(decisions) == 1 else ''} "
             f"{subject.describe()} for {direction}, and no rule allows {other.describe()} on {protocol} {port}."
         )
-    return {"evaluated": True, "isolated": True, "allowed": allowed, "policies": decisions, "reason": reason}
+    return {
+        "evaluated": True,
+        "tier": "NetworkPolicy",
+        "isolated": True,
+        "allowed": allowed,
+        "policies": decisions,
+        "reason": reason,
+    }
 
 
 def _dns_name(*parts: str) -> str:
@@ -501,22 +562,42 @@ def check_reachability(
             + "."
         )
     changes = []
-    if "Ingress" in blocked:
+    for direction in blocked:
+        verdict = ingress if direction == "Ingress" else egress
+        subject, peer = (dst, src) if direction == "Ingress" else (src, dst)
+        word = direction.lower()
+        if verdict.get("tier") == ANP_KIND:
+            # A NetworkPolicy cannot undo this: the admin tier runs first and has already decided. Proposing one
+            # would be applied, change nothing, and cost the next verdict its credibility.
+            changes.append(
+                {
+                    "change": f"{verdict['policy']} {word} rule {verdict['rule']!r} denies this, and it is "
+                    f"cluster-scoped: no NetworkPolicy in {subject.namespace} can override it. A cluster "
+                    f"administrator has to narrow that rule's peers or ports, or add an Allow or Pass rule at a "
+                    f"lower priority, for {peer.describe()} on {protocol} {port}.",
+                    "requiresApproval": True,
+                    "ownedBy": "cluster administrator",
+                    "policy": verdict["policy"],
+                    "rule": verdict["rule"],
+                }
+            )
+            continue
+        baseline = verdict.get("tier") == BANP_KIND
         changes.append(
             {
-                "change": f"Allow ingress to {dst.describe()} from {src.describe()} on {protocol} {port}",
-                "manifest": _allow_policy("Ingress", dst, src, port, protocol),
+                "change": f"Allow {word} {'to' if direction == 'Ingress' else 'from'} {subject.describe()} "
+                f"{'from' if direction == 'Ingress' else 'to'} {peer.describe()} on {protocol} {port}"
+                + (
+                    f" -- {verdict['policy']} denies it as the baseline, and any NetworkPolicy that selects "
+                    f"{subject.describe()} for {direction} takes the decision away from the baseline"
+                    if baseline
+                    else ""
+                ),
+                "manifest": _allow_policy(direction, subject, peer, port, protocol),
                 "requiresApproval": True,
             }
         )
     if "Egress" in blocked:
-        changes.append(
-            {
-                "change": f"Allow egress from {src.describe()} to {dst.describe()} on {protocol} {port}",
-                "manifest": _allow_policy("Egress", src, dst, port, protocol),
-                "requiresApproval": True,
-            }
-        )
         changes.append(
             {
                 "change": "If the source reaches the destination by name, its egress must also allow DNS: UDP and "
@@ -536,10 +617,15 @@ def check_reachability(
         sel = _shell_safe_selector(e.selector)
         if e.namespace in safe_ns and sel:
             checks.append(f"{cli} get pods -n {e.namespace} -l {sel} -o wide --show-labels")
-    if cli == "oc":
-        checks.append("oc get adminnetworkpolicy,baselineadminnetworkpolicy")
-        if src.namespace in safe_ns:
-            checks.append(f"oc get egressfirewall -n {src.namespace} -o yaml")
+    # The admin tiers are upstream CRDs, not an OpenShift feature, so they are worth reading on either CLI - and
+    # first, when one of them is what decided the verdict.
+    anp_check = f"{cli} get adminnetworkpolicy,baselineadminnetworkpolicy"
+    if {egress.get("tier"), ingress.get("tier")} & {ANP_KIND, BANP_KIND}:
+        checks.insert(0, anp_check)
+    else:
+        checks.append(anp_check)
+    if cli == "oc" and src.namespace in safe_ns:
+        checks.append(f"oc get egressfirewall -n {src.namespace} -o yaml")
     out["readOnlyNextSteps"] = [_step(c) for c in checks if classify_step(c) == "read"]
     kind, _, name = src.ref.partition("/")
     if src.namespace in safe_ns and kind.isalpha() and _DNS.match(name) and (dst.external or dst.namespace in safe_ns):
@@ -606,6 +692,17 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
                 f"could not read namespace {ns}'s labels; only kubernetes.io/metadata.name is used for "
                 "namespaceSelector matches"
             )
+    # The admin tiers are cluster-scoped: read once, not per namespace. A cluster without the network-policy-api
+    # CRDs answers 404, which means the tier is not installed - not that the read failed.
+    for tier_plural, tier_kind in (("adminnetworkpolicies", ANP_KIND), ("baselineadminnetworkpolicies", BANP_KIND)):
+        try:
+            items = backend.get(tier_plural, namespace=None).get("items", [])
+        except ClusterAccessError:
+            notes.append(
+                f"{tier_kind} is not installed on this cluster, or could not be read; the answer is NetworkPolicy only"
+            )
+            continue
+        objects += [{**item, "kind": tier_kind} for item in items if isinstance(item, dict)]
     inv = Inventory(objects)
     inv.notes.extend(notes)
     return inv

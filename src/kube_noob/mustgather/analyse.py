@@ -192,10 +192,30 @@ class Analysis:
         c = Counter(f.severity for f in self.findings)
         return {s: c.get(s, 0) for s in SEVERITIES}
 
+    def completeness(self) -> dict[str, Any]:
+        """What this analysis could actually see, so a clean verdict can be told from a blind one.
+
+        "No findings" means two very different things: nothing is wrong, or nothing could be read. The second is the
+        dangerous one, because the exit code was the same -- `failing()` counts findings and never looks at
+        `unparsed`, so a `--fail-on` gate passed over a must-gather whose ClusterOperator, Node and ClusterVersion
+        files were all truncated. Everything needed to tell them apart was already recorded; nothing carried it to
+        the verdict.
+        """
+        missing = [a for a in ANALYSERS if self.coverage.get(a, {}).get("note")]
+        read = [a for a in ANALYSERS if a in self.coverage and not self.coverage[a].get("note")]
+        return {
+            "analysersRead": len(read),
+            "analysersExpected": len(ANALYSERS),
+            "notCollected": missing,
+            "unreadableFiles": len(self.unparsed),
+            "complete": not missing and not self.unparsed,
+        }
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "cluster": self.cluster,
             "counts": self.counts(),
+            "completeness": self.completeness(),
             "findings": [f.as_dict() for f in self.findings],
             "coverage": [{"analyser": a, **self.coverage[a]} for a in ANALYSERS if a in self.coverage],
             "unparsed": self.unparsed,
@@ -1185,6 +1205,15 @@ def render_text(analysis: Analysis) -> str:
         lines.append("not collected: " + ", ".join(missing))
     for u in analysis.unparsed[:5]:
         lines.append(f"not read: {u['path']} ({u['reason']})")
+    if len(analysis.unparsed) > 5:
+        lines.append(f"not read: and {len(analysis.unparsed) - 5} more")
+    c = analysis.completeness()
+    if not c["complete"]:
+        lines.append(
+            f"evidence is partial: {c['analysersRead']} of {c['analysersExpected']} analysers had data, "
+            f"{c['unreadableFiles']} file(s) could not be read. A verdict from this is not a clean bill of health; "
+            "--require-complete exits 5 on it."
+        )
     if analysis.signals:
         lines.append("signals: " + ", ".join(f"{s.kind}:{s.name}" for s in analysis.signals[:20]))
     return "\n".join(lines)

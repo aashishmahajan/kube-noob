@@ -75,6 +75,31 @@ def full_document() -> dict[str, Any]:
     return openapi(Toolkit(settings, shared=True).specs())
 
 
+def _decode_json_text(raw: bytes) -> str:
+    """The body as the one string both the nesting guard and the parser see.
+
+    ``json.loads`` accepts bytes and sniffs the encoding (RFC 8259 allows UTF-8, UTF-16 and UTF-32, and CPython
+    detects a BOM or the NUL pattern of a wide encoding). A caller sending UTF-16 is legitimate, so the body is
+    decoded with the same rule rather than refused -- and then only the decoded text is used.
+    """
+    if raw[:3] == b"\xef\xbb\xbf":
+        return raw[3:].decode("utf-8")
+    if raw[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
+        return raw.decode("utf-32")
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16")
+    # No BOM: CPython's own detection reads the NUL pattern of the first four bytes.
+    if len(raw) >= 4 and raw[0] == 0 and raw[1] == 0 and raw[2] == 0:
+        return raw.decode("utf-32-be")
+    if len(raw) >= 4 and raw[1] == 0 and raw[2] == 0 and raw[3] == 0:
+        return raw.decode("utf-32-le")
+    if len(raw) >= 2 and raw[0] == 0:
+        return raw.decode("utf-16-be")
+    if len(raw) >= 2 and raw[1] == 0:
+        return raw.decode("utf-16-le")
+    return raw.decode("utf-8")
+
+
 def openapi(specs: list[ToolSpec]) -> dict[str, Any]:
     """OpenAPI 3.1 for the routes these specs offer; request bodies are the tools' own JSON Schemas."""
     pairs = offered(specs)
@@ -157,10 +182,18 @@ def register(
             if is_post:
                 raw = await request.body()
                 if raw.strip():
-                    if not sanitize.json_nesting_ok(raw.decode("utf-8", "replace")):
+                    # Decode once and parse the text, never the bytes. json.loads auto-detects UTF-16 and UTF-32
+                    # from a BOM or NUL pattern, so counting brackets on a UTF-8 decoding of the same bytes checked
+                    # a different string from the one the parser read -- a bypass of the guard that exists because
+                    # deep nesting overflows the C stack on CPython 3.14 as a fatal error, not a RecursionError.
+                    try:
+                        text = _decode_json_text(raw)
+                    except UnicodeDecodeError:
+                        return JSONResponse({"error": "the body is not JSON"}, status_code=400)
+                    if not sanitize.json_nesting_ok(text):
                         return JSONResponse({"error": "the body is not JSON"}, status_code=400)
                     try:
-                        arguments = json.loads(raw)
+                        arguments = json.loads(text)
                     except (ValueError, RecursionError):
                         return JSONResponse({"error": "the body is not JSON"}, status_code=400)
                     if not isinstance(arguments, dict):

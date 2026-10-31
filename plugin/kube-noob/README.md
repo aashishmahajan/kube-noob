@@ -42,22 +42,39 @@ kube-noob itself never changes your cluster.
 
 ## How it runs
 
-The server is readable Python source in `server/`: the modules of the
+Claude Code starts the server with `uv run --frozen --isolated` against the readable Python source in `server/`,
+installing the dependencies at the exact versions and SHA-256 hashes in the `uv.lock` beside this file into a
+throwaway environment in uv's cache. `-I` keeps your working directory and `PYTHONPATH` off `sys.path`, and `-B`
+writes no `.pyc` into the plugin. If no Python 3.11 or later is present, uv downloads its managed CPython once.
+Nothing else is downloaded and no LLM SDK is installed.
+
+A pinned package launcher — `uvx kube-noob==<version> mcp` — is what the plugin directory clears automatically,
+where `uv run --frozen` is held for a human reviewer. It becomes the default from 0.7.1, not before: the published
+0.7.0 has no switch to withhold `analyze_must_gather`, the one tool that opens a path on your machine rather than
+reading text it was handed, so installing the published package would hand the plugin a capability the vendored copy
+has never had. 0.7.1 adds `mustGather.enabled`, this file already sets `KUBE_NOOB_MUST_GATHER_ENABLED=false`, and the
+two launchers then offer exactly the same tools.
+
+### What the vendored copy is
+
+The server source in `server/` is the modules of the
 [kube-noob repository](https://github.com/aashishmahajan/kube-noob)'s `src/kube_noob` that the stdio MCP server
 imports, copied unchanged. The CLI, the optional model agent, the HTTP service and REST routes, the web client, Helm
-rendering and the cluster backends are not included, so nothing in the plugin reads a credential, opens a connection
-or starts another program. Claude Code starts it with `uv run --frozen --isolated`, which
-installs the dependencies from PyPI at the exact versions and hashes in `uv.lock` into a throwaway environment in uv's
-cache, and runs Python isolated (`-I`), so nothing from your working directory or `PYTHONPATH` is imported. If no
-Python 3.11 or later is installed, uv downloads its managed CPython once. Nothing else is downloaded, and no LLM SDK
-is installed.
+rendering and the cluster backends are not included, so nothing in that copy reads a credential, opens a connection or
+starts another program. Beside it is a `uv.lock` pinning every dependency to an exact version and SHA-256 hash.
 
-That launcher is a deliberate trade. A plugin that runs a file with plain arguments is reviewed automatically, but it
-needs its dependencies to already be on the machine; `uv run --frozen` is held for a human reviewer instead, and in
-exchange every dependency arrives at the exact version and SHA-256 hash recorded in the `uv.lock` beside this file,
-chosen by nobody at install time. The alternative — vendoring `mcp`, `pydantic`, `starlette` and `uvicorn` into the
-plugin — would not fit the directory's file-count and file-size limits. So the plugin ships its own source and locks
-everything it does not ship.
+From 0.7.1 the default becomes the pinned package launcher. To keep running this vendored copy instead — on an
+air-gapped machine, or when you want every dependency fixed by hash rather than resolved at install time — keep the
+`mcpServers` entry as:
+
+```json
+{"command": "uv", "args": ["run", "--frozen", "--exact", "--isolated", "--quiet", "--project",
+  "${CLAUDE_PLUGIN_ROOT}", "python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]}
+```
+
+That form reads only the source in this directory and the hashes in `uv.lock`, and resolves nothing at install time.
+It stays the stronger of the two. Vendoring `mcp`, `pydantic`, `starlette` and `uvicorn` as well — which would let
+the plugin run a plain file with no resolver at all — does not fit the directory's file-count and file-size limits.
 
 ## What it accesses
 
@@ -67,9 +84,9 @@ everything it does not ship.
   confirmed; never logs, manifests or secrets) in `~/.local/share/kube-noob`, which survives plugin upgrades.
 - To read your cluster (read-only, never Secrets) or allowlisted documentation sites, use the kube-noob CLI
   (`pipx install kube-noob`) or the in-cluster service; the plugin stays offline.
-- Asks you for one optional setting, a must-gather folder, and reads no variable out of your environment for it. The
-  plugin never asks for a token, a key or a password: it starts the server with the web, the cluster and the model
-  off, so the settings that would read one are unreachable.
+- Asks you for nothing and reads nothing out of your environment. The plugin never asks for a token, a key or a
+  password: it starts the server with the web, the cluster and the model off, so the settings that would read one
+  are unreachable, and the one tool that reads your own files (must-gather analysis) is not in the plugin at all.
 - No telemetry and no accounts. Details: [PRIVACY.md](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md).
 
 ## Skills
