@@ -19,7 +19,12 @@ from kube_noob.server.mcp_app import build_server
 
 PUBLIC_PATHS = frozenset({"/healthz", "/readyz"})
 DEFAULT_TOKEN_ENV = "KUBE_NOOB_HTTP_TOKEN"  # noqa: S105 - the variable's name, not a secret
-MAX_BODY_BYTES = 8 * 1024 * 1024  # manifests are capped at 5 MB; JSON-RPC framing needs some headroom
+# Every tool argument is capped at 1,000,000 characters (``toolkit.MAX_*``), so a body much above that can never be
+# a valid request. The limit used to be 8 MiB, which bought nothing and cost a lot: each buffered body is copied
+# again by ``request.body()`` and by ``raw.decode``, and the bracket scan over it is pure Python, which stalls the
+# event loop past the kubelet's 3s probe timeout. 1.5 MiB leaves room for JSON-RPC framing and escaping around a
+# maximum-length argument.
+MAX_BODY_BYTES = 1536 * 1024
 
 
 class BodyLimit:
@@ -41,6 +46,13 @@ class BodyLimit:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
             await self.app(scope, receive, send)
+            return
+        # A kubelet probe sends no body, and these are the only paths an unauthenticated caller can reach. Buffering
+        # one here let anything that could open the port take the pod to its memory limit: 50 connections each
+        # declaring the old 8 MiB limit took the process from 96 MiB to 522 MiB, and the kernel killed it at the
+        # chart's 512Mi. Refuse the body instead of reading it.
+        if scope.get("path") in PUBLIC_PATHS:
+            await JSONResponse({"error": "method not allowed"}, status_code=405)(scope, receive, send)
             return
         declared = dict(scope.get("headers") or []).get(b"content-length")
         if declared is not None and declared.isdigit() and int(declared) > self.limit:
@@ -76,15 +88,22 @@ class BearerAuth:
         self.app = app
         self.token = token.encode() if token else None
 
+    def _refuses(self, scope: Scope) -> bool:
+        if scope["type"] != "http" or self.token is None or scope.get("path") in PUBLIC_PATHS:
+            return False
+        # Read the header list, not a dict of it: a dict keeps the last value while a proxy in front that checks the
+        # header reads the first, so "wrong, right" authenticated here and "right, wrong" did not. Two Authorization
+        # headers are never a legitimate request, so neither resolution is the right one -- refuse.
+        sent = [v for k, v in (scope.get("headers") or []) if k == b"authorization"]
+        if len(sent) != 1:
+            return True
+        return not hmac.compare_digest(sent[0], b"Bearer " + self.token)
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and self.token is not None and scope.get("path") not in PUBLIC_PATHS:
-            headers = dict(scope.get("headers") or [])
-            auth = headers.get(b"authorization", b"")
-            expected = b"Bearer " + self.token
-            if not hmac.compare_digest(auth, expected):
-                resp = JSONResponse({"error": "unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
-                await resp(scope, receive, send)
-                return
+        if self._refuses(scope):
+            resp = JSONResponse({"error": "unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+            await resp(scope, receive, send)
+            return
         await self.app(scope, receive, send)
 
 

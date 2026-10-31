@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **An unauthenticated caller could kill the HTTP server through its health endpoints.** `/healthz` and `/readyz`
+  skip the bearer token so the kubelet can probe them, and skipped it for every method -- while the body limit sat
+  inside the auth middleware and buffered up to 8 MiB per connection before the router answered 405. Fifty such
+  connections took the process from 96 MiB to 522 MiB, and in a 512Mi cgroup matching the chart's own limit the
+  kernel killed it. A probe sends no body, so a body on those paths is now refused before it is read. The comment
+  claiming "a caller without the token cannot make the server buffer requests" was false, and is now true.
+- **The request body limit was six times larger than any valid request.** Every tool argument is capped at
+  1,000,000 characters, so an 8 MiB body could never succeed -- but it was buffered, copied by `request.body()`,
+  copied again by the decode, and then bracket-scanned in pure Python, which stalled the event loop for 0.41s per
+  body and up to 7.9s under load, against the chart's 3s probe timeout. The limit is 1.5 MiB, which still leaves
+  room for JSON-RPC framing around a maximum-length argument.
+- **The JSON nesting guard checked a different string from the one the parser read.** `json.loads` accepts bytes and
+  sniffs UTF-16 and UTF-32, while the guard counted brackets on a UTF-8 decoding of those bytes -- and a backslash
+  followed by a NUL desynchronises in-string tracking, so `{"s": "a\"b", "d": [[[...]]]}` in UTF-16 passed a guard
+  that refused the same text in UTF-8. The guard exists because deep nesting overflows the C stack on CPython 3.14
+  as a fatal error rather than a `RecursionError`, so a bypass of it is the whole defect. The body is now decoded
+  once, by the same rule the parser uses, and only that string is counted and parsed. A legitimate UTF-16 body is
+  still understood rather than refused.
+- Two `Authorization` headers are refused instead of resolved. `dict(scope["headers"])` keeps the last value while a
+  proxy in front reads the first, so "wrong, right" authenticated and "right, wrong" did not. Neither resolution is
+  the right one for a request that is never legitimate.
+- The audit line is documented as content-free -- "which tool, argument names and sizes" -- and on the REST path the
+  names come from the caller's body before it is validated. One request with an 8 MiB key name wrote an 18 MiB log
+  line and spent 9s of CPU. Names are truncated and the count capped, with the number dropped recorded.
+- **The shared server rebuilt the whole knowledge index on nearly every request.** `learning.json` feeds the index
+  (the team's confirmed notes become searchable chunks), so it belonged in the cache key -- but the key used its size
+  and mtime, and almost every tool call rewrites that file to bump a counter, which changes no chunk at all. The
+  result was 157ms and 6.2 req/s with learning on against 11ms and 89.8 req/s with it off. The key now covers the
+  notes themselves: a new note is searchable at once, a counter costs nothing, and a file that cannot be read as
+  notes falls back to its stat rather than serving a stale index.
+
 - **A reachability verdict that ignored the admin tiers was not incomplete, it was wrong.** `check_network_policy`
   and `cluster_check_traffic` listed `AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` under "not evaluated" --
   but an ANP `Deny` blocks traffic every NetworkPolicy in the namespace allows, an ANP `Allow` permits traffic every

@@ -116,6 +116,30 @@ class CallFailed(Exception):
         self.status, self.outcome, self.message = status, outcome, message
 
 
+MAX_AUDITED_NAME = 64
+MAX_AUDITED_ARGS = 32
+
+
+def _argument_shape(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The audit line's argument summary: names and sizes, no content.
+
+    The names come from the caller on the REST path, where the body is logged before it is validated against the
+    tool's model. An argument name the tool does not define carries no audit value and its length is the caller's
+    choice, so one request with an 8 MiB key name wrote an 18 MiB log line and spent 9s of CPU doing it. Names are
+    truncated and the count is capped; the number dropped is recorded, since that is itself worth knowing.
+    """
+    out: dict[str, Any] = {}
+    for i, (k, v) in enumerate(kwargs.items()):
+        if i >= MAX_AUDITED_ARGS:
+            out["..."] = f"+{len(kwargs) - MAX_AUDITED_ARGS} more"
+            break
+        name = k if isinstance(k, str) else type(k).__name__
+        if len(name) > MAX_AUDITED_NAME:
+            name = f"{name[:MAX_AUDITED_NAME]}...<{len(name)} chars>"
+        out[name] = len(v) if isinstance(v, str | list | dict) else type(v).__name__
+    return out
+
+
 def run_tool(spec: ToolSpec, kwargs: dict[str, Any], knowledge: str, via: str = "mcp") -> dict[str, Any]:
     """Validate the arguments, run the tool, stamp knowledgeAsOf and sanitise the result; audit-log the call without
     its content. Shared by the MCP tools and the REST routes, so both behave the same."""
@@ -150,7 +174,7 @@ def run_tool(spec: ToolSpec, kwargs: dict[str, Any], knowledge: str, via: str = 
             "tool=%s via=%s args=%s outcome=%s ms=%d",
             TOOL_PREFIX + spec.name,
             via,
-            {k: len(v) if isinstance(v, str | list | dict) else type(v).__name__ for k, v in kwargs.items()},
+            _argument_shape(kwargs),
             outcome,
             (time.monotonic() - started) * 1000,
         )
