@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 - 2026-10-31
 
 - **Two holes in the Jira corpus scrubber let person-shaped text reach stored tickets**, which is what the
   `corpus-refresh` privacy gate has been refusing since 2026-10-28 with 123 findings. `_ACCOUNT` required the id to
