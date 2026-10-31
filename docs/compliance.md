@@ -6,8 +6,11 @@ offering it runs in (for example an OpenShift or ROSA cluster in a FedRAMP High 
 are met by how that offering deploys and operates it. This page says what kube-noob gives as evidence, how to deploy
 it inside a High boundary, and what is not covered yet. Researched 2026-10-27.
 
-FedRAMP is changing: the Consolidated Rules for 2026 apply to every authorization from 1 January 2027, the
-Vulnerability Detection and Response rules from 7 December 2026, and 20x Class D (the high-impact class) is in pilot.
+FedRAMP is changing: the Consolidated Rules for 2026 apply to every authorization from 1 January 2027, and the
+Vulnerability Detection and Response rules from 7 December 2026 for obtaining and for maintaining a certification,
+with a grace period to 7 March 2027. 20x Class D (the high-impact class) is not in pilot yet: RFC-0033 proposes the
+Phase 4 pilot for FY27 Q1 and Q2, with the application window 1-4 December 2026 and a cap of ten participants, and
+applicants need a CR26-compliant Class C certification first (checked 2026-10-31).
 Both Rev5 baselines and the 20x Key Security Indicators are written against NIST SP 800-53 Rev. 5 controls, which is
 what kube-noob maps to.
 
@@ -171,4 +174,5 @@ Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/
 - [FedRAMP Consolidated Rules transition (Cloud Security Alliance research note)](https://labs.cloudsecurityalliance.org/research/csa-research-note-fedramp-20x-consolidated-rules-transition/)
 - [FedRAMP Vulnerability Detection and Response](https://fedramp.gov/2026/providers/20x/rules/vulnerability-detection-and-response/)
 - [FedRAMP 20x Key Security Indicators](https://www.fedramp.gov/20x/standards/20x-ksi)
+- [RFC-0033: 20x Phase 4 development tracks for Class D](https://www.fedramp.gov/rfcs/0033/)
 - [Claude public sector FAQ (FedRAMP High availability)](https://support.claude.com/en/articles/13756069-public-sector-faqs)
