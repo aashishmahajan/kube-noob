@@ -358,8 +358,15 @@ class MemorySettings(_Base):
 class MustGatherSettings(_Base):
     """Where the ``analyze_must_gather`` MCP tool may read must-gathers. The local stdio server reads any path the
     user names (it runs as the user) unless this is set; the HTTP server offers the tool only when it is set, and
-    then only for paths that resolve inside it (links resolved first). ``$KUBE_NOOB_MUST_GATHER_DIR`` overrides it."""
+    then only for paths that resolve inside it (links resolved first). ``$KUBE_NOOB_MUST_GATHER_DIR`` overrides it.
 
+    ``enabled: false`` (``$KUBE_NOOB_MUST_GATHER_ENABLED=false``) withdraws the tool entirely. It is the only tool
+    that opens a path on the machine rather than reading text it was handed, so a deployment that must not touch the
+    user's files turns it off here and says so: the Claude plugin does. Until this existed the plugin relied on
+    `scripts/sync_plugin_server.py` leaving the module out of its copy, which is a packaging accident rather than a
+    stated policy -- and it stopped holding the moment the plugin installed the published package instead."""
+
+    enabled: bool = True
     allowed_dir: Path | None = None
 
     @field_validator("allowed_dir")
@@ -573,6 +580,9 @@ def _env_overrides() -> dict[str, Any]:
     must_gather = _env("KUBE_NOOB_MUST_GATHER_DIR")
     if must_gather:
         o["mustGather"] = {"allowedDir": must_gather}
+    mg_enabled = _env_bool("KUBE_NOOB_MUST_GATHER_ENABLED")
+    if mg_enabled is not None:
+        o.setdefault("mustGather", {})["enabled"] = mg_enabled
     # an explicit empty value still clears the configured paths, so this one keeps reading the variable directly
     memory = os.environ.get("KUBE_NOOB_MEMORY_PATHS")
     if memory is not None:

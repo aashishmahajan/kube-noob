@@ -122,3 +122,23 @@ def test_a_toolkit_without_the_must_gather_package_still_lists_its_tools(
     monkeypatch.setattr(importlib.util, "find_spec", missing)
     names = _names(_kit(tmp_path, shared=False))
     assert "analyze_must_gather" not in names and "diagnose" in names
+
+
+def test_must_gather_can_be_withdrawn_by_configuration_not_only_by_packaging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """analyze_must_gather is the only tool that opens a path on the machine rather than reading text it was handed,
+    so a deployment that must not touch the user's files has to be able to say so. It used to be withheld only by
+    scripts/sync_plugin_server.py leaving kube_noob.mustgather out of the plugin copy -- a packaging accident, not a
+    policy, and one that stops holding the moment the plugin installs the published package instead."""
+    from kube_noob import toolkit as tk
+
+    offered = {s.name for s in tk.Toolkit(load_settings(overrides={})).specs()}
+    assert "analyze_must_gather" in offered
+
+    off = tk.Toolkit(load_settings(overrides={"mustGather": {"enabled": False}}))
+    assert "analyze_must_gather" not in {s.name for s in off.specs()}
+
+    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_ENABLED", "false")
+    assert "analyze_must_gather" not in {s.name for s in tk.Toolkit(load_settings(overrides={})).specs()}
+    assert load_settings(overrides={}).must_gather.enabled is False

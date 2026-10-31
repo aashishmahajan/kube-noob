@@ -184,7 +184,7 @@ Every rule below grants a verb other than get, list or watch. Each sits behind t
 
 ## What is off by default
 
-Defaults of `kube_noob.config.Settings`, evaluated with no configuration file and no environment variable. Everything below is off except `learningEnabled` (kube-noob's own local learning file, which the tools that are not read-only write). The server binds `127.0.0.1`. `offline` and `webLocked` describe an administrator's lock on the web and on downloads: off here means not locked.
+Defaults of `kube_noob.config.Settings`, evaluated with no configuration file and no environment variable. Everything below is off except `learningEnabled`, `mustGather.enabled` (kube-noob's own local learning file, which the tools that are not read-only write). The server binds `127.0.0.1`. `offline` and `webLocked` describe an administrator's lock on the web and on downloads: off here means not locked.
 
 | Setting | Default | State | Group |
 |---|---|---|---|
@@ -211,6 +211,7 @@ Defaults of `kube_noob.config.Settings`, evaluated with no configuration file an
 | `notify.enabled` | `false` | off | tier W |
 | `webEnabled` | `false` | off | web |
 | `learningEnabled` | `true` | on | local state |
+| `mustGather.enabled` | `true` | on | opt-in feature |
 
 Capability tiers (`src/kube_noob/tiers.py`); every tier beyond R needs a person's approval for each action:
 

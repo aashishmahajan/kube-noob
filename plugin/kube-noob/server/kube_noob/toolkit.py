@@ -2103,8 +2103,11 @@ class Toolkit:
                     self.containerfile_audit,
                 )
             )
-        if _has_module("kube_noob.mustgather.analyse") and (  # not in the Claude plugin
-            not self.shared or self.settings.must_gather.allowed_dir is not None
+        # mustGather.enabled is the stated policy; _has_module is belt and braces for a copy built without the module
+        if (
+            self.settings.must_gather.enabled
+            and _has_module("kube_noob.mustgather.analyse")
+            and (not self.shared or self.settings.must_gather.allowed_dir is not None)
         ):
             s.append(
                 ToolSpec(
