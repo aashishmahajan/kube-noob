@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **A burst of connections that send nothing makes the HTTP server answer 503 to everything**, probes included,
+  and nothing reclaims them: uvicorn counts connections towards `limit_concurrency`, and `timeout_keep_alive`
+  applies between requests on a keep-alive connection, not to a connection that never made one. Measured on the
+  real server: 70 idle sockets, still 503 after 16 seconds, recovering only when they close. kube-noob cannot close
+  that in process, so the parts it does own are now consistent with it. Buffered-body memory is the concurrency
+  limit times the body limit, and that product used to be 64 x 8 MiB = 512 MiB against a 512Mi container -- exactly
+  the ceiling the kernel kills at; with the 1.5 MiB limit it is 96 MiB, and a test keeps the two numbers from
+  drifting apart again. The liveness probe is now four times more forgiving than readiness (120s against 30s), so
+  sustained overload takes the pod out of the endpoints instead of restarting a pod whose restart frees no
+  connection and drops the work in flight. And SECURITY.md states the limitation: expose the port through a proxy,
+  ingress or mesh that enforces a header-read and idle timeout. The default sidecar binds 127.0.0.1, where only
+  containers in the same pod can reach it.
+
 - **A shared server offered three tools that wrote per-caller state it had no identity to key on.** The filter
   meant to keep write tools off the HTTP server was a denylist of three names, and three more had been added since:
   `learn_lesson`, `learn_submit` and `learn_quiz` each wrote `progress/<learner>.json`. The server has one static
