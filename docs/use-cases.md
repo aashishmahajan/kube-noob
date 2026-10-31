@@ -331,16 +331,21 @@ kube-noob policy explain -f examples/events-scc.txt --platform openshift
 
 ### Can pod A reach pod B?
 
-`policy reach` evaluates NetworkPolicies the way Kubernetes does: egress from the source and ingress to the
-destination must both allow the port. It names the policy and rule that decide each direction, says for every other
-rule whether the peer or the port did not match, and proposes the smallest NetworkPolicy that would allow the traffic.
-It exits 1 when the traffic is denied, so CI can assert the paths an application needs. `--live` reads the policies,
-namespace labels and workloads from the cluster (read-only). AdminNetworkPolicy, EgressFirewall and CNI-specific
-policies are listed as not evaluated.
+`policy reach` evaluates all three network policy tiers the way the cluster does: egress from the source and
+ingress to the destination must both allow the port, and each direction runs through `AdminNetworkPolicy`, then the
+namespace's NetworkPolicies, then `BaselineAdminNetworkPolicy`. The two cluster-scoped tiers are why the answer
+needs them: an ANP `Deny` blocks traffic every NetworkPolicy in the namespace allows, and a BANP decides the traffic
+no NetworkPolicy selects. Each verdict names the tier, the policy and the rule that decided it, says for every other
+rule whether the peer or the port did not match, and proposes the smallest NetworkPolicy that would allow the
+traffic. It exits 1 when the traffic is denied, so CI can assert the paths an application needs. `--live` reads the
+policies, both admin tiers, namespace labels and workloads from the cluster (read-only); a cluster without the
+`network-policy-api` CRDs is a note, not a failure. EgressFirewall and CNI-specific policies are listed as not
+evaluated.
 
 ```bash
 kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-shop.yaml
 kube-noob policy reach --from shop/orders-api --to shop/payments --port 9090 -f examples/netpol-shop.yaml
+kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-admin-tiers.yaml
 kube-noob policy reach --from shop/orders-api --to shop/payments --port grpc --live --cluster-enabled
 ```
 

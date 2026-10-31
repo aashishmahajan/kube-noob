@@ -574,6 +574,8 @@ class FakeCluster:
             "statefulsets": "StatefulSet",
             "daemonsets": "DaemonSet",
             "pods": "Pod",
+            "adminnetworkpolicies": "AdminNetworkPolicy",
+            "baselineadminnetworkpolicies": "BaselineAdminNetworkPolicy",
         }[resource]
         if resource == "namespaces" and not self.readable_namespaces:
             raise ClusterAccessError("namespaces is forbidden")
@@ -599,7 +601,17 @@ def test_live_reachability_reads_only_what_it_needs() -> None:
     assert check_reachability(inv, "web/frontend", "shop/payments", 9090)["ingress"]["policies"][0]["policy"] == (
         "shop/default-deny"
     )
-    assert {c[0] for c in cluster.calls} <= {"deployments", "networkpolicies", "namespaces"}
+    # The two admin tiers are cluster-scoped, so they are read once each and never per namespace.
+    assert {c[0] for c in cluster.calls} <= {
+        "deployments",
+        "networkpolicies",
+        "namespaces",
+        "adminnetworkpolicies",
+        "baselineadminnetworkpolicies",
+    }
+    for tier in ("adminnetworkpolicies", "baselineadminnetworkpolicies"):
+        reads = [c for c in cluster.calls if c[0] == tier]
+        assert len(reads) == 1 and reads[0][2] is None, reads
     # Without permission to read namespaces, kubernetes.io/metadata.name still works and the gap is stated.
     inv2 = inventory_from_cluster(FakeCluster(objects, readable_namespaces=False), "web/frontend", "shop/orders-api")
     out = check_reachability(inv2, "web/frontend", "shop/orders-api", 8080)

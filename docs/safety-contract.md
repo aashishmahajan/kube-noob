@@ -106,7 +106,7 @@ Off until `cluster.enabled` is true. The backends are `KubectlBackend` (runs `ku
 - Flags it can pass: `--all-namespaces`, `--container`, `--context`, `--field-selector`, `--namespace`, `--output`, `--previous`, `--request-timeout`, `--selector`, `--tail`
 - API paths it builds: `/api/v1`, `/api/v1/namespaces/`, `/api/v1/namespaces/{namespace}/pods/{pod}/log`, `/apis/`, `/apis/{self.group_version}`, `/version`
 - Names, namespaces, selectors and containers taken from a caller must match strict patterns (`_NAME`, `_SELECTOR`, `_FIELD_SELECTOR`, `_CONTAINER` in `debug/cluster.py`), none of which admits `/`, `?`, `#` or a newline, so a name cannot add a path segment such as `/exec` or `/proxy`.
-- `resolve_resource` refuses `secrets` by name and any resource outside the allowlist below (35 resources, 49 short names); subresources such as `pods/exec` are not in it.
+- `resolve_resource` refuses `secrets` by name and any resource outside the allowlist below (37 resources, 53 short names); subresources such as `pods/exec` are not in it.
 - Output is redacted before it leaves the backend: 10 credential patterns for logs and text (markers `***JWT***`, `***PRIVATE KEY***`, `***aws-key-id***`, `***github-token***`, `***slack-token***`, `***vault-token***` and `***` for values), ConfigMap `data` and `binaryData` replaced by byte counts, sensitive `env` values, `last-applied-configuration` and sensitive annotations masked, `managedFields` dropped.
 
 Resources the backend can read (all `get` and `list`; `pods/log` through `logs`):
@@ -123,6 +123,7 @@ Resources the backend can read (all `get` and `list`; `pods/log` through `logs`)
 | k8s.ovn.org/v1 | `egressfirewalls` | namespaced |
 | networking.k8s.io/v1 | `ingresses`, `networkpolicies` | namespaced |
 | platform.stackrox.io/v1alpha1 | `centrals`, `securedclusters` | namespaced |
+| policy.networking.k8s.io/v1alpha1 | `adminnetworkpolicies`, `baselineadminnetworkpolicies` | cluster |
 | policy/v1 | `poddisruptionbudgets` | namespaced |
 | rbac.authorization.k8s.io/v1 | `rolebindings`, `roles` | namespaced |
 | rbac.authorization.k8s.io/v1 | `clusterrolebindings`, `clusterroles` | cluster |
@@ -155,6 +156,7 @@ Read statically from `deploy/helm/kube-noob/templates/rbac.yaml`, `rbac-tiers.ya
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `networking.k8s.io` | `ingresses`, `networkpolicies` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `platform.stackrox.io` | `centrals`, `securedclusters` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `policy` | `poddisruptionbudgets` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `policy.networking.k8s.io` | `adminnetworkpolicies`, `baselineadminnetworkpolicies` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `rbac.authorization.k8s.io` | `roles`, `rolebindings`, `clusterroles`, `clusterrolebindings` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `route.openshift.io` | `routes` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `security.openshift.io` | `securitycontextconstraints` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |

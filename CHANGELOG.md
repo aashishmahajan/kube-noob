@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **A reachability verdict that ignored the admin tiers was not incomplete, it was wrong.** `check_network_policy`
+  and `cluster_check_traffic` listed `AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` under "not evaluated" --
+  but an ANP `Deny` blocks traffic every NetworkPolicy in the namespace allows, an ANP `Allow` permits traffic every
+  NetworkPolicy denies, and a BANP decides the traffic no NetworkPolicy selects at all. So the tool answered
+  "allowed" for connections that do not flow, and sent an operator looking in the namespace for a decision a
+  platform team had made cluster-wide. All three tiers are now evaluated in order: ANP by `priority` ascending then
+  rule order, first match wins, with `Pass` ending the tier; then the NetworkPolicies, whose answer is final where
+  one selects the pod; then the BANP, whose no-match is an allow. Each verdict names the tier that decided it.
+  A manifest the API server would itself refuse -- a priority outside 0-1000, a BANP not named `default`, an action
+  that is not one of the API's three -- is reported as a mistake instead of being evaluated or read as the nearest
+  valid action, a priority above OVN-Kubernetes's supported 99 says that the cluster ignores the policy, and a
+  `nodes` or `networks` peer says it is not evaluated offline rather than being guessed either way. The live check
+  reads both tiers once (they are cluster-scoped), and a cluster without the `network-policy-api` CRDs answers 404,
+  which is a note, not a failure.
+- A denied verdict now proposes a change that would actually work. An `AdminNetworkPolicy` `Deny` cannot be undone
+  by a NetworkPolicy -- the admin tier runs first and has already decided -- so proposing one was worse than
+  proposing nothing: the operator applies it, the traffic still fails, and the next verdict is not believed. The
+  proposal now names the cluster-scoped policy and rule that decided, and says a cluster administrator has to change
+  it. A baseline denial still gets a NetworkPolicy, with the reason it works: any NetworkPolicy that selects the pod
+  takes the decision away from the baseline.
+- `rbac.yaml` says its read rules are "mirrored from `kube_noob.debug.cluster.ALLOWED_RESOURCES`", and nothing
+  checked that claim. `tests/test_safety_contract.py::test_the_chart_read_rules_mirror_the_backends_allowlist` does
+  now, in both directions: a resource the backend may read but the chart does not grant fails only on a live cluster
+  as a 403 somebody has to diagnose, and a grant the backend never uses is standing access for nothing.
+
 - `AGENTS.md` (and a one-line `CLAUDE.md` pointing at it) says what an agent working on this repository gets
   wrong: that `scripts/check.sh`'s exit status is the answer and piping it through `tail` replaces that status, that
   `plugin/kube-noob/server/` is a generated copy whose omissions are deliberate, which gates exist specifically to

@@ -1,0 +1,204 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels:
+    team: shop
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: web
+  labels:
+    team: web
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: web
+          image: registry.example.com/shop/frontend:1.4.2
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: shop
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/shop/orders-api:2.7.0
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: shop
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payments
+  template:
+    metadata:
+      labels:
+        app: payments
+    spec:
+      containers:
+        - name: payments
+          image: registry.example.com/shop/payments:3.1.0
+          ports:
+            - name: grpc
+              containerPort: 9090
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: shop
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend
+  namespace: shop
+spec:
+  podSelector:
+    matchLabels:
+      app: orders-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              team: web
+          podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orders-egress
+  namespace: shop
+spec:
+  podSelector:
+    matchLabels:
+      app: orders-api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: payments
+      ports:
+        - protocol: TCP
+          port: 9090
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+---
+# A platform team's cluster-wide guardrail. This Deny sits in front of every NetworkPolicy in the shop namespace, so
+# it decides the traffic whatever the namespace's own policies say -- which is the point of the tier, and the reason
+# an answer that skipped it was wrong rather than merely incomplete.
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: no-cross-team-payments
+spec:
+  priority: 10
+  subject:
+    pods:
+      namespaceSelector:
+        matchLabels:
+          team: shop
+      podSelector:
+        matchLabels:
+          app: payments
+  ingress:
+    - name: "only-shop-reaches-payments"
+      action: "Deny"
+      from:
+        - namespaces:
+            matchExpressions:
+              - key: team
+                operator: NotIn
+                values: ["shop"]
+---
+# The same team delegates the rest: Pass ends the admin tier and lets each namespace decide with its own
+# NetworkPolicies, falling through to the baseline below where a namespace wrote none.
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: delegate-to-namespaces
+spec:
+  priority: 50
+  subject:
+    namespaces:
+      matchLabels:
+        team: shop
+  ingress:
+    - name: "namespaces-decide"
+      action: "Pass"
+      from:
+        - namespaces: {}
+---
+# The default for traffic nobody wrote a NetworkPolicy for. It is consulted only where no NetworkPolicy selects the
+# pod, which is what makes a default-deny baseline safe to adopt. The name must be 'default'.
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: BaselineAdminNetworkPolicy
+metadata:
+  name: default
+spec:
+  subject:
+    namespaces:
+      matchLabels:
+        team: shop
+  ingress:
+    - name: "deny-what-nobody-allowed"
+      action: "Deny"
+      from:
+        - namespaces: {}

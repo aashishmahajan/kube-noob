@@ -53,6 +53,12 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     "cronjobs": ResourceDef("batch/v1", "cronjobs", True),
     "ingresses": ResourceDef("networking.k8s.io/v1", "ingresses", True),
     "networkpolicies": ResourceDef("networking.k8s.io/v1", "networkpolicies", True),
+    # The two cluster-scoped tiers either side of NetworkPolicy. A cluster without the network-policy-api CRDs
+    # answers 404 for both, which the reachability check treats as "not installed" rather than as a failure.
+    "adminnetworkpolicies": ResourceDef("policy.networking.k8s.io/v1alpha1", "adminnetworkpolicies", False),
+    "baselineadminnetworkpolicies": ResourceDef(
+        "policy.networking.k8s.io/v1alpha1", "baselineadminnetworkpolicies", False
+    ),
     "poddisruptionbudgets": ResourceDef("policy/v1", "poddisruptionbudgets", True),
     "horizontalpodautoscalers": ResourceDef("autoscaling/v2", "horizontalpodautoscalers", True),
     "storageclasses": ResourceDef("storage.k8s.io/v1", "storageclasses", False),
@@ -103,6 +109,10 @@ ALIASES = {
     "ingress": "ingresses",
     "netpol": "networkpolicies",
     "networkpolicy": "networkpolicies",
+    "anp": "adminnetworkpolicies",
+    "adminnetworkpolicy": "adminnetworkpolicies",
+    "banp": "baselineadminnetworkpolicies",
+    "baselineadminnetworkpolicy": "baselineadminnetworkpolicies",
     "pdb": "poddisruptionbudgets",
     "hpa": "horizontalpodautoscalers",
     "sc": "storageclasses",

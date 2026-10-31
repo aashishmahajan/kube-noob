@@ -593,3 +593,36 @@ def test_cluster_access_flags_a_write_in_the_backend(sc: ModuleType) -> None:
     assert watch_bad != bad
     assert sc.cluster_access(watch_bad).mentions_watch
     assert sc.cluster_violations(sc.cluster_access()) == []
+
+
+def test_the_chart_read_rules_mirror_the_backends_allowlist() -> None:
+    """``rbac.yaml`` says its rules are "mirrored from kube_noob.debug.cluster.ALLOWED_RESOURCES", and nothing
+    checked that claim. A resource added to the allowlist without the matching grant fails only on a live cluster,
+    as a 403 the operator has to diagnose; a grant left behind after a resource is removed is standing access
+    kube-noob no longer uses. The template is read as text rather than rendered because helm is not a test
+    dependency: what matters is that every (apiGroup, resource) pair appears on both sides.
+    """
+    template = (ROOT / "deploy/helm/kube-noob/templates/rbac.yaml").read_text(encoding="utf-8")
+    read_rules = template.split('{{- define "kube-noob.readRules" -}}', 1)[1].split("{{- end }}", 1)[0]
+    granted: set[tuple[str, str]] = set()
+    for group_part, resource_part in re.findall(
+        r"apiGroups:\s*\[([^\]]*)\]\s*\n\s*resources:\s*\[([^\]]*)\]", read_rules, re.S
+    ):
+        groups = [g.strip().strip('"') for g in group_part.split(",")]
+        # Template conditionals mark the cluster-scoped half of the list; both halves are one grant set here.
+        cleaned = re.sub(r"\{\{[^}]*\}\}", " ", resource_part)
+        resources = [r.strip().strip('"') for r in cleaned.replace("\n", " ").split(",") if r.strip()]
+        for g in groups:
+            for r in resources:
+                granted.add((g, r.split("/", 1)[0]))
+
+    needed: set[tuple[str, str]] = set()
+    for defn in ALLOWED_RESOURCES.values():
+        gv = defn.group_version
+        group = "" if gv == "v1" else gv.split("/", 1)[0]
+        needed.add((group, defn.plural))
+    # `pods/log` is granted as a subresource of pods, which the comparison above already folds to `pods`.
+    missing = sorted(needed - granted)
+    assert missing == [], f"the backend may read these but the chart does not grant them: {missing}"
+    extra = sorted({(g, r) for g, r in granted if r not in {"pods"}} - needed)
+    assert extra == [], f"the chart grants read access the backend never uses: {extra}"
