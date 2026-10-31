@@ -35,15 +35,16 @@
   clean: a wrong answer rather than an error, on the operator's own evidence. A file either parser can read is now
   read by whichever one can; the alias, depth and document-count refusals still apply on the retry, and a file
   neither can read is still reported.
-- The Claude plugin asks for its one optional path through a `userConfig` option (`must_gather_dir`, passed to the
-  server as `${user_config.must_gather_dir}`) rather than reading a variable out of the user's machine, which is what
-  the plugin directory's review asks for. An option the user leaves unset arrives as the literal placeholder text, so
-  `kube_noob.config` now treats a value still holding `${` as unset: without that the server refused to start, since
-  `mustGather.allowedDir` must be an absolute path. The plugin declares no secret-valued option and is started with
-  the web, the cluster and the model off, so `apiKeyEnv`, `rhacs.tokenEnv` and `ci.githubTokenEnv` are unreachable
-  from it; `tests/test_distribution.py::test_the_plugin_asks_the_user_and_reads_no_secret_from_their_machine` holds
-  that. The plugin README now also states plainly why the launcher is `uv run --frozen` and what that costs at review
-  time.
+- The Claude plugin asks the user for nothing, which is a stronger answer to the plugin directory's "ask through a
+  `userConfig` option rather than reading the machine" review note than adding one. An earlier attempt at this added
+  an option for a must-gather folder; that was wrong, and is reverted. `scripts/sync_plugin_server.py` deliberately
+  leaves `kube_noob.mustgather` out of the plugin because the directory asks plugins not to read the user's files on
+  their own, so the option asked for access the plugin does not have and offered a tool it does not ship. The plugin
+  declares no `userConfig`, is started with the web, the cluster and the model off (so `apiKeyEnv`, `rhacs.tokenEnv`
+  and `ci.githubTokenEnv` are unreachable from it), and a test now holds all three facts together, including that
+  the must-gather module stays out of the copy. `kube_noob.config` still treats a blank environment variable as
+  unset rather than as a setting of "": `mustGather.allowedDir` has to be an absolute path, so a shell exporting the
+  variable unconditionally used to stop the server starting.
 - **kube-noob.com follows a release instead of a schedule.** `release.yml` gained a `site` job that asks the site
   repository to publish the new release, and it runs after the videos are attached rather than straight after the
   release: a site built the moment the release existed would publish a Videos page saying the release had none, and

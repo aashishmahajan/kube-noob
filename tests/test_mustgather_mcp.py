@@ -71,14 +71,12 @@ def test_settings_and_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert load_settings(overrides={}).must_gather.allowed_dir == tmp_path
 
 
-def test_an_unset_plugin_option_does_not_stop_the_server_starting(monkeypatch: pytest.MonkeyPatch) -> None:
-    """G122: the plugin passes this folder in as ${user_config.must_gather_dir}. An option the user left unset
-    arrives as the literal placeholder, and allowedDir must be absolute, so taking it for a path refused every
-    start. Only that spelling is ignored: a path a user wrote containing ${ is still their path."""
-    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "${user_config.must_gather_dir}")
+def test_a_blank_variable_is_an_unset_one_not_a_refused_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """allowedDir has to be an absolute path, so a shell that exports KUBE_NOOB_MUST_GATHER_DIR unconditionally used
+    to make the server refuse to start rather than fall back to the default. Blank is unset; a real path, including
+    an odd one, is still the user's path."""
+    monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "   ")
     assert load_settings(overrides={}).must_gather.allowed_dir is None
-    monkeypatch.setenv("KUBE_NOOB_MEMORY_PATHS", "${user_config.memory_paths}")
-    assert load_settings(overrides={}).memory.paths == []
     monkeypatch.setenv("KUBE_NOOB_MUST_GATHER_DIR", "/srv/${odd}/must-gather")
     assert str(load_settings(overrides={}).must_gather.allowed_dir) == "/srv/${odd}/must-gather"
 

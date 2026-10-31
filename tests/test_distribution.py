@@ -40,24 +40,26 @@ def test_plugin_pins_the_release() -> None:
     assert pins and set(pins) == {__version__}, "README.md uvx pin for other MCP clients"
 
 
-def test_the_plugin_asks_the_user_and_reads_no_secret_from_their_machine() -> None:
+def test_the_plugin_asks_the_user_for_nothing_and_reads_nothing_from_their_machine() -> None:
     """The plugin directory's review prefers a value the user is asked for (a ``userConfig`` option) over one the
-    server reads out of the machine's environment. The plugin asks for one optional path and nothing else: it holds no
-    secret-valued option, and it starts the server with the web, the cluster and the model off, so the configuration
-    that reads a provider key, an RHACS token or a GitHub token (``apiKeyEnv``, ``rhacs.tokenEnv``,
-    ``ci.githubTokenEnv`` in kube_noob.config) is unreachable from it."""
+    server reads out of the machine's environment. kube-noob's plugin needs neither, and that is the stronger answer:
+    it starts the server with the web, the cluster and the model off, so the configuration that reads a provider key,
+    an RHACS token or a GitHub token (``apiKeyEnv``, ``rhacs.tokenEnv``, ``ci.githubTokenEnv`` in kube_noob.config) is
+    unreachable from it, and ``scripts/sync_plugin_server.py`` leaves ``kube_noob.mustgather`` out of the copy
+    entirely, so the one tool that reads the user's own files is not there to configure. An option asking for a folder
+    of their files would be asking for access the plugin deliberately does not have."""
     plugin = json.loads((ROOT / "plugin/kube-noob/.claude-plugin/plugin.json").read_text())
     mcp = json.loads((ROOT / "plugin/kube-noob/.mcp.json").read_text())
     env = mcp["mcpServers"]["kube-noob"]["env"]
     assert env["KUBE_NOOB_WEB_ENABLED"] == "false"
     assert env["KUBE_NOOB_CLUSTER_ENABLED"] == "false"
     assert env["KUBE_NOOB_LLM_PROVIDER"] == "none"
-    options = plugin.get("userConfig", {})
-    assert not [k for k, v in options.items() if v.get("sensitive")], "the plugin must ask for no secret"
-    # every ${user_config.x} the server is started with has to be an option that exists, or the user is handed a
-    # variable holding the literal placeholder (config._env ignores one, but a typo would silently do nothing)
+    assert "userConfig" not in plugin, "the plugin needs nothing from the user; adding an option needs a reason here"
+    excluded = (ROOT / "scripts" / "sync_plugin_server.py").read_text()
+    assert '"kube_noob.mustgather"' in excluded, "the plugin must not ship the tool that reads the user's own files"
+    assert not (ROOT / "plugin/kube-noob/server/kube_noob/mustgather").exists()
     referenced = set(re.findall(r"\$\{user_config\.([A-Za-z0-9_]+)\}", json.dumps(mcp)))
-    assert referenced <= set(options), f"{referenced - set(options)} is not in plugin.json userConfig"
+    assert referenced == set(), f"{referenced} is asked of the user but plugin.json declares no userConfig"
     secrets = [k for k in env if k.endswith("_API_KEY") or "TOKEN" in k or "SECRET" in k or "PASSWORD" in k]
     assert secrets == [], f"the plugin server is started with a secret-bearing variable: {secrets}"
 

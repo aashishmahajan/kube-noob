@@ -67,9 +67,9 @@ everything it does not ship.
   confirmed; never logs, manifests or secrets) in `~/.local/share/kube-noob`, which survives plugin upgrades.
 - To read your cluster (read-only, never Secrets) or allowlisted documentation sites, use the kube-noob CLI
   (`pipx install kube-noob`) or the in-cluster service; the plugin stays offline.
-- Asks you for one optional setting, a must-gather folder, and reads no variable out of your environment for it. The
-  plugin never asks for a token, a key or a password: it starts the server with the web, the cluster and the model
-  off, so the settings that would read one are unreachable.
+- Asks you for nothing and reads nothing out of your environment. The plugin never asks for a token, a key or a
+  password: it starts the server with the web, the cluster and the model off, so the settings that would read one
+  are unreachable, and the one tool that reads your own files (must-gather analysis) is not in the plugin at all.
 - No telemetry and no accounts. Details: [PRIVACY.md](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md).
 
 ## Skills

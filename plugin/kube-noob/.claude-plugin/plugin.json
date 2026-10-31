@@ -25,12 +25,5 @@
     "mcp",
     "learning"
   ],
-  "icon": "./.claude-plugin/icon.png",
-  "userConfig": {
-    "must_gather_dir": {
-      "type": "directory",
-      "title": "must-gather folder (optional)",
-      "description": "A folder of extracted OpenShift must-gather dumps that analyze_must_gather may read. Claude Code asks you for it rather than kube-noob reading a variable from your machine. Leave it unset and the tool reads any path you name in the conversation. kube-noob only reads: it never writes there, never copies it anywhere and makes no network calls of its own."
-    }
-  }
+  "icon": "./.claude-plugin/icon.png"
 }

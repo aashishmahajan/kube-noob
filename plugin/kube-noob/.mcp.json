@@ -18,8 +18,7 @@
       "env": {
         "KUBE_NOOB_WEB_ENABLED": "false",
         "KUBE_NOOB_CLUSTER_ENABLED": "false",
-        "KUBE_NOOB_LLM_PROVIDER": "none",
-        "KUBE_NOOB_MUST_GATHER_DIR": "${user_config.must_gather_dir}"
+        "KUBE_NOOB_LLM_PROVIDER": "none"
       }
     }
   }
