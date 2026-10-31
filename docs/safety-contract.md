@@ -54,10 +54,10 @@ There are 57 tools in all. 50 are read-only. 7 are not read-only and have no tie
 | `insight` | yes | no | - | default | default |
 | `known_issues` | yes | no | - | default | default |
 | `learn_exercise` | yes | no | - | default | default |
-| `learn_lesson` | no | no | - | default | default |
+| `learn_lesson` | no (shared: yes) | no | - | default | default |
 | `learn_progress` | yes | no | - | default | default |
-| `learn_quiz` | no | no | - | default | default |
-| `learn_submit` | no | no | - | default | default |
+| `learn_quiz` | no (shared: yes) | no | - | default | default |
+| `learn_submit` | no (shared: yes) | no | - | default | default |
 | `learn_tracks` | yes | no | - | default | default |
 | `learning_note_add` | no | no | - | default | never |
 | `learning_profile_set` | no | no | - | default | never |

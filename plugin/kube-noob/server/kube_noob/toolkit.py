@@ -762,7 +762,7 @@ class Toolkit:
         the learning file, so one caller cannot plant notes that every other caller's search then returns."""
         self.settings = settings
         self.shared = shared
-        self.tutor = Tutor(settings.data_dir)
+        self.tutor = Tutor(settings.data_dir, record=not shared)
         self.learning = LearningStore(settings.data_dir)
         # Central's policies, read at most once per RHACS_CACHE_SECONDS whatever the number of callers.
         self._rhacs_lock = threading.Lock()
@@ -1498,30 +1498,18 @@ class Toolkit:
     def tracks(self, p: LearnerIn) -> dict[str, Any]:
         return {"tracks": self.tutor.tracks(p.learner)}
 
-    def _require_real_learner(self, learner: str | None) -> None:
-        """ "local" is the single-user stdio convenience. On the shared HTTP server it would let every caller who
-        forgets to pass their own id silently share (and overwrite) one progress file (SAFE2)."""
-        if self.shared and learner == "local":
-            raise ValueError(
-                'the shared server needs its own learner id for this; "local" is the single-user stdio default '
-                "and would mix this caller's progress into every other caller's"
-            )
-
     def lesson(self, p: LessonIn) -> dict[str, Any]:
-        self._require_real_learner(p.learner)
         return self.tutor.lesson(p.lesson_id, p.learner)
 
     def exercise(self, p: ExerciseIn) -> dict[str, Any]:
         return self.tutor.exercise(p.exercise_id)
 
     def submit(self, p: SubmitIn) -> dict[str, Any]:
-        self._require_real_learner(p.learner)
         return self.tutor.submit(p.exercise_id, p.answer, p.learner)
 
     def quiz(self, p: QuizIn) -> dict[str, Any]:
         if p.choice is None:
             return self.tutor.quiz_question(p.question_id)
-        self._require_real_learner(p.learner)
         return self.tutor.answer_quiz(p.question_id, p.choice, p.learner)
 
     def progress(self, p: LearnerIn) -> dict[str, Any]:
@@ -1942,11 +1930,11 @@ class Toolkit:
             ToolSpec(
                 "learn_lesson",
                 "Open a lesson",
-                "Lesson content with objectives, key points and citations. On the shared server, pass a real "
-                'learner id to track progress (the "local" default is refused there).',
+                "Lesson content with objectives, key points and citations. A shared HTTP server records no "
+                "progress, so the learner id only selects whose tally to show when one is kept.",
                 LessonIn,
                 self.lesson,
-                read_only=False,
+                read_only=self.shared,
             ),
             ToolSpec(
                 "learn_exercise",
@@ -1958,20 +1946,20 @@ class Toolkit:
             ToolSpec(
                 "learn_submit",
                 "Submit an exercise answer",
-                "Grade YAML offline with the audit engine; awards credits and returns feedback. On the shared "
-                'server, pass a real learner id (the "local" default is refused there).',
+                "Grade YAML offline with the audit engine; awards credits and returns feedback. A shared HTTP "
+                "server grades the same way but records nothing, and says so in the result.",
                 SubmitIn,
                 self.submit,
-                read_only=False,
+                read_only=self.shared,
             ),
             ToolSpec(
                 "learn_quiz",
                 "Quiz",
-                "Fetch a quiz question (no choice) or answer it (choice index). Answering on the shared server "
-                'needs a real learner id (the "local" default is refused there).',
+                "Fetch a quiz question (no choice) or answer it (choice index). A shared HTTP server marks the "
+                "answer the same way but records nothing, and says so in the result.",
                 QuizIn,
                 self.quiz,
-                read_only=False,
+                read_only=self.shared,
             ),
             ToolSpec(
                 "learn_progress", "Learner progress", "Credits earned and completed items.", LearnerIn, self.progress
@@ -2183,7 +2171,10 @@ class Toolkit:
                 )
             )
         if self.shared:
-            s = [t for t in s if t.name not in {"learning_note_add", "learning_profile_set", "incident_confirm"}]
+            # The flag each tool already carries, not a list of names: a denylist exposes any write tool added
+            # later by default, and three had been (learn_lesson, learn_submit and learn_quiz each wrote a progress
+            # file). The learning tools stay, with their recording off - see Tutor(record=False).
+            s = [t for t in s if t.read_only]
         from kube_noob.tiers import offered
 
         return [t for t in s if offered(t, self.settings)]

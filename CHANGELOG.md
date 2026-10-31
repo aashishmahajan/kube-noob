@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A shared server offered three tools that wrote per-caller state it had no identity to key on.** The filter
+  meant to keep write tools off the HTTP server was a denylist of three names, and three more had been added since:
+  `learn_lesson`, `learn_submit` and `learn_quiz` each wrote `progress/<learner>.json`. The server has one static
+  bearer token, so the learner id comes from the caller and binds to nothing -- the red team showed one caller's
+  wrong answer taking the credit for another's right one, and anybody reading anybody's tally. The filter is now the
+  `read_only` flag each tool already carries, so a write tool added later is excluded by construction. The three
+  tools stay on the shared server and grade, mark and teach identically, but record nothing and say so in the
+  result; `learn_progress` returns no tally there rather than one anyone could have written. That makes the old
+  SAFE2 guard -- which refused the `"local"` learner id on a shared server -- pointless, so it is gone: it only
+  caught the caller who forgot to pass an id, never the one who passed somebody else's.
+- A local progress file is read and written under a lock. Fifteen concurrent answers used to store between two and
+  eight of them, because load and save took none; one person with two clients open is enough for that, and a lost
+  credit is a silent wrong answer.
+
 - **An unauthenticated caller could kill the HTTP server through its health endpoints.** `/healthz` and `/readyz`
   skip the bearer token so the kubelet can probe them, and skipped it for every method -- while the body limit sat
   inside the auth middleware and buffered up to 8 MiB per connection before the router answered 405. Fifty such
