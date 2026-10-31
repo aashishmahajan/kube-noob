@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Two holes in the Jira corpus scrubber let person-shaped text reach stored tickets**, which is what the
+  `corpus-refresh` privacy gate has been refusing since 2026-10-28 with 123 findings. `_ACCOUNT` required the id to
+  start within one punctuation character of `accountId`, so the JSON spelling `{"accountId": "5b10..."}` -- quote,
+  colon, space -- kept a real Atlassian account id. And `scrub()` ran before `unname()`, so a display name it could
+  not recognise as a person (a non-ASCII one is neither email- nor handle-shaped) survived the scrub and was only
+  then swapped for its label, leaving text like "ping Commenter A at quay.io" that reads as a spelled-out email.
+  `anonymise()` now runs the chain in an order that holds -- scrub, unname, handles, scrub again -- and the widened
+  `_ACCOUNT` accepts any mix of quote, colon, equals and space before the id. The audit that gates the corpus is
+  deliberately not loosened: it may still over-flag a bare 24-character hex string that is not an account id, and
+  telling those apart needs the real tickets.
+
 - **Bundled YAML that only some parsers accepted broke `diagnose` and `known_issues` after 0.7.0.** The Ceph
   catalogue `data/ceph_health.yaml` shipped 195 scalars of the form `src: [healthmon:885]`. A colon with no space
   after it inside a flow sequence is ambiguous YAML: PyYAML's own scanner reads it as the string `"healthmon:885"`,
