@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **An API key was reachable by an endpoint that was never meant to have it.** `key_env` had a single global default,
+  so `llm.provider: openai-compatible` with no `apiKeyEnv` read `ANTHROPIC_API_KEY` and sent it as a bearer token to
+  whatever `llm.baseUrl` named -- a third-party gateway included. The default is now per provider and only `anthropic`
+  has one: an `openai-compatible` request with no `apiKeyEnv` carries no `Authorization` header at all, and says so
+  when the endpoint answers 401. `apiKeyEnv` is also narrowed to `*_API_KEY`, which closes the other half of the same
+  hole: `KUBE_NOOB_*` used to be accepted, so a configuration file could aim the model client at
+  `KUBE_NOOB_HTTP_TOKEN`, the MCP server's own bearer token held by the same process.
+- **An endpoint could get the key echoed back out of kube-noob.** Error bodies were quoted verbatim, so a gateway
+  that includes the `Authorization` header in a 400 or 401 put the key on stderr, into logs and into CI output. Every
+  body kube-noob quotes is now redacted first. `ANTHROPIC_BASE_URL` from the environment is held to the same
+  clear-text rule as `llm.baseUrl` -- the SDK reads it directly, so `http://` to a non-local host bypassed the check
+  that exists precisely to stop the key travelling in the clear.
+- A 200 from a model endpoint that is not the documented shape, and a redirect loop, now end in a message instead of
+  a traceback. A model endpoint is not trusted input: a proxy, a captive portal or a different API version can all
+  answer 200 with something else, and `content` missing or a string was an `AttributeError` on the way out.
+
 - **A must-gather analysis now says what it could not see.** "No findings" meant either nothing is wrong or nothing
   could be read, and the exit code said the same for both: `failing()` counts findings and never looked at
   `unparsed`, so a `--fail-on` gate passed over a must-gather whose ClusterOperator, Node and ClusterVersion files

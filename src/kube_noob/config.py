@@ -88,10 +88,12 @@ class ClusterSettings(_Base):
     max_log_lines: int = Field(default=200, ge=1, le=5000)
 
 
-# apiKeyEnv may only name a model provider's key variable (ending in _API_KEY, or starting with KUBE_NOOB_), so a
-# configuration file cannot point the model client at an unrelated variable. The default per provider is set in
-# kube_noob.agent.providers, which is the only code that reads it.
-_KEY_VAR = re.compile(r"^(?:[A-Z][A-Z0-9_]*_API_KEY|KUBE_NOOB_[A-Z0-9_]+)\Z")
+# apiKeyEnv may only name a model provider's key variable (ending in _API_KEY), so a configuration file cannot point
+# the model client at an unrelated variable - above all not at the HTTP service's own bearer token (server.authTokenEnv
+# and its default), which the same process holds and which a model endpoint has no business receiving. The default per
+# provider is set in kube_noob.agent.providers, which is the only code that reads it, and there is no default for an
+# endpoint kube-noob did not choose.
+_KEY_VAR = re.compile(r"^[A-Z][A-Z0-9_]*_API_KEY\Z")
 _CLUSTER_LOCAL_SUFFIXES = (".svc", ".svc.cluster.local", ".local", ".internal")
 
 
@@ -111,7 +113,9 @@ def is_local_url(url: str | None) -> bool:
         return host == "localhost" or host.endswith(_LOCK_LOCAL_SUFFIXES)
 
 
-def _check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> None:
+def check_endpoint(base_url: str | None, allow_insecure: bool, what: str) -> None:
+    """Reject an endpoint that would carry the API key in clear text or embed credentials in the URL. Public so the
+    providers can hold a base URL that arrived from the environment to the same rule as one from the config file."""
     if base_url is None:
         return
     parts = urlsplit(base_url)
@@ -142,7 +146,7 @@ class _LLMEndpoint(_Base):
     @classmethod
     def _key_env(cls, v: str | None) -> str | None:
         if v is not None and not _KEY_VAR.match(v):
-            raise ValueError(f"apiKeyEnv {v!r} must name a model provider key variable (*_API_KEY or KUBE_NOOB_*)")
+            raise ValueError(f"apiKeyEnv {v!r} must name a model provider key variable (*_API_KEY)")
         return v
 
 
@@ -156,7 +160,7 @@ class LLMSettings(_LLMEndpoint):
 
     @model_validator(mode="after")
     def _endpoint(self) -> LLMSettings:
-        _check_endpoint(self.base_url, self.allow_insecure_base_url, "llm")
+        check_endpoint(self.base_url, self.allow_insecure_base_url, "llm")
         return self
 
 
@@ -168,7 +172,7 @@ class JudgeSettings(_LLMEndpoint):
 
     @model_validator(mode="after")
     def _endpoint(self) -> JudgeSettings:
-        _check_endpoint(self.base_url, self.allow_insecure_base_url, "judge")
+        check_endpoint(self.base_url, self.allow_insecure_base_url, "judge")
         return self
 
 

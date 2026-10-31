@@ -57,6 +57,10 @@ llm:
   apiKeyEnv: VLLM_API_KEY
 ```
 
+`apiKeyEnv` is the only variable the model client reads for `openai-compatible`, and there is no fallback: without it
+the request carries no `Authorization` header. `ANTHROPIC_API_KEY` is the default for `llm.provider: anthropic` alone,
+so pointing `baseUrl` at a gateway cannot quietly hand that key to a third party.
+
 Then compare it with a frontier baseline: install the SDK with `pipx install 'kube-noob[ask]'`, set
 `llm.provider: anthropic` and `ANTHROPIC_API_KEY`, and run `kube-noob train bench --out report.json`. No model is
 configured by default.
