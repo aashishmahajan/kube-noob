@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **One unreadable file used to decide the result for a whole directory of manifests.** `audit -f DIR` and
+  `gate -f DIR` concatenated every `.yaml` in the tree before anything parsed it, so a file that was not UTF-8 or
+  not YAML aborted the audit of every other file -- and reported a line number of the combined text, which is no
+  line of any file you can open. Worse, a NUL byte took `gate` out with an uncaught `yaml.reader.ReaderError` and
+  left exit 1, the same code as "findings at or above `--fail-on`": a pipeline reported policy violations for a gate
+  that had audited nothing. Files are now read one at a time, an unreadable one is named with its reason, and the
+  exit code is 5. `--skip-unreadable` audits the rest and lists them under `unreadable` in the report; `--fail-on`
+  still bites on the files that were read.
+
 - **An API key was reachable by an endpoint that was never meant to have it.** `key_env` had a single global default,
   so `llm.provider: openai-compatible` with no `apiKeyEnv` read `ANTHROPIC_API_KEY` and sent it as a bearer token to
   whatever `llm.baseUrl` named -- a third-party gateway included. The default is now per provider and only `anthropic`
