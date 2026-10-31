@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **A must-gather analysis now says what it could not see.** "No findings" meant either nothing is wrong or nothing
+  could be read, and the exit code said the same for both: `failing()` counts findings and never looked at
+  `unparsed`, so a `--fail-on` gate passed over a must-gather whose ClusterOperator, Node and ClusterVersion files
+  were truncated. Everything needed to tell the two apart was already recorded and simply never reached the verdict.
+  `completeness` now reports the analysers that had data, how many files could not be read, and whether the evidence
+  is whole; the text output states it in words rather than leaving it to five `not read:` lines; and
+  `--require-complete` exits 5 on a partial run. 5 is distinct on purpose -- 1 stays findings at or above
+  `--fail-on`, and 2, 3 and 4 already mean a config or missing file, a clarification and a refused input. Without the
+  flag nothing changes, so no existing gate shifts under anyone.
+
 ## 0.7.1 - 2026-10-31
 
 - **Two holes in the Jira corpus scrubber let person-shaped text reach stored tickets**, which is what the

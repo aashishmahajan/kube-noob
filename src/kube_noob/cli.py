@@ -1100,6 +1100,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="exit 1 when a finding is at or above this severity",
     )
     mga.add_argument(
+        "--require-complete",
+        action="store_true",
+        help="exit 5 when the must-gather was missing analysers or held files that could not be read, so a gate "
+        "never reads a blind run as a clean one (exit 1 stays findings at or above --fail-on)",
+    )
+    mga.add_argument(
         "--report",
         metavar="DIR",
         help="write report.md and report.json here: findings with the known issues and team memory that match them",
@@ -2007,7 +2013,20 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _tprint(text)
         else:
             _emit({**bundle.as_dict(), **rep}, fmt)
-        return 1 if analyse.failing(analysis, a.fail_on) else 0
+        if analyse.failing(analysis, a.fail_on):
+            return 1
+        # A gate that passes on evidence nobody could read is a false all-clear, and exit 0 cannot say which one it
+        # was. 5 rather than 2: 1 is findings at or above --fail-on, and 2, 3 and 4 already mean a config or missing
+        # file, a clarification, and a refused input. 5 means the run itself is not trustworthy enough to act on.
+        if getattr(a, "require_complete", False) and not analysis.completeness()["complete"]:
+            c = analysis.completeness()
+            print(
+                f"refusing a clean verdict: {c['analysersRead']} of {c['analysersExpected']} analysers had data and "
+                f"{c['unreadableFiles']} file(s) could not be read",
+                file=sys.stderr,
+            )
+            return 5
+        return 0
     if a.cmd == "admission":
         return _admission_cmd(a, s, fmt)
     if a.cmd == "build":
