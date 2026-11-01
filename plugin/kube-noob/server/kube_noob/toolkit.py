@@ -796,7 +796,10 @@ class Toolkit:
 
     def audit(self, p: AuditIn) -> dict[str, Any]:
         from kube_noob.audit import exceptions as exc
+        from kube_noob.audit.engine import refuse_if_not_manifests
 
+        # Before anything is scored: a score on a file the rules never saw is a wrong answer, not a thin one.
+        refuse_if_not_manifests(p.manifests)
         stages = {Stage(s) for s in p.stages}
         r = analyze(p.manifests, p.platform, p.version, stages=stages, min_severity=Severity.parse(p.min_severity))
         excepted: list[dict[str, Any]] = []

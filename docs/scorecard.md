@@ -20,8 +20,8 @@ What kube-noob answers, what it leaves unanswered and where it is weak, measured
 | Self-test cases passed | 63 of 63 | `kube-noob selftest` |
 | Audit rules | 77 | `python -c "from kube_noob.audit.engine import RULES; print(len(RULES))"` |
 | Diagnosis playbooks | 67 | `python -c "from kube_noob.debug.playbooks import PLAYBOOKS; print(len(PLAYBOOKS))"` |
-| Knowledge documents | 64 | `python -c "from kube_noob.knowledge.store import builtin_chunks; print(len({c.doc_id for c in builtin_chunks()}))"` |
-| Knowledge sections | 283 | `python -c "from kube_noob.knowledge.store import builtin_chunks; print(len(builtin_chunks()))"` |
+| Knowledge documents | 65 | `python -c "from kube_noob.knowledge.store import builtin_chunks; print(len({c.doc_id for c in builtin_chunks()}))"` |
+| Knowledge sections | 288 | `python -c "from kube_noob.knowledge.store import builtin_chunks; print(len(builtin_chunks()))"` |
 | Reported issues bundled (distinct bugs) | 921 | `python -c "from kube_noob.known_issues import bundled; print(len({i.id for i in bundled()[0]}))"` |
 | Self-test cases | 63 | `python -c "from kube_noob.evals.selftest import cases; print(len(cases()))"` |
 
@@ -40,7 +40,7 @@ The community-question numbers are quoted in the last section; their command nee
 
 - 77 audit rules (45 audit, 12 calibrate, 20 validate).
 - 67 diagnosis playbooks with 170 root causes.
-- 283 knowledge sections in 64 documents.
+- 288 knowledge sections in 65 documents.
 - 921 reported issues from the bundled OpenShift release notes.
 - 63 self-test cases, 151 golden questions, 114 held-out and 171 training triage questions.
 
@@ -77,7 +77,7 @@ What is bundled for each technology is listed in [supported-technologies.md](eva
 | `upg-006` | OpenShift | oc adm upgrade recommend prints "Failed to check for at least some preconditions: no token is currently in... | doc: oc adm upgrade recommend error without a token | none |
 | `upg-007` | OpenShift | We run a local OpenShift Update Service for a disconnected cluster. The release images are mirrored, but OS... | doc: OpenShift Update Service graph data for disconnected clusters | none |
 | `upg-008` | OpenShift | A file in cincinnati-graph-data/blocked-edges has to, from, url, name and message plus a matchingRules list... | doc: how update risks are declared (blocked edges, matchingRules) | none |
-| `rhacs-006` | RHACS | How do I stop one RHACS deploy-time policy from firing in every namespace whose name starts with test-? | rank: kn:rhacs-policy-rules-scope#3 exclusion doc should outrank the roxctl deployment check doc | `kn:rhacs-roxctl-ci#3`, `kn:rhacs-enforcement#0`, `kn:rhacs-policy-rules-scope#4` |
+| `rhacs-006` | RHACS | How do I stop one RHACS deploy-time policy from firing in every namespace whose name starts with test-? | rank: kn:rhacs-policy-rules-scope#3 exclusion doc should outrank the roxctl deployment check doc | `kn:rhacs-roxctl-ci#3`, `kn:rhacs-policy-rules-scope#4`, `kn:rhacs-enforcement#0` |
 | `pcel-001` | Admission policy engines | After upgrading Kyverno to 1.19, every time I apply a ClusterPolicy I get: "Warning: kyverno.io/v1 ClusterP... | doc: Kyverno 1.19 deprecation of ClusterPolicy and the legacy-policy metrics | `kn:kyverno-troubleshooting#1` |
 | `pcel-002` | Admission policy engines | I have a ClusterPolicy generate rule that clones a registry secret into every new namespace, with synchroni... | doc: Kyverno CEL migration of verifyImages | `kn:k8s-images#0` |
 | `pcel-003` | Admission policy engines | My ClusterPolicy has validationFailureAction: Enforce, a failureActionOverrides block that keeps one namesp... | doc: validationFailureAction to validationActions mapping | `kn:kyverno-troubleshooting#1` |
@@ -86,7 +86,7 @@ What is bundled for each technology is listed in [supported-technologies.md](eva
 | `pcel-006` | Admission policy engines | My ClusterPolicy verifyImages rule uses imageReferences, skipImageReferences, a cosign attestor, mutateDige... | doc: Kyverno CEL migration of mutate rules | none |
 | `pcel-007` | Admission policy engines | We run a ClusterCleanupPolicy that deletes completed Jobs every night, using schedule, match, exclude and a... | doc: CleanupPolicy to DeletingPolicy migration | `kn:kyverno-troubleshooting#3` |
 | `pcel-008` | Admission policy engines | After replacing a ClusterPolicy with a ValidatingPolicy, my old kyverno.io PolicyException (exceptions: pol... | doc: legacy PolicyException versus the policies.kyverno.io form (ruleNames has no equivalent) | `kn:kyverno-troubleshooting#1` |
-| `pol-008` | Admission policy engines | Creating a namespace fails with: Error from server ([ns-needs-owner] you must provide labels: {"owner"}): a... | doc: Gatekeeper constraint spec.enforcementAction dryrun or warn instead of deny | `gatekeeper/ns-needs-owner`, `DBG-WEBHOOK`, `kn:gatekeeper-constraints-usage#4` |
+| `pol-008` | Admission policy engines | Creating a namespace fails with: Error from server ([ns-needs-owner] you must provide labels: {"owner"}): a... | doc: Gatekeeper constraint spec.enforcementAction dryrun or warn instead of deny | `gatekeeper/ns-needs-owner`, `DBG-WEBHOOK`, `kn:gatekeeper-enforcement#4` |
 | `pol-012` | Admission policy engines | If all Gatekeeper webhook pods go down, do constraints still block bad resources by default? What is the tr... | doc: Gatekeeper webhook failurePolicy Ignore by default versus Fail trade-offs | `kn:gatekeeper-enforcement#3`, `kn:gatekeeper-constraints-usage#5` |
 | `stor-003` | storage | After a node reboot ceph status shows "Reduced data availability: 24 pgs inactive, 24 pgs peering" and "Deg... | Ceph status prose ('pgs inactive', 'pgs peering') is not read as PG_AVAILABILITY or PG_DEGRADED | none |
 | `stor-010` | storage | Our CephFS clients hang and ceph health detail shows "MDS_SLOW_REQUEST 1 MDSs report slow requests: mds.myf... | MDS_SLOW_REQUEST lacks the admin-socket ops dump step; an etcd playbook ranks second | `MDS_SLOW_REQUEST`, `DBG-ETCD` |
