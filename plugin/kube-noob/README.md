@@ -48,12 +48,13 @@ throwaway environment in uv's cache. `-I` keeps your working directory and `PYTH
 writes no `.pyc` into the plugin. If no Python 3.11 or later is present, uv downloads its managed CPython once.
 Nothing else is downloaded and no LLM SDK is installed.
 
-A pinned package launcher — `uvx kube-noob==<version> mcp` — is what the plugin directory clears automatically,
-where `uv run --frozen` is held for a human reviewer. It becomes the default from 0.7.1, not before: the published
-0.7.0 has no switch to withhold `analyze_must_gather`, the one tool that opens a path on your machine rather than
-reading text it was handed, so installing the published package would hand the plugin a capability the vendored copy
-has never had. 0.7.1 adds `mustGather.enabled`, this file already sets `KUBE_NOOB_MUST_GATHER_ENABLED=false`, and the
-two launchers then offer exactly the same tools.
+Running the published package from an index instead would be cleared by the directory's automatic checks, where
+this launcher is held for a human reviewer. kube-noob does not do it, and the reason is worth stating plainly: a
+launcher that names a package and a version fixes that package, and leaves the rest of the tree to be resolved when
+the user first runs it. This one resolves nothing. The source is the readable copy in `server/`, every dependency is
+fixed to an exact version and SHA-256 hash in the `uv.lock` beside this file, and `--frozen` refuses to re-resolve
+any of it. The trade is a slower listing for an install that is identical on every machine and auditable before it
+runs, and that is the right way round for a tool people point at production clusters.
 
 ### What the vendored copy is
 
@@ -63,18 +64,11 @@ imports, copied unchanged. The CLI, the optional model agent, the HTTP service a
 rendering and the cluster backends are not included, so nothing in that copy reads a credential, opens a connection or
 starts another program. Beside it is a `uv.lock` pinning every dependency to an exact version and SHA-256 hash.
 
-From 0.7.1 the default becomes the pinned package launcher. To keep running this vendored copy instead — on an
-air-gapped machine, or when you want every dependency fixed by hash rather than resolved at install time — keep the
-`mcpServers` entry as:
-
-```json
-{"command": "uv", "args": ["run", "--frozen", "--exact", "--isolated", "--quiet", "--project",
-  "${CLAUDE_PLUGIN_ROOT}", "python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]}
-```
-
-That form reads only the source in this directory and the hashes in `uv.lock`, and resolves nothing at install time.
-It stays the stronger of the two. Vendoring `mcp`, `pydantic`, `starlette` and `uvicorn` as well — which would let
-the plugin run a plain file with no resolver at all — does not fit the directory's file-count and file-size limits.
+The dependencies are the ones the bundled server imports and no others: `mcp`, `pydantic`, `pydantic-core`,
+`mcp-types`, `anyio`, `starlette`, `PyYAML` and `jsonschema`. There is no HTTP client and no web server among them —
+those belong to the HTTP service and the web client, which do not ship here — so the installed tree cannot reach the
+network even if something asked it to. Vendoring the remaining packages as well, which would let the plugin run a
+plain file with no resolver at all, does not fit the directory's file-count and file-size limits.
 
 ## What it accesses
 

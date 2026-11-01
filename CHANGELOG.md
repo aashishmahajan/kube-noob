@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The plugin declared two dependencies it never imports and imported three it never declared.** `httpx` and
+  `uvicorn` belong to the web client and the HTTP service, neither of which ships in the plugin, while `anyio`,
+  `mcp-types` and `pydantic-core` are imported directly by the bundled server and were reaching it only through
+  another package's requirements -- an upgrade that dropped one would have broken the plugin with nothing to say so.
+  The manifest now matches the imports in both directions, with a test each way, and the resolved tree lost `httpx`,
+  `httpcore` and `certifi`: 35 packages down to 32, with no HTTP client among them.
+- The plugin README said the launcher would switch to a published package from 0.7.1. It did not, and should not: a
+  launcher that names a package and a version fixes that package and leaves the rest of the tree to resolve on the
+  user's machine, where this one resolves nothing. The README now says what the plugin does and why, and a test
+  holds it there rather than enforcing the abandoned plan, as it had been doing.
+
+
 - **A burst of connections that send nothing makes the HTTP server answer 503 to everything**, probes included,
   and nothing reclaims them: uvicorn counts connections towards `limit_concurrency`, and `timeout_keep_alive`
   applies between requests on a keep-alive connection, not to a connection that never made one. Measured on the
