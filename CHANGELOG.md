@@ -12,7 +12,14 @@
   launcher that names a package and a version fixes that package and leaves the rest of the tree to resolve on the
   user's machine, where this one resolves nothing. The README now says what the plugin does and why, and a test
   holds it there rather than enforcing the abandoned plan, as it had been doing.
+- **A release the maintainer created by hand took the whole publish pipeline down with it.** `github-release` ran
+  `gh release create`, which is an error when the release already exists, so on v0.7.1 the job failed and `videos`
+  and `site` were skipped behind it: the release carried no wheel, no chart, no skill ZIP and no videos, and
+  kube-noob.com was never told the version had changed -- while PyPI, the chart repository, the MCP registry and
+  Homebrew had all published successfully. Creating the release first is an ordinary thing to do, so the step now
+  branches on whether it exists and uploads with `--clobber`, which also makes re-running the job safe.
 
+## 0.7.1 - 2026-10-31
 
 - **A burst of connections that send nothing makes the HTTP server answer 503 to everything**, probes included,
   and nothing reclaims them: uvicorn counts connections towards `limit_concurrency`, and `timeout_keep_alive`
@@ -139,7 +146,6 @@
   `--fail-on`, and 2, 3 and 4 already mean a config or missing file, a clarification and a refused input. Without the
   flag nothing changes, so no existing gate shifts under anyone.
 
-## 0.7.1 - 2026-10-31
 
 - **Two holes in the Jira corpus scrubber let person-shaped text reach stored tickets**, which is what the
   `corpus-refresh` privacy gate has been refusing since 2026-10-28 with 123 findings. `_ACCOUNT` required the id to
