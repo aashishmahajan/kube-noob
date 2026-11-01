@@ -1,3 +1,6 @@
+{{- if and .Values.route.enabled (not .Values.route.host) }}
+{{- fail "route.enabled needs route.host: with no host OpenShift generates <name>-<namespace>.<apps-domain>, which the chart cannot know and therefore cannot put in server.allowedHosts. The Route then passes both probes while every MCP call gets 421 Invalid Host header. Get the domain with `oc get ingresses.config/cluster -o jsonpath={.spec.domain}` and set route.host to <name>-<namespace>.<that domain>, or expose the Service another way." }}
+{{- end }}
 {{- if .Values.route.enabled }}
 apiVersion: route.openshift.io/v1
 kind: Route

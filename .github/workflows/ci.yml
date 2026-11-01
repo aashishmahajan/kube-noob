@@ -180,7 +180,8 @@ jobs:
           set -euo pipefail
           for v in 4.20:1.33.0 4.21:1.34.0 4.22:1.35.0; do
             helm template kn deploy/helm/kube-noob -n kube-noob --kube-version "${v#*:}" \
-              --set auth.existingSecret=kn-token --set route.enabled=true --set config.clusterEnabled=true \
+              --set auth.existingSecret=kn-token --set route.enabled=true \
+              --set route.host=kn-kube-noob.apps.example.com --set config.clusterEnabled=true \
               --set config.webEnabled=true --set egressFirewall.enabled=true \
               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" \
               | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium

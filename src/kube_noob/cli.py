@@ -6,6 +6,7 @@ Exit codes: 0 ok | 1 findings at/above --fail-on | 2 usage/config error | 3 clar
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -2349,6 +2350,11 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         from kube_noob.posture import posture, render_text
 
         report = posture(s)
+        # Why here and not in posture(): posture.py ships inside the Claude plugin, which must name no credential
+        # variable for a reviewer, and this check has to name one. doctor is CLI-only, so the check lives with it.
+        report["conflicts"] = (
+            list(report["conflicts"]) + _model_conflicts(s.llm, "llm") + _model_conflicts(s.judge, "judge")
+        )
         if a.format == "text":
             print(render_text(report))
             print(f"Knowledge: {line(s.data_dir)}")
@@ -2356,6 +2362,35 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _emit({**report, "knowledge": status(s.data_dir)}, fmt)
         return 1 if report["conflicts"] else 0
     raise ConfigError(f"unknown command {a.cmd}")
+
+
+def _model_conflicts(llm: Any, what: str) -> list[str]:
+    """What stops this provider answering, worked out without calling anything.
+
+    `doctor` is what someone runs to find out whether the thing is set up, and it printed `posture: OK` with a
+    provider configured, no SDK installed and no key set -- while its own help promises "exit 1 on conflicts". Both
+    reasons `ask` cannot run are knowable locally: the optional dependency is absent, or the variable holding the
+    key is unset. `provider: none` is not a conflict; nothing is meant to run.
+    """
+    if llm.provider == "none":
+        return []
+    out: list[str] = []
+    if llm.provider == "anthropic" and importlib.util.find_spec("anthropic") is None:
+        out.append(
+            f"{what}.provider is 'anthropic' but the Anthropic SDK is not installed, so `kube-noob ask` cannot run. "
+            "Add it with: uv tool install 'kube-noob[ask]' (a Homebrew install has no way to add the extra)."
+        )
+    from kube_noob.agent.providers import key_env
+
+    name = key_env(llm)
+    if name is None:
+        out.append(
+            f"{what}.provider is {llm.provider!r} and no {what}.apiKeyEnv is set, so the request would carry no "
+            "credential. Set it to the variable holding this endpoint's key."
+        )
+    elif not os.environ.get(name):
+        out.append(f"{what}.provider is {llm.provider!r} but {name} is not set, so `kube-noob ask` cannot run.")
+    return out
 
 
 _TERMINAL_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
