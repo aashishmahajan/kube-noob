@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The chart's natural OpenShift exposure was silently broken.** `route.enabled: true` with the default empty
+  `route.host` lets OpenShift generate `<name>-<namespace>.<apps-domain>` -- a hostname the chart cannot predict
+  and therefore never adds to `server.allowedHosts` -- so every MCP call came back **421 Invalid Host header**
+  while the liveness probe, the readiness probe and `helm test` all stayed green, because they reach the Service,
+  not the Route. Ingress never had this: its template marks the host `required`. The chart now refuses to render
+  and says how to find the domain. No test covered any of the chart's `fail` guards, which is how this shipped.
+- **`kube-noob doctor` called a model path healthy that could not run.** With a provider configured, no SDK
+  installed and no key set it printed `posture: OK`, while its own help promises "exit 1 on conflicts". Both
+  reasons are knowable without calling anything, and it now names them and exits 1. `provider: none` stays quiet.
+
 - **Nothing linked kube-noob.com.** Not `project.urls`, not the README, not the plugin manifest, not the chart: a
   stranger arriving from PyPI or GitHub could not find the site where the demos, the recordings and the browsable
   rules are. PyPI's Homepage now points there and the README names it.
