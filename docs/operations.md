@@ -51,6 +51,35 @@ merged to `main` and someone presses "Check for new commits" (or sets up push up
 that is bumped on `main` but never tagged never reaches PyPI, the image or the MCP Registry: 0.5.0 (073fe80) was
 bumped on `main` and not tagged, so PyPI stopped at 0.4.0.
 
+## When a release job fails after the others have published
+
+The jobs publish to five places and only the last of them is the GitHub release, so a failure there leaves PyPI,
+the chart repository, the MCP Registry and Homebrew holding the version while the release carries nothing. This
+happened on v0.7.1.
+
+**Do not delete the release and do not delete or re-push the tag.** Deleting the release destroys the assets the
+run already built, and `videos` and `site` with them; re-pushing the tag re-runs `publish-pypi`, which fails
+because PyPI versions are immutable, and `github-release` never runs because it waits on that job.
+
+Re-run the one job instead. It re-runs its dependents (`videos`, `site`) and nothing upstream, and it takes the
+artifacts from the original run, which are retained for 90 days:
+
+```bash
+gh api "repos/<owner>/<repo>/actions/runs/<run id>/attempts/<n>/jobs?per_page=50" \
+  --jq '.jobs[] | select(.name == "github-release") | .id'
+gh api -X POST "repos/<owner>/<repo>/actions/jobs/<job id>/rerun"
+```
+
+The videos can also be re-rendered and re-attached on their own, against a release that already exists, which is
+what `videos.yml`'s `workflow_dispatch` is for:
+
+```bash
+gh workflow run videos.yml --repo <owner>/<repo> -f tag=v<version>
+```
+
+If the artifacts have expired, build the wheel, chart, GIFs and skill ZIP from the tag and upload them with
+`gh release upload`; the release step is idempotent, so running the job again after that is safe.
+
 ## Rollback
 
 - PyPI versions are immutable. Yank the bad version (`pypi.org/manage/project/kube-noob/releases/`), fix forward, and

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `docs/operations.md` says what to do when a release job fails after the other four have published, because the
+  obvious move is the wrong one: deleting the release destroys the assets the run already built, and re-pushing the
+  tag re-runs `publish-pypi`, which cannot succeed on an immutable version, so `github-release` never runs at all.
+  Re-running the single job takes the retained artifacts and re-runs `videos` and `site` behind it; `videos.yml`
+  has a `workflow_dispatch` for re-attaching the videos to a release that already exists.
+
 - **The plugin declared two dependencies it never imports and imported three it never declared.** `httpx` and
   `uvicorn` belong to the web client and the HTTP service, neither of which ships in the plugin, while `anyio`,
   `mcp-types` and `pydantic-core` are imported directly by the bundled server and were reaching it only through
