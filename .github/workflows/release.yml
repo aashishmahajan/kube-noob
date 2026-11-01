@@ -332,7 +332,19 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* demos/*.gif chart/*.tgz skill/*.zip --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag
+        # Attach the assets whether or not the release is already there. `gh release create` is an error on an
+        # existing release, and a maintainer creating one by hand -- to write their own notes, or because a tag push
+        # looked like it did nothing -- is ordinary. On v0.7.1 that error failed this job and skipped `videos` and
+        # `site` behind it, so the release carried no wheel, no chart and no videos, and the website was never told
+        # the version had changed. --clobber so re-running the job replaces an asset instead of failing on it.
+        run: |
+          assets=(dist/* demos/*.gif chart/*.tgz skill/*.zip)
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::notice title=release::${GITHUB_REF_NAME} already exists; attaching assets to it"
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag
+          fi
 
   videos:
     # The release's demo videos: 4K masters and 1080p copies with captions, rendered from this tag and attached to the
