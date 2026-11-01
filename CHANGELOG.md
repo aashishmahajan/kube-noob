@@ -12,6 +12,14 @@
   `route.enabled=true` with no host since the Route was added, so the project had been auditing an exposure
   that would 421. The step now sets a host, and a test refuses any workflow that turns the Route on without
   one in the same step. The chart README and `values.yaml` now say the host is required and why.
+- **The README's second runnable command could not be run.** It read `kube-noob policy explain -f denial.txt`
+  and no such file ships, so the first thing a stranger copied answered `error: no such file: denial.txt`. It now
+  points at `examples/denial-multi.txt`, a single paste in which Pod Security, Kyverno, Gatekeeper,
+  ValidatingAdmissionPolicy and OpenShift SCC all rejected the same Deployment, each in its own wording -- the
+  shortest demonstration of the one-pass attribution the README leads with. `-f k8s/` became `-f your-manifests/`,
+  since that one is the reader's to supply, and a test now refuses any README `-f` path that neither ships nor
+  reads as the reader's own. The README also claimed both commands "exit non-zero for CI"; only `reach` does, and
+  that is right for an explainer, so the claim was corrected rather than the code.
 - **`kube-noob doctor` called a model path healthy that could not run.** With a provider configured, no SDK
   installed and no key set it printed `posture: OK`, while its own help promises "exit 1 on conflicts". Both
   reasons are knowable without calling anything, and it now names them and exits 1. `provider: none` stays quiet.

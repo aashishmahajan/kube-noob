@@ -1,0 +1,14 @@
+# One paste from a real cluster: five admission systems rejected the same Deployment, each in its own wording,
+# in the order the API server and the controllers reported them. Attributing this by hand means recognising five
+# message formats and re-running five tools. `kube-noob policy explain -f examples/denial-multi.txt` names every
+# one, the policy and rule inside it, and the smallest fix, in a single pass over this file.
+Error from server (Forbidden): error when creating "web.yaml": pods "web" is forbidden: violates PodSecurity "restricted:v1.31": allowPrivilegeEscalation != false (container "app" must set securityContext.allowPrivilegeEscalation=false)
+Error from server: admission webhook "validate.kyverno.svc-fail" denied the request:
+
+resource Deployment/prod/web was blocked due to the following policies
+
+require-run-as-nonroot:
+  autogen-check-containers: 'validation error: Running as root is not allowed. rule autogen-check-containers failed at path /spec/template/spec/containers/0/securityContext/runAsNonRoot/'
+Error from server: admission webhook "validation.gatekeeper.sh" denied the request: [psp-allow-privilege-escalation-container] Privilege escalation container is not allowed: app
+Error from server (Forbidden): error when creating "web.yaml": deployments.apps "web" is forbidden: ValidatingAdmissionPolicy 'require-non-root' with binding 'require-non-root-binding' denied request: containers must set runAsNonRoot=true
+Error creating: pods "web-6d9f7c9b8d-" is forbidden: unable to validate against any security context constraint: [provider "anyuid": Forbidden: not usable by user or serviceaccount, spec.containers[0].securityContext.runAsUser: Invalid value: 1000: must be in the ranges: [1000680000, 1000689999]]

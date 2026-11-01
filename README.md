@@ -20,14 +20,14 @@ Two questions it answers that other tools do not, offline, from files you alread
 
 ```bash
 kube-noob policy reach --from web/frontend --to shop/payments --port 9090 -f examples/netpol-admin-tiers.yaml
-kube-noob policy explain -f denial.txt
+kube-noob policy explain -f examples/denial-multi.txt
 ```
 
 **Which policy governs this traffic?** `AdminNetworkPolicy` → `NetworkPolicy` → `BaselineAdminNetworkPolicy`, in
 cluster order, naming the tier, policy and rule that decided. A checker reading NetworkPolicy alone gives a
 **wrong** answer wherever a platform team set cluster-wide guardrails, not a narrower one.
 **Which system denied this pod?** One pass across Pod Security, SCC, Kyverno, Gatekeeper, VAP and RHACS, with the
-smallest fix. Both exit non-zero for CI and say what they could not determine.
+smallest fix. `reach` exits 1 when denied; both say what they could not determine.
 
 Also: 77 rules with strict schemas and 9 red-team scenarios; 67 offline playbooks, read-only steps first;
 must-gathers triaged into a case draft that says what could not be read; OpenShift bugs with fix versions; hardened
@@ -50,7 +50,7 @@ brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob
 brew trust --formula aashishmahajan/kube-noob/kube-noob
 brew install kube-noob
 kube-noob demo --list
-kube-noob audit -f k8s/ --platform openshift --version 4.22
+kube-noob audit -f your-manifests/ --platform openshift --version 4.22
 kube-noob insight 'paste anything'
 kube-noob doctor
 ```

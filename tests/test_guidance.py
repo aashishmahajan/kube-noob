@@ -70,6 +70,21 @@ def test_docs_are_concise_and_linked() -> None:
     assert "getting_started" in use_cases
 
 
+def test_every_file_the_readme_tells_a_stranger_to_run_exists() -> None:
+    """The README led with two runnable commands and the second one was `policy explain -f denial.txt`. No such
+    file ships, so the first thing a stranger copied answered `error: no such file: denial.txt`. A command in the
+    README is a promise; every path it passes to -f has to be in the repository.
+    """
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    refs = re.findall(r"kube-noob [^\n`]*?-f (?!-)(\S+)", readme)
+    assert refs, "the README passes no -f paths, so this test proves nothing"
+    missing = [r for r in refs if not (ROOT / r).exists() and "<" not in r and not r.startswith(("your-", "my-"))]
+    assert missing == [], (
+        f"the README runs these paths and they do not ship: {missing}. Either add the file, or name it so the "
+        "reader can see it is theirs to supply (your-manifests/, <manifest.yaml>)."
+    )
+
+
 _AI_CLAIMS = [
     re.compile(r"(?i)\boffline AI\b"),
     re.compile(r"(?i)\bkube-noob (is|as) an? [^.\n|]{0,60}?\b(assistant|chatbot|agent|AI)\b"),
