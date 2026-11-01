@@ -27,7 +27,8 @@ service:
 
 route:            # OpenShift Route (edge TLS)
   enabled: false
-  host: ""
+  host: ""        # required when enabled: it also goes into server.allowedHosts, and a generated
+                  # hostname the chart cannot predict answers 421 on every MCP call
 
 ingress:          # vanilla Kubernetes Ingress
   enabled: false

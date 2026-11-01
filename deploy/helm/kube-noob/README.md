@@ -47,7 +47,7 @@ Clients connect to `http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `A
 | `rbac.namespaces` | `[]` | Namespaces it may read besides its own (`rbac.scope=cluster` for all) |
 | `egressFirewall.enabled` | `false` | OVN-Kubernetes EgressFirewall: API server and allowlisted domains only, then deny (namespace-wide) |
 | `persistence.enabled` | `false` | Keep progress, notes and indexed runbooks on a PVC; with the default ReadWriteOnce access mode it needs `replicaCount: 1` and switches the Deployment to the Recreate strategy |
-| `route.enabled` | `false` | OpenShift Route with edge TLS |
+| `route.enabled` | `false` | OpenShift Route with edge TLS. Needs `route.host`: a Route with no host gets a generated `<name>-<namespace>.<apps-domain>` hostname, which the chart cannot put in `server.allowedHosts`, so every MCP call would answer **421 Invalid Host header** while both probes stayed green. The chart refuses to render without it. `oc get ingresses.config/cluster -o jsonpath={.spec.domain}` gives the domain |
 | `resources` | 256Mi request, 512Mi limit | About 85 MiB peak with built-in knowledge, plus about 25 MiB per MB of indexed text |
 
 All values and their schema: `values.yaml` and `values.schema.json`. Guides for service, sidecar and OpenShift

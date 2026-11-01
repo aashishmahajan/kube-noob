@@ -8,6 +8,10 @@
   while the liveness probe, the readiness probe and `helm test` all stayed green, because they reach the Service,
   not the Route. Ingress never had this: its template marks the host `required`. The chart now refuses to render
   and says how to find the domain. No test covered any of the chart's `fail` guards, which is how this shipped.
+  The guard immediately turned CI red: our own `Audit our own chart (OpenShift ...)` step had been rendering
+  `route.enabled=true` with no host since the Route was added, so the project had been auditing an exposure
+  that would 421. The step now sets a host, and a test refuses any workflow that turns the Route on without
+  one in the same step. The chart README and `values.yaml` now say the host is required and why.
 - **`kube-noob doctor` called a model path healthy that could not run.** With a provider configured, no SDK
   installed and no key set it printed `posture: OK`, while its own help promises "exit 1 on conflicts". Both
   reasons are knowable without calling anything, and it now names them and exits 1. `provider: none` stays quiet.

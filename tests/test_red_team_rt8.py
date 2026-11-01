@@ -110,3 +110,25 @@ def test_doctor_is_satisfied_once_the_key_is_there(
         tmp_path, capsys, KUBE_NOOB_LLM_PROVIDER="anthropic", ANTHROPIC_API_KEY="sk-ant-not-a-real-key-0123456789"
     )
     assert code == 0, f"doctor still reports a conflict with the key set: {report.get('conflicts')}"
+
+
+def test_our_own_workflows_do_not_render_the_configuration_the_chart_refuses() -> None:
+    """The guard above landed and CI went red: `.github/workflows/ci.yml` had been rendering the chart with
+    `route.enabled=true` and no `route.host` since the Route was added, so the project's own OpenShift audit had
+    been auditing a Route that would answer 421 on every MCP call. The guard found it, which is the point, but
+    nothing stops the next workflow from doing the same -- so a workflow that turns the Route on must set its host
+    in the same step.
+    """
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    assert workflows, "no workflows found, so this test proves nothing"
+    for path in workflows:
+        text = path.read_text(encoding="utf-8")
+        # Steps are separated by `- name:`/`- run:`; a `--set` continues across escaped newlines within one step.
+        for step in re.split(r"\n      - (?=name:|run:|uses:)", text):
+            if "route.enabled=true" not in step:
+                continue
+            assert "route.host=" in step, (
+                f"{path.name} renders the chart with route.enabled=true and no route.host in the same step. "
+                "The chart refuses that (templates/exposure.yaml) because the generated hostname cannot reach "
+                "server.allowedHosts, so every MCP call would answer 421 while both probes stayed green."
+            )
