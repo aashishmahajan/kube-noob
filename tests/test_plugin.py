@@ -33,14 +33,16 @@ def test_bundled_server_matches_the_source() -> None:
 
 
 def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
-    """The plugin runs its own vendored source with every dependency fixed by hash.
+    """The plugin runs its own vendored source with every dependency fixed by hash, and keeps doing so.
 
-    A pinned package launcher (`uvx kube-noob==<version> mcp`) is what the plugin directory clears automatically,
-    where this form is held for a human reviewer, so it is the intended default -- but not before 0.7.1. The
-    published 0.7.0 has no `mustGather.enabled`, so installing it would offer `analyze_must_gather`, the one tool
-    that opens a path on the machine, which this plugin has never had. Switching first and releasing after would
-    widen the plugin in the middle of its security review. The env below already carries the switch, so the swap is
-    a two-line change once the release that honours it exists.
+    Running the published package from an index is what the directory's automatic checks clear, where this form is
+    held for a human reviewer, so there is a standing temptation to switch. The reason not to is the thing the
+    plugin is for: a launcher that names a package and a version fixes that package and leaves the rest of the
+    tree to resolve on the user's machine, while this one resolves nothing -- the source is the readable copy in
+    `server/`, every dependency is fixed to a version and a SHA-256 hash in `uv.lock`, and `--frozen` refuses to
+    re-resolve any of it. A faster listing is not worth an install that differs between machines, for a tool people
+    point at production clusters. The README said the switch would happen at 0.7.1; it did not, and this test now
+    holds the README to what the plugin actually does.
     """
     spec = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["kube-noob"]
     assert spec["command"] == "uv"
@@ -51,9 +53,11 @@ def test_mcp_config_runs_the_bundled_source_from_the_lock() -> None:
     assert args[args.index("--project") + 1] == "${CLAUDE_PLUGIN_ROOT}"
     # -I: no current directory, PYTHONPATH or user site on sys.path; -B: no .pyc files written into the plugin root
     assert args[-4:] == ["python", "-I", "-B", "${CLAUDE_PLUGIN_ROOT}/server/kube_noob_plugin.py"]
-    assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "not from an index before 0.7.1"
+    assert not any("kube-noob==" in a or a in {"--from", "--with"} for a in args), "never installed from an index"
     readme = (PLUGIN / "README.md").read_text()
-    assert "uvx kube-noob==<version> mcp" in readme, "the planned default has to stay documented"
+    assert "resolves nothing" in readme, "the README has to say what this launcher does differently"
+    assert "uvx" not in readme, "the README must not print a launcher the plugin does not use"
+    assert "from 0.7.1" not in readme.lower(), "a switch that was reverted must not be documented as coming"
     env = spec["env"]
     # The directory blocks any registry or index redirect in the server env; set nothing for uv, pip or npm. This
     # matters more now that the default launcher resolves from an index: UV_INDEX_URL or PIP_INDEX_URL here would
@@ -304,3 +308,42 @@ def test_the_plugin_bundle_can_neither_connect_nor_start_a_program() -> None:
                 names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
             found += [f"{path.relative_to(PLUGIN)}: {n}" for n in names if n in banned or n.split(".")[0] in banned]
     assert found == []
+
+
+def _plugin_third_party_imports() -> set[str]:
+    """Top-level third-party modules the bundled server actually imports."""
+    import ast
+
+    root = PLUGIN / "server"
+    local = {"kube_noob"}
+    stdlib = set(sys.stdlib_module_names)
+    found: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                found |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                found.add(node.module.split(".")[0])
+    return {m for m in found if m not in stdlib and m not in local}
+
+
+# The import name differs from the distribution name for a few packages.
+_DIST_FOR_MODULE = {"yaml": "pyyaml"}
+
+
+def test_the_plugin_declares_what_it_imports_and_imports_what_it_declares() -> None:
+    """Both directions, because each failure is its own kind of wrong.
+
+    A module imported but not declared is an ImportError on the user's first call -- uv runs the server with
+    ``--frozen --exact --isolated``, so nothing ambient fills the gap. A dependency declared but never imported is
+    a package a reviewer has to account for and a user has to install for nothing: the plugin listed ``httpx`` and
+    ``uvicorn``, which belong to the HTTP service and the web client, neither of which ships here.
+    """
+    declared = {
+        _sync()._dep_name(d).lower().replace("_", "-")
+        for d in tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    }
+    imported = {_DIST_FOR_MODULE.get(m, m).lower().replace("_", "-") for m in _plugin_third_party_imports()}
+    assert imported - declared == set(), f"imported by the bundled server but not declared: {imported - declared}"
+    assert declared - imported == set(), f"declared but never imported by the bundled server: {declared - imported}"
