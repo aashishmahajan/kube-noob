@@ -6,6 +6,7 @@ from kube_noob.audit.model import Report, Severity, Stage
 from kube_noob.audit.redteam import red_team
 from kube_noob.audit.rules import RULES, AuditContext, run_rules
 from kube_noob.catalog import OPENSHIFT_FAMILY, PLATFORMS, k8s_version_for
+from kube_noob.errors import ConfigError
 from kube_noob.schemas.validate import validate_documents
 from kube_noob.yamlio import Document, load_documents
 
@@ -84,3 +85,56 @@ def explain_rule(rule_id: str) -> dict[str, object]:
 
 def list_rules() -> list[dict[str, object]]:
     return [r.as_dict() for r in sorted(RULES.values(), key=lambda x: x.rule_id)]
+
+
+# The scaffold keys `helm create` writes and every chart keeps. Two of them, with no Kubernetes object anywhere in
+# the file, is a confident read: this is a values file, not a manifest.
+_VALUES_KEYS = frozenset(
+    {
+        "replicaCount",
+        "image",
+        "imagePullSecrets",
+        "nameOverride",
+        "fullnameOverride",
+        "serviceAccount",
+        "podAnnotations",
+        "podSecurityContext",
+        "securityContext",
+        "resources",
+        "nodeSelector",
+        "tolerations",
+        "affinity",
+        "autoscaling",
+        "ingress",
+    }
+)
+
+
+def refuse_if_not_manifests(manifests: str | list[Document]) -> None:
+    """Raise when nothing in the input is a Kubernetes object.
+
+    The audit reads Kubernetes objects. Given something else it used to read the whole file as one unnamed object,
+    report that it was missing `apiVersion`, and return a score -- 90 out of 100 for a Helm values file whose
+    images were `:latest` and whose `securityContext` and `resources` were empty. A score says the rules were
+    applied, so a score on a file the rules never saw is a wrong answer, not a thin one. One Kubernetes document is
+    enough to proceed: a values block pasted above a manifest must not refuse the manifest.
+    """
+    docs = manifests if isinstance(manifests, list) else load_documents(manifests)
+    objects = [d.data for d in docs if isinstance(d.data, dict)]
+    if any("apiVersion" in o and "kind" in o for o in objects):
+        return
+    keys: set[str] = set()
+    for o in objects:
+        keys |= {k for k in o if isinstance(k, str)}
+    looks_like_values = len(keys & _VALUES_KEYS) >= 2
+    what = "a Helm values file" if looks_like_values else "not a Kubernetes manifest"
+    how = (
+        "Render the chart first and audit the output: helm template <release> <chart> -f <this file> | "
+        "kube-noob audit -f -"
+        if looks_like_values
+        else "Pass Kubernetes objects: every document needs apiVersion and kind."
+    )
+    raise ConfigError(
+        f"nothing here is a Kubernetes manifest ({'this looks like ' + what if looks_like_values else what}): "
+        f"no document has both apiVersion and kind, so none of the audit rules apply. {how}"
+    )

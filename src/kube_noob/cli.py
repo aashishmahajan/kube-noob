@@ -1813,6 +1813,10 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         if unreadable and not getattr(a, "skip_unreadable", False):
             _refuse_unreadable(unreadable)
             return 5
+        if a.cmd in {"audit", "validate", "redteam"}:
+            from kube_noob.audit.engine import refuse_if_not_manifests
+
+            refuse_if_not_manifests(text)
         if a.cmd == "audit":
             from kube_noob.audit.exceptions import ExceptionsError
 

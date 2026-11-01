@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The audit scored a file it had not audited.** Pasted a Helm `values.yaml`, it read the whole document as one
+  unnamed Kubernetes object, reported that `apiVersion` was missing, and returned **90 out of 100** -- for a file
+  whose images were `:latest` and whose `securityContext` and `resources` were empty. A score says the rules were
+  applied, so a score on a file the rules never saw is a wrong answer, not a thin one. `audit`, `validate` and
+  `redteam` now exit 2 when no document carries both `apiVersion` and `kind`, naming what the file looks like and
+  the command that would make it auditable. One Kubernetes document anywhere in the input is enough to proceed.
+- **kube-noob's knowledge had nothing about kube-noob.** Asked for its own CI story the search returned Kyverno and
+  RHACS documents, so a client wrote `kube-noob audit -f rendered.yaml  # check the CLI's --help for the flag` and
+  never mentioned `gate`, the command built for exactly that job. `kube-noob-cli.md` now covers `gate` and its
+  SARIF, summary and code-quality outputs, the exit codes, the `ExceptionList` schema, what the audit reads, and
+  the command table. Tests hold its exit codes to the CLI and run its exception example through the real loader.
+
 - **The plugin declared two dependencies it never imports and imported three it never declared.** `httpx` and
   `uvicorn` belong to the web client and the HTTP service, neither of which ships in the plugin, while `anyio`,
   `mcp-types` and `pydantic-core` are imported directly by the bundled server and were reaching it only through
