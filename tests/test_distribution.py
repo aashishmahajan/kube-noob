@@ -329,3 +329,25 @@ def test_the_release_job_survives_a_release_the_maintainer_made_first() -> None:
         assert release[job]["needs"] == "github-release" or "github-release" in release[job]["needs"], (
             f"{job} no longer waits for github-release; the ordering is what keeps the Videos page honest"
         )
+
+
+def test_the_package_points_at_the_website() -> None:
+    """A stranger arrives at PyPI, Homebrew or the GitHub page, not at kube-noob.com. Nothing linked it: not
+    `project.urls`, not the README, not the plugin manifest, not the chart. The site is where the demos, the videos
+    and the browsable rules live, and it was reachable only by already knowing the address."""
+    import tomllib
+
+    urls = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["urls"]
+    assert any("kube-noob.com" in u for u in urls.values()), f"no project URL points at the site: {urls}"
+    assert "kube-noob.com" in (ROOT / "README.md").read_text(encoding="utf-8"), "the README never names the site"
+
+
+def test_nothing_promises_an_artefact_that_has_never_published() -> None:
+    """`docs/use-cases.md` told users the public `kube-noob-db` image is "rebuilt daily" and gave them cosign and
+    helm commands for it. The `db-image` workflow has failed on every scheduled run since it was added and has
+    never published anything. Documenting a thing that does not exist is worse than not having it: the reader
+    spends their time before they find out."""
+    use_cases = (ROOT / "docs" / "use-cases.md").read_text(encoding="utf-8")
+    assert "rebuilt daily" not in use_cases, (
+        "use-cases.md still promises a daily rebuild of an image that has never published"
+    )

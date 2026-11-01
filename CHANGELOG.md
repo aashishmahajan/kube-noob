@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Nothing linked kube-noob.com.** Not `project.urls`, not the README, not the plugin manifest, not the chart: a
+  stranger arriving from PyPI or GitHub could not find the site where the demos, the recordings and the browsable
+  rules are. PyPI's Homepage now points there and the README names it.
+- **The README buried the two things no other tool does.** It opened with a five-bullet feature list; the
+  differentiators -- which tier of `AdminNetworkPolicy`/`NetworkPolicy`/`BaselineAdminNetworkPolicy` governs a
+  connection, and which of six admission systems denied a pod -- were a clause in the third bullet. Both now lead,
+  with a runnable command each against an example that ships, and the feature list is one paragraph pointing at
+  `docs/use-cases.md`. Two independent reviews this week failed to discover `kube-noob gate` at all, which is the
+  same problem seen from outside.
+- **A documented feature had never been published.** `docs/use-cases.md` said the public `kube-noob-db` image is
+  "rebuilt daily" and gave cosign and helm commands for pulling it. The `db-image` workflow has failed on every
+  scheduled run since it was added and has published nothing. The page now says so, and gives the two commands
+  that do exist for building one yourself.
+
 - **The audit scored a file it had not audited.** Pasted a Helm `values.yaml`, it read the whole document as one
   unnamed Kubernetes object, reported that `apiVersion` was missing, and returned **90 out of 100** -- for a file
   whose images were `:latest` and whose `securityContext` and `resources` were empty. A score says the rules were

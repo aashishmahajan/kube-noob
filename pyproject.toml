@@ -64,7 +64,7 @@ kube-noob = "kube_noob.cli:main"
 noob = "kube_noob.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/aashishmahajan/kube-noob"
+Homepage = "https://kube-noob.com"
 Source = "https://github.com/aashishmahajan/kube-noob"
 Issues = "https://github.com/aashishmahajan/kube-noob/issues"
 Security = "https://github.com/aashishmahajan/kube-noob/security/policy"
