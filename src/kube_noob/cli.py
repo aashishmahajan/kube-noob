@@ -2450,6 +2450,10 @@ def _print_reach(out: dict[str, Any]) -> None:
         _tprint(f"\n  fix (needs approval): {c['change']}")
         for line in (c.get("manifest") or "").rstrip().splitlines():
             _tprint(f"    {line}")
+        if c.get("caveat"):
+            # A fix that something unevaluated could override has to carry that where the fix is read, not only
+            # in the JSON: the person pasting the manifest is reading this.
+            _tprint(f"    caveat: {c['caveat']}")
     _tprint("\n  check (read-only):")
     for step in out.get("readOnlyNextSteps", []):
         _tprint(f"    {step['command']}")
