@@ -429,13 +429,16 @@ kube-noob doctor
 - nothing later in the config chain can lift it;
 - the chart refuses to render if web access is also requested.
 
-Start answering from day one without any egress: the public `kube-noob-db` image carries the documentation corpus
-(with its licenses), release history and known issues, rebuilt daily and checked to hold no Jira data. Pin it by
-digest; pods import it on start when it is newer than what they have.
+Start answering from day one without any egress: build the corpus image yourself and pin it by digest. Pods import
+it on start when it is newer than what they have.
+
+> **Not published yet.** The `db-image` workflow that would publish a public `kube-noob-db` image has failed on
+> every scheduled run since it was added and has never published one, so there is no image to pull. Pack your own
+> bundle with `kube-noob corpus db-bundle`, check it with `kube-noob corpus db-check`, put it in an image and push
+> that to a registry you control, then pin its digest below. This note goes when the workflow publishes.
 
 ```bash
-cosign verify ghcr.io/aashishmahajan/kube-noob-db@sha256:<digest> --certificate-identity-regexp https://github.com/aashishmahajan/kube-noob/ --certificate-oidc-issuer https://token.actions.githubusercontent.com
-helm upgrade --install kube-noob deploy/helm/kube-noob --set db.enabled=true --set db.image.digest=sha256:<digest> --set config.offline=true
+helm upgrade --install kube-noob deploy/helm/kube-noob --set db.enabled=true --set db.image.repository=<your-registry>/kube-noob-db --set db.image.digest=sha256:<digest> --set config.offline=true
 kube-noob corpus db-check kube-noob-db.tgz
 ```
 

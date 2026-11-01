@@ -14,27 +14,34 @@
 **No AI inside. Works with yours.** kube-noob is a Kubernetes, OpenShift, ROSA HCP, Helm and RHACS/StackRox expert
 in a box: audit rules, read-only-first playbooks, cited docs and graded exercises. Claude, OpenShift Lightspeed or any
 MCP client calls it as tools; the CLI runs it with no AI at all. No network calls unless enabled.
+Browse the rules, the demos and the recordings at **[kube-noob.com](https://kube-noob.com)**.
 
-- **Audit**: 77 rules plus strict schemas (Kubernetes 1.35, Routes, SCCs, EgressFirewall, Gateway API, StackRox),
-  removed-API checks, safe auto-fixes, attack paths, 9 red-team scenarios, RHACS policy comparison, Containerfiles;
-  scanner and SAST findings ranked by reachability (VEX, KEV); STRIDE threat models.
-- **Generate**: hardened manifests and Helm charts, re-audited; admission policies (VAP, Kyverno) and webhook; CI gate.
-- **Debug**: 67 offline playbooks, read-only steps first; must-gathers triaged into a case draft; OpenShift bugs
-  with fix versions; policy denials explained (Kyverno, Gatekeeper, Pod Security, SCC, RBAC); NetworkPolicy
-  reachability; cluster evidence (never Secrets); CI build failures.
-- **Learn**: 5 tracks, 16 lessons, graded exercises; your team's fixes as code.
-- **Cite**: answers cite local knowledge as `[kn:<doc>#<n>]`.
+Two questions it answers that other tools do not, offline, from files you already have:
 
-Design requests run a 7-step protocol: Clarify, Validate, Research, Audit, Calibrate, Generate, Red Team.
+```bash
+kube-noob policy reach --from web/frontend --to shop/payments --port 9090 -f examples/netpol-admin-tiers.yaml
+kube-noob policy explain -f denial.txt
+```
+
+**Which policy governs this traffic?** `AdminNetworkPolicy` → `NetworkPolicy` → `BaselineAdminNetworkPolicy`, in
+cluster order, naming the tier, policy and rule that decided. A checker reading NetworkPolicy alone gives a
+**wrong** answer wherever a platform team set cluster-wide guardrails, not a narrower one.
+**Which system denied this pod?** One pass across Pod Security, SCC, Kyverno, Gatekeeper, VAP and RHACS, with the
+smallest fix. Both exit non-zero for CI and say what they could not determine.
+
+Also: 77 rules with strict schemas and 9 red-team scenarios; 67 offline playbooks, read-only steps first;
+must-gathers triaged into a case draft that says what could not be read; OpenShift bugs with fix versions; hardened
+manifests and admission policies; 5 tracks, 16 lessons. `kube-noob gate` puts any of it in CI with SARIF and one
+exception list, and a design request runs the 7-step protocol (Clarify, Validate, Research, Audit, Calibrate,
+Generate, Red Team). Answers cite local knowledge as `[kn:<doc>#<n>]`. All of it: [use-cases.md](docs/use-cases.md).
 
 ## Who does the thinking
 
 | You use | Who answers | What leaves your machine |
 |---|---|---|
-| The Claude plugin (Claude Code, Cowork) | Claude, calling kube-noob's tools | What you share with Claude, as in any chat; kube-noob sends nothing |
-| OpenShift Lightspeed or another MCP client | That client's model | What that client sends; kube-noob sends nothing |
+| The Claude plugin, or any MCP client | That client's model, calling kube-noob's tools | What you send that client; kube-noob sends nothing |
 | The CLI | kube-noob's rules, no model | Nothing |
-| `kube-noob ask` (optional) | A model you configure: Anthropic or a local one | Your question, to that model only |
+| `kube-noob ask` (optional) | A model you configure | Your question, to that model only |
 
 ## Quick start
 
@@ -46,7 +53,6 @@ kube-noob demo --list
 kube-noob audit -f k8s/ --platform openshift --version 4.22
 kube-noob insight 'paste anything'
 kube-noob doctor
-kube-noob selftest
 ```
 
 No Homebrew: `uv tool install kube-noob` (Python 3.11+); [install help](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
@@ -60,10 +66,7 @@ Claude plugin, in Claude Code (needs [uv](https://docs.astral.sh/uv/)):
 /plugin install kube-noob@kube-noob
 ```
 
-Desktop app: **Customize > Plugins > Add > Add marketplace**, `aashishmahajan/kube-noob`. claude.ai chat: upload the
-[Agent Skill](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md#agent-skill) under **Customize > Skills**.
-
-Any MCP client:
+Desktop app, claude.ai chat and the Agent Skill: [install.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md). Any MCP client:
 
 ```json
 {"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.7.1", "kube-noob", "mcp"]}}}
@@ -77,29 +80,21 @@ NetworkPolicies and runs under `restricted-v2`.
 
 ## Safe by default
 
-| Setting | Default | Change with |
-|---|---|---|
-| Web lookups (allowlisted HTTPS docs, text only) | off | `webEnabled: true` / `KUBE_NOOB_WEB_ENABLED=true` |
-| Admin offline lock (overrides web) | off | `offline: true` / `KUBE_NOOB_OFFLINE=1` / chart `config.offline` |
-| Live cluster (read-only, no Secrets) | off | `cluster.enabled: true` / `--cluster-enabled` |
-| Local learning file (confirmed notes) | on | `learningEnabled: false` |
-| Model for `kube-noob ask` only | none | `llm.provider: anthropic` (`kube-noob[ask]`) or `openai-compatible` |
-
-`kube-noob doctor` shows what it can reach. Config never comes from the current directory. All keys: [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml).
+Off until you turn it on: web lookups, live cluster access (read-only, never Secrets), and any model at all. An
+admin `offline: true` lock overrides every one of them and nothing later in the config chain can lift it. Config
+never comes from the current directory. `kube-noob doctor` shows what the process can reach and exits 1 if the
+configuration contradicts the lock; every key is in [kube-noob.example.yaml](https://github.com/aashishmahajan/kube-noob/blob/main/kube-noob.example.yaml), and the
+generated [safety contract](https://github.com/aashishmahajan/kube-noob/blob/main/docs/safety-contract.md) lists what each capability tier can do.
 
 ## Docs
 
-- [Use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md) and [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md)
-- [Enterprise roadmap](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md)
-- [Architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md)
-- [Training](https://github.com/aashishmahajan/kube-noob/blob/main/docs/training.md) and [measured accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md)
-- [Operations](https://github.com/aashishmahajan/kube-noob/blob/main/docs/operations.md)
-- [Guidance traceability](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md) and [release readiness](https://github.com/aashishmahajan/kube-noob/blob/main/docs/release-readiness.md)
-- [Privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security policy](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md) and [contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md)
+Everything is at **[kube-noob.com](https://kube-noob.com)**, and in [docs/](https://github.com/aashishmahajan/kube-noob/blob/main/docs/): [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md),
+[architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md), [measured accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md),
+[guidance](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md), [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md), [privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md),
+[contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md).
 
 ## Credits
 
-Notices: [THIRD_PARTY_NOTICES.md](https://github.com/aashishmahajan/kube-noob/blob/main/THIRD_PARTY_NOTICES.md).
-Kubernetes, Helm, OpenShift, ROSA, RHACS, StackRox, OpenShift Lightspeed, Claude, Anthropic, GitHub and AWS are
-trademarks of their respective owners; kube-noob is independent and not endorsed by them.
-License: [Apache-2.0](https://github.com/aashishmahajan/kube-noob/blob/main/LICENSE).
+Notices: [THIRD_PARTY_NOTICES.md](https://github.com/aashishmahajan/kube-noob/blob/main/THIRD_PARTY_NOTICES.md). Kubernetes, Helm, OpenShift, ROSA, RHACS, StackRox,
+OpenShift Lightspeed, Claude, Anthropic, GitHub and AWS are trademarks of their respective owners; kube-noob is
+independent and not endorsed by them. License: [Apache-2.0](https://github.com/aashishmahajan/kube-noob/blob/main/LICENSE).
