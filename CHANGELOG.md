@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A real email address and a private backlog were published in the public repository.**
+  `docs/openshift-release.md` told the reader to run `git config --global user.email` and filled the command in with
+  the maintainer's own address: an Apache-2.0 repository is a scraping target, and an address in a document cannot be
+  withdrawn once a fork or an archive has it. The command now names placeholders the reader fills in, and says why.
+  `.claude/loop/` -- the build queue the `build-loop` skill reads, an unreleased backlog with the product's own moat
+  notes in it -- had three files tracked, so anyone reading the repository read the roadmap; it stays on disk and is
+  now ignored. Two tests enforce both: no tracked file may carry an address outside the RFC 2606 reserved names, and
+  nothing under `.claude/loop/` may be tracked. Git's own commit metadata is left alone, because rewriting published
+  history is worse than the exposure.
+
 - **A `ClusterNetworkPolicy` in the input was dropped in silence, and the fix that followed was wrong.**
   `AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` (`policy.networking.k8s.io/v1alpha1`) are listed by
   kubernetes-sigs/network-policy-api as "no longer actively developed"; the API under active development is

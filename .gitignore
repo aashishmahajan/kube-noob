@@ -26,3 +26,6 @@ demos/video/node_modules/
 # no entry here for a graphify-out symlink under src/kube_noob/: anything under src/ must never be gitignored, so
 # that symlink is a disposable local convenience only, never created by this repo's own tooling.
 /graphify-out
+
+# Private build queue: read by the build-loop skill, never published.
+.claude/loop/
