@@ -85,6 +85,18 @@ Only `python scripts/bump_version.py <version> "<reason>"` changes a version; it
 entry, the plugin, the chart and the image metadata together, and `tests/test_distribution.py` enforces that they
 agree. Tagging, releasing and publishing are the maintainer's, never an agent's.
 
+## One pull request at a time
+
+Every change here edits two append-only files: a `G<n>` row at the end of `docs/guidance.md`, numbered from the
+highest one already there, and a bullet under `## Unreleased` in `CHANGELOG.md`. Two branches cut from the same
+`main` therefore pick the **same** next number and insert at the **same** line, so any two parallel pull requests
+conflict on both files. That is not bad luck; it is arithmetic, and it has cost this repository several rounds of
+conflict resolution that produced no code.
+
+So: open one pull request, land it, then start the next. If a second branch is already open, merge `origin/main`
+into it (never rebase, never force-push) and take the higher `G<n>` for the later change before asking anyone to
+merge it.
+
 ## Commits
 
 Sign off every commit (`git commit -s`) to certify the Developer Certificate of Origin. Never force-push, rebase or
