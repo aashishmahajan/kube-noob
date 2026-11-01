@@ -40,9 +40,16 @@ WORKLOAD_KINDS = (
 _KIND_RANK = {k.lower(): i for i, k in enumerate(WORKLOAD_KINDS)}
 ANP_KIND = "AdminNetworkPolicy"
 BANP_KIND = "BaselineAdminNetworkPolicy"
+# Cluster-scoped kinds that sit ABOVE NetworkPolicy and that this evaluator does not read yet. A NetworkPolicy
+# cannot override one, so when any of these is in the input, a namespace-scoped fix may be applied and change
+# nothing -- the caveat below says so. `ClusterNetworkPolicy` (policy.networking.k8s.io/v1alpha2) is the API under
+# active development at kubernetes-sigs/network-policy-api; the v1alpha1 pair this evaluator does read are listed
+# upstream as "no longer actively developed".
+CLUSTER_SCOPED_ABOVE_NETWORKPOLICY = ("ClusterNetworkPolicy",)
 OTHER_POLICY_KINDS = {
     ANP_KIND,
     BANP_KIND,
+    *CLUSTER_SCOPED_ABOVE_NETWORKPOLICY,
     "EgressFirewall",
     "EgressNetworkPolicy",
     "CiliumNetworkPolicy",
@@ -605,6 +612,20 @@ def check_reachability(
                 "requiresApproval": True,
             }
         )
+    unevaluated_above = [
+        ref for ref in inv.other_policies if ref.split("/", 1)[0] in CLUSTER_SCOPED_ABOVE_NETWORKPOLICY
+    ]
+    if unevaluated_above:
+        # The admin tier runs before NetworkPolicy and has the last word. kube-noob cannot evaluate these yet, so
+        # it must not let a NetworkPolicy fix go out as though nothing could override it.
+        caveat = (
+            "kube-noob did not evaluate " + ", ".join(unevaluated_above[:10]) + ", which is cluster-scoped and "
+            "decided before any NetworkPolicy. If one of them denies this traffic, the NetworkPolicy above is "
+            "applied and changes nothing. Check it first: kubectl get clusternetworkpolicy -o yaml."
+        )
+        for change in changes:
+            if change.get("manifest"):
+                change["caveat"] = caveat
     if changes:
         out["proposedChanges"] = changes
     # Names and labels come from manifests or the cluster: only Kubernetes syntax goes into a command line.

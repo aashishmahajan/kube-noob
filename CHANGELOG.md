@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **A `ClusterNetworkPolicy` in the input was dropped in silence, and the fix that followed was wrong.**
+  `AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` (`policy.networking.k8s.io/v1alpha1`) are listed by
+  kubernetes-sigs/network-policy-api as "no longer actively developed"; the API under active development is
+  `ClusterNetworkPolicy` v1alpha2, one cluster-scoped CRD carrying both tiers in `spec.tier`, enforced today by
+  Calico 3.32, Cilium 1.20, Kube-OVN and kube-network-policies. kube-noob did not know the kind, so an Admin-tier
+  Deny written in the current API never appeared in the answer: `policy reach` attributed the denial to the
+  NetworkPolicy tier and proposed a NetworkPolicy that the admin tier overrides -- applied, changing nothing, which
+  is the one outcome `netpol.py` already refuses to produce for the v1alpha1 tier. Until the evaluator reads
+  v1alpha2, the kind is named under "not evaluated" and every namespace-scoped fix carries a caveat saying a
+  cluster-scoped policy decided first and how to check it. The caveat prints in the text output, not only the JSON.
+
 - **The chart's natural OpenShift exposure was silently broken.** `route.enabled: true` with the default empty
   `route.host` lets OpenShift generate `<name>-<namespace>.<apps-domain>` -- a hostname the chart cannot predict
   and therefore never adds to `server.allowedHosts` -- so every MCP call came back **421 Invalid Host header**
