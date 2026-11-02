@@ -2355,6 +2355,10 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         report["conflicts"] = (
             list(report["conflicts"]) + _model_conflicts(s.llm, "llm") + _model_conflicts(s.judge, "judge")
         )
+        # posture() set this before the model conflicts existed. Leaving it alone printed `posture: OK` on the
+        # first line with `CONFLICT:` on the last, and `"status": "ok"` beside a non-empty list in the JSON --
+        # the exact defect this check was added to remove, one line further down the page.
+        report["status"] = "conflict" if report["conflicts"] else "ok"
         if a.format == "text":
             print(render_text(report))
             print(f"Knowledge: {line(s.data_dir)}")
@@ -2380,14 +2384,19 @@ def _model_conflicts(llm: Any, what: str) -> list[str]:
             f"{what}.provider is 'anthropic' but the Anthropic SDK is not installed, so `kube-noob ask` cannot run. "
             "Add it with: uv tool install 'kube-noob[ask]' (a Homebrew install has no way to add the extra)."
         )
-    from kube_noob.agent.providers import key_env
+    from kube_noob.agent.providers import _PROVIDER_KEY_ENV, key_env
 
     name = key_env(llm)
     if name is None:
-        out.append(
-            f"{what}.provider is {llm.provider!r} and no {what}.apiKeyEnv is set, so the request would carry no "
-            "credential. Set it to the variable holding this endpoint's key."
-        )
+        # No key variable at all is only a conflict for a provider that has a default one. `openai-compatible`
+        # points at whatever endpoint the user named -- a local vLLM, an in-cluster model -- and providers.py is
+        # explicit that with no apiKeyEnv "the request carries no Authorization header at all". That is the
+        # documented no-key path, and the only provider the offline lock allows; refusing it broke a working setup.
+        if llm.provider in _PROVIDER_KEY_ENV:
+            out.append(
+                f"{what}.provider is {llm.provider!r} and no {what}.apiKeyEnv is set, so the request would carry "
+                "no credential. Set it to the variable holding this endpoint's key."
+            )
     elif not os.environ.get(name):
         out.append(f"{what}.provider is {llm.provider!r} but {name} is not set, so `kube-noob ask` cannot run.")
     return out

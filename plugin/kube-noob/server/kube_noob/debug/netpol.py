@@ -621,7 +621,7 @@ def check_reachability(
         caveat = (
             "kube-noob did not evaluate " + ", ".join(unevaluated_above[:10]) + ", which is cluster-scoped and "
             "decided before any NetworkPolicy. If one of them denies this traffic, the NetworkPolicy above is "
-            "applied and changes nothing. Check it first: kubectl get clusternetworkpolicy -o yaml."
+            f"applied and changes nothing. Check it first: {cli} get clusternetworkpolicy -o yaml."
         )
         for change in changes:
             if change.get("manifest"):
@@ -715,7 +715,14 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
             )
     # The admin tiers are cluster-scoped: read once, not per namespace. A cluster without the network-policy-api
     # CRDs answers 404, which means the tier is not installed - not that the read failed.
-    for tier_plural, tier_kind in (("adminnetworkpolicies", ANP_KIND), ("baselineadminnetworkpolicies", BANP_KIND)):
+    # ClusterNetworkPolicy is read too, even though this evaluator does not yet understand v1alpha2: collecting it
+    # is what puts it in `other_policies`, which is what names it under "not evaluated" and caveats the proposed
+    # fix. Without the read, the live answer was confidently wrong in exactly the way the file answer no longer is.
+    for tier_plural, tier_kind in (
+        ("clusternetworkpolicies", "ClusterNetworkPolicy"),
+        ("adminnetworkpolicies", ANP_KIND),
+        ("baselineadminnetworkpolicies", BANP_KIND),
+    ):
         try:
             items = backend.get(tier_plural, namespace=None).get("items", [])
         except ClusterAccessError:

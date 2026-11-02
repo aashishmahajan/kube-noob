@@ -8,8 +8,8 @@ name: corpus-refresh
 # copy fetches the open tickets of each project first. Every Sunday (and on dispatch with scope full): also public Git
 # docs (with licenses) and release history, uploaded as a plain artifact.
 #
-# Jira content is not redistributable, so it is uploaded only encrypted (CORPUS_PASSPHRASE secret); without the secret
-# nothing is kept between runs and each run starts a new copy. Import with kube-noob corpus import <tgz>, or put the
+# Jira content is not redistributable, so it is uploaded only encrypted (CORPUS_PASSPHRASE secret). Without the secret
+# the run fails in its first step rather than fetching for an hour and then keeping nothing. Import with kube-noob corpus import <tgz>, or put the
 # snapshot in a private seed image (jira.seed in the Helm chart) so new pods start from it.
 
 on:
@@ -82,6 +82,17 @@ jobs:
           python-version: "3.12"
       - run: pip install -e .
         if: steps.due.outputs.run == 'true'
+      - name: The secret that keeps the copy must exist before anything is fetched
+        if: steps.due.outputs.run == 'true'
+        env:
+          CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
+        run: |
+          if [ -z "${CORPUS_PASSPHRASE}" ]; then
+            echo "::error title=corpus::CORPUS_PASSPHRASE is not set, so nothing this run fetches can be kept: the encrypt and upload step at the end would be skipped and the next run would start from scratch again. This check runs before the paced Jira fetch so that hour is not spent first. Set the secret."
+            exit 1
+          fi
+          echo "the passphrase is present; the copy made by this run can be kept"
+
       - name: Restore the previous main copy (encrypted artifact of the last successful run)
         if: steps.due.outputs.run == 'true' && !inputs.fresh
         env:
@@ -303,7 +314,7 @@ jobs:
           CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
         run: |
           if [ -z "${CORPUS_PASSPHRASE}" ]; then
-            echo "::error title=corpus::CORPUS_PASSPHRASE is not set, so the main copy was never encrypted or uploaded. A green run here would mean the copy was kept and it was not: the next run re-fetches everything from scratch, and the one after that does too. Set the secret, or run with fresh=true and accept that nothing persists."
+            echo "::error title=corpus::CORPUS_PASSPHRASE is not set, so the main copy was never encrypted or uploaded. A green run here would mean the copy was kept and it was not: the next run re-fetches everything from scratch, and the one after that does too. Set the secret. (fresh=true does not help: it only skips the restore, not this.)"
             exit 1; fi
           umask 077
           kube-noob corpus jira-snapshot -o jira-snapshot.tgz

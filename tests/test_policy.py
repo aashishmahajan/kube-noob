@@ -574,6 +574,7 @@ class FakeCluster:
             "statefulsets": "StatefulSet",
             "daemonsets": "DaemonSet",
             "pods": "Pod",
+            "clusternetworkpolicies": "ClusterNetworkPolicy",
             "adminnetworkpolicies": "AdminNetworkPolicy",
             "baselineadminnetworkpolicies": "BaselineAdminNetworkPolicy",
         }[resource]
@@ -601,14 +602,14 @@ def test_live_reachability_reads_only_what_it_needs() -> None:
     assert check_reachability(inv, "web/frontend", "shop/payments", 9090)["ingress"]["policies"][0]["policy"] == (
         "shop/default-deny"
     )
-    # The two admin tiers are cluster-scoped, so they are read once each and never per namespace.
-    assert {c[0] for c in cluster.calls} <= {
-        "deployments",
-        "networkpolicies",
-        "namespaces",
-        "adminnetworkpolicies",
-        "baselineadminnetworkpolicies",
-    }
+    # The cluster-scoped tiers are read once each and never per namespace. ClusterNetworkPolicy is among them: the
+    # evaluator does not understand v1alpha2 yet, but reading the kind is what lets the answer say it was present
+    # and not evaluated, instead of answering as though no cluster-scoped policy existed.
+    cluster_scoped = {"clusternetworkpolicies", "adminnetworkpolicies", "baselineadminnetworkpolicies"}
+    assert {c[0] for c in cluster.calls} <= {"deployments", "networkpolicies", "namespaces"} | cluster_scoped
+    for plural in cluster_scoped:
+        assert [c[0] for c in cluster.calls].count(plural) == 1, f"{plural} must be read once, not per namespace"
+        assert all(c[2] is None for c in cluster.calls if c[0] == plural), f"{plural} must be read cluster-scoped"
     for tier in ("adminnetworkpolicies", "baselineadminnetworkpolicies"):
         reads = [c for c in cluster.calls if c[0] == tier]
         assert len(reads) == 1 and reads[0][2] is None, reads

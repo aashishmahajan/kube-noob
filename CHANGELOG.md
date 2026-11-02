@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **A red team of this release's own changes found eight defects in them, including one that undid the change's
+  own purpose.** `doctor` still printed `posture: OK` on its first line with `CONFLICT:` on its last, because
+  `posture()` computes `status` before the model conflicts are appended -- the exact signal the change set out to
+  correct, and the test could not see it because it asserted only the conflict list and the exit code. The same
+  check then refused a supported configuration: `openai-compatible` with no `apiKeyEnv` is the documented no-key
+  path (`agent/providers.py`: "the request carries no Authorization header at all"), and the only provider the
+  offline lock allows; it is a conflict only for a provider that has a default key variable.
+- **The drift alarm was switched off rather than fixed.** Treating any non-release ref as a notice meant that
+  while kube-noob.com served `main` -- which it does, and which is the only way to publish a correction before the
+  next tag -- a release whose deploy never ran would never be reported. The branch case now compares the version
+  the build recorded and falls through to the age check when the site is behind.
+- **`policy reach` was honest about a `ClusterNetworkPolicy` only for pasted files.** `inventory_from_cluster` read
+  the two v1alpha1 tiers and not `clusternetworkpolicies`, so against a live cluster -- the answer an operator
+  trusts more, because it came from their cluster -- the kind was still dropped in silence with no caveat. It is
+  now read cluster-scoped once, a 404 is a note as for the other tiers, and the caveat names `oc` on OpenShift
+  instead of always saying `kubectl`.
+- **`corpus-refresh` failed on a missing passphrase only after an hour of paced fetching**, and told the reader to
+  "run with fresh=true", which does not gate that step. The check now runs first, and says so.
+- **Three tests were weaker than they read.** The missing-secret scanner matched one exact shape, so 13 of 14
+  ways of writing the same guard slipped past -- including `"$X_TOKEN"` without braces, a form already in
+  `jira-db-image.yml`; it now reads the guard's own line, stops at the matching `fi`, and treats any non-zero exit
+  as honest. The address scan covered 452 of 968 tracked files, missing `pyproject.toml` (which ships to PyPI) and
+  the plugin manifest (which ships to the directory); it now reads every tracked text file, and its allowlist no
+  longer admits `example.io`, `example-corp.com` or a `noreply@` local part at any domain. The plugin README said
+  "Every one of the 32 is pinned to an exact version and SHA-256 hash" when one of the 32 is the plugin's own
+  virtual project with no artifact to hash.
+
 - **The plugin README denied dependencies its own lock file ships, on the live site and in a review queue.** It read
   "There is no HTTP client and no web server among them -- so the installed tree cannot reach the network even if
   something asked it to", and listed eight dependencies "and no others". `plugin/kube-noob/uv.lock` names 32
@@ -13,7 +40,7 @@
   packages, start a server or open a connection. Three tests read the README against `uv.lock` in both directions,
   so prose and lock file cannot drift apart again.
 
-- **Four more jobs reported success while skipping the work they exist to do.** The `site` job of a release, the
+- **Three more jobs reported success while skipping the work they exist to do.** The `site` job of a release, the
   `notify` job of `site-sync` and the corpus encrypt step each warned about a missing secret and `exit 0`, so a
   release could finish green having never told the website about itself -- which is how kube-noob.com served the
   previous release's videos under a new release's banner for a day with no red check anywhere. They now fail and

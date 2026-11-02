@@ -46,10 +46,34 @@ def test_the_readme_states_the_real_number_of_locked_packages() -> None:
     text = README.read_text(encoding="utf-8")
     counts = {int(m) for m in re.findall(r"`uv\.lock`[^.]{0,40}?names (\d+) packages", text)}
     assert counts, "the README does not state how many packages uv.lock names"
-    # The lock lists the plugin itself as a package; the README counts the dependencies it installs.
+    # The lock lists the plugin itself as a package; the README counts the entries, so it may say either, but it
+    # must not then claim all of them are hashed -- the virtual root has no artifact. See the pinning test below.
     assert counts == {len(names)} or counts == {len(names) + 1}, (
         f"the README says {counts} packages and uv.lock names {len(names)} dependencies"
     )
+
+
+def test_the_readme_does_not_claim_every_entry_is_hashed() -> None:
+    """The README said "Every one of the 32 is pinned to an exact version and SHA-256 hash". One of the 32 is the
+    plugin's own virtual project: `source = {virtual = "."}`, no sdist, no wheels, nothing to hash. The sentence
+    was written in the commit that was fixing a different false claim about this same lock file, and the count
+    test above could not see it because it only checked the number.
+    """
+    import tomllib
+
+    data = tomllib.loads(LOCK.read_text(encoding="utf-8"))
+    entries = data.get("package", [])
+    unhashed = [str(p["name"]) for p in entries if not p.get("sdist") and not (p.get("wheels") or [])]
+    text = " ".join(README.read_text(encoding="utf-8").split())
+    if not unhashed:
+        return  # nothing to get wrong
+    claim = re.search(r"[Ee]very one of the (\d+) is pinned[^.]*hash", text)
+    assert claim is None, (
+        f"the README claims every one of {claim.group(1)} entries is hashed, but {len(unhashed)} have no "
+        f"artifact to hash: {unhashed}"
+    )
+    hashed = len(entries) - len(unhashed)
+    assert str(hashed) in text, f"{hashed} of the {len(entries)} entries carry a hash, and the README does not say so"
 
 
 def test_the_readme_does_not_deny_a_dependency_the_lock_file_contains() -> None:

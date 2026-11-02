@@ -17,8 +17,9 @@ name: site-sync
 #           with GITHUB_TOKEN, which is how release.yml creates it.
 #
 # SITE_DISPATCH_TOKEN is a fine-grained personal access token scoped to aashishmahajan/kube-noob-site with
-# Contents: write (sending a repository_dispatch is a write), and nothing else. Without it both jobs still work: the
-# request is skipped with a warning, and the site publishes the release on its own six-hourly schedule.
+# Contents: write (sending a repository_dispatch is a write), and nothing else. Without it the notify job fails and
+# says so: a run reporting success would mean the site had been asked to publish when it had not. The site still
+# publishes on its own six-hourly schedule, but nobody should have to know that to read a check.
 #
 # Neither job can touch this repository: the workflow asks for no write permission and checks nothing out.
 
@@ -100,8 +101,20 @@ jobs:
                 exit 0
               fi ;;
             *)
-              echo "::notice title=site-sync::kube-noob.com serves non-release ref ${ref}; latest release is ${tag}"
-              exit 0 ;;
+              # A branch build is a deliberate choice -- it is how a correction reaches the site before the next
+              # tag -- but it must not switch the alarm off. The ref cannot be compared to a tag, so compare the
+              # version the build recorded. Exiting 0 here unconditionally meant that while the site sat on a
+              # branch, a release whose deploy never ran would never be reported: the one thing this job is for.
+              product=$(printf '%s' "${live}" | jq -r '.product // ""')
+              if [ -n "${product}" ]; then
+                newest=$(printf '%s\n%s\n' "${tag#v}" "${product}" | sort -V | tail -1)
+                if [ "${newest}" = "${product}" ]; then
+                  echo "::notice title=site-sync::kube-noob.com serves ${ref}, built from ${product}, at or past release ${tag}"
+                  exit 0
+                fi
+              fi
+              echo "::notice title=site-sync::kube-noob.com serves non-release ref ${ref} built from ${product:-an unknown version}; latest release is ${tag}. Checking how long ago ${tag} was published."
+              ;;
           esac
           age=$(( ( $(date -u +%s) - $(date -u -d "${published}" +%s) ) / 60 ))
           if [ "${age}" -lt "${GRACE_MINUTES}" ]; then
