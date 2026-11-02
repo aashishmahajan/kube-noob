@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Four more jobs reported success while skipping the work they exist to do.** The `site` job of a release, the
+  `notify` job of `site-sync` and the corpus encrypt step each warned about a missing secret and `exit 0`, so a
+  release could finish green having never told the website about itself -- which is how kube-noob.com served the
+  previous release's videos under a new release's banner for a day with no red check anywhere. They now fail and
+  say which secret to add. The one guard that genuinely continues another way keeps `exit 0` and must say so, in a
+  `# honest-skip:` note the test reads. And `site-sync`'s drift check compared versions with string equality, so a
+  site serving a ref *newer* than the latest release was reported as a failed deploy (it went red on 2026-11-01
+  for exactly that reason, while nothing was wrong), and a site deliberately built from a branch -- the only way to
+  publish a correction before the next tag -- was reported as broken. It now compares with `sort -V` and treats a
+  non-release ref as a notice.
 - **A real email address and a private backlog were published in the public repository.**
   `docs/openshift-release.md` told the reader to run `git config --global user.email` and filled the command in with
   the maintainer's own address: an Apache-2.0 repository is a scraping target, and an address in a document cannot be

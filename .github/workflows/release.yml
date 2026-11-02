@@ -379,8 +379,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           if [ -z "${DISPATCH_TOKEN}" ]; then
-            echo "::warning title=site::no SITE_DISPATCH_TOKEN secret: kube-noob.com was not told about ${TAG} and will publish it on its own schedule, within about six hours. .github/workflows/site-sync.yml says how to add the secret."
-            exit 0
+            echo "::error title=site::no SITE_DISPATCH_TOKEN secret, so kube-noob.com was never told about ${TAG}. This job reporting success would mean the site was asked and it was not; the site would sit on the previous release until someone noticed. Add a fine-grained PAT scoped to aashishmahajan/kube-noob-site with Contents: write (.github/workflows/site-sync.yml says how), or dispatch deploy.yml there by hand with product_ref=${TAG}."
+            exit 1
           fi
           code=$(curl -sS -o /tmp/dispatch.out -w '%{http_code}' -X POST \
             -H "Accept: application/vnd.github+json" \

@@ -89,7 +89,8 @@ jobs:
           CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
         run: |
           if [ -z "${CORPUS_PASSPHRASE}" ]; then
-            echo "::warning title=Jira main copy::CORPUS_PASSPHRASE is not set: nothing is kept between runs, so each run starts a new copy"
+            # honest-skip: the step below starts a full fetch, so the run still does the work, more slowly.
+            echo "::warning title=Jira main copy::CORPUS_PASSPHRASE is not set: nothing is kept between runs, so this run starts a new copy from scratch"
             exit 0
           fi
           ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow corpus-refresh.yml --status success --limit 20 \
@@ -302,7 +303,8 @@ jobs:
           CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
         run: |
           if [ -z "${CORPUS_PASSPHRASE}" ]; then
-            echo "CORPUS_PASSPHRASE not set - skipping the encrypted main copy and full corpus"; exit 0; fi
+            echo "::error title=corpus::CORPUS_PASSPHRASE is not set, so the main copy was never encrypted or uploaded. A green run here would mean the copy was kept and it was not: the next run re-fetches everything from scratch, and the one after that does too. Set the secret, or run with fresh=true and accept that nothing persists."
+            exit 1; fi
           umask 077
           kube-noob corpus jira-snapshot -o jira-snapshot.tgz
           openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -in jira-snapshot.tgz -out jira-snapshot.tgz.enc \
