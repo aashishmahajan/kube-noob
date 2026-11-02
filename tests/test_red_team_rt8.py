@@ -132,3 +132,83 @@ def test_our_own_workflows_do_not_render_the_configuration_the_chart_refuses() -
                 "The chart refuses that (templates/exposure.yaml) because the generated hostname cannot reach "
                 "server.allowedHosts, so every MCP call would answer 421 while both probes stayed green."
             )
+
+
+def test_the_posture_header_says_conflict_when_there_is_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The commit above set out to stop `doctor` reporting OK for something that does not work, and only half did
+    it: `posture()` computes `status` before the model conflicts are appended, so the JSON still carried
+    `"status": "ok"` beside a non-empty `conflicts`, and the text output printed `posture: OK` on its first line
+    with `CONFLICT:` on its last. The exit code and the list were right; the signal a person reads was not, which
+    is the whole defect this was meant to fix.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    code, report = _doctor(tmp_path, capsys, KUBE_NOOB_LLM_PROVIDER="anthropic")
+    assert code == 1
+    assert report["conflicts"], "precondition: this configuration must produce a conflict"
+    assert report["status"] == "conflict", (
+        f"doctor reported status {report['status']!r} with {len(report['conflicts'])} conflict(s); "
+        "the header is the part a person reads"
+    )
+
+
+def test_the_posture_header_is_rendered_from_the_same_status(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the text rendering must agree with the JSON, since they are the same report."""
+    from kube_noob.cli import main
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("KUBE_NOOB_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("KUBE_NOOB_DATA_DIR", str(tmp_path / "data"))
+    code = main(["doctor"])
+    text = capsys.readouterr().out
+    assert code == 1
+    assert "posture: OK" not in text, f"the first line still claims OK while a conflict is printed below:\n{text}"
+    assert "posture: CONFLICT" in text
+
+
+def test_a_provider_with_no_default_key_variable_is_not_a_conflict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`openai-compatible` with no `apiKeyEnv` is the documented no-key path, not a misconfiguration:
+    `agent/providers.py` says the request then "carries no Authorization header at all", because the endpoint is
+    whatever the user named -- a local vLLM, an in-cluster model -- and no default credential is that endpoint's
+    to receive. It is also the only provider the offline lock allows. Calling it a conflict made `doctor` exit 1
+    on a working setup.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    code, report = _doctor(
+        tmp_path,
+        capsys,
+        KUBE_NOOB_LLM_PROVIDER="openai-compatible",
+        KUBE_NOOB_LLM_BASE_URL="http://localhost:11434/v1",
+    )
+    assert code == 0, f"doctor refused a supported no-key endpoint: {report.get('conflicts')}"
+    assert report["status"] == "ok"
+
+
+def test_a_provider_whose_key_variable_is_named_but_unset_is_still_a_conflict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The negative control: asking for a key and not providing it is a real conflict, whatever the provider.
+    `apiKeyEnv` has no environment mapping and must name a `*_API_KEY` variable, so this goes through a config file.
+    """
+    import json
+
+    from kube_noob.cli import main
+
+    monkeypatch.delenv("MY_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("KUBE_NOOB_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("KUBE_NOOB_DATA_DIR", str(tmp_path / "data"))
+    cfg = tmp_path / "kube-noob.yaml"
+    cfg.write_text(
+        "llm:\n  provider: openai-compatible\n  baseUrl: http://localhost:11434/v1\n  apiKeyEnv: MY_GATEWAY_API_KEY\n",
+        encoding="utf-8",
+    )
+    code = main(["--config", str(cfg), "doctor", "--format", "json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 1, f"a named but unset key variable must still be reported; conflicts={report.get('conflicts')}"
+    assert any("MY_GATEWAY_API_KEY" in c for c in report["conflicts"])
+    assert report["status"] == "conflict"

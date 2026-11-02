@@ -220,12 +220,20 @@ def test_no_source_file_is_ignored_by_git() -> None:
 # Addresses that belong in a public repository: placeholders, the upstream addresses a knowledge page quotes, and
 # the fixture people in tests/fixtures, who are invented and use the RFC 2606 reserved domains.
 _PUBLISHABLE_MAIL = re.compile(
-    # RFC 2606 reserved names (example.com/org/net and anything under them, plus the .example TLD), the upstream
-    # addresses a knowledge page quotes, and GitHub's own no-reply form.
-    r"(?i)(?:@(?:[A-Za-z0-9.-]*\.)?example(?:\.(?:com|org|net))?\b"
-    r"|@amazon\.com\b|@users\.noreply\.github\.com\b|noreply@|@types/|@sha256|@v\d)"
+    # RFC 2606 reserved names only -- example.com/.org/.net and anything under them, and the .example TLD. An
+    # earlier \b after "example" also admitted example.io, example.co.uk and example-corp.com, none of which are
+    # reserved. GitHub's no-reply form is allowed by its full domain, not by a bare "noreply@", which admitted
+    # a bare "noreply@" prefix, which admitted that local part at any domain. The two upstream role addresses a
+    # knowledge page and a CVE fixture quote are allowed by their exact value.
+    r"(?i)(?:@(?:[a-z0-9-]+\.)*example\.(?:com|org|net)$|@(?:[a-z0-9-]+\.)*example$"
+    r"|@users\.noreply\.github\.com$|^noreply@anthropic\.com$"
+    r"|^aws-verification@amazon\.com$|^secalert@redhat\.com$)"
 )
-_MAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# A local part that follows / or : is a path or a URL credential, not an address, and a domain whose first label
+# starts with a digit is a version string: pkg:rpm/redhat/nginx@1.26.1-2.el9.ngx is not mail.
+_MAIL = re.compile(r"(?<![/:\w.-])([A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24})\b")
+# Files whose contents are hashes, not prose.
+_NOT_PROSE = {".lock", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff2", ".zip", ".gz", ".tgz", ".svg", ".ico"}
 
 
 def test_no_real_address_is_published_in_the_repository() -> None:
@@ -242,8 +250,10 @@ def test_no_real_address_is_published_in_the_repository() -> None:
 
     if shutil.which("git") is None or not (ROOT / ".git").exists():
         pytest.skip("not a git checkout")
+    # Every tracked file, not a hand-picked subset: the earlier version covered 452 of 968 and so missed
+    # pyproject.toml (which ships to PyPI), the plugin manifest (which ships to the directory) and examples/.
     tracked = subprocess.run(
-        ["git", "ls-files", "docs", "*.md", "src", "deploy", "scripts", ".github"],  # noqa: S607
+        ["git", "ls-files"],  # noqa: S607
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -252,7 +262,7 @@ def test_no_real_address_is_published_in_the_repository() -> None:
     found: list[str] = []
     for rel in tracked:
         path = ROOT / rel
-        if not path.is_file() or path.suffix in {".png", ".jpg", ".woff2", ".zip", ".gz"}:
+        if not path.is_file() or path.suffix in _NOT_PROSE:
             continue
         try:
             text = path.read_text(encoding="utf-8")

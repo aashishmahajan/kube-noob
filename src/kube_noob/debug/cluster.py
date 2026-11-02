@@ -55,6 +55,7 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     "networkpolicies": ResourceDef("networking.k8s.io/v1", "networkpolicies", True),
     # The two cluster-scoped tiers either side of NetworkPolicy. A cluster without the network-policy-api CRDs
     # answers 404 for both, which the reachability check treats as "not installed" rather than as a failure.
+    "clusternetworkpolicies": ResourceDef("policy.networking.k8s.io/v1alpha2", "clusternetworkpolicies", False),
     "adminnetworkpolicies": ResourceDef("policy.networking.k8s.io/v1alpha1", "adminnetworkpolicies", False),
     "baselineadminnetworkpolicies": ResourceDef(
         "policy.networking.k8s.io/v1alpha1", "baselineadminnetworkpolicies", False
@@ -109,6 +110,8 @@ ALIASES = {
     "ingress": "ingresses",
     "netpol": "networkpolicies",
     "networkpolicy": "networkpolicies",
+    "cnp": "clusternetworkpolicies",
+    "clusternetworkpolicy": "clusternetworkpolicies",
     "anp": "adminnetworkpolicies",
     "adminnetworkpolicy": "adminnetworkpolicies",
     "banp": "baselineadminnetworkpolicies",

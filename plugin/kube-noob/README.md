@@ -73,8 +73,8 @@ and this file should not say otherwise.
 
 What is true is narrower and checkable: this plugin serves stdio only, the bundled modules under `server/` never
 import those packages and never start a server or open a connection, and the CLI, the optional model agent, the HTTP
-service and the web client are not part of the copy at all. Every one of the 32 is pinned to an exact version and
-SHA-256 hash, and `--frozen` refuses to re-resolve any of it. Vendoring them instead, which would let the plugin run
+service and the web client are not part of the copy at all. All 31 dependencies are pinned to an exact version and SHA-256 hash -- the 32nd entry is this plugin itself,
+which is a virtual project with no artifact to hash -- and `--frozen` refuses to re-resolve any of it. Vendoring them instead, which would let the plugin run
 a plain file with no resolver at all, does not fit the directory's file-count and file-size limits.
 
 ## What it accesses

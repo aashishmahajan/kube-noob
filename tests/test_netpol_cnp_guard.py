@@ -125,3 +125,75 @@ def test_the_caveat_is_printed_where_the_fix_is_read(tmp_path: Path, capsys: Any
     assert code == 1, f"a denied reachability check must exit 1; got {code}"
     assert "caveat:" in text, f"the caveat never reached the text output:\n{text}"
     assert "ClusterNetworkPolicy" in text.split("caveat:", 1)[1]
+
+
+def test_the_live_cluster_check_reads_clusternetworkpolicies_too() -> None:
+    """The guard above covered pasted manifests only. `inventory_from_cluster` read the two v1alpha1 tiers and not
+    `clusternetworkpolicies`, so on a cluster running the current API the live answer -- the one an operator
+    trusts more, because it came from their cluster -- went back to being confidently wrong with no caveat and no
+    mention under "not evaluated". The evaluator still does not understand v1alpha2; reading the kind is what puts
+    it in `other_policies`, which is what makes the answer honest.
+    """
+    from kube_noob.debug.cluster import ALLOWED_RESOURCES as RESOURCES
+    from kube_noob.debug.netpol import inventory_from_cluster
+
+    assert "clusternetworkpolicies" in RESOURCES, "the read-only allowlist has no entry for the current API"
+    assert RESOURCES["clusternetworkpolicies"].namespaced is False
+    assert RESOURCES["clusternetworkpolicies"].group_version.endswith("v1alpha2")
+
+    reads: list[str] = []
+
+    class Backend:
+        name = "fake"
+
+        def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> dict[str, Any]:
+            reads.append(plural)
+            if plural == "clusternetworkpolicies":
+                import yaml
+
+                return {"items": [yaml.safe_load(_CNP)]}
+            if plural in {"adminnetworkpolicies", "baselineadminnetworkpolicies", "networkpolicies"}:
+                return {"items": []}
+            if plural == "namespaces":
+                return {"kind": "Namespace", "metadata": {"name": name, "labels": {"team": name}}}
+            raise __import__("kube_noob.errors", fromlist=["x"]).ClusterAccessError("not there")
+
+    inv = inventory_from_cluster(Backend(), "web/frontend", "shop/payments")
+    assert reads.count("clusternetworkpolicies") == 1, "read once, cluster-scoped, not per namespace"
+    assert any(ref.startswith("ClusterNetworkPolicy/") for ref in inv.other_policies), (
+        f"the kind was read but never recorded as unevaluated: {inv.other_policies}"
+    )
+
+
+def test_a_cluster_without_the_current_api_is_not_an_error() -> None:
+    """Most clusters do not have the v1alpha2 CRD. A 404 is normal and must leave a working answer with a note."""
+    from kube_noob.debug.netpol import inventory_from_cluster
+    from kube_noob.errors import ClusterAccessError
+
+    class Backend:
+        name = "fake"
+
+        def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> dict[str, Any]:
+            if plural == "clusternetworkpolicies":
+                raise ClusterAccessError("the server could not find the requested resource")
+            if plural in {"adminnetworkpolicies", "baselineadminnetworkpolicies", "networkpolicies"}:
+                return {"items": []}
+            if plural == "namespaces":
+                return {"kind": "Namespace", "metadata": {"name": name, "labels": {}}}
+            raise ClusterAccessError("not there")
+
+    inv = inventory_from_cluster(Backend(), "web/frontend", "shop/payments")
+    assert any("ClusterNetworkPolicy" in n for n in inv.notes), f"no note explaining the gap: {inv.notes}"
+    assert inv.other_policies == []
+
+
+def test_the_caveat_names_the_cluster_s_own_command() -> None:
+    """On OpenShift the whole answer is written in `oc`; a lone `kubectl` in the caveat is a command the reader
+    may not have."""
+    inv = Inventory.from_yaml(_without_admin_tier() + _CNP)
+    out = check_reachability(inv, "web/frontend", "shop/payments", "9090", "TCP", cli="oc")
+    caveats = [c["caveat"] for c in out.get("proposedChanges", []) if c.get("caveat")]
+    assert caveats, "expected a caveated fix"
+    for c in caveats:
+        assert "oc get clusternetworkpolicy" in c, c
+        assert "kubectl" not in c, c
