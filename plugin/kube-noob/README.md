@@ -64,11 +64,18 @@ imports, copied unchanged. The CLI, the optional model agent, the HTTP service a
 rendering and the cluster backends are not included, so nothing in that copy reads a credential, opens a connection or
 starts another program. Beside it is a `uv.lock` pinning every dependency to an exact version and SHA-256 hash.
 
-The dependencies are the ones the bundled server imports and no others: `mcp`, `pydantic`, `pydantic-core`,
-`mcp-types`, `anyio`, `starlette`, `PyYAML` and `jsonschema`. There is no HTTP client and no web server among them —
-those belong to the HTTP service and the web client, which do not ship here — so the installed tree cannot reach the
-network even if something asked it to. Vendoring the remaining packages as well, which would let the plugin run a
-plain file with no resolver at all, does not fit the directory's file-count and file-size limits.
+The `uv.lock` beside this file names 32 packages. Eight are what the bundled server imports directly: `mcp`,
+`pydantic`, `pydantic-core`, `mcp-types`, `anyio`, `starlette`, `PyYAML` and `jsonschema`. The rest arrive through
+`mcp`, which declares its HTTP transports as dependencies whether or not you use them, so the installed tree does
+contain HTTP clients and a web server — `httpx2`, `httpcore2`, `h11`, `uvicorn`, `sse-starlette` — along with
+`cryptography`, `truststore`, `pyjwt` and their own dependencies. A reviewer reading `uv.lock` will see all of them,
+and this file should not say otherwise.
+
+What is true is narrower and checkable: this plugin serves stdio only, the bundled modules under `server/` never
+import those packages and never start a server or open a connection, and the CLI, the optional model agent, the HTTP
+service and the web client are not part of the copy at all. Every one of the 32 is pinned to an exact version and
+SHA-256 hash, and `--frozen` refuses to re-resolve any of it. Vendoring them instead, which would let the plugin run
+a plain file with no resolver at all, does not fit the directory's file-count and file-size limits.
 
 ## What it accesses
 

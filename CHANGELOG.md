@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The plugin README denied dependencies its own lock file ships, on the live site and in a review queue.** It read
+  "There is no HTTP client and no web server among them -- so the installed tree cannot reach the network even if
+  something asked it to", and listed eight dependencies "and no others". `plugin/kube-noob/uv.lock` names 32
+  packages, among them `httpx2`, `httpcore2`, `h11`, `uvicorn` and `sse-starlette`: `mcp` declares its HTTP
+  transports as dependencies whether or not a plugin uses them. A reviewer can open the lock file, so the claim was
+  both false and trivially falsifiable. An earlier pass removed a neighbouring false sentence and left this one.
+  The README now states the real count and names what arrives through `mcp`, and makes the narrower claim that is
+  actually checkable: the plugin serves stdio only, and the bundled modules under `server/` never import those
+  packages, start a server or open a connection. Three tests read the README against `uv.lock` in both directions,
+  so prose and lock file cannot drift apart again.
+
 - **Four more jobs reported success while skipping the work they exist to do.** The `site` job of a release, the
   `notify` job of `site-sync` and the corpus encrypt step each warned about a missing secret and `exit 0`, so a
   release could finish green having never told the website about itself -- which is how kube-noob.com served the
