@@ -336,9 +336,13 @@ Nothing above depends on any of it, except where noted.
    same expectation applies to signed-off contributions generally. Set these once:
 
    ```zsh
-   git config --global user.name "Aashish Mahajan"
-   git config --global user.email "stockincubator@gmail.com"
+   git config --global user.name "<your real name>"
+   git config --global user.email "<the address on your GitHub account>"
    ```
+
+   Both values go into every commit you push and into the public `Signed-off-by` line, so use the address you are
+   willing to have published. This file does not name them: a document in a public repository is a scraping target,
+   and the values are yours to supply at the moment you run the command.
 
 3. **Optional: a PGP key for chart provenance.** `OWNERS` currently has `publicPgpKey: null`. Signed submissions put a
    base64-encoded public key there and add `kube-noob-<version>.tgz.prov` beside the tarball. This is a real signing key

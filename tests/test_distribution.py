@@ -217,6 +217,77 @@ def test_no_source_file_is_ignored_by_git() -> None:
     assert hidden == [], f"ignored by .gitignore, so never committed or packaged: {hidden[:10]}"
 
 
+# Addresses that belong in a public repository: placeholders, the upstream addresses a knowledge page quotes, and
+# the fixture people in tests/fixtures, who are invented and use the RFC 2606 reserved domains.
+_PUBLISHABLE_MAIL = re.compile(
+    # RFC 2606 reserved names (example.com/org/net and anything under them, plus the .example TLD), the upstream
+    # addresses a knowledge page quotes, and GitHub's own no-reply form.
+    r"(?i)(?:@(?:[A-Za-z0-9.-]*\.)?example(?:\.(?:com|org|net))?\b"
+    r"|@amazon\.com\b|@users\.noreply\.github\.com\b|noreply@|@types/|@sha256|@v\d)"
+)
+_MAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def test_no_real_address_is_published_in_the_repository() -> None:
+    """`docs/openshift-release.md` told the reader to run `git config --global user.email` and filled the command
+    in with the maintainer's own address. A public Apache-2.0 repository is a scraping target, and an address in a
+    document cannot be withdrawn once a fork or an archive has it. Instructions name a placeholder; the person
+    supplies the value when they run the command.
+
+    Git's own commit metadata is a separate matter -- rewriting published history is worse than the exposure -- so
+    this test reads tracked file contents only.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None or not (ROOT / ".git").exists():
+        pytest.skip("not a git checkout")
+    tracked = subprocess.run(
+        ["git", "ls-files", "docs", "*.md", "src", "deploy", "scripts", ".github"],  # noqa: S607
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    found: list[str] = []
+    for rel in tracked:
+        path = ROOT / rel
+        if not path.is_file() or path.suffix in {".png", ".jpg", ".woff2", ".zip", ".gz"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            for hit in _MAIL.findall(line):
+                if not _PUBLISHABLE_MAIL.search(hit):
+                    found.append(f"{rel}:{n}: {hit.split('@')[0][:2]}...@{hit.split('@')[-1]}")
+    assert found == [], (
+        f"a real-looking address is published in a tracked file; use a placeholder the reader fills in: {found[:5]}"
+    )
+
+
+def test_the_private_build_queue_is_not_published() -> None:
+    """`.claude/loop/` is the build queue the `build-loop` skill reads: an unreleased backlog with the product's
+    own moat notes in it. Three of its files were tracked in the public repository, so anyone reading the repo read
+    the roadmap. It stays on disk and out of git.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None or not (ROOT / ".git").exists():
+        pytest.skip("not a git checkout")
+    tracked = subprocess.run(
+        ["git", "ls-files", ".claude"],  # noqa: S607
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    leaked = [p for p in tracked if p.startswith(".claude/loop/")]
+    assert leaked == [], f"the private build queue is tracked in a public repository: {leaked}"
+
+
 # A bundled YAML file is parsed by whatever YAML parser the machine running kube-noob happens to have: the pure-Python
 # PyYAML scanner, or libyaml through CSafeLoader (which signals/ceph.py and mustgather/analyse.py prefer for its
 # start-up time). Those two do not agree on every document. `src: [healthmon:885]` in data/ceph_health.yaml parses as

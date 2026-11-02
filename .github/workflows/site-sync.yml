@@ -58,8 +58,8 @@ jobs:
         run: |
           tag=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
           if [ -z "${DISPATCH_TOKEN}" ]; then
-            echo "::warning title=site-sync::no SITE_DISPATCH_TOKEN secret: cannot ask for ${tag}. The site publishes it on its own schedule, within about six hours."
-            exit 0
+            echo "::error title=site-sync::no SITE_DISPATCH_TOKEN secret, so ${tag} was never requested. A green run here would mean the site was asked, and it was not. Add a fine-grained PAT scoped to ${SITE_REPO} with Contents: write, or dispatch the deploy by hand."
+            exit 1
           fi
           code=$(curl -sS -o /tmp/dispatch.out -w '%{http_code}' -X POST \
             -H "Accept: application/vnd.github+json" \
@@ -87,10 +87,22 @@ jobs:
           ref=$(printf '%s' "${live}" | jq -r '.productRef // ""')
           built=$(printf '%s' "${live}" | jq -r '.built // ""')
           echo "::notice title=site-sync::latest release ${tag} (${published}), kube-noob.com serves ${ref:-none} (built ${built:-never})"
-          if [ "${ref}" = "${tag}" ]; then
-            echo "kube-noob.com is on ${tag}"
-            exit 0
-          fi
+          # Equality alone called a site that is AHEAD a failed deploy: on 2026-11-01 the site had served v0.7.1
+          # since 10-31, the v0.7.1 release object was recreated at 19:49Z by a re-run, and this went red while
+          # nothing was wrong. A site serving a ref at or past the release is not drift, and a site deliberately
+          # built from a branch (to publish a fix before the next tag) is a choice, not a failure.
+          case "${ref}" in
+            "") ;;
+            v[0-9]*)
+              newest=$(printf '%s\n%s\n' "${tag#v}" "${ref#v}" | sort -V | tail -1)
+              if [ "${newest}" = "${ref#v}" ]; then
+                echo "kube-noob.com serves ${ref}, at or past release ${tag}"
+                exit 0
+              fi ;;
+            *)
+              echo "::notice title=site-sync::kube-noob.com serves non-release ref ${ref}; latest release is ${tag}"
+              exit 0 ;;
+          esac
           age=$(( ( $(date -u +%s) - $(date -u -d "${published}" +%s) ) / 60 ))
           if [ "${age}" -lt "${GRACE_MINUTES}" ]; then
             echo "${tag} was published ${age} minutes ago; the site has ${GRACE_MINUTES} to publish it"
