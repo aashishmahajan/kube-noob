@@ -692,6 +692,11 @@ def check_reachability(
         checks.insert(0, anp_check)
     else:
         checks.append(anp_check)
+    # When a cluster-scoped kind this evaluator cannot read is what made the answer unknown, reading it is the
+    # one step that resolves the verdict -- so it goes first. Printing checks that cannot settle the question,
+    # and omitting the one that can, is the same failure as naming the policy in a field nobody reads.
+    if unevaluated_above:
+        checks.insert(0, f"{cli} get clusternetworkpolicy -o yaml")
     if cli == "oc" and src.namespace in safe_ns:
         checks.append(f"oc get egressfirewall -n {src.namespace} -o yaml")
     out["readOnlyNextSteps"] = [_step(c) for c in checks if classify_step(c) == "read"]

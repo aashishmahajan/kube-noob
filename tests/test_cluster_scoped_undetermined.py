@@ -130,3 +130,80 @@ def _tmp(text: str) -> str:
     p = Path(tempfile.mkdtemp()) / "m.yaml"
     p.write_text(text, encoding="utf-8")
     return str(p)
+
+
+# --- the surface a human reads ---------------------------------------------------------------------------------
+# G172 moved the verdict and the exit code, and put the reason in `undeterminedBy` and `summary`. Both are JSON
+# keys. `_print_reach` printed neither, so the terminal showed "UNDETERMINED" over two lines reading "allowed"
+# with nothing saying why -- the information was present and the surface a person reads ignored it, which is the
+# defect this very commit was fixing one layer down.
+
+CNP_PORT_8080 = """apiVersion: policy.networking.k8s.io/v1alpha2
+kind: ClusterNetworkPolicy
+metadata:
+  name: deny-8080
+spec:
+  priority: 10
+  subject:
+    namespaces: {}
+  ingress:
+  - action: Deny
+    from:
+    - namespaces: {}
+    protocols:
+    - tcp:
+        destinationPort: 8080
+"""
+
+
+def _reach_text(tmp_path, capsys) -> str:
+    from pathlib import Path
+
+    from kube_noob.cli import main
+
+    example = Path(__file__).resolve().parent.parent / "examples" / "netpol-shop.yaml"
+    manifests = tmp_path / "with-cnp.yaml"
+    manifests.write_text(example.read_text(encoding="utf-8") + "\n" + CNP_PORT_8080, encoding="utf-8")
+    code = main(
+        [
+            "policy",
+            "reach",
+            "-f",
+            str(manifests),
+            "--from",
+            "web/frontend",
+            "--to",
+            "shop/orders-api",
+            "--port",
+            "8080",
+        ]
+    )
+    assert code == 1, "an undetermined verdict is not a pass"
+    return capsys.readouterr().out
+
+
+def test_the_terminal_says_why_the_verdict_is_undetermined(tmp_path, capsys) -> None:
+    out = _reach_text(tmp_path, capsys)
+    assert "UNDETERMINED" in out
+    head = out.partition("check (read-only)")[0]
+    assert "ClusterNetworkPolicy/deny-8080" in head, (
+        "the policy that made the answer unknown must be named above the check list, not left to the trailing "
+        "'not evaluated' line among boilerplate"
+    )
+    assert "reverse" in head.lower(), "the reader has to be told it can go either way"
+
+
+def test_the_check_list_tells_the_operator_to_look_at_the_policy_that_decides(tmp_path, capsys) -> None:
+    """The read-only steps named adminnetworkpolicy and baselineadminnetworkpolicy but not the kind that
+    actually made the verdict unknown, so following the printed advice could not resolve it."""
+    out = _reach_text(tmp_path, capsys)
+    # Only the commands. Partitioning on the heading also swallows the trailing "not evaluated:" line, which
+    # does name the policy -- so a looser assertion here passes while the printed advice still cannot resolve
+    # the verdict. That is the same mistake as G174: a test that matches the wrong text proves nothing.
+    section = out.partition("check (read-only)")[2].partition("not evaluated")[0]
+    commands = [ln.strip() for ln in section.splitlines() if ln.strip().startswith("kubectl")]
+    assert commands, "no read-only commands were printed"
+    assert any("clusternetworkpolicy" in c.lower() for c in commands), (
+        "the printed checks name adminnetworkpolicy and baselineadminnetworkpolicy but not the kind that made "
+        f"the verdict unknown, so following them cannot resolve it: {commands}"
+    )

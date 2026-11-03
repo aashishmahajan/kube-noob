@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **The `ClusterNetworkPolicy` fix was invisible in the terminal, which is where an operator reads it.** G172
+  moved the verdict to `undetermined` and the exit code to 1, and put the reason in `undeterminedBy` and
+  `summary` -- both JSON keys. `_print_reach` printed neither, so `policy reach` showed `UNDETERMINED` above two
+  lines reading `allowed` and nothing explaining the contradiction; the policy appeared only inside the trailing
+  `not evaluated:` line among four other boilerplate caveats. Worse, the read-only check list named
+  `adminnetworkpolicy` and `baselineadminnetworkpolicy` but not `clusternetworkpolicy`, so an operator following
+  the printed advice could not resolve the verdict it had just been given. The terminal now prints `unknown
+  because: <policy> is not evaluated here` and the summary sentence above the checks, and `get
+  clusternetworkpolicy -o yaml` goes first in the list when that is what made the answer unknown. A run with no
+  such policy is byte-identical. This is the day's own lesson one layer up: a disclosure is not a decision, and
+  fixing it in the JSON did not fix it in the surface a person reads (G177).
+
+- **The first version of that test passed against the wrong text.** It partitioned the output on the
+  `check (read-only)` heading, which also swallowed the trailing `not evaluated:` line -- and that line names the
+  policy, so the assertion went green while the printed commands still could not resolve the verdict. Scoped to
+  the `kubectl` lines only, it fails before the fix and passes after, which is the difference between a test and
+  a decoration (G178).
+
+- **Stale numbers and an overstated citation in this file, found by a closeout red team.** The 4.23 entry said
+  `openshift/kubernetes` `release-4.23` "is taking v1.36.x rebases" -- both rebase PRs, #2801 and #2839, are
+  closed and not merged, so what the evidence shows is a branch and a bot that targets it, not a landed rebase.
+  The commit message that corrected this claimed only the commit message was wrong, while this file carried the
+  same overstatement; it now states the evidence at its real strength, and so does the comment in
+  `tests/test_yamlio_catalog.py`. The `policy_generate` cap figures (380,670 and 14,168) were measured before
+  KN-S029 added the 108th generated policy and never said which serialization they used; they are now 392,307 ->
+  14,334 bytes of compact JSON on the 78-rule set, with the serialization named. `docs/roadmap.md` called P6
+  "Not started" for the version ceiling this cycle ships, and described P4's pre-G172 behaviour as current; both
+  corrected. `demos/README.md` carried three hand-typed video lengths that no longer match the released renders
+  (MCP 70 s and 57 s in two tables, actually 67 s; teaser 30 s, actually 32 s), credited the terminal lines to
+  "the 0.2.2 CLI" when `facts.py` re-records them against the code being built, and listed the compliance video
+  beside three that ship without saying it is a local render only.
+
 - **The weekly risk review opened an issue a week and never closed the previous one.** `risk-review.yml`
   searched for an open issue titled with *this* week and edited it, else created one, and never touched the week
   before -- so 2026-W44 ("release recommended: no, no action needed this week") sat open from 27 October while
@@ -68,18 +100,20 @@
 - **The one result that could not fit in any caller's context was the one an MCP caller had no way to
   shrink.** `policy generate -o FILE` stopped inlining the rendered set, but `PolicyGenerateIn` has no `output`
   field and an MCP caller has no filesystem to write to, so that fix reached the audience that was not the
-  problem. Measured on the bundled rule set for OpenShift, `policy_generate` returned **380,670 bytes, about
-  95,000 tokens, 96.4% of it one YAML string** -- more than most callers can hold, for a tool that is meant to be
-  called by a model. A result the caller cannot read is worse than one that says how to ask for less.
+  problem. Measured on the bundled rule set for OpenShift, `policy_generate` returned **392,307 bytes of compact
+  JSON, about 98,000 tokens, 94% of it one YAML string** -- more than most callers can hold, for a tool that is
+  meant to be called by a model. A result the caller cannot read is worse than one that says how to ask for less.
+  (Every byte count here is compact JSON, `separators=(',', ':')`, on the 78-rule set as shipped; an earlier
+  draft quoted 380,670, measured before KN-S029 added the 108th generated policy.)
 
   There is now a 128 KiB limit on the inline YAML, chosen from the measurements rather than picked: every rule on
-  every engine is 380,670 bytes and every rule on one engine is still 186,000-201,000, while ten rules on two
+  every engine is 392,307 bytes and every rule on one engine is still 186,000-201,000, while ten rules on two
   engines is 79,217 and five on one engine is 19,670. The limit sits above the queries a caller can use and below
   the ones that overflow it. Over the limit the result is the counts, `skipped`, `yamlOmitted: true`, the byte
-  count and a sentence naming the three ways out -- `rules`, a single `engines` entry, or the CLI's `-o`. That
-  turns 380,670 bytes into **14,168** (95,167 tokens into 3,542, a 96.3% reduction) with nothing a caller
-  reasoned over removed. A request already under the limit is byte-identical to before, and `allow_large: true`
-  returns the whole set for a caller that knows its own budget.
+  count (`yamlBytes: 369793`) and a sentence naming the three ways out -- `rules`, a single `engines` entry, or
+  the CLI's `-o`. That turns 392,307 bytes into **14,334** (about 98,000 tokens into 3,600, a 96.3% reduction)
+  with nothing a caller reasoned over removed. A request already under the limit is byte-identical to before, and
+  `allow_large: true` returns the whole set for a caller that knows its own budget.
 
   It refuses rather than truncates, deliberately: half a policy set is not a policy set, and a caller that
   applied one would enforce some rules and silently drop the rest -- a quiet partial answer, which this project
@@ -121,11 +155,15 @@
   than not reading the kind at all; the Baseline tier is no longer a singleton named `default`; egress peers gain
   `nodes`, `networks` and `domainNames`, none evaluated; and the per-list cap fell from 100 to 25.
 
-- **OpenShift 4.23 is mapped to Kubernetes 1.36 from the source rather than from the cadence rule.**
-  `OCP_TO_K8S` stopped at 4.22, and 4.23 was answered by the "OCP 4.x tracks 1.(x+13)" extrapolation. That
-  extrapolation happens to be right -- `openshift/kubernetes` `release-4.23` is taking v1.36.x rebases
-  (openshift/kubernetes#2839, 2 November 2026) -- so the row is now explicit and cited, and the test moved to
-  4.24 so the extrapolation branch stays covered instead of being shadowed by the new row.
+- **OpenShift 4.23 is written out as Kubernetes 1.36, and the evidence for it is stated at its real strength.**
+  `OCP_TO_K8S` stopped at 4.22 and answered 4.23 through the "OCP 4.x tracks 1.(x+13)" extrapolation. The row is
+  now explicit, and the test moved to 4.24 so the extrapolation branch stays covered instead of being shadowed.
+  What the evidence shows: `openshift/kubernetes` has a `release-4.23` branch and its automated rebase bot
+  targets v1.36.x at it -- but both rebase PRs, #2801 (v1.36.5, 28 September 2026) and #2839 (v1.36.6, 2
+  November 2026), are **closed, not merged**. That is the direction of travel, not a landed rebase, and not a
+  settled mapping. An earlier draft of this entry and of the commit message said the branch "is taking" those
+  rebases, which overstates it; the row is behaviourally a no-op either way, since the +13 cadence answers 1.36
+  on its own.
 
 - **The FedRAMP 20x KSI mapping now has a release and a retirement list recorded before it is built.**
   `FRMR.KSI.key-security-indicators.json` is at release 25.11C (published 2025-12-01), 20x is at

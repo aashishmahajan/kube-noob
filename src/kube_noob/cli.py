@@ -2474,6 +2474,13 @@ def _print_reach(out: dict[str, Any]) -> None:
                         f"          {pol['policy']} rule {rule['rule']}: allows {rule['peer']} on {rule['ports']} "
                         f"(no match: {', '.join(miss)})"
                     )
+    if out.get("undeterminedBy"):
+        # The verdict says UNDETERMINED and the two direction lines can both read "allowed", so without this the
+        # terminal shows a conclusion with no reason while the JSON carries both `undeterminedBy` and `summary`.
+        # A caveat belongs in the surface that is read, not only in the one that is parsed.
+        _tprint(f"  unknown because: {', '.join(out['undeterminedBy'])} is not evaluated here")
+    if out.get("summary") and out["verdict"] == "undetermined":
+        _tprint(f"  {out['summary']}")
     if out.get("warning"):
         _tprint(f"  warning: {out['warning']}")
     for c in out.get("proposedChanges", []):
