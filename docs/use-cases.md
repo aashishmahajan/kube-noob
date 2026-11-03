@@ -46,6 +46,20 @@ kube-noob helm-chart --name orders-api --namespace shop --image quay.io/acme/ord
 
 To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It exits 1 on any HIGH or CRITICAL finding.
 
+If you target a Kubernetes or OpenShift minor newer than the one kube-noob's removed-API data was read at, the
+report says so rather than reporting nothing:
+
+```console
+$ kube-noob validate -f k8s/ --platform openshift --version 4.25
+kube-noob audit | platform=openshift k8s=1.38 | score=100.0 |
+  not checked: The Kubernetes deprecated-API migration guide was read at 1.37, so no removed or deprecated API
+  finding here means none through 1.37 -- not none in 1.38. Check the guide for 1.38 before reading this as clean.
+```
+
+In JSON the same thing arrives as a `notCheckedBeyond` block, and `api_history` carries `checkedThrough` and
+`beyondCheckedVersions`. A target at or below the ceiling says nothing extra, because for those the answer is
+complete.
+
 When the report is going into a model's context rather than a terminal, add `--compact`:
 
 ```bash

@@ -255,6 +255,10 @@ def _print_report(rep: dict[str, Any]) -> None:
     )
     for a in rep.get("assumptions", []):
         print(f"  note: {a}")
+    if limit := rep.get("notCheckedBeyond"):
+        # Print it before the findings, not after: somebody reading a short report in a terminal has to see the
+        # limit before they read an empty finding list as a clean one.
+        print(f"  not checked: {limit['why']}")
     for f in rep["findings"]:
         loc = f"L{f['line']}" if f.get("line") else ""
         print(f"[{f['severity'].upper():8}] {f['ruleId']:9} {f['resource']} {loc} {f['path']}")

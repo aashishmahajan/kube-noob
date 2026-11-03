@@ -643,9 +643,15 @@ class RemovedAPI:
     notes: str = ""
 
 
+# The Kubernetes minor this table was read at. The guide lists no removals after v1.32, so for any target up to
+# here an empty result is complete. Past here nobody has looked, and an empty result would be a verdict earned by
+# absence (G163) -- `beyond_checked` exists so that the answer can say so instead. Raise it only after re-reading
+# the guide, because raising it is a claim that somebody did.
+CHECKED_THROUGH = "1.37"
+
 # Source: Kubernetes Deprecated API Migration Guide (k8s-deprecation-guide), kubernetes/website
 # content/en/docs/reference/using-api/deprecation-guide.md, verified 2026-10-27. The guide lists no removals after
-# v1.32 (as of Kubernetes 1.37); do not add rows without a citation.
+# v1.32; `CHECKED_THROUGH` above records the minor it was read at. Do not add rows without a citation.
 REMOVED_APIS: tuple[RemovedAPI, ...] = (
     RemovedAPI("extensions/v1beta1", "Deployment", "1.9", "1.16", "apps/v1", "spec.selector is required"),
     RemovedAPI("apps/v1beta1", "Deployment", "1.9", "1.16", "apps/v1", "spec.selector is required"),
@@ -818,6 +824,33 @@ def k8s_version_for(platform: str, version: str | None) -> str:
         return DEFAULT_K8S_VERSION
     major, minor = parse_minor(version)
     return f"{major}.{minor}"
+
+
+def beyond_checked(k8s_version: str) -> bool:
+    """Is this target past the last Kubernetes minor the removal table was read at?
+
+    True means the removal and deprecation answers for it are "nothing through ``CHECKED_THROUGH``", not
+    "nothing". The caller is owed that difference.
+    """
+    return parse_minor(k8s_version) > parse_minor(CHECKED_THROUGH)
+
+
+def not_checked_beyond(k8s_version: str) -> dict[str, str] | None:
+    """The note a result carries when its target is past the ceiling, or ``None`` when it is covered.
+
+    Returning ``None`` for a covered target keeps every result that was already correct byte-identical.
+    """
+    if not beyond_checked(k8s_version):
+        return None
+    return {
+        "removalData": CHECKED_THROUGH,
+        "target": k8s_version,
+        "why": (
+            f"The Kubernetes deprecated-API migration guide was read at {CHECKED_THROUGH}, so no removed or "
+            f"deprecated API finding here means none through {CHECKED_THROUGH} -- not none in {k8s_version}. "
+            f"Check the guide for {k8s_version} before reading this as clean."
+        ),
+    }
 
 
 def removed_api(group_version: str, kind: str, k8s_version: str) -> RemovedAPI | None:

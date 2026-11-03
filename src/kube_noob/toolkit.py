@@ -26,7 +26,14 @@ from kube_noob.audit.engine import analyze, explain_rule, list_rules
 from kube_noob.audit.fixer import fix_manifests
 from kube_noob.audit.model import Severity, Stage
 from kube_noob.audit.protocol import run_protocol
-from kube_noob.catalog import OCP_TO_K8S, REMOVED_APIS, k8s_version_for, parse_minor
+from kube_noob.catalog import (
+    CHECKED_THROUGH,
+    OCP_TO_K8S,
+    REMOVED_APIS,
+    beyond_checked,
+    k8s_version_for,
+    parse_minor,
+)
 from kube_noob.config import Settings
 from kube_noob.debug.cluster import cluster_info, get_backend, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
@@ -945,7 +952,18 @@ class Toolkit:
             "removedInTarget": [r.__dict__ for r in rows if parse_minor(k8s) >= parse_minor(r.removed_in)],
             "allRemovals": [r.__dict__ for r in rows],
             "openshiftToKubernetes": OCP_TO_K8S,
-            "note": "The upstream deprecation guide lists no removals after Kubernetes 1.32 (as of 1.37).",
+            "checkedThrough": CHECKED_THROUGH,
+            "beyondCheckedVersions": beyond_checked(k8s),
+            "note": (
+                f"The upstream deprecation guide lists no removals after Kubernetes 1.32, read at "
+                f"{CHECKED_THROUGH}."
+                + (
+                    f" {k8s} is past that, so this answer is 'nothing through {CHECKED_THROUGH}', not 'nothing "
+                    f"in {k8s}'."
+                    if beyond_checked(k8s)
+                    else ""
+                )
+            ),
         }
 
     def explain(self, p: RuleIn) -> dict[str, Any]:

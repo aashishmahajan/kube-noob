@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- **The removed-API tables say where they stop, so "no removals" stops meaning "nobody looked".** `REMOVED_APIS`
+  was read from the Kubernetes deprecated-API migration guide at 1.37 and the guide lists no removals after
+  v1.32, so for any target up to 1.37 an empty answer is complete. Past it, `api_history` returned
+  `removedInTarget: []` and `validate` produced no removed-API finding, and neither said that nobody had checked
+  that minor -- a verdict earned by absence, the same shape as G163. It stops being hypothetical on **16
+  December 2026**, when Kubernetes 1.38 is released, and already today for `--version 4.25`, which maps to 1.38.
+  `catalog.CHECKED_THROUGH` now names the ceiling; `api_history` returns `checkedThrough` and
+  `beyondCheckedVersions` and says so in its note; and a report whose target is past the ceiling carries a
+  `notCheckedBeyond` block, printed above the findings in text so a short clean-looking report cannot be read as
+  clean. A target at or below the ceiling is byte-identical to what it was, so nothing that was already complete
+  changed shape (G171).
+
+- **`policy reach` answered "allowed" on a cluster whose real policy it cannot read, and exited 0.**
+  `ClusterNetworkPolicy` (`policy.networking.k8s.io/v1alpha2`) is cluster-scoped and decided before any
+  NetworkPolicy, and this evaluator does not read it. The kind was already named under `notEvaluated` and already
+  attached a caveat to every proposed manifest -- but the verdict still read `allowed` and the CLI still returned
+  0, so a CI gate merged on an answer a `Deny` in that policy reverses. A note in a JSON list does not stop a
+  pipeline. With such a policy in the input the verdict is now `undetermined`, `undeterminedBy` names it, the
+  summary says which way the NetworkPolicies alone would have gone and that the unread policy can reverse it
+  either way, and the exit code is 1. Deliberately not `denied`: nothing here knows what the unread policy says,
+  so unknown is the honest answer -- the same third answer a same-priority AdminNetworkPolicy tie already gets.
+  A run with no such policy is unchanged, verdict and exit code both.
+
+  This is not a future-API edge case. Calico 3.32 (13 May 2026) removed AdminNetworkPolicy and
+  BaselineAdminNetworkPolicy enforcement outright in favour of `ClusterNetworkPolicy`, so on a current Calico
+  cluster the policy that actually decides the traffic is the one kind this evaluator cannot read (G172).
+
+- **The `debug/anp.py` docstring said v1alpha2 kept the same action semantics. It does not.** Six differences are
+  now written out where anyone extending the module will read them, each one a way the existing evaluator would
+  misread a v1alpha2 document: `Allow` is renamed `Accept`, so `ANP_ACTIONS` rejects every valid Admin rule;
+  `Pass` is legal in the Baseline tier, which `BANP_ACTIONS` forbids; `ports` is replaced by `protocols`, and
+  because `_port_matches` reads an absent `ports` key as "every port", adding the kind to `collect` without
+  rewriting the matcher would read a rule scoped to one port as a blanket rule and widen every verdict -- worse
+  than not reading the kind at all; the Baseline tier is no longer a singleton named `default`; egress peers gain
+  `nodes`, `networks` and `domainNames`, none evaluated; and the per-list cap fell from 100 to 25.
+
 - **OpenShift 4.23 is mapped to Kubernetes 1.36 from the source rather than from the cadence rule.**
   `OCP_TO_K8S` stopped at 4.22, and 4.23 was answered by the "OCP 4.x tracks 1.(x+13)" extrapolation. That
   extrapolation happens to be right -- `openshift/kubernetes` `release-4.23` is taking v1.36.x rebases
