@@ -2171,8 +2171,14 @@ def _n007(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     "design): anyone who can create or update a Service can set externalIPs to any address and so intercept "
     "cluster traffic meant for that address (man in the middle). The Kubernetes docs describe the feature as very "
     "powerful (it allows network traffic interception), say most users do not need it, and recommend the "
-    "DenyServiceExternalIPs admission controller, which rejects all net-new use of the field.",
-    ("k8s-cve-2020-8554", "k8s-admission-deny-external-ips"),
+    "DenyServiceExternalIPs admission controller, which rejects all net-new use of the field. The field is now "
+    "on its way out as well: KEP-5707 deprecates it in Kubernetes 1.36 behind a kube-proxy feature gate "
+    "AllowServiceExternalIPs, which the KEP plans to switch off by default about four releases later and to lock "
+    "off three releases after that -- tentatively 1.40 and 1.43, both of which the KEP itself marks as tentative. "
+    "The KEP gives no replacement inside the Service API: it points to a LoadBalancer Service with a cloud "
+    "provider, an Ingress controller, or the Gateway API, which it recommends for new deployments. So this is "
+    "worth fixing on a schedule rather than only on principle.",
+    ("k8s-cve-2020-8554", "k8s-kep-5707", "k8s-admission-deny-external-ips"),
 )
 def _n008(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d in ctx.by_kind("Service"):

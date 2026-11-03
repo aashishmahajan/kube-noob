@@ -235,6 +235,12 @@ SOURCES: dict[str, Citation] = {
         "https://github.com/kubernetes/kubernetes/issues/97076",
         "link only",
     ),
+    "k8s-kep-5707": Citation(
+        "k8s-kep-5707",
+        "KEP-5707 Deprecate Service.spec.externalIPs (sig-network), verified 2026-11-03",
+        "https://www.kubernetes.dev/resources/keps/5707/",
+        "link only",
+    ),
     "k8s-admission-deny-external-ips": Citation(
         "k8s-admission-deny-external-ips",
         "Kubernetes Admission Controllers Reference - DenyServiceExternalIPs",

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **KN-N008 knew `Service.spec.externalIPs` was dangerous but not that it is now going away.** The rule already
+  carried CVE-2020-8554 and the `DenyServiceExternalIPs` admission controller; it predates KEP-5707, which
+  deprecates the field in Kubernetes 1.36 behind a kube-proxy feature gate `AllowServiceExternalIPs`, plans to
+  switch that gate off by default about four releases later and to lock it off three releases after that, and
+  offers no replacement inside the Service API -- pointing instead to a LoadBalancer Service with a cloud
+  provider, an Ingress controller, or the Gateway API, which it recommends for new deployments. The rule now says
+  so, which turns "this is risky" into "this is risky and it is leaving on a schedule" and changes how a team
+  prioritises it.
+
+  Two things are deliberately **not** asserted. The tentative release numbers (1.40 and 1.43) are given as
+  tentative, because the KEP marks them so. And the gate's default at 1.36 is left out entirely: the KEP
+  contradicts itself about it, with the Summary saying `default: false` and Phase 1 saying `default: true`, so
+  there is no version of that sentence this rule can state as fact.
+
+  No new rule, no count change: the check, its fixture, its CEL and its controls were already right. Only the
+  citation list (now including KEP-5707) and the explanation moved.
+
 - **New rule KN-S029: a `host` on a probe or lifecycle handler, and the Pod Security denial it causes.** A
   `host` on an `httpGet` or `tcpSocket` handler makes the kubelet -- a trusted node component -- open a
   connection to that address on the pod's behalf, so anyone who can create a pod can have the kubelet reach
