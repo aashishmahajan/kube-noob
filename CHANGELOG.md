@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The KN-N008 deprecation change shipped with no test, so the claim it added was unprotected.** The commit
+  added the `k8s-kep-5707` citation and rewrote the description to say the field is deprecated in Kubernetes
+  1.36, and touched no test -- the suite stayed green at exactly the count it had before, which is what a claim
+  with nothing asserting it looks like. Any later edit of that rule could have dropped the citation and the
+  sentence and nothing would have said so. There are now four assertions: the KEP is cited and every citation
+  resolves, the description names KEP-5707 and 1.36 and says "deprecated", the remediation names somewhere to go
+  (KEP-5707 offers no successor inside the Service API), and a Service with `externalIPs` is still reported while
+  one without it is not -- because a rule whose text improved while its detection broke is worse than leaving the
+  text alone. Verified by mutation: removing the citation from `rules.py` fails
+  `test_the_rule_cites_the_kep_that_removes_the_field`, so the assertion is real and not incidentally true
+  (G175).
+
 - **KN-N008 knew `Service.spec.externalIPs` was dangerous but not that it is now going away.** The rule already
   carried CVE-2020-8554 and the `DenyServiceExternalIPs` admission controller; it predates KEP-5707, which
   deprecates the field in Kubernetes 1.36 behind a kube-proxy feature gate `AllowServiceExternalIPs`, plans to
