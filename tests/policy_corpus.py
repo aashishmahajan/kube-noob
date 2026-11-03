@@ -138,14 +138,37 @@ def _sc(rng: random.Random, container: bool) -> dict[str, Any] | None:
     return sc
 
 
+# A `host` on a probe or lifecycle handler (KEP-4940's `probeHost`), which KN-S029 reports and its generated
+# policy refuses. Without these the corpus never produced one, so the parity between the rule and its CEL was
+# asserted over 900 objects that could not tell the two apart.
+PROBE_HOSTS: tuple[str | None, ...] = (None, None, None, None, "127.0.0.1", "10.0.0.1", "metadata.internal")
+
+
+def _handler(rng: random.Random) -> dict[str, Any]:
+    """An httpGet or tcpSocket handler, sometimes with a host on it."""
+    h: dict[str, Any] = (
+        {"httpGet": {"path": "/healthz", "port": 8080}} if rng.random() < 0.8 else {"tcpSocket": {"port": 8080}}
+    )
+    inner = next(iter(h.values()))
+    _set(inner, "host", rng.choice(PROBE_HOSTS))
+    return h
+
+
 def _probe(rng: random.Random) -> dict[str, Any] | None:
     if rng.random() < 0.3:
         return None
-    p: dict[str, Any] = {"httpGet": {"path": "/healthz", "port": 8080}}
+    p: dict[str, Any] = _handler(rng)
     _set(p, "periodSeconds", _maybe(rng, rng.choice((1, 4, 5, 10, 30)), 0.6))
     _set(p, "failureThreshold", _maybe(rng, rng.choice((1, 2, 3)), 0.6))
     _set(p, "timeoutSeconds", _maybe(rng, rng.choice((1, 5, 10, 30)), 0.5))
     return p
+
+
+def _lifecycle(rng: random.Random) -> dict[str, Any] | None:
+    """A lifecycle hook, which KEP-4940 covers as well as the three probes."""
+    if rng.random() < 0.85:
+        return None
+    return {rng.choice(("preStop", "postStart")): _handler(rng)}
 
 
 def _resources(rng: random.Random) -> dict[str, Any] | None:
@@ -183,6 +206,10 @@ def _container(rng: random.Random, name: str, app: bool) -> dict[str, Any]:
     if app:
         _set(c, "readinessProbe", _probe(rng))
         _set(c, "livenessProbe", _probe(rng))
+        _set(c, "startupProbe", _maybe(rng, _probe(rng), 0.85))
+    # Not gated on `app`: an init container's handler reaches the kubelet exactly the same way, and `_s029`
+    # walks init and ephemeral containers too.
+    _set(c, "lifecycle", _lifecycle(rng))
     return c
 
 

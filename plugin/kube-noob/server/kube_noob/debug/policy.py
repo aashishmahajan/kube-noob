@@ -652,6 +652,25 @@ _PSA_CHECKS: tuple[tuple[re.Pattern[str], tuple[str, ...], str | None, dict[str,
         ),
         (r"hostPort", ("KN-S011",), None, None, "Remove hostPort from {containers}; use a Service instead."),
         (r"procMount", ("KN-S020",), None, None, "Remove securityContext.procMount: Unmasked."),
+        # KEP-4940 (sig-auth, "psa-block-host-field-in-probes"). The check is named `probeHost` in the violation
+        # message -- "probeHost (container \"liveness\" uses probeHost 135.45.63.4)" -- and without an entry here
+        # it fell through to the generic branch, which echoes the denial back as its own fix and attributes no
+        # rule, while `readOnlyNextSteps` still offered `kube-noob fix`, which could do nothing for it. The KEP
+        # covers the lifecycle handlers as well as the three probes, so the fix names both. It is enabled by a
+        # namespace's `pod-security.kubernetes.io/enforce-version: v1.34` or later, which is why no version is
+        # compared here: by the time this message exists, Pod Security has already ruled, and second-guessing it
+        # from a cluster version would be the tool overriding the cluster.
+        (
+            r"^probeHost$",
+            ("KN-S029",),
+            None,
+            None,
+            "Remove the host field from the probes and lifecycle handlers of {containers}: "
+            "livenessProbe/readinessProbe/startupProbe .httpGet.host and .tcpSocket.host, and "
+            "lifecycle.postStart/preStop .httpGet.host. A handler with no host is sent to the pod's own IP, "
+            "which is what the check requires; a host pointing anywhere else makes the kubelet probe that "
+            "address instead of the container.",
+        ),
         (r"seLinuxOptions", (), None, None, "Remove the custom seLinuxOptions type or user."),
         (r"sysctls", (), None, None, "Remove the unsafe sysctls from the pod securityContext."),
         (r"appArmor", (), None, None, "Use the RuntimeDefault AppArmor profile (or remove the override)."),

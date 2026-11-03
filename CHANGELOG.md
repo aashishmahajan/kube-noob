@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **New rule KN-S029: a `host` on a probe or lifecycle handler, and the Pod Security denial it causes.** A
+  `host` on an `httpGet` or `tcpSocket` handler makes the kubelet -- a trusted node component -- open a
+  connection to that address on the pod's behalf, so anyone who can create a pod can have the kubelet reach
+  somewhere the pod itself may not be allowed to, including node-local endpoints no NetworkPolicy sees.
+  KEP-4940 adds this to the Pod Security baseline as the `probeHost` check, enabled by a namespace's
+  `pod-security.kubernetes.io/enforce-version: v1.34` or later.
+
+  Both sides of the deploy were blind to it. `audit` did not look at the field, so nothing caught it before
+  admission; KN-S029 now checks all ten paths the KEP names -- the three probes' `httpGet.host` and
+  `tcpSocket.host` and the `postStart`/`preStop` handlers -- for containers and initContainers alike. And
+  `policy explain` had no entry for the check, so a real denial fell through to the generic branch, which echoes
+  the denial back as its own "fix" and attributes no rule, while `readOnlyNextSteps` still offered
+  `kube-noob fix`, which could do nothing for it. The denial now reports `relatedRules: ["KN-S029"]` and a fix
+  that names the fields to delete.
+
+  The check name was verified against the KEP rather than written from memory: it is `probeHost`, one word, in a
+  message of the form `probeHost (container "liveness" uses probeHost 135.45.63.4)`. A plausible-looking
+  invention -- "restricted probe hosts" was the first guess -- would have produced a regex matching nothing real,
+  and a test written against the same invention would have passed. A test now pins the name to the KEP's (G174).
+
 - **The one result that could not fit in any caller's context was the one an MCP caller had no way to
   shrink.** `policy generate -o FILE` stopped inlining the rendered set, but `PolicyGenerateIn` has no `output`
   field and an MCP caller has no filesystem to write to, so that fix reached the audience that was not the

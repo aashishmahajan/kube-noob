@@ -59,7 +59,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 77 audit rules and their controls
+## The 78 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -117,6 +117,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S026 | Credential stored in a ConfigMap | IA-5(7), SC-28 |
 | KN-S027 | Legacy ServiceAccount token Secret | IA-5, AC-6 |
 | KN-S028 | RBAC binding grants a role to everyone | AC-14, AC-3, AC-6 |
+| KN-S029 | Probe or lifecycle handler with a host | SC-7, CM-7 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |

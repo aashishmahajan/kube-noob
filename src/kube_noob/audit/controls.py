@@ -69,6 +69,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S018": ("IA-5(7)", "SC-28"),
     "KN-S019": ("AC-6", "CM-7", "SC-39"),
     "KN-S020": ("SC-39", "CM-7"),
+    "KN-S029": ("SC-7", "CM-7"),  # the kubelet is made to cross a boundary on the pod's behalf
     "KN-S021": ("SI-2", "CM-7", "SC-39"),  # a deprecated volume driver with a published breakout
     "KN-S022": ("SI-2", "SC-39", "CM-7"),
     "KN-S023": ("SI-2", "SC-39"),

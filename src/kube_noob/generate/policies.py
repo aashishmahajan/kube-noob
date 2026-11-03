@@ -163,6 +163,29 @@ def _sc(field_name: str, var: str = "c") -> str:
     return _has(var, f"securityContext.{field_name}")
 
 
+# The handler paths KEP-4940 forbids a `host` on, matching `rules._s029` exactly: a mismatch between the two
+# would show up as a policy that admits what the audit flags, which `test_policy_equals_audit_on_random_objects`
+# holds to exact parity.
+_PROBE_HOST_PATHS: tuple[str, ...] = (
+    "livenessProbe.httpGet",
+    "livenessProbe.tcpSocket",
+    "readinessProbe.httpGet",
+    "readinessProbe.tcpSocket",
+    "startupProbe.httpGet",
+    "startupProbe.tcpSocket",
+    "lifecycle.postStart.httpGet",
+    "lifecycle.postStart.tcpSocket",
+    "lifecycle.preStop.httpGet",
+    "lifecycle.preStop.tcpSocket",
+)
+
+
+def _no_probe_host() -> str:
+    """No container, init container or ephemeral container sets a host on any probe or lifecycle handler."""
+    clauses = " && ".join(f"!({_has('c', f'{path}.host')} && c.{path}.host != '')" for path in _PROBE_HOST_PATHS)
+    return f"variables.containers.all(c, {clauses})"
+
+
 def _eff(field_name: str, default: str) -> str:
     """A container's securityContext field, else the pod's, else ``default`` (kube_noob.audit.podspec)."""
     return (
@@ -549,6 +572,12 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
             pod=True,
         ),
         Check(
+            "KN-S029",
+            _POD_KINDS,
+            (_no_probe_host(),),
+            pod=True,
+        ),
+        Check(
             "KN-S021",
             _POD_KINDS,
             ("!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.gitRepo))",),
@@ -615,6 +644,12 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
                 f"!object.subjects.exists(s, has(s.kind) && has(s.name) && ({_EVERYONE}))",
             ),
             rbac_names=True,
+        ),
+        Check(
+            "KN-S029",
+            _POD_KINDS,
+            (_no_probe_host(),),
+            pod=True,
         ),
         Check(
             "KN-N002",
