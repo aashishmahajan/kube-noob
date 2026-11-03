@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
+  0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
+  "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held
+  by a policy its own checklist says is held by design, and carried no entry for the two scheduled workflows that
+  have been failing for days. It is rewritten around one ordering -- correctness before capability, capability
+  before reach, reach before breadth -- with every item dated to a release, a **What this refuses to be** section
+  naming the privileges and claims the tool will not take and why, an honest ceiling on the compliance story (27
+  of about 1,189 controls, evidence rather than coverage, never a percentage), and a state column on the riskiest
+  assumptions that says which are blocked on a design partner rather than on code.
+
 - **A red team of this release's own changes found eight defects in them, including one that undid the change's
   own purpose.** `doctor` still printed `posture: OK` on its first line with `CONFLICT:` on its last, because
   `posture()` computes `status` before the model conflicts are appended -- the exact signal the change set out to
