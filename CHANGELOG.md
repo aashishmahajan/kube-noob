@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **A refresh that found nothing destroyed the corpus, marked it redistributable, and published an empty database
+  image under a green check.** Four defects composed. `corpus.write_shard` calls `os.replace` unconditionally, so
+  a source that yielded no records truncated the shard it was replacing to 0 bytes and the records were gone from
+  the data directory. `redistributable` was `all(r["redistributable"] for r in records)`, and `all([])` is `True`,
+  so the empty shard was marked publishable. `corpus build` returned `0 if all(isinstance(v, int) ...)`, and a
+  count of `0` is an `int`, so only an exception gave a non-zero exit. And `db_bundle.build` refused only when
+  there were no shards *at all*, so a present-but-empty shard shipped -- `_shard_problems` finds no bad lines in a
+  file with no lines, so `db-check` reported it clean. Upstream moving a documentation path is enough to set it
+  off: `ingest` matches nothing and raises nothing. `write_shard` now refuses a zero-record write unless the
+  caller passes `allow_empty`, keeping the previous shard; an empty shard is not redistributable; the bundle
+  refuses a corpus with no records; and the two workflows gained the records gate the Jira step beside them
+  already had.
+
+- **Nine workflow steps lost the exit code of the command they ran.** GitHub's default shell is `bash -e` without
+  `pipefail`, so `kube-noob corpus build ... | tee summary.json` reports `tee`'s status, not the build's. The two
+  corpus workflows run eight such pipelines between them, including the one that packs the published database
+  bundle, so a command could fail outright and the step still pass. Each now sets `set -euo pipefail`.
+
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
   "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held

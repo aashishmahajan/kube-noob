@@ -46,6 +46,7 @@ jobs:
       - run: pip install -e .
       - name: Public sources only (clones paced with a random pause)
         run: |
+          set -euo pipefail
           sources=$(python -c "from kube_noob.sources.registry import GIT_SOURCES as G; print(','.join(s.source_id for s in G if s.redistributable))")
           kube-noob corpus build --online --sources "$sources" --format json | tee git-summary.json
           kube-noob corpus history --online --format json | tee history-summary.json
@@ -62,9 +63,17 @@ jobs:
           rm -f "$RUNNER_TEMP/$name"
       - name: Pack the bundle
         run: |
+          set -euo pipefail
           mkdir -p dist/kube-noob-db
           kube-noob corpus db-bundle -o dist/kube-noob-db/kube-noob-db.tgz --format json | tee bundle.json
           tar -xzf dist/kube-noob-db/kube-noob-db.tgz -C dist/kube-noob-db ATTRIBUTION.md
+          python - <<'PY'
+          import json
+          b = json.load(open("bundle.json"))
+          if int(b.get("records", 0)) <= 0:
+              print("::error title=db bundle::0 records; refusing to publish an empty corpus image")
+              raise SystemExit(1)
+          PY
       - name: "Gate: nothing private, nothing unlicensed"
         run: kube-noob corpus db-check dist/kube-noob-db/kube-noob-db.tgz
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

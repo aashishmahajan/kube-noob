@@ -275,12 +275,20 @@ def build(data_dir: Path, out: Path, now: datetime | None = None) -> dict[str, A
                 (stage / "known_issues").rmdir()
         if not shards and not files:
             raise BundleError("nothing to ship: build the public corpus first (kube-noob corpus build --online)")
+        # A present-but-empty shard used to pass everything: `_shard_problems` finds no bad lines in a file with no
+        # lines, so the bundle built and `db-check` reported it clean. An empty corpus must not be publishable.
+        total = sum(int(e.get("records", 0)) for e in shards.values())
+        if shards and total == 0:
+            raise BundleError(
+                "refusing to ship a bundle with 0 records: the shards it would carry are empty, which means the "
+                "last `kube-noob corpus build` found nothing rather than that the corpus is small"
+            )
         stamp = (now or datetime.now(UTC)).isoformat(timespec="seconds")
         bundle = {
             "format": FORMAT,
             "builtAt": stamp,
             "kubeNoobVersion": __version__,
-            "records": sum(int(e.get("records", 0)) for e in shards.values()),
+            "records": total,
             "licenses": dict(sorted(licenses.items())),
             "files": files,
         }

@@ -117,3 +117,34 @@ def test_the_secret_that_gates_an_hour_of_work_is_checked_before_the_hour() -> N
         f"the first passphrase check is step {min(guards)} ({names[min(guards)]!r}) and the paced fetch is step "
         f"{fetch}; the run spends the hour before finding out it cannot keep the result"
     )
+
+
+def test_every_piped_step_sets_pipefail() -> None:
+    """`cmd | tee file` reports `tee`'s exit status, not `cmd`'s.
+
+    GitHub runs a `run:` block with `bash -e {0}` and no `pipefail`, so a step that pipes its real work into `tee`
+    to keep a copy of the JSON cannot fail when that work fails. Eight such steps existed across the two corpus
+    workflows, including the one that packs the database bundle that is published to users.
+
+    The exception is a step that pipes deliberately in order to inspect the output afterwards and asserts on it
+    itself; those are listed, with the assertion that follows them.
+    """
+    # path -> the line of a deliberate pipe whose own check follows it
+    allowed = {
+        # applies a manifest expecting it to be denied, then greps the captured output for the denial
+        ("ci.yml", "kubectl apply -f /tmp/priv.yaml 2>&1 | tee /tmp/applied.out"),
+    }
+    offenders: list[str] = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        lines = path.read_text().split("\n")
+        for i, line in enumerate(lines):
+            if "| tee " not in line and "| tee\t" not in line:
+                continue
+            if (path.name, line.strip()) in allowed:
+                continue
+            # `set -o pipefail` has to be in the same run block, which starts at the nearest `run:`
+            start = next((j for j in range(i, -1, -1) if re.search(r"^\s*(?:run|-\s*run):", lines[j])), 0)
+            block = "\n".join(lines[start : i + 1])
+            if "pipefail" not in block:
+                offenders.append(f"{path.name}:{i + 1}: {line.strip()[:80]}")
+    assert not offenders, "piped step whose exit status is tee's, not the command's:\n" + "\n".join(offenders)
