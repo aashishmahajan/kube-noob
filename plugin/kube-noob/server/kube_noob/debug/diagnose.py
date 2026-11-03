@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.debug.cluster import Backend, redact_text
 from kube_noob.debug.playbooks import EXIT_CODES, PLAYBOOKS, Cause, Playbook
 from kube_noob.debug.steps import classify_step, split_comment
@@ -241,7 +242,7 @@ def _selector(text: str) -> str | None:
     if not m:
         return None
     try:
-        doc = json.loads(m.group(1))
+        doc = sanitize.loads_bounded(m.group(1))
     except ValueError:
         return None
     if not isinstance(doc, dict) or not doc or len(doc) > 10:

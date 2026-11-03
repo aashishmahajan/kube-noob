@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from kube_noob import __version__
+from kube_noob import __version__, sanitize
 from kube_noob.audit.model import Severity
 
 MAX_FILES = 2_000
@@ -59,8 +59,10 @@ def _classify(path: Path | None, text: str) -> str | None:
     if path is not None and any(_in_chart_templates(path, parent) for parent in path.parents):
         return "a Helm template: render the chart with --chart"
     try:
-        docs = [d for d in yaml.safe_load_all(text) if d is not None]
-    except yaml.YAMLError:
+        docs = [d for d in sanitize.safe_load_all_bounded(text) if d is not None]
+    except sanitize.YamlTooDeep as exc:
+        return str(exc)
+    except (yaml.YAMLError, RecursionError):
         return None  # audited, so the parse error is reported
     if not any(isinstance(d, dict) and "apiVersion" in d and "kind" in d for d in docs):
         return "not a Kubernetes manifest (no document with apiVersion and kind)"
@@ -73,12 +75,17 @@ def unreadable_reason(text: str) -> str | None:
     Collecting it per file keeps one bad file in a directory from deciding the outcome for every other file, and keeps
     the reason attached to a path the user can open instead of a line of the combined input."""
     try:
-        list(yaml.safe_load_all(text))
+        sanitize.safe_load_all_bounded(text)
+    except sanitize.YamlTooDeep as exc:
+        # Not read, and the reason is the depth rather than a syntax error, so say that and name no line.
+        return str(exc)
     except yaml.YAMLError as exc:
         first = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
         mark = getattr(exc, "problem_mark", None)
         where = f" (line {mark.line + 1})" if mark is not None else ""
         return f"{first}{where}"
+    except RecursionError:
+        return "YAML nesting is too deep to read safely"
     return None
 
 
@@ -413,7 +420,7 @@ def _code_findings(
     parsed = []
     for uri, text in reports:
         try:
-            parsed.append(sarif.parse(text, uri, roots=roots))
+            parsed.append(sarif.parse(text, uri, roots=roots, max_depth=sanitize.MAX_JSON_DEPTH_FILE))
         except sarif.SarifError as err:
             raise GateError(str(err)) from err
     unknown = list(unknown_builds or [])

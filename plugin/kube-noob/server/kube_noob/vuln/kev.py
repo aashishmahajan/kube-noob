@@ -9,11 +9,12 @@ kube-noob reads a copy on disk (``--kev``); it does not download it here (VUL2 a
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from kube_noob import sanitize
 
 MAX_BYTES = 20_000_000
 MAX_ENTRIES = 100_000
@@ -70,12 +71,12 @@ def _s(v: Any, n: int = 300) -> str:
     return str(v)[:n] if isinstance(v, (str, int)) and not isinstance(v, bool) else ""
 
 
-def parse(data: str | bytes, origin: str = "KEV catalog") -> Kev:
+def parse(data: str | bytes, origin: str = "KEV catalog", max_depth: int = sanitize.MAX_JSON_DEPTH) -> Kev:
     raw = data.encode("utf-8") if isinstance(data, str) else data
     if len(raw) > MAX_BYTES:
         raise KevError(f"{origin}: larger than {MAX_BYTES} bytes")
     try:
-        doc = json.loads(raw)
+        doc = sanitize.loads_bounded(raw, max_depth)
     except (ValueError, RecursionError) as exc:
         raise KevError(f"{origin}: not JSON") from exc
     if not isinstance(doc, dict) or not isinstance(doc.get("vulnerabilities"), list) or "catalogVersion" not in doc:
@@ -109,4 +110,4 @@ def load(path: Path) -> Kev:
         raise KevError(f"{path}: no such file")
     if path.stat().st_size > MAX_BYTES:
         raise KevError(f"{path}: larger than {MAX_BYTES} bytes")
-    return parse(path.read_bytes(), str(path.name))
+    return parse(path.read_bytes(), str(path.name), sanitize.MAX_JSON_DEPTH_FILE)

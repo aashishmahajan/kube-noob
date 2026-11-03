@@ -249,13 +249,39 @@ kube-noob calls no model, but the model that calls kube-noob reads its results, 
 
 Where it is applied (found in the code):
 
+- `kube_noob/admission.py` `review_bytes` calls `sanitize.loads_bounded`
+- `kube_noob/audit/exceptions.py` `review` calls `sanitize.safe_load_bounded`
+- `kube_noob/build/analytics.py` `load_history` calls `sanitize.loads_bounded`
+- `kube_noob/build/containerfile.py` `audit` calls `sanitize.loads_bounded`
+- `kube_noob/build/oci.py` `_json` calls `sanitize.loads_bounded`
+- `kube_noob/code/sarif.py` `parse` calls `sanitize.loads_bounded`
+- `kube_noob/code/ship.py` `_args` calls `sanitize.loads_bounded`
+- `kube_noob/debug/diagnose.py` `_selector` calls `sanitize.loads_bounded`
 - `kube_noob/evals/problems.py` `parse` calls `sanitize.json_nesting_ok`
+- `kube_noob/gate.py` `_classify` calls `sanitize.safe_load_all_bounded`
+- `kube_noob/gate.py` `unreadable_reason` calls `sanitize.safe_load_all_bounded`
 - `kube_noob/insight.py` `_json` calls `sanitize.json_nesting_ok`
+- `kube_noob/knowledge_status.py` `_corpus_as_of` calls `sanitize.loads_bounded`
+- `kube_noob/known_issues.py` `_read_parts` calls `sanitize.loads_bounded`
+- `kube_noob/memory/importers.py` `parse` calls `sanitize.loads_bounded`
+- `kube_noob/rhacs.py` `load` calls `sanitize.loads_bounded`
 - `kube_noob/server/mcp_app.py` `CallFailed.__init__` calls `sanitize.clean`
 - `kube_noob/server/mcp_app.py` `build_server.knowledge_doc` calls `sanitize.clean`
 - `kube_noob/server/rest.py` `register.endpoint.handle` calls `sanitize.json_nesting_ok`
 - `kube_noob/signals/alertmanager.py` `_load` calls `sanitize.json_nesting_ok`
+- `kube_noob/signals/core.py` `_parse` calls `sanitize.loads_bounded`
+- `kube_noob/sources/db_bundle.py` `_known_problems` calls `sanitize.loads_bounded`
+- `kube_noob/sources/db_bundle.py` `build` calls `sanitize.loads_bounded`
+- `kube_noob/sources/jira.py` `load_state` calls `sanitize.loads_bounded`
+- `kube_noob/ticket_changes.py` `sync_state` calls `sanitize.loads_bounded`
+- `kube_noob/tickets.py` `_ticket_shards` calls `sanitize.loads_bounded`
 - `kube_noob/tool_runner.py` `call` calls `sanitize.result`
+- `kube_noob/upgrade_risks.py` `bundled` calls `sanitize.loads_bounded`
+- `kube_noob/vuln/kev.py` `parse` calls `sanitize.loads_bounded`
+- `kube_noob/vuln/reports.py` `parse` calls `sanitize.loads_bounded`
+- `kube_noob/vuln/vex.py` `_corpus_records` calls `sanitize.loads_bounded`
+- `kube_noob/vuln/vex.py` `_documents` calls `sanitize.loads_bounded`
+- `kube_noob/vuln/vex.py` `load` calls `sanitize.loads_bounded`
 
 Finding kinds it reports (read from its source): `bidi-override`, `instruction`, `instruction-hint`, `markdown-image`, `markdown-link`, `role-marker`, `tool-call`, `unicode-tags`, `zero-width`.
 

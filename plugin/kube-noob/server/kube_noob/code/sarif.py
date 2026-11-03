@@ -34,12 +34,13 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import json
 import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import unquote, urlparse
+
+from kube_noob import sanitize
 
 MAX_BYTES = 50_000_000
 MAX_RUNS = 20
@@ -399,14 +400,21 @@ def _fingerprint(result: dict[str, Any], tool: str, rule_id: str, loc: Location,
     return "kube-noob:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
-def parse(data: str | bytes, where: str = "SARIF", roots: list[str] | None = None) -> SarifReport:
+def parse(
+    data: str | bytes,
+    where: str = "SARIF",
+    roots: list[str] | None = None,
+    max_depth: int = sanitize.MAX_JSON_DEPTH,
+) -> SarifReport:
     """Every run's failing results, normalised. ``roots``: absolute source roots the scanners ran in (for example
     ``/home/runner/work/shop/shop``), so absolute paths become repository-relative."""
     raw = data.encode("utf-8") if isinstance(data, str) else data
     if len(raw) > MAX_BYTES:
         raise SarifError(f"{where}: larger than {MAX_BYTES} bytes")
     try:
-        doc = json.loads(raw)
+        doc = sanitize.loads_bounded(raw, max_depth)
+    except sanitize.JsonTooDeep as exc:
+        raise SarifError(f"{where}: JSON nested too deeply") from exc
     except (ValueError, RecursionError) as exc:
         raise SarifError(f"{where}: not JSON") from exc
     if not isinstance(doc, dict) or not isinstance(doc.get("runs"), list):

@@ -70,13 +70,14 @@ offline`` with the reason. Versions are x.y.z only, validated with a ``\\Z``-anc
 from __future__ import annotations
 
 import functools
-import json
 import re
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib import resources
 from typing import Any
+
+from kube_noob import sanitize
 
 ARCHITECTURES = ("amd64", "arm64", "multi", "ppc64le", "s390x")
 VERDICTS = ("applies", "check", "cannot evaluate offline")
@@ -768,7 +769,7 @@ def bundled() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not root.is_dir():
         return records, meta
     for f in sorted((p for p in root.iterdir() if p.name.endswith(".json")), key=lambda p: p.name):
-        doc = json.loads(f.read_text(encoding="utf-8"))
+        doc = sanitize.loads_bounded(f.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
         records.extend(doc.get("records", []))
         meta = {k: v for k, v in doc.items() if k != "records"} or meta
     return records, meta

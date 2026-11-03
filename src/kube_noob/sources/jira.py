@@ -35,6 +35,7 @@ from typing import Any
 
 import httpx
 
+from kube_noob import sanitize
 from kube_noob.errors import KubeNoobError
 from kube_noob.jira_catalog import (  # noqa: F401 - re-exported for callers of the sync
     DEFAULT_BASE_URL,
@@ -784,7 +785,7 @@ def load_state(data_dir: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc = sanitize.loads_bounded(path.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
     except (OSError, ValueError):
         return {}
     return doc if isinstance(doc, dict) else {}

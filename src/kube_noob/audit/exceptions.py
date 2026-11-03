@@ -37,6 +37,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from kube_noob import sanitize
 from kube_noob.audit.rules import RULES
 
 MAX_DAYS = 400
@@ -202,8 +203,10 @@ def review(text: str, today: dt.date | None = None) -> Review:
     if len(text.encode("utf-8")) > MAX_BYTES:
         raise ExceptionsError(f"exception list larger than {MAX_BYTES} bytes")
     try:
-        doc = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+        doc = sanitize.safe_load_bounded(text)
+    except sanitize.YamlTooDeep as exc:
+        raise ExceptionsError(str(exc)) from exc
+    except (yaml.YAMLError, RecursionError) as exc:
         raise ExceptionsError(f"not YAML: {str(exc)[:200]}") from exc
     if not isinstance(doc, dict) or doc.get("apiVersion") != "kube-noob.io/v1" or doc.get("kind") != "ExceptionList":
         raise ExceptionsError("expected apiVersion: kube-noob.io/v1 and kind: ExceptionList")

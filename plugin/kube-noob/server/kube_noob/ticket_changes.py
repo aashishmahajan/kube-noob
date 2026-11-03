@@ -17,6 +17,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
+
 OPEN_VERDICTS = ("open", "fix-in-progress", "fix-proposed")
 KINDS = (
     "fixed",
@@ -47,7 +49,11 @@ def sync_state(data_dir: Path) -> dict[str, Any]:
     """The sync state (``jira/state.json``) read without the sync code, so the MCP plugin needs no Jira client."""
     path = data_dir / "jira" / "state.json"
     try:
-        doc = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        doc = (
+            sanitize.loads_bounded(path.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
+            if path.is_file()
+            else {}
+        )
     except (OSError, ValueError):
         return {}
     return doc if isinstance(doc, dict) else {}

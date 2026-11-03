@@ -10,11 +10,11 @@ order. Input is bounded in size, lines, items and signals.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.errors import ManifestError
 from kube_noob.signals.vocab import (
     CO_BAD,
@@ -153,7 +153,7 @@ def _parse(text: str) -> list[Any] | None:
     head = text.lstrip()[:200]
     if head.startswith(("{", "[")):  # JSON (kubectl -o json, Alertmanager): parsed as JSON only, fast to refuse
         try:
-            doc = json.loads(text)
+            doc = sanitize.loads_bounded(text)
         except (ValueError, RecursionError):
             return None
         docs = doc if isinstance(doc, list) and doc and all(isinstance(d, dict) for d in doc) else [doc]

@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.catalog import OPENSHIFT_FAMILY
 from kube_noob.errors import KubeNoobError
 from kube_noob.jira_catalog import DEFAULT_BASE_URL, DEFAULT_PROJECTS, ISSUE_KEY, OPENSHIFT_VERSIONED, parse_version
@@ -322,7 +323,11 @@ def index_path(data_dir: Path) -> Path:
 def _ticket_shards(data_dir: Path) -> list[tuple[str, dict[str, Any]]]:
     manifest = data_dir / "corpus" / "MANIFEST.json"
     try:
-        doc = json.loads(manifest.read_text(encoding="utf-8")) if manifest.is_file() else {}
+        doc = (
+            sanitize.loads_bounded(manifest.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
+            if manifest.is_file()
+            else {}
+        )
     except (OSError, ValueError):
         return []
     shards = (doc.get("shards") or {}).items() if isinstance(doc, dict) else []

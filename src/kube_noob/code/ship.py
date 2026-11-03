@@ -25,12 +25,12 @@ Traversal of stages is memoised per call, so a stage copying from every earlier 
 from __future__ import annotations
 
 import fnmatch
-import json
 import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.build import containerfile as cf
 
 MAX_STAGES = 50
@@ -102,8 +102,8 @@ def _args(ins: cf.Instruction) -> list[str]:
     body = ins.body.strip()
     if body.startswith("["):
         try:
-            parts = json.loads(body)
-        except ValueError:
+            parts = sanitize.loads_bounded(body)
+        except (ValueError, RecursionError):
             parts = None
         if isinstance(parts, list) and all(isinstance(p, str) for p in parts):
             return [str(p) for p in parts]

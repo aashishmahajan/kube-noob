@@ -34,6 +34,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kube_noob import sanitize
+
 API_VERSION = "admission.k8s.io/v1"
 MAX_BODY = 4_000_000  # bytes: the API server's object limit plus the review envelope
 WARNING_CHARS = 256
@@ -243,7 +245,7 @@ def review_bytes(
     if len(body) > MAX_BODY:
         return _response("", True, [_warning(f"kube-noob: request larger than {MAX_BODY} bytes; admitted")])
     try:
-        doc = json.loads(body)
+        doc = sanitize.loads_bounded(body)
     except (ValueError, RecursionError):
         return _response("", True, [_warning("kube-noob: the request is not JSON; admitted")])
     return review(doc, cfg, context)

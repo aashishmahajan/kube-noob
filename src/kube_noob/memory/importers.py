@@ -29,12 +29,13 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+from kube_noob import sanitize
 
 FORMATS = ("servicenow-json", "servicenow-csv", "jira-json", "jira-csv")
 MAX_EXPORT = 50_000_000  # bytes
@@ -255,7 +256,9 @@ def parse(fmt: str, text: str) -> list[Ticket]:
         )
     if fmt.endswith("json"):
         try:
-            doc = json.loads(text)
+            doc = sanitize.loads_bounded(text, sanitize.MAX_JSON_DEPTH_FILE)
+        except sanitize.JsonTooDeep as exc:
+            raise TicketImportError(f"the JSON cannot be read: it is {exc}") from None
         except (ValueError, RecursionError) as exc:
             raise TicketImportError(f"the JSON cannot be read: {str(exc)[:120]}") from None
         if fmt == "servicenow-json":

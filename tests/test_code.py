@@ -224,7 +224,7 @@ def test_hostile_sarif(monkeypatch: pytest.MonkeyPatch) -> None:
         (b"[]", "not SARIF"),
         (b'{"version": "2.1.0"}', "not SARIF"),
         (b'{"version": "2.0.0", "runs": []}', "2.0.0"),
-        (b"[" * 100_000 + b"]" * 100_000, "not JSON"),
+        (b"[" * 100_000 + b"]" * 100_000, "nested too deeply"),
     ):
         with pytest.raises(sarif.SarifError, match=why):
             sarif.parse(bad, "t")

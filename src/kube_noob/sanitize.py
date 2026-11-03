@@ -30,48 +30,137 @@ from __future__ import annotations
 import base64
 import binascii
 import html
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
+import yaml
+
 MAX_SIGNALS = 20
 MAX_DEPTH = 40
 MAX_JSON_DEPTH = 64  # brackets deep that pasted JSON may nest before it is refused unread (real payloads: under 10)
+# Files get a higher ceiling than pastes. The tight limit exists for the WebAssembly playground, whose stack is
+# small, and for text a person pastes, which nests under ten. A scanner's own output is different: nested
+# CycloneDX components are a dependency tree, and `vuln.reports` is built to accept a deep one and bound its own
+# walk at MAX_DEPTH rather than refuse the document. Refusing at 64 would turn that into a rejection. 512 is far
+# above any real SBOM and far below both CPython's recursion limit and a nesting bomb, which runs to six figures.
+MAX_JSON_DEPTH_FILE = 512
+MAX_YAML_DEPTH = 64  # nesting levels of YAML composed from outside; `yamlio` bounds manifests at its own MAX_DEPTH
 MAX_SCAN = 4_000_000  # characters of one string scanned; the rest is kept as is (results are bounded upstream)
 MAX_BASE64 = 20  # base64 runs decoded per string
 MARKER = "[removed: {what}]"
 
 
-def json_nesting_ok(text: str, limit: int = MAX_JSON_DEPTH) -> bool:
-    """Whether pasted JSON is shallow enough to hand to ``json.loads``, counted before parsing it.
+class YamlTooDeep(ValueError):
+    """Raised instead of composing YAML that nests past ``MAX_YAML_DEPTH``.
 
-    ``json.loads`` recurses, and what stops it differs by interpreter: CPython 3.13 and earlier raise
-    ``RecursionError`` at about a thousand levels, which every caller here catches. CPython 3.14 relies on the C
-    stack instead, so in the WebAssembly runtime that kube-noob.com's playground uses, a deeply nested paste
-    overflows the stack and surfaces as a raw JavaScript ``RangeError`` that the runtime calls fatal -- taking out
-    ``diagnose`` and ``known_issues`` for a paste that merely starts with a bracket. Counting the brackets first
-    refuses that input the same way on every interpreter, before anything recurses.
+    A ``ValueError``, so an ``except ValueError`` catches it. ``yaml.YAMLError`` is *not* a ``ValueError``, so a
+    caller that only catches ``yaml.YAMLError`` must be widened as well as pointed at the bounded loader.
     """
+
+
+class JsonTooDeep(ValueError):
+    """Raised instead of parsing JSON that nests past ``MAX_JSON_DEPTH``.
+
+    A ``ValueError``, so the ``except ValueError`` every JSON reader here already has keeps catching it.
+    """
+
+
+# A complete JSON string literal, with the inner loop unrolled so the engine consumes long runs of ordinary
+# characters in one step instead of one alternation per character. The trailing `"?` makes an unterminated string
+# swallow the rest of the input, which is what counting character by character does.
+_JSON_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"?')
+_NOT_BRACKET = re.compile(r"[^{}\[\]]+")
+
+
+def json_nesting_ok(text: str | bytes, limit: int = MAX_JSON_DEPTH) -> bool:
+    """Whether JSON is shallow enough to hand to ``json.loads``, counted before parsing it.
+
+    ``json.loads`` recurses, and from CPython 3.14 nothing portable stops it. Up to 3.13 it raises
+    ``RecursionError`` at about ``sys.getrecursionlimit()`` levels, which every caller here catches. On 3.14 the
+    limit no longer applies to it: measured on 3.14.6 with ``recursionlimit`` at its default 1000, a document
+    10 000 brackets deep parses, and only 100 000 fails -- and whether even that fails depends on the C stack the
+    process happens to have, so the same document is refused in a small container and accepted on a CI runner. In
+    the WebAssembly runtime behind kube-noob.com's playground the overflow surfaces as a raw JavaScript
+    ``RangeError`` that the runtime calls fatal, taking out ``diagnose`` and ``known_issues`` for a paste that
+    merely starts with a bracket.
+
+    So there is no depth a handler can be written against. Counting the brackets first refuses the same input at
+    the same depth on every interpreter and every machine, before anything recurses.
+
+    Two passes in C -- drop every string literal, then drop everything that is not a bracket -- so the loop below
+    runs once per bracket rather than once per character. On a 50 MB document that is about 0.4 s instead of 3 s,
+    and the two passes allocate less than the parse they guard.
+    """
+    s = text.decode("utf-8", errors="replace") if isinstance(text, bytes | bytearray) else text
+    # Nothing can nest past the limit with fewer openers than that, and most documents stop here for free.
+    if s.count("{") + s.count("[") <= limit:
+        return True
     depth = 0
-    in_string = escaped = False
-    for ch in text:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-        elif ch == '"':
-            in_string = True
-        elif ch in "{[":
+    for ch in _NOT_BRACKET.sub("", _JSON_STRING.sub("", s)):
+        if ch in {"{", "["}:
             depth += 1
             if depth > limit:
                 return False
-        elif ch in "}]":
+        else:
             depth -= 1
     return True
+
+
+_YAML_OPEN = (yaml.MappingStartEvent, yaml.SequenceStartEvent)
+_YAML_CLOSE = (yaml.MappingEndEvent, yaml.SequenceEndEvent)
+
+
+def yaml_nesting_ok(text: str, limit: int = MAX_YAML_DEPTH) -> bool:
+    """Whether YAML is shallow enough to hand to a loader, counted from the event stream before composing it.
+
+    The same problem as JSON, worse: ``yaml.SafeLoader``'s composer recurses in Python and ``yaml.CSafeLoader``'s
+    recurses in C, where a deep document does not raise ``RecursionError`` but **segfaults the process** -- 50 000
+    levels is enough on CPython 3.13, no 3.14 required. ``yaml.parse`` only emits events and recurses in neither
+    implementation (40 007 events at 20 000 levels deep, measured), so the depth can be counted before anything
+    builds a node.
+
+    Malformed YAML returns ``True``: saying so is the loader's job, and its message is the better one.
+    """
+    depth = 0
+    try:
+        for event in yaml.parse(text):
+            if isinstance(event, _YAML_OPEN):
+                depth += 1
+                if depth > limit:
+                    return False
+            elif isinstance(event, _YAML_CLOSE):
+                depth -= 1
+    except yaml.YAMLError:
+        return True
+    return True
+
+
+def safe_load_bounded(text: str, limit: int = MAX_YAML_DEPTH) -> Any:
+    """``yaml.safe_load`` with the nesting counted first. Raises ``YamlTooDeep`` (a ``ValueError``)."""
+    if not yaml_nesting_ok(text, limit):
+        raise YamlTooDeep(f"YAML nested too deeply (more than {limit} levels)")
+    return yaml.safe_load(text)
+
+
+def safe_load_all_bounded(text: str, limit: int = MAX_YAML_DEPTH) -> list[Any]:
+    """``yaml.safe_load_all`` with the nesting counted first, returned as a list so the count cannot be skipped."""
+    if not yaml_nesting_ok(text, limit):
+        raise YamlTooDeep(f"YAML nested too deeply (more than {limit} levels)")
+    return list(yaml.safe_load_all(text))
+
+
+def loads_bounded(data: str | bytes, limit: int = MAX_JSON_DEPTH) -> Any:
+    """``json.loads`` with the bracket depth counted first, so every reader refuses a nesting bomb identically.
+
+    Raises ``JsonTooDeep`` (a ``ValueError``) rather than letting the interpreter decide, and otherwise behaves
+    exactly like ``json.loads``.
+    """
+    if not json_nesting_ok(data, limit):
+        raise JsonTooDeep(f"JSON nested too deeply (more than {limit} levels)")
+    return json.loads(data)
 
 
 def _chars(*points: int | tuple[int, int]) -> str:
