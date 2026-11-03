@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **The weekly risk review opened an issue a week and never closed the previous one.** `risk-review.yml`
+  searched for an open issue titled with *this* week and edited it, else created one, and never touched the week
+  before -- so 2026-W44 ("release recommended: no, no action needed this week") sat open from 27 October while
+  W45 replaced it, and by December there would have been six open issues all reporting that nothing is wrong,
+  with any week that did need attention among them. An open issue is a claim that something wants doing; a report
+  that has been superseded is not making that claim. The step now closes every other open `risk-review` issue
+  with a comment naming the week that replaced it.
+  Two details that matter because this runs unattended: the new issue's number is taken from `gh issue create`'s
+  own output rather than a follow-up search, because GitHub's search index is eventually consistent and an empty
+  result would have closed the issue just written; and the run fails loudly rather than closing anything if the
+  number cannot be established. Both paths were exercised against a stubbed `gh` before shipping -- creating
+  closes the two superseded issues and not the new one, updating closes only the older one. W44 was closed by
+  hand this once (G176).
+
 - **The KN-N008 deprecation change shipped with no test, so the claim it added was unprotected.** The commit
   added the `k8s-kep-5707` citation and rewrote the description to say the field is deprecated in Kubernetes
   1.36, and touched no test -- the suite stayed green at exactly the count it had before, which is what a claim

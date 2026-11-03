@@ -12,7 +12,11 @@
 | Weekly | Dependabot PRs for pip, Actions and the base image | `dependabot.yml` |
 
 The risk review opens or updates one GitHub issue per ISO week titled `Weekly risk review <year>-W<week>` with the
-label `risk-review`, plus `release-needed` when a patch release is recommended.
+label `risk-review`, plus `release-needed` when a patch release is recommended. It then closes every other open
+`risk-review` issue as superseded, so the open list holds the current week only: an open issue is a claim that
+something wants doing, and a report that has been replaced is not making that claim. The run fails rather than
+closing anything if it cannot establish this week's issue number, because closing on an unknown number would
+close the week it had just written.
 
 ## Risk vectors and the release rule
 
