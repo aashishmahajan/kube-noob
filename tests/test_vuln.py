@@ -405,7 +405,10 @@ def test_cli_report_threat_and_gate(fx: Path, tmp_path: Path, capsys: pytest.Cap
     assert any("vulnerability finding(s) at critical or above that are fixable or known exploited" in w for w in why)
     assert not any(w.startswith("6 finding") for w in why), "unfixable vulnerabilities are reported, not counted"
     assert main([*args, "--fail-on", "never", "--format", "json"]) == 0
-    assert "--scanner-report" in json.loads(capsys.readouterr().out)["notRun"][0]
+    # By membership, not by index: `notRun` also names the manifest and Containerfile audits when those did not
+    # run, so the position of any one entry is not part of the contract.
+    not_run = json.loads(capsys.readouterr().out)["notRun"]
+    assert any("--scanner-report" in entry for entry in not_run), not_run
 
 
 def test_mcp_tools(fx: Path, tmp_path: Path) -> None:

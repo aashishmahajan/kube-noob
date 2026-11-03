@@ -133,6 +133,57 @@ def _flatten(values: list[Any]) -> list[Any]:
     return out
 
 
+class CheckSpecError(ValueError):
+    """An assertion in a task spec cannot be evaluated as written."""
+
+
+# Every comparison `_check_value` understands, plus the two `_assert` handles itself. A key outside this set is a
+# typo, and a typo used to pass: `_check_value` returned None for an unrecognised operator and `_assert` turned
+# that None into a pass -- on a gating, weight-2.0 assertion, which also disengaged the GATE_CAP clamp, so a
+# wrong answer scored high instead of being capped.
+OPERATORS = frozenset(
+    {
+        "equals",
+        "notEquals",
+        "in",
+        "gte",
+        "lte",
+        "contains",
+        "notContains",
+        "containsItem",
+        "notContainsItem",
+        "subsetOf",
+        "lenLte",
+        "lenGte",
+        "matches",
+        "exists",
+    }
+)
+_ASSERTION_KEYS = OPERATORS | {"kind", "path", "all", "name"}
+
+
+def validate_assertion(a: dict[str, Any]) -> None:
+    """Refuse an assertion that names no operator this module can evaluate.
+
+    `exists: true` is an operator, so a bare presence check is legitimate; what is refused is a key nothing
+    recognises, which previously read as "present" and passed.
+    """
+    if not isinstance(a, dict):
+        raise CheckSpecError(f"an assertion must be a mapping, not {type(a).__name__}")
+    unknown = sorted(set(a) - _ASSERTION_KEYS)
+    if unknown:
+        raise CheckSpecError(
+            f"assertion on {a.get('kind')}.{a.get('path')}: {unknown} is not an operator this module can "
+            f"evaluate, so the assertion would pass whatever the answer is. Use one of "
+            f"{', '.join(sorted(OPERATORS))}"
+        )
+    if not set(a) & OPERATORS:
+        raise CheckSpecError(
+            f"assertion on {a.get('kind')}.{a.get('path')} names no operator, so it would pass whatever the "
+            f"answer is; use one of {', '.join(sorted(OPERATORS))}"
+        )
+
+
 def _check_value(a: dict[str, Any], val: Any) -> tuple[bool, str] | None:
     """Evaluate one operator against one value. None means no operator was given."""
     if "equals" in a:
@@ -256,6 +307,9 @@ def evaluate(answer: str, spec: dict[str, Any]) -> Evaluation:
             )
         )
     for a in spec.get("assertions") or []:
+        # Refuse a spec whose assertion names no operator rather than scoring it as a pass. These are gating and
+        # weight 2.0, so a typo used to hand out free marks and disengage the GATE_CAP clamp at the same time.
+        validate_assertion(a)
         outcome = _assert(docs, a)
         outcome.weight, outcome.gating = 2.0, True
         outcomes.append(outcome)

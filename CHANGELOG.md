@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Five more places reported a clean result without having checked anything.** `gate`'s `notRun` listed only the
+  two absent-report cases, so a pipeline whose manifest glob stopped matching -- a renamed `deploy/` directory --
+  kept passing its scanner and SARIF reports, exited 0, printed "gate passed", and rendered an **empty** "Not run"
+  section, which positively asserts that nothing was left out; it now names the no-manifests and
+  no-Containerfile cases. An eval assertion whose operator was misspelled (`equal` for `equals`) scored as a pass:
+  `_check_value` returns `None` for an unrecognised operator and `_assert` turned that into "present" -- on a
+  gating, weight-2.0 assertion, which also disengaged the `GATE_CAP` clamp, so a valid-but-wrong answer scored
+  high instead of being capped at 0.4. `validate_assertion` now refuses a spec that names no operator, and
+  `evaluate` calls it. The Jira scrubber's account-id pattern was strictly weaker than the privacy audit that
+  gates the weekly refresh -- the audit matches bare ids, the scrubber required a `[~...]` or `accountId:` prefix
+  -- so a reporter id pasted bare into a description survived the scrub and then failed the gate: not a leak,
+  because no workflow commits Jira data and the gate exits 1, but one such ticket failed the refresh every week
+  and discarded an hour of paced fetching each time. Both now share one definition. `db_bundle`'s `MAX_MEMBER` and
+  `MAX_MEMBERS` were referenced only inside the reader, so `build()` could pack an archive nothing can `import`
+  and report success, and `check()` on a directory enforced neither; `check` now applies the predicate and `build`
+  runs `check` over its staging tree, so there is one call site rather than two that can drift. And three
+  assertions ended in `or True`, including `test_a_blind_run_is_not_reported_as_a_clean_one`, whose comment states
+  the repo's own coverage-honesty property while the assertion that would hold it was dead. All three pass without
+  it.
+
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
   "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held
