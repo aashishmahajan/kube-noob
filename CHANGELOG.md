@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- **Both red scheduled workflows are diagnosed, and neither is a bug in the workflow.** `db-image` fails its own
-  member-size gate: `redhat-vex.jsonl` has grown past `db_bundle.MAX_MEMBER` (300 MB), so an upstream feed
-  outgrew a limit this project set. Raising the number buys a quarter; sharding the member, filtering the feed to
+- **Both red scheduled workflows are diagnosed, and neither is a bug in the workflow.** the scheduled `db-image.yml` fails its
+  own member-size gate: `redhat-vex.jsonl` has grown past `db_bundle.MAX_MEMBER` (300 MB), so an upstream feed
+  outgrew a limit this project set. (The `db-image` job in `ci.yml` shares the name and is green: it bundles a
+  small public corpus and never downloads the VEX feed.) Raising the number buys a quarter; sharding the member, filtering the feed to
   the products kube-noob answers about, or compressing it are the real options, and choosing between them is a
   decision rather than a fix. `corpus-refresh` fails its privacy audit, which is the gate working -- and now
   reports enough to triage (G179). Its run also warns that the stored copy no longer decrypts with the current
