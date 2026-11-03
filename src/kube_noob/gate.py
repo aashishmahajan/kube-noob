@@ -379,6 +379,21 @@ def run(
         "vulnerabilities": vulns["summary"],
         "code": code["summary"],
         "notRun": [
+            # The two biggest omissions were missing: a pipeline whose manifest glob stopped matching passed its
+            # reports, exited 0, and rendered an empty "Not run" section, which asserts that nothing was skipped.
+            *(
+                []
+                if sources
+                else [
+                    "manifest and chart audit: no manifests were read, so no policy, RBAC, SCC or NetworkPolicy "
+                    "rule ran. Pass them with -f, or render a chart with --chart"
+                ]
+            ),
+            *(
+                []
+                if containerfiles
+                else ["Containerfile audit: pass a build file with --containerfile (Dockerfile or Containerfile)"]
+            ),
             *(
                 []
                 if scanner_reports

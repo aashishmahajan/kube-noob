@@ -8,6 +8,7 @@ then BANP; within the ANP tier, lower ``priority`` first and then rule order, fi
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -478,3 +479,90 @@ def test_the_read_only_steps_name_the_tier_that_decided_first() -> None:
     plain_steps = [s["command"] for s in plain["readOnlyNextSteps"]]
     assert any("adminnetworkpolicy" in s for s in plain_steps)
     assert not plain_steps[0].endswith("get adminnetworkpolicy,baselineadminnetworkpolicy")
+
+
+def test_two_policies_at_one_priority_whose_rules_disagree_are_not_determined() -> None:
+    """The API's own words: two AdminNetworkPolicies at the same priority in the same tier are undefined behaviour,
+    so which one decides is up to the implementation and may differ between clusters and between restarts. The
+    evaluator used to break the tie by the order the documents arrived in, which made a coin toss look like a
+    verdict. It has to say it could not determine this instead -- and it must not then propose a NetworkPolicy,
+    because a NetworkPolicy cannot override the admin tier whichever way the tie lands.
+    """
+    for parts in (
+        (_anp(10, "Deny", "deny-side"), _anp(10, "Allow", "allow-side")),
+        (_anp(10, "Allow", "allow-side"), _anp(10, "Deny", "deny-side")),
+    ):
+        out = _check(ALLOW_ALL_NP, *parts)
+        assert out["verdict"] == "undetermined", out["verdict"]
+        ing = out["ingress"]
+        assert ing["undetermined"] is True
+        assert ing["tier"] == "AdminNetworkPolicy"
+        assert ing["evaluated"] is False
+        # Both policies are named, so the operator knows which two to reconcile.
+        assert set(ing["tiedPolicies"]) == {"AdminNetworkPolicy/deny-side", "AdminNetworkPolicy/allow-side"}
+        assert "priority 10" in ing["reason"]
+        assert "undefined" in ing["reason"]
+        assert "could not determine" in out["summary"]
+        # No manifest may be proposed: it would be applied and change nothing if the Deny wins.
+        for change in out.get("proposedChanges") or []:
+            assert "manifest" not in change, change
+
+
+def test_two_policies_at_one_priority_that_agree_still_decide() -> None:
+    """A tie is only undetermined when the tied policies disagree. Two Denies at the same priority deny the traffic
+    whichever one the API server picks, so refusing to answer there would be a false unknown."""
+    out = _check(ALLOW_ALL_NP, _anp(10, "Deny", "deny-a"), _anp(10, "Deny", "deny-b"))
+    assert out["verdict"] == "denied"
+    assert out["ingress"]["tier"] == "AdminNetworkPolicy"
+    assert not out["ingress"].get("undetermined")
+
+
+def test_a_duplicate_priority_is_reported_even_when_the_tie_does_not_change_the_verdict() -> None:
+    """Relying on undefined behaviour is worth saying out loud: the config is fragile even in the run where both
+    tied policies happen to agree."""
+    out = _check(ALLOW_ALL_NP, _anp(10, "Deny", "deny-a"), _anp(10, "Deny", "deny-b"))
+    notes = " ".join(out.get("notes") or [])
+    assert "priority 10" in notes
+    assert "deny-a" in notes and "deny-b" in notes
+
+
+def test_a_tie_at_a_priority_that_never_matches_is_still_only_a_note() -> None:
+    """A duplicate priority among policies that do not select this traffic cannot change this verdict, so it stays a
+    note and does not turn a real answer into an unknown."""
+    out = _check(
+        ALLOW_ALL_NP,
+        _anp(10, "Deny", "deny-other", from_ns="kube-system"),
+        _anp(10, "Allow", "allow-other", from_ns="kube-system"),
+    )
+    assert out["verdict"] == "allowed"
+    assert not out["ingress"].get("undetermined")
+    assert "priority 10" in " ".join(out.get("notes") or [])
+
+
+def test_a_lower_priority_decides_before_a_tie_higher_up() -> None:
+    """Precedence still runs lowest number first: a clean Deny at 5 settles the traffic and the conflicting pair at
+    10 is never reached, so the answer is a verdict, not an unknown."""
+    out = _check(ALLOW_ALL_NP, _anp(5, "Deny", "clean-deny"), _anp(10, "Allow", "tie-a"), _anp(10, "Deny", "tie-b"))
+    assert out["verdict"] == "denied"
+    assert "clean-deny" in out["ingress"]["reason"]
+    assert not out["ingress"].get("undetermined")
+
+
+def test_the_reach_command_prints_and_exits_on_an_undetermined_verdict(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Two things a CI job depends on: the unknown is visible in the default text output, not only in the JSON, and
+    the exit code is not 0. ``policy reach`` returns 0 only for 'allowed'."""
+    from kube_noob.cli import main
+
+    bundle = tmp_path / "tie.yaml"
+    bundle.write_text(
+        "\n---\n".join((WORKLOADS, ALLOW_ALL_NP, _anp(10, "Deny", "deny-side"), _anp(10, "Allow", "allow-side")))
+    )
+    args = ["policy", "reach", "--from", "monitoring/prometheus", "--to", "shop/orders", "--port", "8080"]
+    rc = main([*args, "-f", str(bundle)])
+    text = capsys.readouterr().out
+    assert rc == 1, text
+    assert text.startswith("UNDETERMINED  "), text
+    assert "deny-side" in text and "allow-side" in text
+    assert "fix (needs approval)" not in text, text

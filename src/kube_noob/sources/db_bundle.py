@@ -110,8 +110,11 @@ def _known_problems(path: Path, name: str) -> list[str]:
 
 
 def check(root: Path) -> list[str]:
-    """Every rule a bundle directory must keep; empty when it keeps them all."""
-    problems: list[str] = []
+    """Every rule a bundle directory must keep; empty when it keeps them all.
+
+    `build` runs this over its staging tree before packing, so the writer and the reader share one predicate.
+    """
+    problems: list[str] = _member_problems(root)
     manifest_file = root / "MANIFEST.json"
     if not manifest_file.is_file():
         return ["MANIFEST.json is missing"]
@@ -124,6 +127,18 @@ def check(root: Path) -> list[str]:
         return [f"MANIFEST.json is not a {FORMAT} manifest"]
     if "jira" in manifest:
         problems.append("MANIFEST.json carries a Jira block")
+    # `db-check` is what someone runs on a bundle they downloaded. A manifest declaring no shards, or shards whose
+    # record counts are all zero, used to pass every check here: the per-shard loop below finds no bad lines in a
+    # file with no lines, so an empty corpus reported clean and exited 0. The writer's guard is not enough, since
+    # the writer is not who runs this.
+    declared = (manifest.get("shards") or {}) if isinstance(manifest, dict) else {}
+    if not declared:
+        problems.append("MANIFEST.json declares no shards: an empty corpus is not a bundle")
+    elif sum(int((e or {}).get("records", 0) or 0) for e in declared.values()) == 0:
+        problems.append(
+            f"MANIFEST.json declares {len(declared)} shard(s) with 0 records between them: an empty corpus is not "
+            "a bundle"
+        )
     listed: dict[str, str] = {}
     for name, entry in (manifest.get("shards") or {}).items():
         fname = str((entry or {}).get("file", ""))
@@ -277,12 +292,20 @@ def build(data_dir: Path, out: Path, now: datetime | None = None) -> dict[str, A
                 (stage / "known_issues").rmdir()
         if not shards and not files:
             raise BundleError("nothing to ship: build the public corpus first (kube-noob corpus build --online)")
+        # A present-but-empty shard used to pass everything: `_shard_problems` finds no bad lines in a file with no
+        # lines, so the bundle built and `db-check` reported it clean. An empty corpus must not be publishable.
+        total = sum(int(e.get("records", 0)) for e in shards.values())
+        if shards and total == 0:
+            raise BundleError(
+                "refusing to ship a bundle with 0 records: the shards it would carry are empty, which means the "
+                "last `kube-noob corpus build` found nothing rather than that the corpus is small"
+            )
         stamp = (now or datetime.now(UTC)).isoformat(timespec="seconds")
         bundle = {
             "format": FORMAT,
             "builtAt": stamp,
             "kubeNoobVersion": __version__,
-            "records": sum(int(e.get("records", 0)) for e in shards.values()),
+            "records": total,
             "licenses": dict(sorted(licenses.items())),
             "files": files,
         }
@@ -339,6 +362,23 @@ def _extract(archive: Path, into: Path) -> Path:
     except (tarfile.TarError, OSError, EOFError) as exc:
         raise BundleError(f"{archive.name}: not a readable .tgz ({exc})") from exc
     return into
+
+
+def _member_problems(root: Path) -> list[str]:
+    """The size and count caps `_extract` enforces on a .tgz, applied to a tree before it becomes one.
+
+    `MAX_MEMBER` and `MAX_MEMBERS` were referenced only by the reader, so `build()` could pack an archive nothing
+    could import and report success, and `check()` on a directory enforced neither.
+    """
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    out: list[str] = []
+    if len(files) > MAX_MEMBERS:
+        out.append(f"{len(files)} files, more than {MAX_MEMBERS}")
+    for f in files:
+        size = f.stat().st_size
+        if size > MAX_MEMBER:
+            out.append(f"{f.relative_to(root)} is {size} bytes, larger than {MAX_MEMBER}")
+    return out
 
 
 def check_archive(archive: Path) -> list[str]:

@@ -37,6 +37,108 @@
   loaders left in the tree that may shrink and never grow, and it says so rather than claiming they are all safe.
 
 
+- **`policy reach` decided an undefined case by the order the manifests arrived in.** Two
+  `AdminNetworkPolicy` objects at the same priority whose rules disagree have no defined winner -- the API says so,
+  and OVN-Kubernetes raises `ANPWithDuplicatePriority` -- but the evaluator sorted on `(priority, document index)`
+  and returned the first one's action. The same two manifests therefore gave `denied` in one file order and
+  `allowed` in the other, with no hint in either answer that anything was in doubt, while the README promises both
+  policy commands "say what they could not determine". The admin tier is now evaluated in priority groups: a group
+  whose matching policies disagree returns a third verdict, `undetermined`, which names both policies, prints as
+  `UNKNOWN` in the text output, exits non-zero, and proposes no NetworkPolicy -- because a NetworkPolicy cannot
+  override the admin tier whichever way the tie lands. Two policies tied at one priority that agree still decide,
+  and a duplicate priority is reported as a note either way, since the configuration is relying on undefined
+  behaviour even in the runs where it happens to work.
+- **The drift report told you a critical finding had been fixed when all that had happened was losing permission
+  to look.** `drift.collect_live` returns what it could not read, and `snapshot`, `diff` and `markdown` never
+  received it: the CLI printed the first five entries to stderr, the scheduled job logged the first three, and
+  nothing durable held any of it. So when a service account lost `list networkpolicies` between two runs, the
+  objects were simply absent from the second snapshot, and the daily report said they were **removed** and their
+  findings **fixed** -- an RBAC regression published as a security improvement, in the one artefact an operator
+  reads every morning, and served verbatim over MCP by `posture_report`. `attack_paths` already carries its
+  `notRead` into its output and `build audit` does the same, so drift was the exception rather than an oversight
+  nobody had had the idea for. The snapshot now keeps the record and the kinds behind it; `diff` holds back any
+  object or finding whose kind the new snapshot was refused, under `undetermined` rather than `removed` and
+  `fixed`; and the Markdown says so in the summary line, above every count, because each of those counts is only
+  over what could be read. A genuinely deleted object is still a removal, and an unreadable resource does not
+  launder an unrelated one. `posture_report` also gained `ageSeconds`, which the RHACS output beside it already
+  had: the daily job swallows its own failures so one bad run cannot stop the service, which leaves the previous
+  report as the latest one, and without an age a month-old report read exactly like this morning's. The test that
+  should have caught all of this asserted that `collect_live` produced the record and then built a snapshot on the
+  next line without it, covering the collecting half only.
+- **A refresh that found nothing destroyed the corpus, marked it redistributable, and published an empty database
+  image under a green check.** Four defects composed. `corpus.write_shard` calls `os.replace` unconditionally, so
+  a source that yielded no records truncated the shard it was replacing to 0 bytes and the records were gone from
+  the data directory. `redistributable` was `all(r["redistributable"] for r in records)`, and `all([])` is `True`,
+  so the empty shard was marked publishable. `corpus build` returned `0 if all(isinstance(v, int) ...)`, and a
+  count of `0` is an `int`, so only an exception gave a non-zero exit. And `db_bundle.build` refused only when
+  there were no shards *at all*, so a present-but-empty shard shipped -- `_shard_problems` finds no bad lines in a
+  file with no lines, so `db-check` reported it clean. Upstream moving a documentation path is enough to set it
+  off: `ingest` matches nothing and raises nothing. `write_shard` now refuses a zero-record write unless the
+  caller passes `allow_empty`, keeping the previous shard; an empty shard is not redistributable; the bundle
+  refuses a corpus with no records; and the two workflows gained the records gate the Jira step beside them
+  already had.
+
+- **Nine workflow steps lost the exit code of the command they ran.** GitHub's default shell is `bash -e` without
+  `pipefail`, so `kube-noob corpus build ... | tee summary.json` reports `tee`'s status, not the build's. The two
+  corpus workflows run eight such pipelines between them, including the one that packs the published database
+  bundle, so a command could fail outright and the step still pass. Each now sets `set -euo pipefail`.
+- **Five more places reported a clean result without having checked anything.** `gate`'s `notRun` listed only the
+  two absent-report cases, so a pipeline whose manifest glob stopped matching -- a renamed `deploy/` directory --
+  kept passing its scanner and SARIF reports, exited 0, printed "gate passed", and rendered an **empty** "Not run"
+  section, which positively asserts that nothing was left out; it now names the no-manifests and
+  no-Containerfile cases. An eval assertion whose operator was misspelled (`equal` for `equals`) scored as a pass:
+  `_check_value` returns `None` for an unrecognised operator and `_assert` turned that into "present" -- on a
+  gating, weight-2.0 assertion, which also disengaged the `GATE_CAP` clamp, so a valid-but-wrong answer scored
+  high instead of being capped at 0.4. `validate_assertion` now refuses a spec that names no operator, and
+  `evaluate` calls it. The Jira scrubber's account-id pattern was strictly weaker than the privacy audit that
+  gates the weekly refresh -- the audit matches bare ids, the scrubber required a `[~...]` or `accountId:` prefix
+  -- so a reporter id pasted bare into a description survived the scrub and then failed the gate: not a leak,
+  because no workflow commits Jira data and the gate exits 1, but one such ticket failed the refresh every week
+  and discarded an hour of paced fetching each time. Both now share one definition. `db_bundle`'s `MAX_MEMBER` and
+  `MAX_MEMBERS` were referenced only inside the reader, so `build()` could pack an archive nothing can `import`
+  and report success, and `check()` on a directory enforced neither; `check` now applies the predicate and `build`
+  runs `check` over its staging tree, so there is one call site rather than two that can drift. And three
+  assertions ended in `or True`, including `test_a_blind_run_is_not_reported_as_a_clean_one`, whose comment states
+  the repo's own coverage-honesty property while the assertion that would hold it was dead. All three pass without
+  it.
+- **Three scorers reported success for a spec that asserted nothing.** The same shape as the corpus
+  `redistributable` bug: `all([])` is `True` and an empty collection is the flattering answer. `evals/reward.py`
+  set `coverage = 1.0 if not must else len(hits) / len(must)`, so a qa task listing no `mustMention` gave any
+  prose at all a perfect coverage score. `Evaluation.passed` was `self.parsed and all(o.passed for o in
+  self.outcomes)`, so an evaluation with zero outcomes reported `passed: true` while `score` returned `0.0` --
+  two fields of one result disagreeing. And `selftest`'s `audit` case built `missing = [r for r in
+  case["expect"] if r not in fired]` and returned `not missing`, so a case with `expect: []` passed whatever the
+  audit found, in the command a user runs to decide whether to trust the tool. None was reachable from a shipped
+  fixture, which is exactly why none was caught: the version of this bug that *was* reachable published an empty
+  corpus. Each now refuses an empty spec, and a sweep asserts that no shipped fixture asserts nothing, so the
+  next empty one is caught when it is added rather than when it scores.
+
+  A red-team pass of the same family found two more, one of them worse than the three above. **`corpus db-check`
+  reported clean on a bundle manifest declaring no shards** -- the guard against an empty corpus had gone into
+  `build()`, which stops kube-noob from publishing one, but `db-check` is the command a *user* runs against a
+  bundle they downloaded, and it printed ok and exited 0 on an empty one. That was the last open link of that
+  chain, at the end people actually hold. And **`run_protocol` reported `status: "ready"` when it had audited
+  nothing**: `"ready" if not blockers else "blocked"` asserts readiness from an absence of HIGH findings, and with
+  no documents no rule ran, so there were no blockers -- a far stronger claim than a control summary, from the
+  same root cause as the coverage record still to be built. It now says `undetermined`.
+
+  The sweep is a frozen inventory rather than a lint rule, and the reasoning is worth recording: a pure AST sweep
+  for `all(...)`, `not any(...)` and `X if not Y else Z` finds 85 sites, and the live bugs shared no AST shape --
+  two ternaries, one `all()`, one missing guard. A rule precise enough to catch them would fire on all 85 and be
+  silenced within a day. What the real bugs share is a context, not a shape: an empty collection reaching a name
+  that means "this was fine". Filtering on that cuts 85 to 13, which is small enough to review and freeze.
+- **The "rebuilt daily" claim is still live on kube-noob.com, because the test that removed it read one file.**
+  G136 exists for this sentence: `docs/use-cases.md` promised a daily rebuild of the public `kube-noob-db` image,
+  whose workflow has failed on every scheduled run since it was added and has published nothing. The fix corrected
+  that page, and the enforcing test asserted `"rebuilt daily" not in use_cases` -- `use_cases` being
+  `docs/use-cases.md` and nothing else. The same sentence sat untouched in the chart's `values.yaml`, which the
+  site republishes at `/reference/helm-values/`, so the claim stayed on the live site after it was "fixed". That
+  is G147 in its own right: a test that polices a rule is itself a claim, and it is checked by trying to evade it.
+  The chart comment now says the image is not published and gives the two commands that do exist, and the test
+  reads every tracked text file, with three files allowlisted by name because they quote the phrase in order to
+  record that it was wrong. Proven by reverting the chart alone: the widened test fails, the old one could not see
+  the file.
+
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
   "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held

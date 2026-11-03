@@ -38,12 +38,14 @@ OVN_PRIORITY_MAX = 99
 
 @dataclass
 class Decision:
-    """A tier's answer: ``allow`` and ``deny`` are final, ``passed`` hands the decision to the next tier."""
+    """A tier's answer: ``allow`` and ``deny`` are final, ``passed`` hands the decision to the next tier,
+    ``undetermined`` means the tier's own rules disagree and the API server's choice between them is undefined."""
 
-    outcome: str  # "allow" | "deny" | "passed" | "nomatch"
+    outcome: str  # "allow" | "deny" | "passed" | "nomatch" | "undetermined"
     policy: str = ""
     rule: str = ""
     reason: str = ""
+    policies: tuple[str, ...] = ()  # the tied policies, when `outcome` is "undetermined"
 
 
 def _str(v: Any) -> str:
@@ -132,8 +134,70 @@ def _rules(spec: Any, direction: str) -> list[Any]:
     return rules if isinstance(rules, list) else []
 
 
+def _policy_decision(
+    pol: dict[str, Any],
+    actions: tuple[str, ...],
+    subject_ep: Endpoint,
+    other: Endpoint,
+    direction: str,
+    port: int | str,
+    protocol: str,
+    dest: Endpoint,
+    inv: Inventory,
+    notes: list[str],
+) -> Decision | None:
+    """This one policy's answer for this traffic: its first rule whose peer and ports both match, or ``None`` when
+    the policy does not select the subject or no rule matches."""
+    meta = pol.get("metadata") or {}
+    name = f"{pol.get('kind')}/{meta.get('name')}"
+    spec = pol.get("spec") or {}
+    if not _subject_matches(spec.get("subject") if isinstance(spec, dict) else None, subject_ep, inv):
+        return None
+    for i, raw in enumerate(_rules(spec, direction), 1):
+        rule = raw if isinstance(raw, dict) else {}
+        action = _str(rule.get("action"))
+        label = _str(rule.get("name")) or f"rule {i}"
+        if action not in actions:
+            notes.append(
+                f"{name} {direction.lower()} {label}: action {action or '(empty)'!r} is not one of "
+                f"{', '.join(actions)}; the rule is skipped rather than read as the nearest valid action"
+            )
+            continue
+        peers = rule.get("from" if direction == "Ingress" else "to")
+        peers = peers if isinstance(peers, list) else []
+        if direction == "Egress":
+            for peer in peers:
+                if isinstance(peer, dict) and ("nodes" in peer or "networks" in peer):
+                    notes.append(
+                        f"{name} {direction.lower()} {label}: a 'nodes' or 'networks' peer is not evaluated "
+                        "offline, so this rule may decide the traffic on the cluster"
+                    )
+        if not any(_peer_matches(p, other, inv) for p in peers):
+            continue
+        if not _port_matches(rule.get("ports"), port, protocol, dest):
+            continue
+        if action == "Pass":
+            return Decision(
+                "passed",
+                name,
+                label,
+                f"{name} {direction.lower()} {label} passes {other.describe()} on {protocol} {port} down to the "
+                "NetworkPolicies in the namespace.",
+            )
+        return Decision(
+            "allow" if action == "Allow" else "deny",
+            name,
+            label,
+            f"{'Allowed' if action == 'Allow' else 'Denied'} by {name} {direction.lower()} {label} "
+            f"(priority {spec.get('priority')})."
+            if pol.get("kind") == ANP_KIND
+            else f"{'Allowed' if action == 'Allow' else 'Denied'} by {name} {direction.lower()} {label}.",
+        )
+    return None
+
+
 def _evaluate(
-    policies: list[dict[str, Any]],
+    groups: list[list[dict[str, Any]]],
     actions: tuple[str, ...],
     subject_ep: Endpoint,
     other: Endpoint,
@@ -144,54 +208,37 @@ def _evaluate(
     inv: Inventory,
     notes: list[str],
 ) -> Decision:
-    """The first rule of the first selecting policy whose peer and ports both match. ``policies`` arrives in
-    precedence order."""
-    for pol in policies:
-        meta = pol.get("metadata") or {}
-        name = f"{pol.get('kind')}/{meta.get('name')}"
-        spec = pol.get("spec") or {}
-        if not _subject_matches(spec.get("subject") if isinstance(spec, dict) else None, subject_ep, inv):
+    """The first group, in precedence order, in which any policy decides.
+
+    ``groups`` is the tier's policies bucketed by the thing that orders them -- ``priority`` for
+    AdminNetworkPolicy, and one policy per group where nothing orders them. Within a group nothing says which
+    policy the API server picks, so a group whose matching policies disagree is reported ``undetermined`` rather
+    than settled by the order the documents happened to arrive in.
+    """
+    for group in groups:
+        decided: list[Decision] = []
+        for pol in group:
+            got = _policy_decision(pol, actions, subject_ep, other, direction, port, protocol, dest, inv, notes)
+            if got is not None:
+                decided.append(got)
+        if not decided:
             continue
-        for i, raw in enumerate(_rules(spec, direction), 1):
-            rule = raw if isinstance(raw, dict) else {}
-            action = _str(rule.get("action"))
-            label = _str(rule.get("name")) or f"rule {i}"
-            if action not in actions:
-                notes.append(
-                    f"{name} {direction.lower()} {label}: action {action or '(empty)'!r} is not one of "
-                    f"{', '.join(actions)}; the rule is skipped rather than read as the nearest valid action"
-                )
-                continue
-            peers = rule.get("from" if direction == "Ingress" else "to")
-            peers = peers if isinstance(peers, list) else []
-            if direction == "Egress":
-                for peer in peers:
-                    if isinstance(peer, dict) and ("nodes" in peer or "networks" in peer):
-                        notes.append(
-                            f"{name} {direction.lower()} {label}: a 'nodes' or 'networks' peer is not evaluated "
-                            "offline, so this rule may decide the traffic on the cluster"
-                        )
-            if not any(_peer_matches(p, other, inv) for p in peers):
-                continue
-            if not _port_matches(rule.get("ports"), port, protocol, dest):
-                continue
-            if action == "Pass":
-                return Decision(
-                    "passed",
-                    name,
-                    label,
-                    f"{name} {direction.lower()} {label} passes {other.describe()} on {protocol} {port} down to the "
-                    "NetworkPolicies in the namespace.",
-                )
-            return Decision(
-                "allow" if action == "Allow" else "deny",
-                name,
-                label,
-                f"{'Allowed' if action == 'Allow' else 'Denied'} by {name} {direction.lower()} {label} "
-                f"(priority {spec.get('priority')})."
-                if pol.get("kind") == ANP_KIND
-                else f"{'Allowed' if action == 'Allow' else 'Denied'} by {name} {direction.lower()} {label}.",
-            )
+        if len({d.outcome for d in decided}) == 1:
+            return decided[0]
+        names = tuple(dict.fromkeys(d.policy for d in decided))
+        spec = group[0].get("spec")
+        priority = spec.get("priority") if isinstance(spec, dict) else None
+        return Decision(
+            "undetermined",
+            policies=names,
+            reason=(
+                f"{' and '.join(names)} are both at priority {priority} and disagree about "
+                f"{other.describe()} on {protocol} {port} "
+                f"({', '.join(sorted({d.outcome for d in decided}))}). Two policies at one priority in one tier are "
+                "undefined behaviour in the API, so which one the API server applies is not something kube-noob can "
+                "work out from the manifests."
+            ),
+        )
     return Decision("nomatch")
 
 
@@ -232,6 +279,17 @@ def collect(inv: Inventory, objects: list[dict[str, Any]]) -> tuple[list[dict[st
                 continue
             banps.append(obj)
     anps.sort(key=lambda t: (t[0], t[1]))
+    # Two policies at one priority in one tier is undefined behaviour in the API, so a config that relies on it is
+    # fragile even in the runs where the tied policies happen to agree. Say it once, naming them.
+    by_priority: dict[int, list[str]] = {}
+    for priority, _, obj in anps:
+        by_priority.setdefault(priority, []).append(str((obj.get("metadata") or {}).get("name")))
+    for priority, names in by_priority.items():
+        if len(names) > 1:
+            inv.notes.append(
+                f"{', '.join(names)} are all at priority {priority}: the API does not define which "
+                "AdminNetworkPolicy wins at one priority in one tier, so give them distinct priorities"
+            )
     return [obj for _, _, obj in anps], banps
 
 
@@ -248,7 +306,16 @@ def tier_before(
     """The AdminNetworkPolicy tier, which runs before any NetworkPolicy."""
     if not anps or subject.external:
         return Decision("nomatch")
-    return _evaluate(anps, ANP_ACTIONS, subject, other, direction, port, protocol, dest, inv, inv.notes)
+    groups: list[list[dict[str, Any]]] = []
+    for pol in anps:  # `collect` already sorted these by (priority, document order)
+        spec = pol.get("spec")
+        priority = spec.get("priority") if isinstance(spec, dict) else None
+        last = (groups[-1][0].get("spec") or {}) if groups else None
+        if groups and isinstance(last, dict) and last.get("priority") == priority:
+            groups[-1].append(pol)
+        else:
+            groups.append([pol])
+    return _evaluate(groups, ANP_ACTIONS, subject, other, direction, port, protocol, dest, inv, inv.notes)
 
 
 def tier_after(
@@ -264,4 +331,5 @@ def tier_after(
     """The BaselineAdminNetworkPolicy tier, which runs only where no NetworkPolicy selects the pod."""
     if not banps or subject.external:
         return Decision("nomatch")
-    return _evaluate(banps, BANP_ACTIONS, subject, other, direction, port, protocol, dest, inv, inv.notes)
+    groups = [[b] for b in banps]  # the baseline tier is the singleton `default`, so nothing can tie
+    return _evaluate(groups, BANP_ACTIONS, subject, other, direction, port, protocol, dest, inv, inv.notes)

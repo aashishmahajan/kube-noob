@@ -64,14 +64,14 @@ before reach, reach before breadth.** A verdict that can be wrong costs more tha
 
 ### Now: 0.8.0
 
-| # | Item | Why it is first |
-|---|---|---|
-| P0 | **Same-priority `AdminNetworkPolicy` ties are "not determined"** | Two policies at one priority are decided today by document order, silently. Upstream says the choice is implementation-defined and OVN-Kubernetes raises `ANPWithDuplicatePriority`. The README promises both policy commands "say what they could not determine"; this is the one place they do not |
-| P1 | **Coverage record: which rules ran over which objects** | `controlSummary` lists only controls that have findings, so "clean" and "never evaluated" are indistinguishable. Every compliance output built on top of that would claim satisfaction from silence, which is the exact failure FedRAMP's own guidance names. Nothing else in the compliance arc is honest until this exists |
-| P2 | **`kubectl krew` plugin** | Both `noob` and `kube-noob` are unclaimed in krew-index. A shell script that execs the installed CLI or falls back to `uvx`, mapping kubectl-shaped verbs onto commands that already take stdin. No new binary, no new Python, and it is the index platform engineers actually browse |
-| P3 | **OSCAL assessment-results emitter** | `audit --oscal`, `gate --oscal`. Pure serialisation of data already computed, once P1 makes it honest. Deterministic v5 UUIDs so CI can diff it; `oscal-version: 1.2.1` for trestle interop; validated in CI against the pinned NIST schema with ajv, because Python's `jsonschema` cannot read the token pattern |
-| P4 | **`ClusterNetworkPolicy` v1alpha2 evaluated, not just named** | The v1alpha1 pair kube-noob evaluates is listed upstream as "Previous". v1alpha2 is the API under active development and Calico 3.32 and Kube-OVN enforce it. No tool evaluates it offline. Mostly a kind and tier mapping over the existing evaluator |
-| P5 | **Fix the two failing scheduled workflows** | A red schedule that has been red for days trains everyone to ignore schedules |
+| # | Item | State | Why it is first |
+|---|---|---|---|
+| P0 | **Same-priority `AdminNetworkPolicy` ties are "not determined"** | Shipped | Two policies at one priority were decided by document order, silently. Upstream says the choice is implementation-defined and OVN-Kubernetes raises `ANPWithDuplicatePriority`. The README promises both policy commands "say what they could not determine"; this is the one place they do not |
+| P1 | **Coverage record: which rules ran over which objects** | Not started | `controlSummary` lists only controls that have findings, so "clean" and "never evaluated" are indistinguishable. Every compliance output built on top of that would claim satisfaction from silence, which is the exact failure FedRAMP's own guidance names. Nothing else in the compliance arc is honest until this exists |
+| P2 | **`kubectl krew` plugin** | Not started | Both `noob` and `kube-noob` are unclaimed in krew-index. A shell script that execs the installed CLI or falls back to `uvx`, mapping kubectl-shaped verbs onto commands that already take stdin. No new binary, no new Python, and it is the index platform engineers actually browse |
+| P3 | **OSCAL assessment-results emitter** | Not started | `audit --oscal`, `gate --oscal`. Pure serialisation of data already computed, once P1 makes it honest. Deterministic v5 UUIDs so CI can diff it; `oscal-version: 1.2.1` for trestle interop; validated in CI against the pinned NIST schema with ajv, because Python's `jsonschema` cannot read the token pattern |
+| P4 | **`ClusterNetworkPolicy` v1alpha2 evaluated, not just named** | Not started | The v1alpha1 pair kube-noob evaluates is listed upstream as "Previous". v1alpha2 is the API under active development and Calico 3.32 and Kube-OVN enforce it. No tool evaluates it offline. Mostly a kind and tier mapping over the existing evaluator |
+| P5 | **Fix the two failing scheduled workflows** | Not started | A red schedule that has been red for days trains everyone to ignore schedules |
 
 ### Next: 0.9.0
 

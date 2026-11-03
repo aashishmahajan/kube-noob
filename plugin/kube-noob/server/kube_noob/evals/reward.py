@@ -203,6 +203,10 @@ def _qa(text: str, task: dict[str, Any]) -> tuple[float, dict[str, Any]]:
     prose = CITATION_RE.sub(" ", text)
     hits = [m for m in must if _affirmed(prose, m)]
     bad = [m for m in must_not if _affirmed(prose, m)]
+    # A task with nothing to mention is vacuously covered, and a multiplier of 1.0 is the right arithmetic -- a
+    # citation-only task is a legitimate shape. What was wrong was that the result did not SAY so: `missing: []`
+    # beside a full score reads as "covered every required claim" when none were required. `claimsChecked` makes
+    # the difference visible, so an empty claim list cannot be mistaken for evidence of coverage.
     coverage = 1.0 if not must else len(hits) / len(must)
     words = len(_WORD.findall(prose))
     min_words = int(task.get("minWords", DEFAULT_MIN_WORDS))
@@ -212,6 +216,8 @@ def _qa(text: str, task: dict[str, Any]) -> tuple[float, dict[str, Any]]:
         "mentioned": [_claim(m)[0] for m in hits],
         "missing": [_claim(m)[0] for m in must if m not in hits],
         "forbiddenHits": [_claim(m)[0] for m in bad],
+        "claimsChecked": len(must),
+        "coverage": round(coverage, 3),
         "words": words,
         "lengthFactor": round(length_factor, 3),
     }

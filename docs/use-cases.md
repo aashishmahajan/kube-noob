@@ -337,7 +337,11 @@ namespace's NetworkPolicies, then `BaselineAdminNetworkPolicy`. The two cluster-
 needs them: an ANP `Deny` blocks traffic every NetworkPolicy in the namespace allows, and a BANP decides the traffic
 no NetworkPolicy selects. Each verdict names the tier, the policy and the rule that decided it, says for every other
 rule whether the peer or the port did not match, and proposes the smallest NetworkPolicy that would allow the
-traffic. It exits 1 when the traffic is denied, so CI can assert the paths an application needs. `--live` reads the
+traffic. There is a third verdict: two `AdminNetworkPolicy` objects at one priority whose rules disagree have no
+defined winner in the API, so the answer is `undetermined` (`UNKNOWN` in the text output), it names both policies,
+and it proposes nothing -- a NetworkPolicy cannot override the admin tier whichever way the tie lands. A duplicate
+priority is reported as a note even where the tied policies agree. It exits 1 when the traffic is denied or
+undetermined, so CI can assert the paths an application needs. `--live` reads the
 policies, both admin tiers, namespace labels and workloads from the cluster (read-only); a cluster without the
 `network-policy-api` CRDs is a note, not a failure. EgressFirewall and CNI-specific policies are listed as not
 evaluated.
@@ -699,8 +703,15 @@ values are kept. `posture diff` compares two snapshots: objects added, removed a
 changed, findings new and fixed, and open findings by namespace, owner and rule. Scaling, status, server-set
 metadata and the ReplicaSets and pods a controller makes are not drift. `posture report` does both in one step and
 keeps the newest snapshots and reports (JSON and Markdown) in a folder; `serve` with `posture.reportEnabled` (chart:
-`posture.report.enabled`) writes one a day at a random time, and the MCP tool `posture_report` returns the newest.
+`posture.report.enabled`) writes one a day at a random time, and the MCP tool `posture_report` returns the newest
+with an `ageSeconds`, since a failed daily run leaves the previous report as the latest one.
 Excepted findings (`--exceptions`) are not counted open.
+
+A live snapshot records what it could not read, and the diff uses it. An object that was in yesterday's snapshot
+and is missing from today's is only `removed` if today's run could read its kind; if the backend refused that
+resource -- RBAC narrowed, a CRD uninstalled -- the object is `undetermined` and its findings are
+`undetermined` rather than `fixed`, and the report says so above every count. Losing permission to look is not a
+finding being fixed, and a report that conflated the two would call an RBAC regression an improvement.
 
 ```bash
 kube-noob posture snapshot -f k8s/ -o monday.json

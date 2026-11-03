@@ -428,7 +428,40 @@ def test_nothing_promises_an_artefact_that_has_never_published() -> None:
     helm commands for it. The `db-image` workflow has failed on every scheduled run since it was added and has
     never published anything. Documenting a thing that does not exist is worse than not having it: the reader
     spends their time before they find out."""
-    use_cases = (ROOT / "docs" / "use-cases.md").read_text(encoding="utf-8")
-    assert "rebuilt daily" not in use_cases, (
-        "use-cases.md still promises a daily rebuild of an image that has never published"
+    # Scoped to use-cases.md, this test let the same sentence survive in the chart's values.yaml, which the site
+    # republishes at /reference/helm-values/ -- so the claim stayed live on kube-noob.com after it was "fixed".
+    # G147: a test that polices a rule is itself a claim, and it is checked by trying to evade it.
+    records_the_history = {
+        # These three quote the phrase in order to record that it was wrong, which is the opposite of promising it.
+        "CHANGELOG.md",
+        "docs/guidance.md",
+        "tests/test_distribution.py",
+    }
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None or not (ROOT / ".git").exists():
+        pytest.skip("needs a git checkout to list tracked files")
+    tracked = subprocess.run(
+        ["git", "ls-files"],  # noqa: S607 - the repository's own checkout, as the sibling sweeps here do
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    offenders = []
+    for rel in tracked:
+        if rel in records_the_history or rel.startswith("plugin/kube-noob/server/"):
+            continue  # the plugin copy is generated from src/ by sync_plugin_server.py
+        path = ROOT / rel
+        if not path.is_file() or path.suffix not in {".md", ".py", ".yaml", ".yml", ".json", ".txt", ".html"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "rebuilt daily" in text:
+            offenders.append(rel)
+    assert not offenders, "these promise a daily rebuild of an image that has never published: " + ", ".join(
+        sorted(offenders)
     )

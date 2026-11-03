@@ -37,6 +37,7 @@ import httpx
 
 from kube_noob import sanitize
 from kube_noob.errors import KubeNoobError
+from kube_noob.jira_audit import BARE_ACCOUNT_ID
 from kube_noob.jira_catalog import (  # noqa: F401 - re-exported for callers of the sync
     DEFAULT_BASE_URL,
     DEFAULT_PROJECTS,
@@ -61,7 +62,11 @@ _ACCOUNT = re.compile(
     # start within one punctuation character, so the JSON spelling `{"accountId": "5b10..."}` -- a quote, a colon and
     # a space -- kept its id, and the corpus-refresh privacy gate caught it in stored text.
     r"|accountId[\"'=:\s]{1,6}[0-9a-f][0-9a-f:-]{9,}"
-    r"|https?://[^\s/]+/(?:jira/)?(?:people|secure/ViewProfile\.jspa\?name=)[^\s)\]>\"']*",  # profile links
+    r"|https?://[^\s/]+/(?:jira/)?(?:people|secure/ViewProfile\.jspa\?name=)[^\s)\]>\"']*"  # profile links
+    # ...and the bare forms, from the one definition the privacy audit gates on. The two had drifted: an id pasted
+    # bare into a description ("see 5b10... for details") survived this scrub and was then flagged by the audit,
+    # which exits 1 -- so one such ticket failed the weekly refresh every week and discarded an hour of fetching.
+    "|" + BARE_ACCOUNT_ID,
     re.IGNORECASE,
 )
 MAX_COMMENTS = 2_000  # comments kept per ticket: in practice every one

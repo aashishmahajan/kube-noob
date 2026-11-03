@@ -126,9 +126,17 @@ def decide(
     for s in sdk:
         reasons.append(f"SDK update available: {s['package']} {s['locked']} -> {s['latest']} (review changelog)")
     security = any(v.fixable for v in vulns) or bool(image.get("fixableHighCritical", 0))
+    # With no image data at all, half of the review did not happen: `fixableHighCritical` is absent, which reads
+    # as 0, which reads as "nothing to do". A verdict of "no release needed" from a scan that never ran is the
+    # worst output this script can produce, so say what is missing and ask for review instead.
+    if not image:
+        reasons.append(
+            "the released image was NOT scanned (no trivy report), so the container half of this review is "
+            "missing and the verdict below covers Python dependencies only"
+        )
     return Decision(
         release_recommended=security or bool(drift),
-        review_required=bool(drift or sdk or any(not v.fixable for v in vulns)),
+        review_required=bool(drift or sdk or any(not v.fixable for v in vulns)) or not image,
         reasons=reasons,
         vulns=vulns,
         image=image,
@@ -141,7 +149,9 @@ def render_markdown(d: Decision, week: str) -> str:
     lines = [
         f"# Weekly risk review {week}",
         "",
-        f"Release recommended: **{'yes' if d.release_recommended else 'no'}**  ",
+        f"Release recommended: **{'yes' if d.release_recommended else 'no'}**"
+        + ("" if d.image else " (Python dependencies only -- the image was not scanned)")
+        + "  ",
         f"Human/agent review required: **{'yes' if d.review_required else 'no'}**",
         "",
         "## Reasons",

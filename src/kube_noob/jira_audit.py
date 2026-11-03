@@ -18,7 +18,11 @@ from typing import Any
 
 MAX_LINE = 2_000_000  # bytes: a record line longer than this is counted as malformed, not parsed
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
-_ACCOUNT_ID = re.compile(r"\b(?:5[0-9a-f]{23}|[0-9]{6}:[0-9a-f-]{36}|712020:[0-9a-f-]{20,})\b")
+# The bare forms, with no `[~...]` or `accountId:` in front of them. Shared with `sources.jira`'s scrubber, which
+# must be at least as strong as this audit: this one gates the weekly refresh, so anything it flags and the
+# scrubber misses fails the run every week instead of being redacted.
+BARE_ACCOUNT_ID = r"\b(?:5[0-9a-f]{23}|[0-9]{6}:[0-9a-f-]{36}|712020:[0-9a-f-]{20,})\b"
+_ACCOUNT_ID = re.compile(BARE_ACCOUNT_ID)
 _PROFILE = re.compile(r"https?://[^\s/]+/(?:jira/)?people/|ViewProfile\.jspa\?name=", re.IGNORECASE)
 _COMMENTER = re.compile(r"\bby (Commenter [A-Z]{1,3})\b")
 PLACEHOLDERS = ("<email>", "<phone>", "<account>", "@user")
