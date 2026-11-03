@@ -91,3 +91,24 @@ def test_the_terminal_report_shows_the_limit_before_the_findings(capsys) -> None
     assert CHECKED_THROUGH in out
     head = out.partition("not checked:")[0]
     assert "[" not in head, "the limit must come before the first finding line"
+
+
+def test_the_removal_ceiling_and_the_drift_baseline_agree() -> None:
+    """Two constants that must move together, with nothing holding them together until now.
+
+    `catalog.CHECKED_THROUGH` is the Kubernetes minor the removed-API table was read at.
+    `scripts/risk_baseline.json`'s `kubernetes` is the minor the weekly risk review compares upstream against to
+    report knowledge drift. They answer the same question -- "how current is what we know about Kubernetes?" --
+    from two files, and raising one without the other gives a drift report that contradicts the data, or a
+    `notCheckedBeyond` note for a version the review calls current.
+
+    Kubernetes 1.38 is released on 16 December 2026. When it lands, both move in the same commit, after somebody
+    re-reads the deprecation guide. This test is what makes that a single step rather than two.
+    """
+    import json
+
+    baseline = json.loads((Path(__file__).resolve().parents[1] / "scripts" / "risk_baseline.json").read_text())
+    assert baseline["kubernetes"] == CHECKED_THROUGH, (
+        f"risk_baseline.json says Kubernetes {baseline['kubernetes']} and catalog.CHECKED_THROUGH says "
+        f"{CHECKED_THROUGH}; raise both in one commit, after re-reading the deprecated-API migration guide"
+    )

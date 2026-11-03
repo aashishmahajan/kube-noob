@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Both red scheduled workflows are diagnosed, and neither is a bug in the workflow.** `db-image` fails its own
+  member-size gate: `redhat-vex.jsonl` has grown past `db_bundle.MAX_MEMBER` (300 MB), so an upstream feed
+  outgrew a limit this project set. Raising the number buys a quarter; sharding the member, filtering the feed to
+  the products kube-noob answers about, or compressing it are the real options, and choosing between them is a
+  decision rather than a fix. `corpus-refresh` fails its privacy audit, which is the gate working -- and now
+  reports enough to triage (G179). Its run also warns that the stored copy no longer decrypts with the current
+  `CORPUS_PASSPHRASE`, so each run starts from scratch and discards an hour of paced fetching; that is a secret
+  rotation only the owner can settle. `docs/roadmap.md` P5 carries both diagnoses instead of "Not started".
+
+- **`CHECKED_THROUGH` and the risk review's drift baseline are now held together by a test.** Both said
+  Kubernetes 1.37, by the coincidence of having been edited the same day, and nothing connected them: raising the
+  removed-API ceiling without the baseline would have produced a drift report that contradicts the data, and
+  raising the baseline alone would mark a version current that the tables have never been read against.
+  Kubernetes 1.38 is released on 16 December 2026, and both now move in one commit or the suite fails (G181).
+
 - **The weekly corpus refresh has been refusing the copy since 2026-10-31, and the failure could not be acted
   on.** The privacy audit exits 1 rather than keep Jira text with person-shaped content in it -- correct, and the
   reason it is a gate -- but it reported only `123 person-shaped findings: ['CNV-95960: spelled-out email',
