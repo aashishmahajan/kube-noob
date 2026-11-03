@@ -337,7 +337,11 @@ namespace's NetworkPolicies, then `BaselineAdminNetworkPolicy`. The two cluster-
 needs them: an ANP `Deny` blocks traffic every NetworkPolicy in the namespace allows, and a BANP decides the traffic
 no NetworkPolicy selects. Each verdict names the tier, the policy and the rule that decided it, says for every other
 rule whether the peer or the port did not match, and proposes the smallest NetworkPolicy that would allow the
-traffic. It exits 1 when the traffic is denied, so CI can assert the paths an application needs. `--live` reads the
+traffic. There is a third verdict: two `AdminNetworkPolicy` objects at one priority whose rules disagree have no
+defined winner in the API, so the answer is `undetermined` (`UNKNOWN` in the text output), it names both policies,
+and it proposes nothing -- a NetworkPolicy cannot override the admin tier whichever way the tie lands. A duplicate
+priority is reported as a note even where the tied policies agree. It exits 1 when the traffic is denied or
+undetermined, so CI can assert the paths an application needs. `--live` reads the
 policies, both admin tiers, namespace labels and workloads from the cluster (read-only); a cluster without the
 `network-policy-api` CRDs is a note, not a failure. EgressFirewall and CNI-specific policies are listed as not
 evaluated.

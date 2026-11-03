@@ -8,8 +8,13 @@ wrong port), and, when the answer is no, proposes the smallest NetworkPolicy tha
 
 The same evaluation runs on objects read from a live cluster (read-only) through ``inventory_from_cluster``.
 
-Not evaluated, and said so in every result: AdminNetworkPolicy and BaselineAdminNetworkPolicy, OpenShift EgressFirewall
-and EgressNetworkPolicy, CNI-specific policies (Cilium, Calico), host-network pods, and firewalls outside the cluster.
+Three tiers decide, in order: AdminNetworkPolicy, then the NetworkPolicies in the namespace, then
+BaselineAdminNetworkPolicy where no NetworkPolicy selects the pod (``kube_noob.debug.anp`` has the semantics). Where
+the deciding tier has no determinate answer -- two AdminNetworkPolicies at one priority whose rules disagree, which
+the API leaves undefined -- the verdict is ``undetermined`` and no fix is proposed, rather than a guess.
+
+Not evaluated, and said so in every result: ClusterNetworkPolicy, OpenShift EgressFirewall and EgressNetworkPolicy,
+CNI-specific policies (Cilium, Calico), host-network pods, and firewalls outside the cluster.
 """
 
 from __future__ import annotations
@@ -362,6 +367,15 @@ def _direction(
     from kube_noob.debug.anp import tier_after, tier_before
 
     admin = tier_before(inv, inv.admin, subject, other, direction, port, protocol, dest)
+    if admin.outcome == "undetermined":
+        return {
+            "evaluated": False,
+            "undetermined": True,
+            "tier": ANP_KIND,
+            "allowed": False,  # an unknown must never read as a pass
+            "tiedPolicies": list(admin.policies),
+            "reason": admin.reason,
+        }
     if admin.outcome in ("allow", "deny"):
         return {
             "evaluated": True,
@@ -379,6 +393,15 @@ def _direction(
     if np.get("isolated") or not np.get("evaluated"):
         return np
     base = tier_after(inv, inv.baseline, subject, other, direction, port, protocol, dest)
+    if base.outcome == "undetermined":  # unreachable while the baseline is a singleton; kept so it cannot regress
+        return {
+            "evaluated": False,
+            "undetermined": True,
+            "tier": BANP_KIND,
+            "allowed": False,
+            "tiedPolicies": list(base.policies),
+            "reason": base.reason,
+        }
     if base.outcome in ("allow", "deny"):
         return {
             "evaluated": True,
@@ -545,8 +568,12 @@ def check_reachability(
     egress = _direction(inv, src, dst, "Egress", port, protocol, dst)
     ingress = _direction(inv, dst, src, "Ingress", port, protocol, dst)
     allowed = bool(egress["allowed"] and ingress["allowed"])
+    # A direction whose deciding tier has no determinate answer is neither allowed nor denied. Calling it either
+    # would be a guess, and a proposed NetworkPolicy under it would be applied and change nothing if the admin
+    # tier's tie lands on Deny.
+    undetermined = [d for d, r in (("Egress", egress), ("Ingress", ingress)) if r.get("undetermined")]
     out: dict[str, Any] = {
-        "verdict": "allowed" if allowed else "denied",
+        "verdict": "undetermined" if undetermined else ("allowed" if allowed else "denied"),
         "source": src.describe(),
         "destination": dst.describe(),
         "port": port,
@@ -556,8 +583,14 @@ def check_reachability(
     }
     if isinstance(port, str) and port not in dst.ports:
         out["warning"] = f"named port {port!r} is not declared by {dst.describe()}'s containers in these manifests"
-    blocked = [d for d, r in (("Egress", egress), ("Ingress", ingress)) if not r["allowed"]]
-    if allowed:
+    blocked = [d for d, r in (("Egress", egress), ("Ingress", ingress)) if not r["allowed"] and d not in undetermined]
+    if undetermined:
+        out["undetermined"] = undetermined
+        out["summary"] = (
+            f"Undetermined: kube-noob could not determine whether {src.describe()} reaches {dst.describe()} on "
+            f"{protocol} {port}. " + " ".join((ingress if d == "Ingress" else egress)["reason"] for d in undetermined)
+        )
+    elif allowed:
         out["summary"] = (
             f"Allowed: {src.describe()} -> {dst.describe()} on {protocol} {port}. "
             f"{egress['reason']} {ingress['reason']}"

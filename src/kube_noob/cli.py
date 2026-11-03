@@ -2444,8 +2444,11 @@ def _print_reach(out: dict[str, Any]) -> None:
     _tprint(f"{out['verdict'].upper()}  {out['source']} -> {out['destination']}  {out['protocol']} {out['port']}")
     for direction in ("egress", "ingress"):
         r = out[direction]
-        _tprint(f"  {direction:7} {'allowed' if r['allowed'] else 'DENIED '}  {r['reason']}")
-        for pol in [] if r["allowed"] else r.get("policies", []):
+        # Three states, not two: an undetermined direction is not a denial, and printing it as one would be the
+        # same false certainty the JSON now refuses.
+        word = "UNKNOWN" if r.get("undetermined") else ("allowed" if r["allowed"] else "DENIED ")
+        _tprint(f"  {direction:7} {word}  {r['reason']}")
+        for pol in [] if r["allowed"] or r.get("undetermined") else r.get("policies", []):
             for rule in pol.get("rules", []):
                 if not rule["allows"]:
                     miss = [x for x, ok in (("peer", rule["peerMatches"]), ("port", rule["portMatches"])) if not ok]

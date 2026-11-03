@@ -37,6 +37,17 @@
   loaders left in the tree that may shrink and never grow, and it says so rather than claiming they are all safe.
 
 
+- **`policy reach` decided an undefined case by the order the manifests arrived in.** Two
+  `AdminNetworkPolicy` objects at the same priority whose rules disagree have no defined winner -- the API says so,
+  and OVN-Kubernetes raises `ANPWithDuplicatePriority` -- but the evaluator sorted on `(priority, document index)`
+  and returned the first one's action. The same two manifests therefore gave `denied` in one file order and
+  `allowed` in the other, with no hint in either answer that anything was in doubt, while the README promises both
+  policy commands "say what they could not determine". The admin tier is now evaluated in priority groups: a group
+  whose matching policies disagree returns a third verdict, `undetermined`, which names both policies, prints as
+  `UNKNOWN` in the text output, exits non-zero, and proposes no NetworkPolicy -- because a NetworkPolicy cannot
+  override the admin tier whichever way the tie lands. Two policies tied at one priority that agree still decide,
+  and a duplicate priority is reported as a note either way, since the configuration is relying on undefined
+  behaviour even in the runs where it happens to work.
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
   "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held
