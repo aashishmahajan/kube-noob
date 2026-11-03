@@ -143,7 +143,9 @@ jira:
 
 db:
   # The public kube-noob-db image: the documentation corpus with its licenses, release history and the release-note
-  # known issues, rebuilt daily, signed, and checked to hold no Jira data and nothing that may not be redistributed.
+  # known issues, signed, and checked to hold no Jira data and nothing that may not be redistributed. It is not
+  # published yet -- the db-image workflow has failed on every scheduled run since it was added -- so build one
+  # yourself with `kube-noob corpus db-bundle` and check it with `kube-noob corpus db-check`.
   # An init container copies the archive; kube-noob serve imports it on start when it is newer than the one the data
   # folder already has, so rolling out a newer digest refreshes every pod. Pinned by digest only. No egress needed.
   # Verify the signature first: cosign verify <repository>@<digest> --certificate-identity-regexp
