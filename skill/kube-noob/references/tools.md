@@ -234,6 +234,7 @@ List audit rules. All rule ids with stage, category and default severity.
 
 Turn audit rules into admission policies. Generate ValidatingAdmissionPolicy (with binding) and/or Kyverno ValidatingPolicy YAML from kube-noob's audit rules, in audit (warn and record) or enforce mode, for a platform. One policy per rule decidable from one object; each names its rule, fix and source. Rules that need other objects or that the API server already enforces are listed with the reason. Nothing is applied.
 
+- `allow_large` (boolean): Return the rendered YAML even when it is larger than 128 KiB. Off by default: every rule on every engine renders about 380 KB (~95,000 tokens), which is more than most callers can hold, and a result a caller cannot read is worse than one that says how to narrow the request. When it is off and the set is too large, the counts and `skipped` come back as usual with `yamlOmitted: true` and the byte count, and nothing is truncated.
 - `engines` (array): vap: ValidatingAdmissionPolicy + binding (built into Kubernetes 1.30+); kyverno: Kyverno ValidatingPolicy (policies.kyverno.io/v1, Kyverno 1.18+).
 - `exceptions` (null/string): An exception list (YAML, kube-noob.io/v1 ExceptionList): active entries become exemptions in their rule's policy (with the ReplicaSets and pods their workloads make); expired or refused ones are listed.
 - `exclude_namespaces` (array): Namespaces the policies skip, besides kube-system, kube-public and kube-node-lease.

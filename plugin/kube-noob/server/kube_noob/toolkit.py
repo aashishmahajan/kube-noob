@@ -157,6 +157,13 @@ class RuleIn(_In):
     rule_id: str = Field(..., pattern=r"^[A-Za-z]{2}-[A-Za-z]{1,2}\d{3}$", description="e.g. KN-S001")
 
 
+# A rendered policy set is the one result that can exceed any caller's context. Measured on the bundled rule
+# set for OpenShift: every rule on every engine is 380,670 bytes (~95,000 tokens), and every rule on a single
+# engine is still 186,000-201,000 (~46,000-50,000). Ten rules on two engines is 79,217 (~19,800) and five on one
+# engine is 19,670 (~4,900). 128 KiB sits above the queries a caller can actually use and below the ones that
+# overflow it, and `allow_large` is there for a caller that knows its own budget.
+MAX_INLINE_POLICY_YAML = 128 * 1024
+
 MAX_DIAGNOSE_TEXT = 400_000
 MAX_SIGNAL_TEXT = 400_000
 
@@ -363,6 +370,14 @@ class PolicyGenerateIn(_In):
         default_factory=list,
         max_length=50,
         description="Namespaces the policies skip, besides kube-system, kube-public and kube-node-lease.",
+    )
+    allow_large: bool = Field(
+        False,
+        description="Return the rendered YAML even when it is larger than 128 KiB. Off by default: every rule on "
+        "every engine renders about 380 KB (~95,000 tokens), which is more than most callers can hold, and a "
+        "result a caller cannot read is worse than one that says how to narrow the request. When it is off and "
+        "the set is too large, the counts and `skipped` come back as usual with `yamlOmitted: true` and the byte "
+        "count, and nothing is truncated.",
     )
     exceptions: str | None = Field(
         None,
@@ -1171,7 +1186,26 @@ class Toolkit:
         header = policies.header(
             g, platform=p.platform, platform_version=p.version, mode=p.mode, engines=engines, exceptions=entries
         )
-        return {**g.summary(), "yaml": g.yaml(header)}
+        text = g.yaml(header)
+        size = len(text.encode("utf-8"))
+        if size > MAX_INLINE_POLICY_YAML and not p.allow_large:
+            # Refuse, do not truncate: half a policy set is not a policy set, and a caller that applied it would
+            # enforce some rules and silently drop the rest. The counts and `skipped` still come back, so the
+            # caller learns what it asked for and how to ask for less.
+            return {
+                **g.summary(),
+                "yamlOmitted": True,
+                "yamlBytes": size,
+                "limit": MAX_INLINE_POLICY_YAML,
+                "why": (
+                    f"The rendered set is {size:,} bytes (about {size // 4:,} tokens), over the "
+                    f"{MAX_INLINE_POLICY_YAML:,}-byte limit for an inline result. Nothing was truncated and "
+                    "nothing failed. Ask for less with `rules` (one or a few rule ids) or a single `engines` "
+                    "entry, pass `allow_large: true` if you can hold it, or run "
+                    "`kube-noob policy generate -o policies.yaml` to write the whole set to a file."
+                ),
+            }
+        return {**g.summary(), "yaml": text}
 
     def policy_migrate_check(self, p: PolicyMigrateCheckIn) -> dict[str, Any]:
         from kube_noob import kyverno_migrate

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **The one result that could not fit in any caller's context was the one an MCP caller had no way to
+  shrink.** `policy generate -o FILE` stopped inlining the rendered set, but `PolicyGenerateIn` has no `output`
+  field and an MCP caller has no filesystem to write to, so that fix reached the audience that was not the
+  problem. Measured on the bundled rule set for OpenShift, `policy_generate` returned **380,670 bytes, about
+  95,000 tokens, 96.4% of it one YAML string** -- more than most callers can hold, for a tool that is meant to be
+  called by a model. A result the caller cannot read is worse than one that says how to ask for less.
+
+  There is now a 128 KiB limit on the inline YAML, chosen from the measurements rather than picked: every rule on
+  every engine is 380,670 bytes and every rule on one engine is still 186,000-201,000, while ten rules on two
+  engines is 79,217 and five on one engine is 19,670. The limit sits above the queries a caller can use and below
+  the ones that overflow it. Over the limit the result is the counts, `skipped`, `yamlOmitted: true`, the byte
+  count and a sentence naming the three ways out -- `rules`, a single `engines` entry, or the CLI's `-o`. That
+  turns 380,670 bytes into **14,168** (95,167 tokens into 3,542, a 96.3% reduction) with nothing a caller
+  reasoned over removed. A request already under the limit is byte-identical to before, and `allow_large: true`
+  returns the whole set for a caller that knows its own budget.
+
+  It refuses rather than truncates, deliberately: half a policy set is not a policy set, and a caller that
+  applied one would enforce some rules and silently drop the rest -- a quiet partial answer, which this project
+  treats as a wrong one (G173).
+
 - **The removed-API tables say where they stop, so "no removals" stops meaning "nobody looked".** `REMOVED_APIS`
   was read from the Kubernetes deprecated-API migration guide at 1.37 and the guide lists no removals after
   v1.32, so for any target up to 1.37 an empty answer is complete. Past it, `api_history` returned

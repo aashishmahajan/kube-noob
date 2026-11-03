@@ -789,6 +789,12 @@ kube-noob policy generate --rule KN-S001 --rule KN-S009 --mode enforce --engine 
 kube-noob policy generate --engine kyverno --exclude-namespace legacy-apps -o kyverno.yaml
 ```
 
+Through the MCP or HTTP tool there is no `-o`, so the inline YAML is capped at 128 KiB: every rule on every
+engine renders about 380 KB (~95,000 tokens), which is more than most callers can hold. Over the limit the result
+is the counts, `skipped`, `yamlOmitted: true`, the byte count and how to ask for less -- 14,168 bytes instead of
+380,670, with nothing truncated. Narrow it with `rules` or a single `engines` entry, or pass `allow_large: true`
+if you can hold the whole set.
+
 With `-o`, the JSON or YAML result is the path, the file's size and the counts -- not the policy set as well.
 The whole generated set is about 358 KB of YAML, so returning it inline *and* writing it made the result larger
 with `-o` than without; a caller that names a file has already said where it wants the bytes. Without `-o` the
