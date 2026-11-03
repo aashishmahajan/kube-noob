@@ -2,10 +2,12 @@ name: corpus-refresh
 
 # Keeps the organisation's main copy of Red Hat's public Jira current and builds the kube-noob corpus in the cloud.
 #
-# Every day (or every JIRA_EVERY_DAYS days, a repository variable: 1 or 2): restore the previous main copy (encrypted
-# artifact), sync only what changed through Jira's REST API (one request per second or slower, within a budget), record
-# what was fixed, closed, reopened or opened for reconciliation, and upload the new main copy encrypted. A brand-new
-# copy fetches the open tickets of each project first. Every Sunday (and on dispatch with scope full): also public Git
+# Every other day by default (JIRA_EVERY_DAYS=1 runs daily; 2, the default, skips every other day): restore the
+# previous main copy (encrypted artifact), sync only what changed through Jira's REST API, newest updates first,
+# and upload the new main copy encrypted. A decrypt failure fails the run. It does not start a fresh copy: a
+# green partial fetch would replace the main copy and the previous artifact would stop being the one that is
+# restored. Discarding the copy is explicit (workflow_dispatch with fresh=true). A brand-new copy, or fresh=true,
+# fetches the open tickets of each project first. Every Sunday (and on dispatch with scope full): also public Git
 # docs (with licenses) and release history, uploaded as a plain artifact.
 #
 # Jira content is not redistributable, so it is uploaded only encrypted (CORPUS_PASSPHRASE secret). Without the secret
@@ -34,7 +36,7 @@ on:
         description: "Git sources (comma separated ids or 'all')"
         default: "all"
   schedule:
-    - cron: "17 5 * * *"     # the Jira main copy: daily (JIRA_EVERY_DAYS=2 skips every other day)
+    - cron: "17 5 * * *"     # the Jira main copy: every other day by default (JIRA_EVERY_DAYS=1 for daily)
     - cron: "41 3 * * 0"     # weekly: also Git docs and release history
 
 permissions:
@@ -56,7 +58,7 @@ jobs:
       - name: Decide whether this run is due
         id: due
         env:
-          EVERY: ${{ vars.JIRA_EVERY_DAYS || '1' }}
+          EVERY: ${{ vars.JIRA_EVERY_DAYS || '2' }}
           EVENT: ${{ github.event_name }}
         run: |
           case "$EVERY" in 1|2) ;; *) echo "::error title=JIRA_EVERY_DAYS::must be 1 or 2, not $EVERY"; exit 1 ;; esac
@@ -116,17 +118,32 @@ jobs:
             echo "::notice title=Jira main copy::no previous main copy: starting a new one (open tickets first)"
             exit 0
           fi
-          # A copy encrypted under an earlier CORPUS_PASSPHRASE can never be read again: failing every day would not
-          # change that, so the run starts a new copy (saved under the current secret) and says why.
+          # A copy encrypted under an earlier CORPUS_PASSPHRASE is not readable with this secret. Starting a new
+          # copy here would, on the first green run, become the artifact the next run restores, and the previous
+          # copy would no longer be the main copy. Fail instead. The previous artifact is untouched. Re-run with
+          # fresh=true only when discarding it is intentional, or put the passphrase that encrypted it back.
           if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in previous/jira-snapshot.tgz.enc \
             -out previous/jira-snapshot.tgz -pass env:CORPUS_PASSPHRASE 2> decrypt.err; then
-            echo "::warning title=Jira main copy::the copy from run $id does not decrypt with the current CORPUS_PASSPHRASE (was the secret changed?): starting a new one. $(head -c 200 decrypt.err | tr '\n' ' ')"
-            rm -f previous/jira-snapshot.tgz previous/jira-snapshot.tgz.enc
-            exit 0
+            echo "::error title=Jira main copy::the copy from run $id does not decrypt with the current CORPUS_PASSPHRASE. Refusing to start a new copy, because a successful partial fetch would replace the main copy. The previous artifact is unchanged. Restore that passphrase, or re-run with fresh=true to discard it on purpose. $(head -c 200 decrypt.err | tr '\n' ' ')"
+            rm -f previous/jira-snapshot.tgz
+            exit 1
           fi
           set -euo pipefail
           kube-noob corpus import previous/jira-snapshot.tgz --format json | tee import-summary.json
           rm -f previous/jira-snapshot.tgz
+          python - <<'PY'
+          import pathlib
+          root = pathlib.Path("corpus-out/corpus")
+          n = 0
+          if root.is_dir():
+              for path in root.glob("jira-*.jsonl"):
+                  if "insight" in path.name:
+                      continue
+                  with path.open(encoding="utf-8") as fh:
+                      n += sum(1 for line in fh if line.strip())
+          pathlib.Path("baseline-tickets.txt").write_text(str(n) + "\n", encoding="utf-8")
+          print(f"::notice title=Jira main copy::restored {n} tickets")
+          PY
       - name: Red Hat Jira copy (paced, budgeted)
         if: steps.due.outputs.run == 'true'
         env:
@@ -321,6 +338,26 @@ jobs:
             *-summary.json
             stats.json
           retention-days: 30
+      - name: Refuse to publish a smaller Jira copy
+        if: steps.due.outputs.run == 'true'
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          base_path = pathlib.Path("baseline-tickets.txt")
+          base = int(base_path.read_text().strip()) if base_path.is_file() else 0
+          root = pathlib.Path("corpus-out/corpus")
+          n = 0
+          if root.is_dir():
+              for path in root.glob("jira-*.jsonl"):
+                  if "insight" in path.name:
+                      continue
+                  with path.open(encoding="utf-8") as fh:
+                      n += sum(1 for line in fh if line.strip())
+          print(f"::notice title=Jira main copy::tickets now {n}, restored {base}")
+          if base and n < base:
+              print(f"::error title=Jira main copy::refusing to upload {n} tickets over a restored copy of {base}. The previous artifact stays the main copy.")
+              sys.exit(1)
+          PY
       - name: Encrypt the Jira main copy and the full corpus (non-redistributable Jira data)
         if: steps.due.outputs.run == 'true'
         env:

@@ -87,8 +87,9 @@ def test_image_build_context_has_every_wheel_input() -> None:
 
 
 def test_scheduled_cadences_and_rox_corpus_scope() -> None:
-    """Weekly risk review; the Jira main copy every day (or every 2 days) continuing the previous encrypted copy, with
-    a reconciliation summary; the docs corpus weekly; and a Red Hat Jira copy that covers ROX (every version, so RHACS
+    """Weekly risk review; the Jira main copy every other day by default (daily with JIRA_EVERY_DAYS=1), continuing
+    the previous encrypted copy and failing rather than replacing it when that copy does not decrypt, with a
+    reconciliation summary; the docs corpus weekly; and a Red Hat Jira copy that covers ROX (every version, so RHACS
     4.10 onward included) with room for well over 1000 issues."""
     import yaml
 
@@ -102,7 +103,10 @@ def test_scheduled_cadences_and_rox_corpus_scope() -> None:
     crons = [s["cron"] for s in ctriggers["schedule"]]
     assert re.fullmatch(r"\d+ \d+ \* \* \*", crons[0]) and re.fullmatch(r"\d+ \d+ \* \* \d", crons[1])
     assert f"github.event.schedule == '{crons[1]}'" in corpus_text  # the weekly run is the full one
-    assert "vars.JIRA_EVERY_DAYS || '1'" in corpus_text and "1|2)" in corpus_text
+    assert "vars.JIRA_EVERY_DAYS || '2'" in corpus_text and "1|2)" in corpus_text
+    assert "Refusing to start a new copy" in corpus_text
+    assert "Refuse to publish a smaller Jira copy" in corpus_text
+    assert "baseline-tickets.txt" in corpus_text
     assert corpus["permissions"] == {"contents": "read", "actions": "read"}
     assert corpus["concurrency"] == {"group": "corpus-refresh", "cancel-in-progress": False}
     steps = corpus["jobs"]["corpus"]["steps"]
