@@ -46,6 +46,33 @@ kube-noob helm-chart --name orders-api --namespace shop --image quay.io/acme/ord
 
 To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It exits 1 on any HIGH or CRITICAL finding.
 
+If you target a Kubernetes or OpenShift minor newer than the one kube-noob's removed-API data was read at, the
+report says so rather than reporting nothing:
+
+```console
+$ kube-noob validate -f k8s/ --platform openshift --version 4.25
+kube-noob audit | platform=openshift k8s=1.38 | score=100.0 |
+  not checked: The Kubernetes deprecated-API migration guide was read at 1.37, so no removed or deprecated API
+  finding here means none through 1.37 -- not none in 1.38. Check the guide for 1.38 before reading this as clean.
+```
+
+In JSON the same thing arrives as a `notCheckedBeyond` block, and `api_history` carries `checkedThrough` and
+`beyondCheckedVersions`. A target at or below the ceiling says nothing extra, because for those the answer is
+complete.
+
+When the report is going into a model's context rather than a terminal, add `--compact`:
+
+```bash
+kube-noob --format json audit -f k8s/ --platform openshift --compact
+```
+
+Each rule's constant fields -- title, severity, remediation, citations, controls and the rest -- are collected
+once into a `ruleInfo` map keyed by rule id instead of being repeated on every finding that rule produced. On
+this repository's `examples/` directory that is 105 findings over 19 rules, and the JSON goes from 118 631 to
+54 694 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
+exactly. The MCP and HTTP tool takes the same thing as `compact: true`, off by default so the flat shape stays
+what it was. The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
+
 ## SRE or on-call: diagnose before you change anything
 
 Not sure what you have? `insight` names it first (events, logs, a denial, manifests, a ticket, a build log, a
@@ -761,6 +788,17 @@ oc apply -f kube-noob-policies.yaml
 kube-noob policy generate --rule KN-S001 --rule KN-S009 --mode enforce --engine vap -o enforce.yaml
 kube-noob policy generate --engine kyverno --exclude-namespace legacy-apps -o kyverno.yaml
 ```
+
+Through the MCP or HTTP tool there is no `-o`, so the inline YAML is capped at 128 KiB: every rule on every
+engine renders about 380 KB (~95,000 tokens), which is more than most callers can hold. Over the limit the result
+is the counts, `skipped`, `yamlOmitted: true`, the byte count and how to ask for less -- 14,168 bytes instead of
+380,670, with nothing truncated. Narrow it with `rules` or a single `engines` entry, or pass `allow_large: true`
+if you can hold the whole set.
+
+With `-o`, the JSON or YAML result is the path, the file's size and the counts -- not the policy set as well.
+The whole generated set is about 358 KB of YAML, so returning it inline *and* writing it made the result larger
+with `-o` than without; a caller that names a file has already said where it wants the bytes. Without `-o` the
+rendered YAML is still returned inline, because there is nowhere else for it to go.
 
 ### Every finding as a kubectl warning: the admission webhook
 

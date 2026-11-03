@@ -51,7 +51,12 @@ def test_missing_comments_older_format_and_leaks_are_reported(tmp_path: Path) ->
     assert ocp["olderFormat"] == 1 and ocp["malformedLines"] == 1
     check = jira_audit.audit(data)["selfCheck"]
     assert check["personShapedFindings"] == 3
-    assert {e.split(": ")[1] for e in check["examples"]} == {"email", "account id", "profile link"}
+    # A finding reads "<TICKET> <field>: <kind> <redacted shape>". Match the kind by prefix, and check the shape
+    # carried no content: that is what lets the gate's failure be triaged from a public CI log.
+    kinds = {e.split(": ", 1)[1].rsplit(" ", 1)[0] for e in check["examples"]}
+    assert kinds == {"email", "account id", "profile link"}
+    assert all(" text: " in e or " title: " in e for e in check["examples"]), check["examples"]
+    assert not any(c in e for e in check["examples"] for c in ("@redhat", "example.com", "5b10")), check["examples"]
 
 
 def test_cli_text_json_and_no_copy(

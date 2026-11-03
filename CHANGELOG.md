@@ -2,6 +2,260 @@
 
 ## Unreleased
 
+- **Both red scheduled workflows are diagnosed, and neither is a bug in the workflow.** the scheduled `db-image.yml` fails its
+  own member-size gate: `redhat-vex.jsonl` has grown past `db_bundle.MAX_MEMBER` (300 MB), so an upstream feed
+  outgrew a limit this project set. (The `db-image` job in `ci.yml` shares the name and is green: it bundles a
+  small public corpus and never downloads the VEX feed.) Raising the number buys a quarter; sharding the member, filtering the feed to
+  the products kube-noob answers about, or compressing it are the real options, and choosing between them is a
+  decision rather than a fix. `corpus-refresh` fails its privacy audit, which is the gate working -- and now
+  reports enough to triage (G179). Its run also warns that the stored copy no longer decrypts with the current
+  `CORPUS_PASSPHRASE`, so each run starts from scratch and discards an hour of paced fetching; that is a secret
+  rotation only the owner can settle. `docs/roadmap.md` P5 carries both diagnoses instead of "Not started".
+
+- **`CHECKED_THROUGH` and the risk review's drift baseline are now held together by a test.** Both said
+  Kubernetes 1.37, by the coincidence of having been edited the same day, and nothing connected them: raising the
+  removed-API ceiling without the baseline would have produced a drift report that contradicts the data, and
+  raising the baseline alone would mark a version current that the tables have never been read against.
+  Kubernetes 1.38 is released on 16 December 2026, and both now move in one commit or the suite fails (G181).
+
+- **The weekly corpus refresh has been refusing the copy since 2026-10-31, and the failure could not be acted
+  on.** The privacy audit exits 1 rather than keep Jira text with person-shaped content in it -- correct, and the
+  reason it is a gate -- but it reported only `123 person-shaped findings: ['CNV-95960: spelled-out email',
+  'CNV-85843: account id', ...]`. The ticket and the kind, nothing more, so separating a real leak from a false
+  positive needed the encrypted copy and the passphrase, and the workflow stayed red for days. Printing the match
+  would be strictly worse: that writes personal data into a public CI log.
+  Each finding now carries the field it came from and a character-class shape of what matched, with no content
+  kept: `CNV-95960 text: spelled-out email A at A.A`, `CNV-85843 text: account id 9A9A9A9`. Letters collapse to
+  `A` and digits to `9`, while `at` and `dot` survive because they are what makes a spelled-out email
+  recognisable. `docs/operations.md` now lists the two known false-positive shapes -- a `sha256:` digest fragment
+  matching `BARE_ACCOUNT_ID`, and a labelled commenter name before a hostname -- and says that anything else is a
+  real leak to fix in the anonymiser rather than a reason to raise the gate. The patterns themselves are
+  deliberately left broad: over-matching a digest costs a digest, under-matching costs someone's identity
+  (G179).
+
+- **The same audit manufactured findings at a seam of its own making.** It scanned `text + " " + title`, two
+  fields that are sanitised separately, so a pattern could match across the join and refuse a copy over text
+  present in neither -- "escalated to Commenter A at" and "example.com upgrade notes" are each clean and read as
+  a spelled-out email when concatenated. Each field is scanned on its own, and the field is named in the finding
+  (G180).
+
+- **The `ClusterNetworkPolicy` fix was invisible in the terminal, which is where an operator reads it.** G172
+  moved the verdict to `undetermined` and the exit code to 1, and put the reason in `undeterminedBy` and
+  `summary` -- both JSON keys. `_print_reach` printed neither, so `policy reach` showed `UNDETERMINED` above two
+  lines reading `allowed` and nothing explaining the contradiction; the policy appeared only inside the trailing
+  `not evaluated:` line among four other boilerplate caveats. Worse, the read-only check list named
+  `adminnetworkpolicy` and `baselineadminnetworkpolicy` but not `clusternetworkpolicy`, so an operator following
+  the printed advice could not resolve the verdict it had just been given. The terminal now prints `unknown
+  because: <policy> is not evaluated here` and the summary sentence above the checks, and `get
+  clusternetworkpolicy -o yaml` goes first in the list when that is what made the answer unknown. A run with no
+  such policy is byte-identical. This is the day's own lesson one layer up: a disclosure is not a decision, and
+  fixing it in the JSON did not fix it in the surface a person reads (G177).
+
+- **The first version of that test passed against the wrong text.** It partitioned the output on the
+  `check (read-only)` heading, which also swallowed the trailing `not evaluated:` line -- and that line names the
+  policy, so the assertion went green while the printed commands still could not resolve the verdict. Scoped to
+  the `kubectl` lines only, it fails before the fix and passes after, which is the difference between a test and
+  a decoration (G178).
+
+- **Stale numbers and an overstated citation in this file, found by a closeout red team.** The 4.23 entry said
+  `openshift/kubernetes` `release-4.23` "is taking v1.36.x rebases" -- both rebase PRs, #2801 and #2839, are
+  closed and not merged, so what the evidence shows is a branch and a bot that targets it, not a landed rebase.
+  The commit message that corrected this claimed only the commit message was wrong, while this file carried the
+  same overstatement; it now states the evidence at its real strength, and so does the comment in
+  `tests/test_yamlio_catalog.py`. The `policy_generate` cap figures (380,670 and 14,168) were measured before
+  KN-S029 added the 108th generated policy and never said which serialization they used; they are now 392,307 ->
+  14,334 bytes of compact JSON on the 78-rule set, with the serialization named. `docs/roadmap.md` called P6
+  "Not started" for the version ceiling this cycle ships, and described P4's pre-G172 behaviour as current; both
+  corrected. `demos/README.md` carried three hand-typed video lengths that no longer match the released renders
+  (MCP 70 s and 57 s in two tables, actually 67 s; teaser 30 s, actually 32 s), credited the terminal lines to
+  "the 0.2.2 CLI" when `facts.py` re-records them against the code being built, and listed the compliance video
+  beside three that ship without saying it is a local render only.
+
+- **The weekly risk review opened an issue a week and never closed the previous one.** `risk-review.yml`
+  searched for an open issue titled with *this* week and edited it, else created one, and never touched the week
+  before -- so 2026-W44 ("release recommended: no, no action needed this week") sat open from 27 October while
+  W45 replaced it, and by December there would have been six open issues all reporting that nothing is wrong,
+  with any week that did need attention among them. An open issue is a claim that something wants doing; a report
+  that has been superseded is not making that claim. The step now closes every other open `risk-review` issue
+  with a comment naming the week that replaced it.
+  Two details that matter because this runs unattended: the new issue's number is taken from `gh issue create`'s
+  own output rather than a follow-up search, because GitHub's search index is eventually consistent and an empty
+  result would have closed the issue just written; and the run fails loudly rather than closing anything if the
+  number cannot be established. Both paths were exercised against a stubbed `gh` before shipping -- creating
+  closes the two superseded issues and not the new one, updating closes only the older one. W44 was closed by
+  hand this once (G176).
+
+- **The KN-N008 deprecation change shipped with no test, so the claim it added was unprotected.** The commit
+  added the `k8s-kep-5707` citation and rewrote the description to say the field is deprecated in Kubernetes
+  1.36, and touched no test -- the suite stayed green at exactly the count it had before, which is what a claim
+  with nothing asserting it looks like. Any later edit of that rule could have dropped the citation and the
+  sentence and nothing would have said so. There are now four assertions: the KEP is cited and every citation
+  resolves, the description names KEP-5707 and 1.36 and says "deprecated", the remediation names somewhere to go
+  (KEP-5707 offers no successor inside the Service API), and a Service with `externalIPs` is still reported while
+  one without it is not -- because a rule whose text improved while its detection broke is worse than leaving the
+  text alone. Verified by mutation: removing the citation from `rules.py` fails
+  `test_the_rule_cites_the_kep_that_removes_the_field`, so the assertion is real and not incidentally true
+  (G175).
+
+- **KN-N008 knew `Service.spec.externalIPs` was dangerous but not that it is now going away.** The rule already
+  carried CVE-2020-8554 and the `DenyServiceExternalIPs` admission controller; it predates KEP-5707, which
+  deprecates the field in Kubernetes 1.36 behind a kube-proxy feature gate `AllowServiceExternalIPs`, plans to
+  switch that gate off by default about four releases later and to lock it off three releases after that, and
+  offers no replacement inside the Service API -- pointing instead to a LoadBalancer Service with a cloud
+  provider, an Ingress controller, or the Gateway API, which it recommends for new deployments. The rule now says
+  so, which turns "this is risky" into "this is risky and it is leaving on a schedule" and changes how a team
+  prioritises it.
+
+  Two things are deliberately **not** asserted. The tentative release numbers (1.40 and 1.43) are given as
+  tentative, because the KEP marks them so. And the gate's default at 1.36 is left out entirely: the KEP
+  contradicts itself about it, with the Summary saying `default: false` and Phase 1 saying `default: true`, so
+  there is no version of that sentence this rule can state as fact.
+
+  No new rule, no count change: the check, its fixture, its CEL and its controls were already right. Only the
+  citation list (now including KEP-5707) and the explanation moved.
+
+- **New rule KN-S029: a `host` on a probe or lifecycle handler, and the Pod Security denial it causes.** A
+  `host` on an `httpGet` or `tcpSocket` handler makes the kubelet -- a trusted node component -- open a
+  connection to that address on the pod's behalf, so anyone who can create a pod can have the kubelet reach
+  somewhere the pod itself may not be allowed to, including node-local endpoints no NetworkPolicy sees.
+  KEP-4940 adds this to the Pod Security baseline as the `probeHost` check, enabled by a namespace's
+  `pod-security.kubernetes.io/enforce-version: v1.34` or later.
+
+  Both sides of the deploy were blind to it. `audit` did not look at the field, so nothing caught it before
+  admission; KN-S029 now checks all ten paths the KEP names -- the three probes' `httpGet.host` and
+  `tcpSocket.host` and the `postStart`/`preStop` handlers -- for containers and initContainers alike. And
+  `policy explain` had no entry for the check, so a real denial fell through to the generic branch, which echoes
+  the denial back as its own "fix" and attributes no rule, while `readOnlyNextSteps` still offered
+  `kube-noob fix`, which could do nothing for it. The denial now reports `relatedRules: ["KN-S029"]` and a fix
+  that names the fields to delete.
+
+  The check name was verified against the KEP rather than written from memory: it is `probeHost`, one word, in a
+  message of the form `probeHost (container "liveness" uses probeHost 135.45.63.4)`. A plausible-looking
+  invention -- "restricted probe hosts" was the first guess -- would have produced a regex matching nothing real,
+  and a test written against the same invention would have passed. A test now pins the name to the KEP's (G174).
+
+- **The one result that could not fit in any caller's context was the one an MCP caller had no way to
+  shrink.** `policy generate -o FILE` stopped inlining the rendered set, but `PolicyGenerateIn` has no `output`
+  field and an MCP caller has no filesystem to write to, so that fix reached the audience that was not the
+  problem. Measured on the bundled rule set for OpenShift, `policy_generate` returned **392,307 bytes of compact
+  JSON, about 98,000 tokens, 94% of it one YAML string** -- more than most callers can hold, for a tool that is
+  meant to be called by a model. A result the caller cannot read is worse than one that says how to ask for less.
+  (Every byte count here is compact JSON, `separators=(',', ':')`, on the 78-rule set as shipped; an earlier
+  draft quoted 380,670, measured before KN-S029 added the 108th generated policy.)
+
+  There is now a 128 KiB limit on the inline YAML, chosen from the measurements rather than picked: every rule on
+  every engine is 392,307 bytes and every rule on one engine is still 186,000-201,000, while ten rules on two
+  engines is 79,217 and five on one engine is 19,670. The limit sits above the queries a caller can use and below
+  the ones that overflow it. Over the limit the result is the counts, `skipped`, `yamlOmitted: true`, the byte
+  count (`yamlBytes: 369793`) and a sentence naming the three ways out -- `rules`, a single `engines` entry, or
+  the CLI's `-o`. That turns 392,307 bytes into **14,334** (about 98,000 tokens into 3,600, a 96.3% reduction)
+  with nothing a caller reasoned over removed. A request already under the limit is byte-identical to before, and
+  `allow_large: true` returns the whole set for a caller that knows its own budget.
+
+  It refuses rather than truncates, deliberately: half a policy set is not a policy set, and a caller that
+  applied one would enforce some rules and silently drop the rest -- a quiet partial answer, which this project
+  treats as a wrong one (G173).
+
+- **The removed-API tables say where they stop, so "no removals" stops meaning "nobody looked".** `REMOVED_APIS`
+  was read from the Kubernetes deprecated-API migration guide at 1.37 and the guide lists no removals after
+  v1.32, so for any target up to 1.37 an empty answer is complete. Past it, `api_history` returned
+  `removedInTarget: []` and `validate` produced no removed-API finding, and neither said that nobody had checked
+  that minor -- a verdict earned by absence, the same shape as G163. It stops being hypothetical on **16
+  December 2026**, when Kubernetes 1.38 is released, and already today for `--version 4.25`, which maps to 1.38.
+  `catalog.CHECKED_THROUGH` now names the ceiling; `api_history` returns `checkedThrough` and
+  `beyondCheckedVersions` and says so in its note; and a report whose target is past the ceiling carries a
+  `notCheckedBeyond` block, printed above the findings in text so a short clean-looking report cannot be read as
+  clean. A target at or below the ceiling is byte-identical to what it was, so nothing that was already complete
+  changed shape (G171).
+
+- **`policy reach` answered "allowed" on a cluster whose real policy it cannot read, and exited 0.**
+  `ClusterNetworkPolicy` (`policy.networking.k8s.io/v1alpha2`) is cluster-scoped and decided before any
+  NetworkPolicy, and this evaluator does not read it. The kind was already named under `notEvaluated` and already
+  attached a caveat to every proposed manifest -- but the verdict still read `allowed` and the CLI still returned
+  0, so a CI gate merged on an answer a `Deny` in that policy reverses. A note in a JSON list does not stop a
+  pipeline. With such a policy in the input the verdict is now `undetermined`, `undeterminedBy` names it, the
+  summary says which way the NetworkPolicies alone would have gone and that the unread policy can reverse it
+  either way, and the exit code is 1. Deliberately not `denied`: nothing here knows what the unread policy says,
+  so unknown is the honest answer -- the same third answer a same-priority AdminNetworkPolicy tie already gets.
+  A run with no such policy is unchanged, verdict and exit code both.
+
+  This is not a future-API edge case. Calico 3.32 (13 May 2026) removed AdminNetworkPolicy and
+  BaselineAdminNetworkPolicy enforcement outright in favour of `ClusterNetworkPolicy`, so on a current Calico
+  cluster the policy that actually decides the traffic is the one kind this evaluator cannot read (G172).
+
+- **The `debug/anp.py` docstring said v1alpha2 kept the same action semantics. It does not.** Six differences are
+  now written out where anyone extending the module will read them, each one a way the existing evaluator would
+  misread a v1alpha2 document: `Allow` is renamed `Accept`, so `ANP_ACTIONS` rejects every valid Admin rule;
+  `Pass` is legal in the Baseline tier, which `BANP_ACTIONS` forbids; `ports` is replaced by `protocols`, and
+  because `_port_matches` reads an absent `ports` key as "every port", adding the kind to `collect` without
+  rewriting the matcher would read a rule scoped to one port as a blanket rule and widen every verdict -- worse
+  than not reading the kind at all; the Baseline tier is no longer a singleton named `default`; egress peers gain
+  `nodes`, `networks` and `domainNames`, none evaluated; and the per-list cap fell from 100 to 25.
+
+- **OpenShift 4.23 is written out as Kubernetes 1.36, and the evidence for it is stated at its real strength.**
+  `OCP_TO_K8S` stopped at 4.22 and answered 4.23 through the "OCP 4.x tracks 1.(x+13)" extrapolation. The row is
+  now explicit, and the test moved to 4.24 so the extrapolation branch stays covered instead of being shadowed.
+  What the evidence shows: `openshift/kubernetes` has a `release-4.23` branch and its automated rebase bot
+  targets v1.36.x at it -- but both rebase PRs, #2801 (v1.36.5, 28 September 2026) and #2839 (v1.36.6, 2
+  November 2026), are **closed, not merged**. That is the direction of travel, not a landed rebase, and not a
+  settled mapping. An earlier draft of this entry and of the commit message said the branch "is taking" those
+  rebases, which overstates it; the row is behaviourally a no-op either way, since the +13 cadence answers 1.36
+  on its own.
+
+- **The FedRAMP 20x KSI mapping now has a release and a retirement list recorded before it is built.**
+  `FRMR.KSI.key-security-indicators.json` is at release 25.11C (published 2025-12-01), 20x is at
+  `current_status: Phase 2 Pilot`, the eleven families are intact, and seven indicators carry `retired: true`:
+  KSI-CMT-05, KSI-MLA-03, KSI-MLA-04, KSI-MLA-06, KSI-SVC-03, KSI-TPR-01, KSI-TPR-02. Evidence offered against a
+  withdrawn indicator is worse than no evidence, so `docs/roadmap.md` N3 and `docs/compliance.md` now say that
+  the allowlist ships with the release string and excludes those seven. Documentation only; no code claims a KSI
+  yet.
+
+- **Compaction skipped the excepted findings, so it did nothing for the callers who need it most.**
+  `compact_report` hoisted the per-rule constants out of `findings`, but `Toolkit.audit` puts the findings an
+  exceptions file accepted in a separate top-level `excepted` list, and that list was left untouched -- so every
+  caller with an exceptions file, which is every CI caller, got a report with hoisted findings beside un-hoisted
+  excepted ones, each still carrying its rule's `title`, `severity`, `stage`, `category`, `remediation`,
+  `citations`, `stackroxPolicies` and `controls` inline at about 794 bytes apiece. `expand_report` round-tripped
+  `findings` alone, so expanding such a report produced two finding lists of different shapes. Both lists are now
+  hoisted against one shared `ruleInfo` map and both are restored by `expand_report`; the per-finding `exception`
+  block is never hoisted. With one exception on `examples/netpol-shop.yaml` the result goes 39 025 -> 24 674 bytes
+  and the round trip through `Toolkit.audit` is exact. The existing round-trip test could not have caught this:
+  it called `analyze(...).as_dict()` directly and so never produced an `excepted` key at all (G169).
+
+- **`policy generate -o FILE` reported a byte count that was wrong on Windows.** The count was
+  `len(text.encode("utf-8"))` while the file was written with `write_text`, which translates `\n` to `\r\n` on
+  Windows -- so the file was larger than the number returned, and a caller checking the size would have seen a
+  mismatch on one platform only. It now writes the encoded bytes directly (G170).
+
+- **Filing an exception deleted the control it was filed against from the compliance record.** `Report.as_dict`
+  builds `controlSummary` from `self.findings`, and the exceptions filter in `Toolkit.audit` replaced that list
+  with the surviving findings *before* calling it -- so a control whose only evidence was an excepted finding
+  dropped out of the report entirely. On `examples/netpol-shop.yaml`, one well-formed exception against KN-N001
+  removed AC-4, SC-7 and SC-7(5) from `controlSummary`, leaving them indistinguishable from controls no rule had
+  ever evaluated. That is backwards: an exception is an owned, reviewed, expiring decision *about* a control, and
+  the one thing a compliance record must never do is make a signed-off control look unexamined. `controls.summary`
+  now takes the excepted rule ids as well and counts them apart, so those controls stay named with
+  `findings: 0, excepted: 1` and the note says what that means. A run with no exceptions is byte-for-byte what it
+  was (G168).
+
+- **Two results were mostly copies of themselves, and an MCP result is spent out of the caller's context
+  window.** `audit_manifests` carried each rule's `title`, `severity`, `stage`, `category`, `remediation`,
+  `citations`, `stackroxPolicies` and `controls` on every finding that rule produced: on `examples/` that is 105
+  findings over 19 distinct rules, so each constant appeared about five times and 53.9% of the 118 631-byte
+  result was duplicates (~29 700 tokens). `audit --compact`, and `compact=true` on the tool, now hoist those
+  fields once into a `ruleInfo` map keyed by rule id -- 118 631 -> 54 694 bytes, 37.9% on a single file -- and
+  `audit.compact.expand_report` is an exact inverse, asserted by a round-trip test, so this is a hoist and not a
+  guess about which fields a caller does not need. It is opt-in: the flat shape is what `/v1/audit` callers
+  parse, so the default does not move under them. The exit code is computed from the audit, never from the
+  emitted copy, because compaction moves `severity` off the findings and a gate must read the same verdict
+  either way (G165, G166).
+
+- **`policy generate -o FILE` wrote the file and still inlined all 358 KB of YAML, so asking for a file made the
+  result bigger.** 385 965 bytes with `-o` against 385 866 without, about 96 500 tokens either way, for a caller
+  that had just said where it wanted the bytes. With `-o` the result is now the path, the byte count and the
+  structured summary: 19 059 bytes, ~4 800 tokens, a 95% reduction. Without `-o` the YAML is still returned
+  inline, because there is nowhere else to put it (G167).
+
 - **Only four of the nineteen readers of untrusted JSON counted its depth first, and from Python 3.14 nothing
   else does.** `sanitize.json_nesting_ok` was written because `json.loads` recurses, and it was wired into the
   four paste paths (`server/rest`, `insight`, `signals/alertmanager`, `evals/problems`) and into none of the

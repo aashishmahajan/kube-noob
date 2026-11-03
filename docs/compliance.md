@@ -50,12 +50,16 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - Per-user identity in the service: authorization is one shared token unless you add the OAuth proxy, and audit
   records do not carry the caller's identity yet.
 - Machine-readable output for assessors (OSCAL assessment results) and the FedRAMP 20x Key Security Indicator
-  mapping.
+  mapping. When that mapping ships it will name the release it was built from and carry the retirement list:
+  `FRMR.KSI.key-security-indicators.json` is at release 25.11C (published 2025-12-01), 20x is at Phase 2 Pilot,
+  and seven indicators are now marked `retired: true` -- KSI-CMT-05, KSI-MLA-03, KSI-MLA-04, KSI-MLA-06,
+  KSI-SVC-03, KSI-TPR-01 and KSI-TPR-02. The eleven families are unchanged. Evidence offered against a withdrawn
+  indicator is worse than no evidence, so a mapping without that list is not shippable.
 - FIPS mode is checked by `doctor` but not exercised in CI (no FIPS-mode runner).
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 77 audit rules and their controls
+## The 78 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -113,6 +117,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S026 | Credential stored in a ConfigMap | IA-5(7), SC-28 |
 | KN-S027 | Legacy ServiceAccount token Secret | IA-5, AC-6 |
 | KN-S028 | RBAC binding grants a role to everyone | AC-14, AC-3, AC-6 |
+| KN-S029 | Probe or lifecycle handler with a host | SC-7, CM-7 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |

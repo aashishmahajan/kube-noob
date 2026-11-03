@@ -16,7 +16,7 @@ All three are rendered in 4K from real output, with the kube-noob brand music; t
 | Video | Command | Source |
 |---|---|---|
 | 2-minute walkthrough + YouTube thumbnail | `demos/video/render.sh <out-dir>` | `kube-noob demo` and `selftest` |
-| kube-noob as tools for Claude (MCP), 70 s | `demos/video/render.sh <out-dir> mcp <session.jsonl>` | a `claude -p --plugin-dir plugin/kube-noob --output-format stream-json --verbose` session, with its prompt in `<session>.prompt.txt` |
+| kube-noob as tools for Claude (MCP), 67 s | `demos/video/render.sh <out-dir> mcp <session.jsonl>` | a `claude -p --plugin-dir plugin/kube-noob --output-format stream-json --verbose` session, with its prompt in `<session>.prompt.txt` |
 | kube-noob as a sidecar on a cluster | `demos/video/render.sh <out-dir> sidecar <transcript.txt>` | the transcript `scripts/demo_sidecar_kind.sh` records in CI (job `e2e-kind`, OpenShift 4.22 leg) |
 
 The voice-over, title options and chapters are in [youtube-walkthrough.md](youtube-walkthrough.md). Prompts for an
@@ -25,15 +25,21 @@ AI-generated teaser, sidecar and MCP explainer are in [ai-video-prompts.md](ai-v
 ### Animated videos, no video model
 
 The same three scripts, rendered locally in the look of the Grok teaser (navy server room, glass terminal, rocket
-mascot) with a Kokoro voice-over and the kube-noob brand music. Every terminal line in them is copied from a real run:
-the 0.2.2 CLI, the CI sidecar transcript and the recorded Claude session.
+mascot) with a Kokoro voice-over and the kube-noob brand music. Every terminal line in them comes from a real run,
+recorded when the video is built rather than typed: `demos/video/facts.py` recomputes each number and re-records
+each `@name` line against the code being built, takes the sidecar lines from the CI transcript and the Claude lines
+from the recorded session. A release that changes a count changes the video, and `tests/test_video_facts.py` fails a
+script that hard-codes one.
 
-| Video | Length | Command |
-|---|---|---|
-| Teaser: no AI inside | 30 s | `demos/video/stage/build.sh <out-dir> teaser` |
-| kube-noob as a sidecar | 56 s | `demos/video/stage/build.sh <out-dir> sidecar` |
-| kube-noob as tools for Claude (MCP) | 57 s | `demos/video/stage/build.sh <out-dir> mcp` |
-| Compliance regimes: FedRAMP, EU AI Act, GDPR | 71 s | `python3 demos/video/stage/compliance.py <out-dir>` then `node demos/video/stage/capture.js <out-dir>` |
+Lengths below are the released v0.7.1 renders, measured from the attached 1080p copies. A local build of the
+same script can differ by a second or two, because the voice-over is synthesised at build time.
+
+| Video | Length | Attached to releases | Command |
+|---|---|---|---|
+| Teaser: no AI inside | 32 s | yes | `demos/video/stage/build.sh <out-dir> teaser` |
+| kube-noob as a sidecar | 57 s | yes | `demos/video/stage/build.sh <out-dir> sidecar` |
+| kube-noob as tools for Claude (MCP) | 67 s | yes | `demos/video/stage/build.sh <out-dir> mcp` |
+| Compliance regimes: FedRAMP, EU AI Act, GDPR | 71 s | **no, local render only** | `python3 demos/video/stage/compliance.py <out-dir>` then `node demos/video/stage/capture.js <out-dir>` |
 
 Needs python3 with `numpy` and `kokoro-onnx` (`pip install kokoro-onnx numpy`), Node with Playwright and Chromium,
 and ffmpeg. Scenes, captions and voice-over lines are in [video/stage/videos.json](video/stage/videos.json).

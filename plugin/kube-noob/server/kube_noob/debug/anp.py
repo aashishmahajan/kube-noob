@@ -16,9 +16,28 @@ Precedence, as OVN-Kubernetes implements it:
    matching rule wins. No match means allowed.
 
 Sources: https://ovn-kubernetes.io/features/network-security-controls/admin-network-policy/ and
-https://network-policy-api.sigs.k8s.io/api-overview/. Note that upstream is replacing both with
-``ClusterNetworkPolicy`` in v1alpha2; the tiers and the action semantics are the same, under the names
-``Accept``/``Deny``/``Pass``.
+https://network-policy-api.sigs.k8s.io/api-overview/.
+
+Upstream is replacing both with a single ``ClusterNetworkPolicy`` in v1alpha2, and **this module does not
+evaluate it**. The two tiers survive as a ``tier`` field, but the semantics are not the same and nothing here
+should be reused on a v1alpha2 document without reading each of these:
+
+* ``Allow`` is renamed ``Accept``, so :data:`ANP_ACTIONS` rejects every valid v1alpha2 Admin rule.
+* ``Pass`` is legal in the Baseline tier, which :data:`BANP_ACTIONS` does not allow.
+* The ``ports`` field is replaced by ``protocols``, with ``tcp``/``udp``/``sctp`` each carrying a
+  ``destinationPort``. :func:`_port_matches` treats an absent ``ports`` key as "every port", which is right for
+  v1alpha1 -- so simply adding the kind to :func:`collect` would read a rule scoped to one port as a blanket
+  rule, and widen every verdict. That is worse than not reading the kind at all.
+* The Baseline tier is no longer a singleton named ``default``, which :func:`collect` requires.
+* Egress peers gain ``nodes``, ``networks`` and ``domainNames``; none of the three is evaluated here.
+* The per-list cap fell from 100 items to 25.
+
+Until that work is done, ``ClusterNetworkPolicy`` is listed in
+:data:`kube_noob.debug.netpol.CLUSTER_SCOPED_ABOVE_NETWORKPOLICY`, which makes ``policy reach`` answer
+``undetermined`` rather than guess. This matters on current clusters rather than future ones: Calico 3.32
+removed AdminNetworkPolicy and BaselineAdminNetworkPolicy enforcement outright in favour of
+``ClusterNetworkPolicy``, so on such a cluster the policy that actually decides is the kind this module cannot
+read.
 """
 
 from __future__ import annotations

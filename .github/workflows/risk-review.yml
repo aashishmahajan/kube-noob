@@ -83,8 +83,21 @@ jobs:
           if [ -n "$num" ]; then
             gh issue edit "$num" --repo "$GITHUB_REPOSITORY" --body-file report/report.md --add-label "$labels"
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file report/report.md --label "$labels"
+            url=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file report/report.md \
+                  --label "$labels")
+            num="${url##*/}"
           fi
+          if [ -z "$num" ]; then
+            echo "::error::could not determine this week's issue number; not closing anything"
+            exit 1
+          fi
+          for old in $(gh issue list --repo "$GITHUB_REPOSITORY" --label risk-review --state open \
+                       --json number --jq '.[].number'); do
+            if [ "$old" != "$num" ]; then
+              gh issue close "$old" --repo "$GITHUB_REPOSITORY" --reason completed \
+                --comment "Superseded by $title. Closed by risk-review.yml so the open list holds the current week only."
+            fi
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: risk-review

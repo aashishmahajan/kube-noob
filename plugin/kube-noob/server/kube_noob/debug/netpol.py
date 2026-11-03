@@ -572,8 +572,16 @@ def check_reachability(
     # would be a guess, and a proposed NetworkPolicy under it would be applied and change nothing if the admin
     # tier's tie lands on Deny.
     undetermined = [d for d, r in (("Egress", egress), ("Ingress", ingress)) if r.get("undetermined")]
+    # A cluster-scoped kind that sits above NetworkPolicy and that this evaluator cannot read yet decides BEFORE
+    # any NetworkPolicy and has the last word. Naming it under `notEvaluated` was not enough: the verdict still
+    # read "allowed" and the CLI still exited 0, so a gate merged on an answer a ClusterNetworkPolicy `Deny` may
+    # reverse. Calico 3.32 removed AdminNetworkPolicy enforcement entirely in favour of ClusterNetworkPolicy, so
+    # on a current Calico cluster this is where the real policy lives, not an edge case.
+    unevaluated_above = [
+        ref for ref in inv.other_policies if ref.split("/", 1)[0] in CLUSTER_SCOPED_ABOVE_NETWORKPOLICY
+    ]
     out: dict[str, Any] = {
-        "verdict": "undetermined" if undetermined else ("allowed" if allowed else "denied"),
+        "verdict": "undetermined" if (undetermined or unevaluated_above) else ("allowed" if allowed else "denied"),
         "source": src.describe(),
         "destination": dst.describe(),
         "port": port,
@@ -589,6 +597,15 @@ def check_reachability(
         out["summary"] = (
             f"Undetermined: kube-noob could not determine whether {src.describe()} reaches {dst.describe()} on "
             f"{protocol} {port}. " + " ".join((ingress if d == "Ingress" else egress)["reason"] for d in undetermined)
+        )
+    elif unevaluated_above:
+        out["undeterminedBy"] = unevaluated_above
+        out["summary"] = (
+            f"Undetermined: the NetworkPolicies in these manifests would {'allow' if allowed else 'deny'} "
+            f"{src.describe()} -> {dst.describe()} on {protocol} {port}, but "
+            + ", ".join(unevaluated_above[:10])
+            + " is cluster-scoped and decided before any NetworkPolicy, and kube-noob does not evaluate it yet. "
+            "It can reverse this either way, so the answer is unknown rather than allowed or denied."
         )
     elif allowed:
         out["summary"] = (
@@ -645,9 +662,6 @@ def check_reachability(
                 "requiresApproval": True,
             }
         )
-    unevaluated_above = [
-        ref for ref in inv.other_policies if ref.split("/", 1)[0] in CLUSTER_SCOPED_ABOVE_NETWORKPOLICY
-    ]
     if unevaluated_above:
         # The admin tier runs before NetworkPolicy and has the last word. kube-noob cannot evaluate these yet, so
         # it must not let a NetworkPolicy fix go out as though nothing could override it.
@@ -678,6 +692,11 @@ def check_reachability(
         checks.insert(0, anp_check)
     else:
         checks.append(anp_check)
+    # When a cluster-scoped kind this evaluator cannot read is what made the answer unknown, reading it is the
+    # one step that resolves the verdict -- so it goes first. Printing checks that cannot settle the question,
+    # and omitting the one that can, is the same failure as naming the policy in a field nobody reads.
+    if unevaluated_above:
+        checks.insert(0, f"{cli} get clusternetworkpolicy -o yaml")
     if cli == "oc" and src.namespace in safe_ns:
         checks.append(f"oc get egressfirewall -n {src.namespace} -o yaml")
     out["readOnlyNextSteps"] = [_step(c) for c in checks if classify_step(c) == "read"]

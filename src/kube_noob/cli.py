@@ -255,6 +255,10 @@ def _print_report(rep: dict[str, Any]) -> None:
     )
     for a in rep.get("assumptions", []):
         print(f"  note: {a}")
+    if limit := rep.get("notCheckedBeyond"):
+        # Print it before the findings, not after: somebody reading a short report in a terminal has to see the
+        # limit before they read an empty finding list as a clean one.
+        print(f"  not checked: {limit['why']}")
     for f in rep["findings"]:
         loc = f"L{f['line']}" if f.get("line") else ""
         print(f"[{f['severity'].upper():8}] {f['ruleId']:9} {f['resource']} {loc} {f['path']}")
@@ -854,6 +858,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="audit the files that could be read and list the rest under 'unreadable' in the report; without it a "
         "directory holding a file that is not UTF-8 or not YAML exits 5, so a gate never reads a partial audit as a "
         "clean one (exit 1 stays findings at or above --fail-on)",
+    )
+    a.add_argument(
+        "--compact",
+        action="store_true",
+        help="in json/yaml output, collect each rule's constant fields (title, severity, remediation, citations, "
+        "controls and the rest) once into a 'ruleInfo' map keyed by rule id instead of repeating them on every "
+        "finding: the same report, losslessly, about a third smaller where a rule fires more than once. The exit "
+        "code is unchanged, so a gate reads the same verdict either way",
     )
     a.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     a.add_argument(
@@ -1840,6 +1852,12 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                 _print_exceptions(rep)
                 for b in unreadable:
                     print(f"not read: {b['path']} ({b['why']})", file=sys.stderr)
+            elif a.compact:
+                from kube_noob.audit.compact import compact_report
+
+                # Compact the emitted copy only. The exit code below is computed from `rep`, where every finding
+                # still carries its severity -- a gate must read the same verdict whether or not this flag is on.
+                _emit(compact_report(rep), fmt)
             else:
                 _emit(rep, fmt)
             if rep.get("exceptions") and not rep["exceptions"]["gate"]:
@@ -2456,6 +2474,13 @@ def _print_reach(out: dict[str, Any]) -> None:
                         f"          {pol['policy']} rule {rule['rule']}: allows {rule['peer']} on {rule['ports']} "
                         f"(no match: {', '.join(miss)})"
                     )
+    if out.get("undeterminedBy"):
+        # The verdict says UNDETERMINED and the two direction lines can both read "allowed", so without this the
+        # terminal shows a conclusion with no reason while the JSON carries both `undeterminedBy` and `summary`.
+        # A caveat belongs in the surface that is read, not only in the one that is parsed.
+        _tprint(f"  unknown because: {', '.join(out['undeterminedBy'])} is not evaluated here")
+    if out.get("summary") and out["verdict"] == "undetermined":
+        _tprint(f"  {out['summary']}")
     if out.get("warning"):
         _tprint(f"  warning: {out['warning']}")
     for c in out.get("proposedChanges", []):
@@ -2542,9 +2567,20 @@ def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         )
     )
     if a.output:
-        Path(a.output).write_text(text, encoding="utf-8")
+        # write_bytes, not write_text: write_text translates newlines on Windows, so the file would be larger
+        # than the `bytes` count reported below and a caller's size check would fail on one platform only.
+        Path(a.output).write_bytes(text.encode("utf-8"))
     if a.format != "text":
-        _emit({**g.summary(), "yaml": text, **({"output": a.output} if a.output else {})}, fmt)
+        # A caller that named a file has said where it wants the bytes. Inlining the rendered set as well spent
+        # that context twice -- about 96 000 tokens of YAML on the bundled rule set, which made the result with
+        # `-o` LARGER than the result without it.
+        body: dict[str, Any] = dict(g.summary())
+        if a.output:
+            body["output"] = a.output
+            body["bytes"] = len(text.encode("utf-8"))
+        else:
+            body["yaml"] = text
+        _emit(body, fmt)
         return 0
     if not a.output:
         sys.stdout.write(text)

@@ -148,3 +148,30 @@ def test_every_piped_step_sets_pipefail() -> None:
             if "pipefail" not in block:
                 offenders.append(f"{path.name}:{i + 1}: {line.strip()[:80]}")
     assert not offenders, "piped step whose exit status is tee's, not the command's:\n" + "\n".join(offenders)
+
+
+def test_the_weekly_risk_review_closes_the_week_it_supersedes() -> None:
+    """One issue per week, opened and never closed, turns the open-issue list into a calendar.
+
+    `risk-review.yml` searches for an open issue whose title matches *this* week and edits it, else creates one. It
+    never touches last week's. So 2026-W44 ("no action needed this week") sat open from 27 October while W45
+    superseded it, and by December there would be six open issues all saying nothing is wrong -- with any week
+    that did need attention buried among them. An open issue is a claim that something wants doing; a report that
+    has been replaced is not making that claim any more.
+
+    This is the same failure as the rest of this file: the information was there, and the thing a human reads was
+    not updated to reflect it.
+    """
+    import yaml
+
+    doc = yaml.safe_load((WORKFLOWS / "risk-review.yml").read_text(encoding="utf-8"))
+    steps = [s for job in doc["jobs"].values() for s in job.get("steps", [])]
+    runs = [str(s.get("run", "")) for s in steps]
+    opener = next((r for r in runs if "gh issue create" in r), None)
+    assert opener is not None, "no step opens the weekly issue; update this test with the new one"
+    assert "gh issue close" in opener, (
+        "the step that opens this week's risk review must close the ones it supersedes, or the open-issue list "
+        "grows one stale 'no action needed' report per week"
+    )
+    # Closing must be scoped to superseded reviews, never to this week's own issue or to unrelated work.
+    assert "risk-review" in opener, "the close has to be scoped by the risk-review label"

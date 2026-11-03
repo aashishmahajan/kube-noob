@@ -285,7 +285,12 @@ def test_the_title_is_anonymised_and_the_audit_sees_what_slips(tmp_path: Path) -
     leaky = {**rec, "text": rec["text"] + "\nping @robin.placeholder or +1.415.555.0198"}
     write_shard(tmp_path, "jira-ocpbugs", [leaky])
     check = jira_audit.audit(tmp_path)["selfCheck"]
-    assert check["personShapedFindings"] == 2 and {e.split(": ")[1] for e in check["examples"]} == {"handle", "phone"}
+    assert check["personShapedFindings"] == 2
+    kinds = {e.split(": ", 1)[1].rsplit(" ", 1)[0] for e in check["examples"]}
+    assert kinds == {"handle", "phone"}
+    # The shape has to be informative and content-free: "@robin.placeholder" -> "@A.A", "+1.415.555.0198" ->
+    # "+9.9.9.9". A report a reviewer cannot act on kept this gate red for days.
+    assert not any(x in e for e in check["examples"] for x in ("robin", "placeholder", "415", "0198"))
 
 
 def test_an_older_copy_is_rescrubbed_offline_once(tmp_path: Path) -> None:

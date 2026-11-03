@@ -26,7 +26,14 @@ from kube_noob.audit.engine import analyze, explain_rule, list_rules
 from kube_noob.audit.fixer import fix_manifests
 from kube_noob.audit.model import Severity, Stage
 from kube_noob.audit.protocol import run_protocol
-from kube_noob.catalog import OCP_TO_K8S, REMOVED_APIS, k8s_version_for, parse_minor
+from kube_noob.catalog import (
+    CHECKED_THROUGH,
+    OCP_TO_K8S,
+    REMOVED_APIS,
+    beyond_checked,
+    k8s_version_for,
+    parse_minor,
+)
 from kube_noob.config import Settings
 from kube_noob.debug.cluster import cluster_info, get_backend, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
@@ -97,6 +104,14 @@ class AuditIn(ManifestsIn):
         "low", description="Hide findings below this severity."
     )
     stages: list[StageName] = Field(default_factory=lambda: list(ALL_STAGE_NAMES))
+    compact: bool = Field(
+        False,
+        description="Return the same report with each rule's constant fields (title, severity, stage, category, "
+        "remediation, citations, stackroxPolicies, controls) collected once into a `ruleInfo` map keyed by rule id "
+        "instead of repeated on every finding. Lossless and about a third smaller on a report where rules fire more "
+        "than once; the findings keep their order, rule id, resource, line and message. Off by default so the flat "
+        "shape stays what it was.",
+    )
 
 
 class FixIn(ManifestsIn):
@@ -141,6 +156,13 @@ class ApiHistoryIn(_In):
 class RuleIn(_In):
     rule_id: str = Field(..., pattern=r"^[A-Za-z]{2}-[A-Za-z]{1,2}\d{3}$", description="e.g. KN-S001")
 
+
+# A rendered policy set is the one result that can exceed any caller's context. Measured on the bundled rule
+# set for OpenShift: every rule on every engine is 380,670 bytes (~95,000 tokens), and every rule on a single
+# engine is still 186,000-201,000 (~46,000-50,000). Ten rules on two engines is 79,217 (~19,800) and five on one
+# engine is 19,670 (~4,900). 128 KiB sits above the queries a caller can actually use and below the ones that
+# overflow it, and `allow_large` is there for a caller that knows its own budget.
+MAX_INLINE_POLICY_YAML = 128 * 1024
 
 MAX_DIAGNOSE_TEXT = 400_000
 MAX_SIGNAL_TEXT = 400_000
@@ -348,6 +370,14 @@ class PolicyGenerateIn(_In):
         default_factory=list,
         max_length=50,
         description="Namespaces the policies skip, besides kube-system, kube-public and kube-node-lease.",
+    )
+    allow_large: bool = Field(
+        False,
+        description="Return the rendered YAML even when it is larger than 128 KiB. Off by default: every rule on "
+        "every engine renders about 380 KB (~95,000 tokens), which is more than most callers can hold, and a "
+        "result a caller cannot read is worse than one that says how to narrow the request. When it is off and "
+        "the set is too large, the counts and `skipped` come back as usual with `yamlOmitted: true` and the byte "
+        "count, and nothing is truncated.",
     )
     exceptions: str | None = Field(
         None,
@@ -822,10 +852,23 @@ class Toolkit:
         if review is not None:
             out["excepted"] = excepted
             out["exceptions"] = {**review.summary(), "unused": [e.id for e in review.active if e.id not in used]}
+            # `as_dict` built controlSummary from the findings that survived the filter, so a control held only by
+            # excepted findings disappeared -- an owned, reviewed, expiring exception looked exactly like a control
+            # nothing had ever evaluated. Rebuild it with both sets, counted apart.
+            from kube_noob.audit.controls import summary as control_summary
+
+            out["controlSummary"] = control_summary(
+                [f.rule_id for f in kept], [str(e["ruleId"]) for e in excepted if "ruleId" in e]
+            )
         self._observe(
             [f"platform:{out.get('platform')}"]
             + [f"rule:{f['ruleId']}" for f in out.get("findings", []) if "ruleId" in f]
         )
+        if p.compact:
+            from kube_noob.audit.compact import compact_report
+
+            # After _observe, so the counters see the findings whatever shape the caller asked for.
+            return compact_report(out)
         return out
 
     def red_team(self, p: ManifestsIn) -> dict[str, Any]:
@@ -924,7 +967,18 @@ class Toolkit:
             "removedInTarget": [r.__dict__ for r in rows if parse_minor(k8s) >= parse_minor(r.removed_in)],
             "allRemovals": [r.__dict__ for r in rows],
             "openshiftToKubernetes": OCP_TO_K8S,
-            "note": "The upstream deprecation guide lists no removals after Kubernetes 1.32 (as of 1.37).",
+            "checkedThrough": CHECKED_THROUGH,
+            "beyondCheckedVersions": beyond_checked(k8s),
+            "note": (
+                f"The upstream deprecation guide lists no removals after Kubernetes 1.32, read at "
+                f"{CHECKED_THROUGH}."
+                + (
+                    f" {k8s} is past that, so this answer is 'nothing through {CHECKED_THROUGH}', not 'nothing "
+                    f"in {k8s}'."
+                    if beyond_checked(k8s)
+                    else ""
+                )
+            ),
         }
 
     def explain(self, p: RuleIn) -> dict[str, Any]:
@@ -1132,7 +1186,26 @@ class Toolkit:
         header = policies.header(
             g, platform=p.platform, platform_version=p.version, mode=p.mode, engines=engines, exceptions=entries
         )
-        return {**g.summary(), "yaml": g.yaml(header)}
+        text = g.yaml(header)
+        size = len(text.encode("utf-8"))
+        if size > MAX_INLINE_POLICY_YAML and not p.allow_large:
+            # Refuse, do not truncate: half a policy set is not a policy set, and a caller that applied it would
+            # enforce some rules and silently drop the rest. The counts and `skipped` still come back, so the
+            # caller learns what it asked for and how to ask for less.
+            return {
+                **g.summary(),
+                "yamlOmitted": True,
+                "yamlBytes": size,
+                "limit": MAX_INLINE_POLICY_YAML,
+                "why": (
+                    f"The rendered set is {size:,} bytes (about {size // 4:,} tokens), over the "
+                    f"{MAX_INLINE_POLICY_YAML:,}-byte limit for an inline result. Nothing was truncated and "
+                    "nothing failed. Ask for less with `rules` (one or a few rule ids) or a single `engines` "
+                    "entry, pass `allow_large: true` if you can hold it, or run "
+                    "`kube-noob policy generate -o policies.yaml` to write the whole set to a file."
+                ),
+            }
+        return {**g.summary(), "yaml": text}
 
     def policy_migrate_check(self, p: PolicyMigrateCheckIn) -> dict[str, Any]:
         from kube_noob import kyverno_migrate
@@ -1650,7 +1723,9 @@ class Toolkit:
                 "Audit manifests",
                 "Full deterministic audit: security, network exposure, storage access modes, reliability and "
                 "red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS "
-                "policy names.",
+                "policy names. On a large manifest set pass compact=true: the same report, with each rule's "
+                "constants hoisted once into ruleInfo instead of repeated on every finding, which is lossless and "
+                "about a third smaller.",
                 AuditIn,
                 self.audit,
             ),

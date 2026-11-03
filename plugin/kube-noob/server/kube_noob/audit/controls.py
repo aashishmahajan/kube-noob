@@ -69,6 +69,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S018": ("IA-5(7)", "SC-28"),
     "KN-S019": ("AC-6", "CM-7", "SC-39"),
     "KN-S020": ("SC-39", "CM-7"),
+    "KN-S029": ("SC-7", "CM-7"),  # the kubelet is made to cross a boundary on the pod's behalf
     "KN-S021": ("SI-2", "CM-7", "SC-39"),  # a deprecated volume driver with a published breakout
     "KN-S022": ("SI-2", "SC-39", "CM-7"),
     "KN-S023": ("SI-2", "SC-39"),
@@ -141,15 +142,39 @@ def describe(rule_id: str) -> list[dict[str, str]]:
     return [{"id": c, "title": TITLES[c]} for c in RULE_CONTROLS.get(rule_id, ())]
 
 
-def summary(rule_ids: list[str]) -> dict[str, Any]:
-    """Controls touched by a set of findings, most findings first: for an audit report."""
+def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> dict[str, Any]:
+    """Controls touched by a set of findings, most findings first: for an audit report.
+
+    ``excepted_rule_ids`` are the rules whose findings an exceptions file accepted. They are counted separately
+    and they still put their controls in the list. An exception is a reviewed, owned, expiring decision about a
+    control -- it is evidence *about* that control, so a control held only by excepted findings must stay named.
+    Dropping it would make a control somebody signed off on indistinguishable from a control nothing evaluated,
+    which is the one confusion a compliance record must not create.
+    """
     counts: dict[str, int] = {}
+    excepted: dict[str, int] = {}
     for rid in rule_ids:
         for c in RULE_CONTROLS.get(rid, ()):
             counts[c] = counts.get(c, 0) + 1
-    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    return {
-        "catalog": CATALOG,
-        "controls": [{"id": c, "title": TITLES[c], "findings": n} for c, n in ordered],
-        "note": "Findings are evidence about these controls; an assessment decides whether a control is met.",
-    }
+    for rid in excepted_rule_ids or ():
+        for c in RULE_CONTROLS.get(rid, ()):
+            excepted[c] = excepted.get(c, 0) + 1
+    ordered = sorted(
+        set(counts) | set(excepted),
+        key=lambda c: (-counts.get(c, 0), -excepted.get(c, 0), c),
+    )
+    controls: list[dict[str, Any]] = []
+    for c in ordered:
+        entry: dict[str, Any] = {"id": c, "title": TITLES[c], "findings": counts.get(c, 0)}
+        if excepted.get(c):
+            entry["excepted"] = excepted[c]
+        controls.append(entry)
+    out: dict[str, Any] = {"catalog": CATALOG, "controls": controls}
+    note = "Findings are evidence about these controls; an assessment decides whether a control is met."
+    if excepted:
+        note += (
+            " A control with `excepted` had findings an exceptions file accepted: the decision is recorded, not"
+            " that the control is clean."
+        )
+    out["note"] = note
+    return out

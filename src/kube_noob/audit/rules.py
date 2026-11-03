@@ -1554,6 +1554,50 @@ def _s020(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 
 
 @rule(
+    "KN-S029",
+    "Probe or lifecycle handler with a host",
+    Stage.AUDIT,
+    "security",
+    Severity.MEDIUM,
+    "Remove the host field from the probe or lifecycle handler. A handler with no host is sent to the pod's own "
+    "IP, which is what you almost always want; to reach another address, do it from the application.",
+    "A host on an httpGet or tcpSocket handler makes the kubelet -- a trusted node component -- open a "
+    "connection to that address on the pod's behalf, so anyone who can create a pod can have the kubelet reach "
+    "an address the pod itself may not be allowed to, including node-local and cluster-internal endpoints that "
+    "NetworkPolicy never sees. KEP-4940 adds this to the Pod Security baseline as the `probeHost` check, "
+    "enabled by a namespace label `pod-security.kubernetes.io/enforce-version: v1.34` or later, so on such a "
+    "namespace the pod is refused at admission rather than merely questionable.",
+    ("k8s-pss",),
+)
+def _s029(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    # The field paths KEP-4940 names, for containers and initContainers alike. `_containers` already yields both.
+    handlers = (
+        ("livenessProbe", "httpGet"),
+        ("livenessProbe", "tcpSocket"),
+        ("readinessProbe", "httpGet"),
+        ("readinessProbe", "tcpSocket"),
+        ("startupProbe", "httpGet"),
+        ("startupProbe", "tcpSocket"),
+        ("lifecycle", "postStart", "httpGet"),
+        ("lifecycle", "postStart", "tcpSocket"),
+        ("lifecycle", "preStop", "httpGet"),
+        ("lifecycle", "preStop", "tcpSocket"),
+    )
+    for d, _pt, c in _containers(ctx):
+        for path in handlers:
+            host = get_path(c.container, (*path, "host"))
+            if not isinstance(host, str) or not host.strip():
+                continue
+            where = ".".join(path)
+            yield r.finding(
+                d,
+                (*c.path, *path, "host"),
+                f"Container '{c.name}' sets {where}.host: {host.strip()}, so the kubelet connects to that "
+                f"address instead of the pod.",
+            )
+
+
+@rule(
     "KN-S021",
     "gitRepo volume",
     Stage.AUDIT,
@@ -2127,8 +2171,14 @@ def _n007(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     "design): anyone who can create or update a Service can set externalIPs to any address and so intercept "
     "cluster traffic meant for that address (man in the middle). The Kubernetes docs describe the feature as very "
     "powerful (it allows network traffic interception), say most users do not need it, and recommend the "
-    "DenyServiceExternalIPs admission controller, which rejects all net-new use of the field.",
-    ("k8s-cve-2020-8554", "k8s-admission-deny-external-ips"),
+    "DenyServiceExternalIPs admission controller, which rejects all net-new use of the field. The field is now "
+    "on its way out as well: KEP-5707 deprecates it in Kubernetes 1.36 behind a kube-proxy feature gate "
+    "AllowServiceExternalIPs, which the KEP plans to switch off by default about four releases later and to lock "
+    "off three releases after that -- tentatively 1.40 and 1.43, both of which the KEP itself marks as tentative. "
+    "The KEP gives no replacement inside the Service API: it points to a LoadBalancer Service with a cloud "
+    "provider, an Ingress controller, or the Gateway API, which it recommends for new deployments. So this is "
+    "worth fixing on a schedule rather than only on principle.",
+    ("k8s-cve-2020-8554", "k8s-kep-5707", "k8s-admission-deny-external-ips"),
 )
 def _n008(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d in ctx.by_kind("Service"):

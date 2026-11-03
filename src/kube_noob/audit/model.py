@@ -8,7 +8,7 @@ from typing import Any
 
 from kube_noob.audit.controls import controls_for
 from kube_noob.audit.controls import summary as control_summary
-from kube_noob.catalog import SOURCES, Citation
+from kube_noob.catalog import SOURCES, Citation, not_checked_beyond
 
 
 class Severity(enum.IntEnum):
@@ -139,6 +139,9 @@ class Report:
             "findings": [f.as_dict() for f in sorted(self.findings, key=_sort_key)],
             "controlSummary": control_summary([f.rule_id for f in self.findings]),
             "redTeam": [s.as_dict() for s in self.scenarios],
+            # Only when the target is past the minor the removal table was read at, so every result that was
+            # already complete stays byte-identical. See `catalog.not_checked_beyond`.
+            **({"notCheckedBeyond": limit} if (limit := not_checked_beyond(self.kubernetes_version)) else {}),
         }
 
 
