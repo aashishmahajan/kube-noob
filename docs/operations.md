@@ -18,6 +18,25 @@ something wants doing, and a report that has been replaced is not making that cl
 closing anything if it cannot establish this week's issue number, because closing on an unknown number would
 close the week it had just written.
 
+### When the corpus refresh refuses the copy
+
+The privacy audit exits 1 rather than keep a copy that still has person-shaped text in it, which is the right
+way round. Each finding now reads `<TICKET> <field>: <kind> <shape>`, where the shape is the match with its
+content removed -- `spelled-out email A at A.A`, `account id 9A9A9A9` -- so a failure can be triaged from the CI
+log without decrypting the copy and without the log carrying anyone's details.
+
+Two known false-positive shapes, both from patterns that are deliberately broad because missing real personal
+data is worse than over-matching:
+
+- `account id 9A9A9A9` on a `sha256:` image digest. `BARE_ACCOUNT_ID` matches any 24-character hex run starting
+  with `5`, which a digest fragment satisfies. The anonymiser replaces it with `<account>`, so the ticket text
+  loses a digest; it is not a leak. Do not narrow the pattern to fix the cosmetics.
+- `spelled-out email A at A.A` on text like "ping Commenter A at quay.io", which is what a labelled commenter
+  name followed by a hostname looks like. `anonymise` scrubs again after labelling for exactly this reason, so a
+  surviving one means the text reached the audit by another path.
+
+A finding whose shape is neither of those is a real leak: fix the anonymiser, do not raise the gate.
+
 ## Risk vectors and the release rule
 
 | Vector | Signal | Release? |

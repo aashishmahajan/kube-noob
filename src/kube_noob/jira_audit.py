@@ -28,12 +28,40 @@ _COMMENTER = re.compile(r"\bby (Commenter [A-Z]{1,3})\b")
 PLACEHOLDERS = ("<email>", "<phone>", "<account>", "@user")
 
 
+def redacted_shape(matched: str) -> str:
+    """The form of a match with none of its content: ``A9 at A9.A9`` for ``alice1 at example1.com``.
+
+    The gate refuses a copy and names the ticket and the kind, which is not enough to tell a real leak from a
+    false positive -- a 24-character hex digest fragment and an Atlassian account id match the same pattern.
+    Printing the match itself would write personal data into a public CI log, which is worse than an unactionable
+    failure. So each run of letters becomes ``A``, each run of digits ``9``, and the separators that carry the
+    structure (``at``, ``dot``, punctuation) are kept. Capped so a report stays readable.
+    """
+    out: list[str] = []
+    for token in re.split(r"(\s+)", matched.strip()):
+        if not token or token.isspace():
+            out.append(" ")
+            continue
+        if token.lower() in {"at", "dot"}:  # the words that make a spelled-out email what it is
+            out.append(token.lower())
+            continue
+        piece = re.sub(r"[0-9]+", "9", re.sub(r"[A-Za-z]+", "A", token))
+        out.append(piece)
+    shape = "".join(out).strip()
+    return shape if len(shape) <= 80 else shape[:77] + "..."
+
+
 def _person_shapes(body: str) -> list[str]:
     """Kinds of person-shaped text left in a stored record: the anonymiser's own patterns, run again, plus account
-    ids and Jira profile paths. Anything the anonymiser would still change is a leak."""
+    ids and Jira profile paths. Anything the anonymiser would still change is a leak.
+
+    Each kind is returned as ``"<kind> <shape>"``, the shape being :func:`redacted_shape` of what matched, so a
+    reviewer can act on a failure without decrypting the copy and without the log carrying anyone's details.
+    """
     from kube_noob.sources import jira
 
-    kinds = []
+    kinds: list[str] = []
+    shapes: dict[str, str] = {}
     for rx, kind in (
         (_EMAIL, "email"),
         (jira._EMAIL_LOCAL, "email"),
@@ -50,7 +78,8 @@ def _person_shapes(body: str) -> list[str]:
             if kind == "quoted reply name" and " someone wrote:" in m.group(0):
                 continue
             kinds.append(kind)
-    return kinds
+            shapes[kind] = redacted_shape(m.group(0))
+    return [f"{k} {shapes[k]}" for k in kinds]
 
 
 def _key_number(record_id: str) -> int:
@@ -105,10 +134,10 @@ def _project_report(path: Path) -> tuple[dict[str, Any], Counter[str], list[str]
             for p in PLACEHOLDERS:
                 scrub[p] += text.count(p)
             scrub["commenter labels"] += len(set(_COMMENTER.findall(text)))
-            body = text + " " + str(rec.get("title") or "")
-            for kind in _person_shapes(body):
-                if len(leaks) < 50:
-                    leaks.append(f"{rid.removeprefix('jira-')}: {kind}")
+            for field, body in (("text", text), ("title", str(rec.get("title") or ""))):
+                for kind in _person_shapes(body):
+                    if len(leaks) < 50:
+                        leaks.append(f"{rid.removeprefix('jira-')} {field}: {kind}")
     span = (max(keys) - min(keys) + 1) if keys else 0
     report = {
         "tickets": tickets,

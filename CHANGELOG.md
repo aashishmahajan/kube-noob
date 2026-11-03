@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **The weekly corpus refresh has been refusing the copy since 2026-10-31, and the failure could not be acted
+  on.** The privacy audit exits 1 rather than keep Jira text with person-shaped content in it -- correct, and the
+  reason it is a gate -- but it reported only `123 person-shaped findings: ['CNV-95960: spelled-out email',
+  'CNV-85843: account id', ...]`. The ticket and the kind, nothing more, so separating a real leak from a false
+  positive needed the encrypted copy and the passphrase, and the workflow stayed red for days. Printing the match
+  would be strictly worse: that writes personal data into a public CI log.
+  Each finding now carries the field it came from and a character-class shape of what matched, with no content
+  kept: `CNV-95960 text: spelled-out email A at A.A`, `CNV-85843 text: account id 9A9A9A9`. Letters collapse to
+  `A` and digits to `9`, while `at` and `dot` survive because they are what makes a spelled-out email
+  recognisable. `docs/operations.md` now lists the two known false-positive shapes -- a `sha256:` digest fragment
+  matching `BARE_ACCOUNT_ID`, and a labelled commenter name before a hostname -- and says that anything else is a
+  real leak to fix in the anonymiser rather than a reason to raise the gate. The patterns themselves are
+  deliberately left broad: over-matching a digest costs a digest, under-matching costs someone's identity
+  (G179).
+
+- **The same audit manufactured findings at a seam of its own making.** It scanned `text + " " + title`, two
+  fields that are sanitised separately, so a pattern could match across the join and refuse a copy over text
+  present in neither -- "escalated to Commenter A at" and "example.com upgrade notes" are each clean and read as
+  a spelled-out email when concatenated. Each field is scanned on its own, and the field is named in the finding
+  (G180).
+
 - **The `ClusterNetworkPolicy` fix was invisible in the terminal, which is where an operator reads it.** G172
   moved the verdict to `undetermined` and the exit code to 1, and put the reason in `undeterminedBy` and
   `summary` -- both JSON keys. `_print_reach` printed neither, so `policy reach` showed `UNDETERMINED` above two
