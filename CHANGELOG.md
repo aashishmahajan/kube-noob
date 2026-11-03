@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **Three scorers reported success for a spec that asserted nothing.** The same shape as the corpus
+  `redistributable` bug: `all([])` is `True` and an empty collection is the flattering answer. `evals/reward.py`
+  set `coverage = 1.0 if not must else len(hits) / len(must)`, so a qa task listing no `mustMention` gave any
+  prose at all a perfect coverage score. `Evaluation.passed` was `self.parsed and all(o.passed for o in
+  self.outcomes)`, so an evaluation with zero outcomes reported `passed: true` while `score` returned `0.0` --
+  two fields of one result disagreeing. And `selftest`'s `audit` case built `missing = [r for r in
+  case["expect"] if r not in fired]` and returned `not missing`, so a case with `expect: []` passed whatever the
+  audit found, in the command a user runs to decide whether to trust the tool. None was reachable from a shipped
+  fixture, which is exactly why none was caught: the version of this bug that *was* reachable published an empty
+  corpus. Each now refuses an empty spec, and a sweep asserts that no shipped fixture asserts nothing, so the
+  next empty one is caught when it is added rather than when it scores.
+
+  A red-team pass of the same family found two more, one of them worse than the three above. **`corpus db-check`
+  reported clean on a bundle manifest declaring no shards** -- the guard against an empty corpus had gone into
+  `build()`, which stops kube-noob from publishing one, but `db-check` is the command a *user* runs against a
+  bundle they downloaded, and it printed ok and exited 0 on an empty one. That was the last open link of that
+  chain, at the end people actually hold. And **`run_protocol` reported `status: "ready"` when it had audited
+  nothing**: `"ready" if not blockers else "blocked"` asserts readiness from an absence of HIGH findings, and with
+  no documents no rule ran, so there were no blockers -- a far stronger claim than a control summary, from the
+  same root cause as the coverage record still to be built. It now says `undetermined`.
+
+  The sweep is a frozen inventory rather than a lint rule, and the reasoning is worth recording: a pure AST sweep
+  for `all(...)`, `not any(...)` and `X if not Y else Z` finds 85 sites, and the live bugs shared no AST shape --
+  two ternaries, one `all()`, one missing guard. A rule precise enough to catch them would fire on all 85 and be
+  silenced within a day. What the real bugs share is a context, not a shape: an empty collection reaching a name
+  that means "this was fine". Filtering on that cuts 85 to 13, which is small enough to review and freeze.
+
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
   "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held

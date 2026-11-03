@@ -77,7 +77,9 @@ class Evaluation:
 
     @property
     def passed(self) -> bool:
-        return self.parsed and all(o.passed for o in self.outcomes)
+        # `all([])` is True, so an evaluation with no outcomes used to report passed while `score()` returned
+        # 0.0 -- two fields of the same result disagreeing. Nothing checked is not everything passing.
+        return self.parsed and bool(self.outcomes) and all(o.passed for o in self.outcomes)
 
     def as_dict(self) -> dict[str, Any]:
         return {

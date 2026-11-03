@@ -122,6 +122,18 @@ def check(root: Path) -> list[str]:
         return [f"MANIFEST.json is not a {FORMAT} manifest"]
     if "jira" in manifest:
         problems.append("MANIFEST.json carries a Jira block")
+    # `db-check` is what someone runs on a bundle they downloaded. A manifest declaring no shards, or shards whose
+    # record counts are all zero, used to pass every check here: the per-shard loop below finds no bad lines in a
+    # file with no lines, so an empty corpus reported clean and exited 0. The writer's guard is not enough, since
+    # the writer is not who runs this.
+    declared = (manifest.get("shards") or {}) if isinstance(manifest, dict) else {}
+    if not declared:
+        problems.append("MANIFEST.json declares no shards: an empty corpus is not a bundle")
+    elif sum(int((e or {}).get("records", 0) or 0) for e in declared.values()) == 0:
+        problems.append(
+            f"MANIFEST.json declares {len(declared)} shard(s) with 0 records between them: an empty corpus is not "
+            "a bundle"
+        )
     listed: dict[str, str] = {}
     for name, entry in (manifest.get("shards") or {}).items():
         fname = str((entry or {}).get("file", ""))

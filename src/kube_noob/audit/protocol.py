@@ -188,7 +188,15 @@ def run_protocol(
     blockers = [f.as_dict() for f in final.findings if f.severity >= Severity.HIGH]
     steps["redTeam"] = {"scenarios": [s.as_dict() for s in final.scenarios], "remainingBlockers": blockers}
 
-    status = "ready" if not blockers else "blocked"
+    # "ready" from an absence of HIGH findings is only honest if something was actually audited. With no
+    # documents no rule ran, so there were no blockers and the run reported ready -- a far stronger claim than a
+    # control summary. Until the coverage record lands, the minimum is to refuse the word when nothing was read.
+    if blockers:
+        status = "blocked"
+    elif not docs:
+        status = "undetermined"
+    else:
+        status = "ready"
     brief = {
         "platform": platform,
         "platformVersion": final.platform_version,
