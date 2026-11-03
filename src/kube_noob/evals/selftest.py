@@ -15,9 +15,32 @@ import yaml
 from kube_noob.config import Settings
 
 
+class SelfTestSpecError(ValueError):
+    """A self-test case cannot be judged as written."""
+
+
+def validate_case(case: dict[str, Any]) -> None:
+    """Refuse a case that asserts nothing.
+
+    `audit` built `missing = [r for r in case["expect"] if r not in fired]` and returned `not missing`, so a case
+    with `expect: []` passed whatever the audit found -- and `search` returns `any(d in case["expect"] ...)`,
+    which is False on an empty expectation and so fails for the opposite reason. Either way the case is not
+    saying what it means, and the self-test is the thing a user runs to decide whether to trust the tool.
+    """
+    expect = case.get("expect")
+    if expect is None or (isinstance(expect, list | tuple | set | str) and not expect):
+        raise SelfTestSpecError(
+            f"self-test case {case.get('id')!r} ({case.get('kind')}) has an empty `expect`, so it asserts "
+            "nothing; give it what it should find, or remove the case"
+        )
+
+
 def cases() -> list[dict[str, Any]]:
     raw = resources.files("kube_noob").joinpath("data", "evals", "selftest.yaml").read_text(encoding="utf-8")
-    return list(yaml.safe_load(raw)["cases"])
+    out = list(yaml.safe_load(raw)["cases"])
+    for case in out:
+        validate_case(case)
+    return out
 
 
 def _check(kit: Any, case: dict[str, Any]) -> tuple[bool, str]:
