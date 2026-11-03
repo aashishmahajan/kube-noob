@@ -23,11 +23,11 @@ Every policy gets one outcome, with the reason:
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.audit.rules import RULES
 
 MAX_POLICIES = 2000
@@ -236,7 +236,7 @@ def load(text: str) -> list[dict[str, Any]]:
     if len(text.encode("utf-8")) > MAX_BYTES:
         raise RhacsError(f"larger than {MAX_BYTES} bytes")
     try:
-        data = json.loads(text)
+        data = sanitize.loads_bounded(text)
     except (ValueError, RecursionError) as exc:
         raise RhacsError(f"not JSON: {str(exc)[:120]}") from exc
     return policies_from(data)

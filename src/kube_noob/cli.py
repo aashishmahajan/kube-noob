@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from kube_noob import __version__
+from kube_noob import __version__, sanitize
 from kube_noob.config import Settings, load_settings
 from kube_noob.errors import ClarificationNeeded, ConfigError, KubeNoobError
 
@@ -542,7 +542,7 @@ def _vuln_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         for path in paths:
             if path != "-" and Path(path).is_file() and Path(path).stat().st_size > rep.MAX_BYTES:
                 raise ConfigError(f"{path}: larger than {rep.MAX_BYTES} bytes")
-            out.append(rep.parse(_read(path), path))
+            out.append(rep.parse(_read(path), path, sanitize.MAX_JSON_DEPTH_FILE))
         return out
 
     try:
@@ -669,7 +669,7 @@ def _code_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         for path in a.sarif:
             if path != "-" and Path(path).is_file() and Path(path).stat().st_size > sarif.MAX_BYTES:
                 raise ConfigError(f"{path}: larger than {sarif.MAX_BYTES} bytes")
-            sarifs.append(sarif.parse(_read(path), path, roots=roots))
+            sarifs.append(sarif.parse(_read(path), path, roots=roots, max_depth=sanitize.MAX_JSON_DEPTH_FILE))
         builds = _code_builds(list(a.containerfile), repo)
         reach = None
         if a.manifests:

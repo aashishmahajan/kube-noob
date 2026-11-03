@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 import pytest
 
+from kube_noob import sanitize
 from kube_noob.attack_paths import Inventory, workload_reach
 from kube_noob.cli import main
 from kube_noob.config import load_settings
@@ -145,7 +146,7 @@ def test_hostile_reports(monkeypatch: pytest.MonkeyPatch) -> None:
     for data, msg in (
         (b"not json", "not JSON"),
         (b"[1, 2]", "not a JSON object"),
-        (b"[" * 100_000 + b"]" * 100_000, "nested too deeply|not JSON"),
+        (b"[" * 100_000 + b"]" * 100_000, "nested too deeply"),
         (b'{"hello": "world"}', "not a Trivy or Grype JSON report"),
         (b'{"document": {"category": "csaf_vex"}}', "pass VEX with --vex"),
         (b'{"catalogVersion": "1", "vulnerabilities": []}', "pass it with --kev"),
@@ -174,7 +175,12 @@ def test_hostile_reports(monkeypatch: pytest.MonkeyPatch) -> None:
     deep: dict[str, Any] = {"name": "leaf", "type": "library"}
     for _ in range(50):
         deep = {"name": "n", "type": "library", "components": [deep]}
-    sbom = reports.parse(json.dumps({"bomFormat": "CycloneDX", "components": [deep]}))
+    # A scanner's own SBOM, so it is read with the file ceiling: nested components are a dependency tree and the
+    # walk is bounded at MAX_DEPTH below, rather than the document being refused. The same text arriving as a tool
+    # argument gets the tight ceiling and is refused -- see tests/test_json_depth_guard.py.
+    sbom = reports.parse(
+        json.dumps({"bomFormat": "CycloneDX", "components": [deep]}), max_depth=sanitize.MAX_JSON_DEPTH_FILE
+    )
     assert len(sbom.packages) == reports.MAX_DEPTH + 1, "nested components stop at the depth bound"
 
 

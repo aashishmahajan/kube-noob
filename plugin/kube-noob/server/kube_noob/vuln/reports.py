@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import unquote
 
+from kube_noob import sanitize
 from kube_noob.vuln import rpmver
 
 MAX_BYTES = 64_000_000
@@ -829,13 +830,13 @@ def detect(doc: dict[str, Any]) -> str:
     )
 
 
-def parse(data: str | bytes, where: str = "report") -> ScanReport:
+def parse(data: str | bytes, where: str = "report", max_depth: int = sanitize.MAX_JSON_DEPTH) -> ScanReport:
     raw = data.encode("utf-8") if isinstance(data, str) else data
     if len(raw) > MAX_BYTES:
         raise ReportError(f"{where}: larger than {MAX_BYTES} bytes")
     try:
-        doc = json.loads(raw)
-    except RecursionError as exc:
+        doc = sanitize.loads_bounded(raw, max_depth)
+    except (sanitize.JsonTooDeep, RecursionError) as exc:
         raise ReportError(f"{where}: JSON nested too deeply") from exc
     except ValueError as exc:
         raise ReportError(f"{where}: not JSON ({str(exc)[:120]})") from exc

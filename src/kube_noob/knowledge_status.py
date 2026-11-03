@@ -8,10 +8,10 @@ through the opt-in web lookups (labelled as external) or a corpus you rebuild yo
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.catalog import DEFAULT_K8S_VERSION, DEFAULT_OCP_VERSION, parse_minor
 
 # The date the bundled rules, playbooks, docs and version tables were last reviewed. Raise it with every review.
@@ -23,7 +23,7 @@ def _corpus_as_of(data_dir: Path | None) -> str | None:
     if not manifest or not manifest.is_file():
         return None
     try:
-        doc = json.loads(manifest.read_text(encoding="utf-8"))
+        doc = sanitize.loads_bounded(manifest.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
     except (OSError, ValueError):
         return None
     shards = (doc.get("shards") or {}).values()

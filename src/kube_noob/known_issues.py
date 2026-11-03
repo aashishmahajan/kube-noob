@@ -20,7 +20,6 @@ duplicate (see ``kube_noob.tickets``). A release-note issue that is also in the 
 from __future__ import annotations
 
 import functools
-import json
 import re
 import threading
 from collections.abc import Callable
@@ -29,6 +28,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.catalog import OPENSHIFT_FAMILY
 from kube_noob.knowledge.store import Chunk, KnowledgeStore, builtin_chunks, tokenize
 
@@ -475,7 +475,7 @@ def _read_parts(files: list[Any]) -> tuple[list[Issue], dict[str, Any]]:
     issues: list[Issue] = []
     meta: dict[str, Any] = {}
     for f in sorted(files, key=lambda p: p.name):
-        doc = json.loads(f.read_text(encoding="utf-8"))
+        doc = sanitize.loads_bounded(f.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
         issues.extend(_parse(doc))
         meta = {k: v for k, v in doc.items() if k != "records"} or meta
     return issues, meta

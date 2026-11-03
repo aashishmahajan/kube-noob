@@ -23,7 +23,6 @@ Definitions (stated so the numbers can be checked by hand):
 from __future__ import annotations
 
 import datetime as dt
-import json
 import math
 import re
 import xml.etree.ElementTree as ET  # DTDs and entities are refused before parsing (_safe_xml)
@@ -31,6 +30,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from kube_noob import sanitize
 
 MAX_RUNS = 5_000
 MAX_XML_BYTES = 20_000_000
@@ -139,7 +140,7 @@ def load_history(folder: Path) -> list[Run]:
         if len(runs) >= MAX_RUNS:
             raise HistoryError(f"more than {MAX_RUNS} runs")
         try:
-            doc = json.loads(meta.read_text(encoding="utf-8"))
+            doc = sanitize.loads_bounded(meta.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
         except (ValueError, RecursionError) as exc:
             raise HistoryError(f"{meta}: not JSON") from exc
         if not isinstance(doc, dict):

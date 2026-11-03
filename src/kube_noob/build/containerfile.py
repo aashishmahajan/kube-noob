@@ -19,6 +19,7 @@ deleted by a later layer) and KN-B010 (one in the image config or history), and 
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import re
@@ -27,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.audit.rules import SENSITIVE_ENV
 from kube_noob.build import secrets
 from kube_noob.catalog import SOURCES
@@ -610,12 +612,8 @@ def audit(
             if ins.cmd in {"COPY", "ADD"} and "from" not in ins.flags:
                 words = _words(ins.body)
                 if words and words[0].startswith("["):
-                    try:
-                        import json
-
-                        words = [str(w) for w in json.loads(ins.body)]
-                    except ValueError:
-                        pass
+                    with contextlib.suppress(ValueError, RecursionError, TypeError):
+                        words = [str(w) for w in sanitize.loads_bounded(ins.body)]
                 for src in words[:-1]:
                     kind = secrets.name_kind(src)
                     if kind:

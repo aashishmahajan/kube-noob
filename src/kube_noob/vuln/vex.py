@@ -20,13 +20,13 @@ are, and the output says how many were outside VEX.
 from __future__ import annotations
 
 import functools
-import json
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
 from kube_noob.vuln import rpmver
 from kube_noob.vuln.csaf import module_stream
 from kube_noob.vuln.reports import Finding, Package, parse_purl, severity
@@ -174,7 +174,7 @@ def _corpus_records(data_dir: Path) -> Iterator[dict[str, Any]]:
             if not line.strip() or len(line) > MAX_LINE:
                 continue
             try:
-                rec = json.loads(line)
+                rec = sanitize.loads_bounded(line, sanitize.MAX_JSON_DEPTH_FILE)
             except ValueError:
                 continue
             if isinstance(rec, dict):
@@ -188,7 +188,7 @@ def _documents(path: Path) -> Iterator[Any]:
         if path.stat().st_size > MAX_DOC:
             raise VexError(f"{path}: larger than {MAX_DOC} bytes")
         try:
-            yield json.loads(path.read_bytes())
+            yield sanitize.loads_bounded(path.read_bytes(), sanitize.MAX_JSON_DEPTH_FILE)
         except (ValueError, RecursionError) as exc:
             raise VexError(f"{path}: not JSON") from exc
         return
@@ -203,7 +203,7 @@ def _documents(path: Path) -> Iterator[Any]:
             if f.stat().st_size > MAX_DOC:
                 continue
             try:
-                yield json.loads(f.read_bytes())
+                yield sanitize.loads_bounded(f.read_bytes(), sanitize.MAX_JSON_DEPTH_FILE)
             except (ValueError, RecursionError):
                 continue
         return
@@ -255,7 +255,7 @@ def load(
         index.origins.append(f"{path}: {index.documents - before} VEX documents")
     for i, text in enumerate(texts):
         try:
-            doc = json.loads(text)
+            doc = sanitize.loads_bounded(text, sanitize.MAX_JSON_DEPTH_FILE)
         except (ValueError, RecursionError) as exc:
             raise VexError(f"VEX document {i + 1}: not JSON") from exc
         take(doc, f"VEX document {i + 1}")

@@ -26,6 +26,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from kube_noob import sanitize
+
 FORMAT = "kube-noob-db/1"
 ARCHIVE = "kube-noob-db.tgz"
 LICENSES = frozenset(
@@ -95,7 +97,7 @@ def _known_problems(path: Path, name: str) -> list[str]:
     from kube_noob import known_issues as ki
 
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc = sanitize.loads_bounded(path.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
     except (ValueError, RecursionError):
         return [f"{name}: invalid JSON"]
     if not isinstance(doc, dict) or str(doc.get("license")) not in LICENSES or not doc.get("attribution"):
@@ -260,7 +262,7 @@ def build(data_dir: Path, out: Path, now: datetime | None = None) -> dict[str, A
                 bad = _known_problems(f, rel)
                 if bad:
                     raise BundleError("not built: " + "; ".join(bad))
-                doc = json.loads(f.read_text(encoding="utf-8"))
+                doc = sanitize.loads_bounded(f.read_text(encoding="utf-8"), sanitize.MAX_JSON_DEPTH_FILE)
                 shutil.copyfile(f, stage / rel)
                 files[rel] = _sha(stage / rel)
                 known.append(

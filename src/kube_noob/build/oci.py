@@ -12,13 +12,13 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
-import json
 import re
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO, Any
 
+from kube_noob import sanitize
 from kube_noob.build import secrets
 
 MAX_MANIFEST = 4_000_000
@@ -124,7 +124,7 @@ def _small_blob(root: Path, digest: Any) -> bytes:
 
 def _json(data: bytes, what: str) -> dict[str, Any]:
     try:
-        doc = json.loads(data)
+        doc = sanitize.loads_bounded(data, sanitize.MAX_JSON_DEPTH_FILE)
     except (ValueError, RecursionError) as exc:
         raise LayoutError(f"{what} is not JSON") from exc
     if not isinstance(doc, dict):

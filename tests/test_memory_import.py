@@ -106,7 +106,7 @@ def test_cleaning_removes_people_and_keeps_the_fix() -> None:
     [
         ("servicenow-json", "{not json", "JSON cannot be read"),
         ("servicenow-json", '{"records": []}', "result"),
-        ("jira-json", "[" * 100_000 + "]" * 100_000, "JSON cannot be read"),
+        ("jira-json", "[" * 100_000 + "]" * 100_000, "nested too deeply"),
         ("jira-json", '{"issues": 3}', "issues"),
         ("jira-csv", "", "empty"),
         ("jira-csv", "Key,Title\nX-1,y\n", "Issue key and Summary"),

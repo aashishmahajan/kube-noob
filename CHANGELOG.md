@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **Only four of the nineteen readers of untrusted JSON counted its depth first, and from Python 3.14 nothing
+  else does.** `sanitize.json_nesting_ok` was written because `json.loads` recurses, and it was wired into the
+  four paste paths (`server/rest`, `insight`, `signals/alertmanager`, `evals/problems`) and into none of the
+  fifteen parsers that read a scanner report, an SBOM, a ticket export, an OCI image config or a corpus shard.
+  That was the same defect as G146 -- a guard added on one input path and not the rest -- and 3.14 made it
+  reachable: `sys.getrecursionlimit()` no longer bounds `json.loads`, so on 3.14.6 at the default limit of 1000 a
+  document 10 000 brackets deep parses, and whether 100 000 fails depends on the C stack the process happens to
+  have. The same file is therefore refused in a small container and accepted on a CI runner, which is exactly what
+  `ci/test (3.14)` was reporting. There is no depth a handler can be written against, so every reader now goes
+  through `sanitize.loads_bounded`, which counts brackets before parsing and raises `sanitize.JsonTooDeep` (a
+  `ValueError`, so existing handlers keep catching it) at the same depth on every interpreter and every machine.
+  Files get a higher ceiling than pastes (512 against 64): nested CycloneDX components are a dependency tree and
+  `vuln.reports` is built to accept a deep one and bound its own walk at `MAX_DEPTH`, so refusing at 64 would have
+  turned truncation into rejection. The count itself is two passes in C rather than a Python loop over every
+  character, which is about 0.4 s on a 50 MB document instead of 3 s, and allocates less than the parse it guards.
+  Three tests that asserted whichever message the interpreter happened to produce now assert the refusal.
+
+- **A red team of that change found that it was shallower than it claimed, in five ways.** The sweep behind it
+  matched `doc|raw_doc|payload = json.loads(`, so it reached 18 sites out of 71 and the regression test it left
+  behind could see exactly one of them while its name promised all of them -- G147 again, a test policing a rule
+  being itself a claim. Four of the fifteen "file" parsers were not file reads at all but `parse(data)` helpers
+  fed by MCP tool arguments on the shared HTTP server, so a pasted 503-deep SARIF was accepted through
+  `code_report`; `max_depth` now defaults to the tight ceiling, because a string argument is a paste until proven
+  otherwise, and the callers that read a path ask for the loose one. Four paste paths had no count at all and let
+  a `RecursionError` out of a `read_only` tool: `rhacs.load` (`rhacs_compare`), the exception list in
+  `audit.exceptions.review` (`audit_manifests`, which the browser playground offers), and the JSON array lifted
+  out of a pasted Containerfile in `build.containerfile` and `code.ship`. YAML was worse than JSON and unguarded:
+  `yaml.CSafeLoader` **segfaults** on a deep document on 3.13 already, no 3.14 needed, so `sanitize` now carries
+  `yaml_nesting_ok`, `safe_load_bounded` and `safe_load_all_bounded`, counting depth from `yaml.parse`'s event
+  stream, which recurses in neither implementation. `gate` read operator YAML with `except yaml.YAMLError` only --
+  which does not catch `RecursionError`, since `yaml.YAMLError` is not a `ValueError` -- and a deep file ended the
+  command instead of being reported against its path. The regression test is now a frozen inventory of the 67 raw
+  loaders left in the tree that may shrink and never grow, and it says so rather than claiming they are all safe.
+
+
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
   "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held
