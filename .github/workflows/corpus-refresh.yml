@@ -124,6 +124,7 @@ jobs:
             rm -f previous/jira-snapshot.tgz previous/jira-snapshot.tgz.enc
             exit 0
           fi
+          set -euo pipefail
           kube-noob corpus import previous/jira-snapshot.tgz --format json | tee import-summary.json
           rm -f previous/jira-snapshot.tgz
       - name: Red Hat Jira copy (paced, budgeted)
@@ -274,15 +275,27 @@ jobs:
       - name: Git documentation sources
         if: steps.due.outputs.run == 'true' && env.FULL == 'true'
         run: |
+          set -euo pipefail
           kube-noob corpus build --online --sources "${{ inputs.git_sources || 'all' }}" --format json | tee git-summary.json
-          python -c "import json; s=json.load(open('git-summary.json'))['sources']; print('::notice title=Git sources::' + ', '.join(f'{k}={v}' for k, v in s.items()))"
+          python - <<'PY'
+          import json
+          s = json.load(open("git-summary.json"))["sources"]
+          print("::notice title=Git sources::" + ", ".join(f"{k}={v}" for k, v in s.items()))
+          bad = {k: v for k, v in s.items() if not isinstance(v, int) or v == 0}
+          if bad:
+              print("::error title=Git sources::no records from " + ", ".join(sorted(bad)))
+              raise SystemExit(1)
+          PY
       - name: Release history
         if: steps.due.outputs.run == 'true' && env.FULL == 'true'
-        run: kube-noob corpus history --online --format json | tee history-summary.json
+        run: |
+          set -euo pipefail
+          kube-noob corpus history --online --format json | tee history-summary.json
       - name: Verify corpus integrity
         if: steps.due.outputs.run == 'true'
         run: |
           kube-noob corpus verify
+          set -euo pipefail
           kube-noob corpus stats --format json | tee stats.json
           python -c "import json; s=json.load(open('stats.json'))['index']; print(f'::notice title=Corpus index::chunks={s[\"chunks\"]} documents={s[\"documents\"]} bySource={s[\"bySource\"]}')"
       - name: Package redistributable corpus

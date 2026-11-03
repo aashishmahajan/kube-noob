@@ -11,7 +11,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from kube_noob.errors import KubeNoobError
+
 REQUIRED = ("id", "title", "text", "sourceId", "license", "redistributable")
+
+
+class CorpusError(KubeNoobError):
+    """A shard cannot be written, or would be written in a state that must not reach a bundle."""
 
 
 def corpus_dir(data_dir: Path) -> Path:
@@ -28,10 +34,24 @@ def _validate(rec: dict[str, Any]) -> None:
         raise ValueError(f"corpus record {rec['id']!r}: redistributable must be a bool")
 
 
-def write_shard(data_dir: Path, shard: str, records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Atomically replace ``corpus/<shard>.jsonl`` and update the manifest."""
+def write_shard(
+    data_dir: Path, shard: str, records: list[dict[str, Any]], *, allow_empty: bool = False
+) -> dict[str, Any]:
+    """Atomically replace ``corpus/<shard>.jsonl`` and update the manifest.
+
+    A refresh that produced no records is refused unless ``allow_empty``. A source yielding nothing means its
+    upstream layout moved far more often than it means the source is genuinely empty, and the write is
+    ``os.replace``: it would truncate the shard it is replacing to nothing and take the records with it. Refusing
+    keeps the previous shard, and keeps the empty file out of the bundle, where a file with no lines passes every
+    per-line check there is.
+    """
     if not shard.replace("-", "").replace("_", "").isalnum():
         raise ValueError(f"invalid shard name {shard!r}")
+    if not records and not allow_empty:
+        raise CorpusError(
+            f"{shard}: the source produced 0 records, which is almost always a moved upstream path rather than an "
+            "empty source. The existing shard is kept. Pass allow_empty to write an empty one on purpose."
+        )
     cdir = corpus_dir(data_dir)
     for r in records:
         _validate(r)
@@ -53,7 +73,9 @@ def write_shard(data_dir: Path, shard: str, records: list[dict[str, Any]]) -> di
         "records": len(records),
         "sha256": digest,
         "licenses": dict(Counter(r["license"] for r in records)),
-        "redistributable": all(r["redistributable"] for r in records),
+        # `all([])` is True, and nothing to redistribute is not permission to redistribute. `db_bundle` reads
+        # this flag to decide what may be published.
+        "redistributable": bool(records) and all(r["redistributable"] for r in records),
         "sources": sorted({r["sourceId"] for r in records}),
         "writtenAt": datetime.now(UTC).isoformat(timespec="seconds"),
     }
