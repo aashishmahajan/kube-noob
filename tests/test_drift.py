@@ -28,6 +28,9 @@ EXPECTED: dict[str, Any] = {
     "format": "kube-noob-drift/1",
     "from": "2026-10-27T03:00:00Z",
     "to": "2026-10-28T03:00:00Z",
+    # Manifests are all read, so there is nothing undetermined. A live snapshot that was refused a resource puts
+    # the reason here and the objects behind it under `undetermined` rather than `removed`.
+    "notRead": [],
     "objects": {
         "added": ["Ingress/shop/web", "Role/shop/secret-reader", "RoleBinding/shop/web-secrets"],
         "removed": ["ConfigMap/shop/web-config"],
@@ -50,6 +53,7 @@ EXPECTED: dict[str, Any] = {
                 ],
             },
         ],
+        "undetermined": [],
         "unchanged": 8,
     },
     "findings": {
@@ -85,6 +89,7 @@ EXPECTED: dict[str, Any] = {
                 "owner": "web-team",
             },
         ],
+        "undetermined": [],
         "open": 3,
         "excepted": 0,
     },
@@ -248,8 +253,12 @@ def test_live_snapshots_read_the_allowlist_only(tmp_path: Path) -> None:
     assert not any("secret" in r for r, _ in backend.calls)
     assert {r for r, _ in backend.calls} == set(drift.LIVE_RESOURCES) | set(drift.EXTRA_LIVE)
     assert any(n.startswith("securitycontextconstraints") for n in not_read)
-    live = drift.snapshot(objects, source="live", taken_at=T2)
+    live = drift.snapshot(objects, source="live", taken_at=T2, not_read=not_read)
     assert set(live["objects"]) == set(_snap("day2.yaml", T2)["objects"])
+    # The record has to arrive in the snapshot, not just be returned by the collector: asserting only that
+    # `collect_live` produced it is what let a report call an unreadable object "removed" and its finding "fixed".
+    assert live["notRead"] == sorted(not_read)[: drift.MAX_NOT_READ]
+    assert "SecurityContextConstraints" in live["notReadKinds"]
     scoped = FakeBackend(_docs("day2.yaml"))
     objs, _ = drift.collect_live(scoped, ["shop"])
     assert ("namespaces", None) in scoped.calls and ("deployments", "shop") in scoped.calls

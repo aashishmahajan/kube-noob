@@ -2669,7 +2669,9 @@ def _snapshot_from_args(a: argparse.Namespace, s: Settings) -> dict[str, Any]:
         objects, not_read = drift.collect_live(get_backend(s), a.namespaces or list(s.posture.namespaces))
         for line in not_read[:5]:
             print(f"not read: {line}", file=sys.stderr)
-        return drift.snapshot(objects, source="live", platform=platform, version=a.pversion, exceptions=rev)
+        return drift.snapshot(
+            objects, source="live", platform=platform, version=a.pversion, exceptions=rev, not_read=not_read
+        )
     if not a.file:
         raise ConfigError("pass the manifests with -f (repeat for several), or --live with --cluster-enabled")
     if a.namespaces:
