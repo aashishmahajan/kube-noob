@@ -127,6 +127,17 @@
   two ternaries, one `all()`, one missing guard. A rule precise enough to catch them would fire on all 85 and be
   silenced within a day. What the real bugs share is a context, not a shape: an empty collection reaching a name
   that means "this was fine". Filtering on that cuts 85 to 13, which is small enough to review and freeze.
+- **The "rebuilt daily" claim is still live on kube-noob.com, because the test that removed it read one file.**
+  G136 exists for this sentence: `docs/use-cases.md` promised a daily rebuild of the public `kube-noob-db` image,
+  whose workflow has failed on every scheduled run since it was added and has published nothing. The fix corrected
+  that page, and the enforcing test asserted `"rebuilt daily" not in use_cases` -- `use_cases` being
+  `docs/use-cases.md` and nothing else. The same sentence sat untouched in the chart's `values.yaml`, which the
+  site republishes at `/reference/helm-values/`, so the claim stayed on the live site after it was "fixed". That
+  is G147 in its own right: a test that polices a rule is itself a claim, and it is checked by trying to evade it.
+  The chart comment now says the image is not published and gives the two commands that do exist, and the test
+  reads every tracked text file, with three files allowlisted by name because they quote the phrase in order to
+  record that it was wrong. Proven by reverting the chart alone: the widened test fails, the old one could not see
+  the file.
 
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
