@@ -368,4 +368,4 @@ def test_a_blind_run_is_not_reported_as_a_clean_one(tmp_path: Path) -> None:
     # the text output has to say so where a reader will see it, not only in the JSON
     assert "evidence is partial" in analyse.render_text(a)
     # and it is still not a *finding*: --fail-on must not be the thing that catches this
-    assert analyse.failing(a, "low") == [] or True
+    assert analyse.failing(a, "low") == []

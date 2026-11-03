@@ -166,7 +166,7 @@ def test_structured_playbooks_are_consistent() -> None:
                 re.compile(w)
                 assert len(w) <= 200 and ".*.*" not in w, (pid, w)
     unstructured = [p for p in PLAYBOOKS if p.pid not in STRUCTURED]
-    assert all(not p.causes for p in unstructured if len(p.root_causes) > 1) or True  # rolled out playbook by playbook
+    assert all(not p.causes for p in unstructured if len(p.root_causes) > 1)  # rolled out playbook by playbook
 
 
 def test_a_playbook_without_causes_keeps_todays_answer(kit: tk.Toolkit) -> None:

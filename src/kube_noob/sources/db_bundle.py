@@ -110,8 +110,11 @@ def _known_problems(path: Path, name: str) -> list[str]:
 
 
 def check(root: Path) -> list[str]:
-    """Every rule a bundle directory must keep; empty when it keeps them all."""
-    problems: list[str] = []
+    """Every rule a bundle directory must keep; empty when it keeps them all.
+
+    `build` runs this over its staging tree before packing, so the writer and the reader share one predicate.
+    """
+    problems: list[str] = _member_problems(root)
     manifest_file = root / "MANIFEST.json"
     if not manifest_file.is_file():
         return ["MANIFEST.json is missing"]
@@ -347,6 +350,23 @@ def _extract(archive: Path, into: Path) -> Path:
     except (tarfile.TarError, OSError, EOFError) as exc:
         raise BundleError(f"{archive.name}: not a readable .tgz ({exc})") from exc
     return into
+
+
+def _member_problems(root: Path) -> list[str]:
+    """The size and count caps `_extract` enforces on a .tgz, applied to a tree before it becomes one.
+
+    `MAX_MEMBER` and `MAX_MEMBERS` were referenced only by the reader, so `build()` could pack an archive nothing
+    could import and report success, and `check()` on a directory enforced neither.
+    """
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    out: list[str] = []
+    if len(files) > MAX_MEMBERS:
+        out.append(f"{len(files)} files, more than {MAX_MEMBERS}")
+    for f in files:
+        size = f.stat().st_size
+        if size > MAX_MEMBER:
+            out.append(f"{f.relative_to(root)} is {size} bytes, larger than {MAX_MEMBER}")
+    return out
 
 
 def check_archive(archive: Path) -> list[str]:

@@ -80,7 +80,7 @@ def test_hostile_documents_are_bounded() -> None:
     for _ in range(200):  # deep branches: walked to depth 30, never recursing without bound
         node = {"category": "x", "name": "x", "branches": [node]}
     d["product_tree"]["branches"] = [node]
-    assert adv.parse_vex(d) is None or True
+    assert adv.parse_vex(d) is None
     many = _doc("CVE-2023-44487")
     pid = "9Base-RHOSE-4.14"
     many["product_tree"]["relationships"] += [
