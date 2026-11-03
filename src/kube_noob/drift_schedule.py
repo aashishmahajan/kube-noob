@@ -30,7 +30,12 @@ def start_background(settings: Any, rng: Any = None) -> Any:
         while not stop.is_set():
             try:
                 objects, not_read = collect_live(get_backend(settings), list(settings.posture.namespaces))
-                snap = snapshot(objects, source="live", platform=settings.default_platform or "kubernetes")
+                snap = snapshot(
+                    objects,
+                    source="live",
+                    platform=settings.default_platform or "kubernetes",
+                    not_read=not_read,
+                )
                 report, _ = write_report(state_dir, snap, settings.posture.keep)
                 f = report["findings"]
                 log.info(
@@ -40,7 +45,7 @@ def start_background(settings: Any, rng: Any = None) -> Any:
                     len(report["objects"]["removed"]),
                     len(f["new"]),
                     len(f["fixed"]),
-                    f"; not read: {'; '.join(not_read[:3])}" if not_read else "",
+                    f"; {len(not_read)} not read ({'; '.join(not_read[:3])})" if not_read else "",
                 )
             except Exception:  # one failed run must not stop the service
                 log.exception("posture report failed")

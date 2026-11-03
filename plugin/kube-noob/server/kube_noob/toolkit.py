@@ -8,6 +8,7 @@ web tools exist only when ``webEnabled: true``; live-cluster tools only when ``c
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import importlib.util
 import re
 import tempfile
@@ -1377,7 +1378,18 @@ class Toolkit:
                 "message": "No drift report yet: kube-noob serve writes one a day with posture.reportEnabled, or run "
                 "kube-noob --cluster-enabled posture report --live",
             }
-        return {"report": rep}
+        # How old it is, as the RHACS output already does: the daily job swallows its own failures so that one bad
+        # run does not stop the service, which leaves the previous report as the latest one. Without an age, a
+        # month-old report reads over MCP exactly like this morning's.
+        out: dict[str, Any] = {"report": rep}
+        taken = str(rep.get("to") or "")
+        if taken:
+            with contextlib.suppress(ValueError):
+                when = dt.datetime.fromisoformat(taken.replace("Z", "+00:00"))
+                out["ageSeconds"] = max(0, round((dt.datetime.now(dt.UTC) - when).total_seconds()))
+        if rep.get("notRead"):
+            out["notRead"] = list(rep["notRead"])
+        return out
 
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
         inv = Inventory.from_yaml(p.manifests, p.default_namespace)

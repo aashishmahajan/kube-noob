@@ -38,6 +38,7 @@ MAX_OBJECTS = 50_000
 MAX_FIELDS = 400
 MAX_CHANGED_FIELDS = 20
 MAX_SNAPSHOT_BYTES = 200_000_000
+MAX_NOT_READ = 200  # entries kept in a snapshot; the reason strings are bounded by collect_live
 WATCHED = frozenset(
     {
         "Deployment",
@@ -95,6 +96,11 @@ OWNER_ANNOTATIONS = ("kube-noob.io/owner", "owner")
 
 class DriftError(ValueError):
     """A snapshot that is not one, or too large."""
+
+
+def _kind_of(ref: str) -> str:
+    """The Kind from a ``_ref``-shaped key (``Kind/namespace/name`` or ``Kind/name``)."""
+    return ref.split("/", 1)[0]
 
 
 def _ref(obj: dict[str, Any]) -> str:
@@ -213,8 +219,14 @@ def snapshot(
     version: str | None = None,
     exceptions: Any = None,
     taken_at: dt.datetime | None = None,
+    not_read: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """A snapshot of ``objects`` (dicts read from manifests or the cluster); ``exceptions``: an exceptions Review."""
+    """A snapshot of ``objects`` (dicts read from manifests or the cluster); ``exceptions``: an exceptions Review.
+
+    ``not_read``: the entries ``collect_live`` could not read, verbatim. They are kept because a resource the
+    backend refused is not a resource with no objects in it: without the record, the next ``diff`` cannot tell an
+    object that was deleted from one it was no longer allowed to see, and reports the second as the first.
+    """
     from kube_noob.audit.engine import analyze
     from kube_noob.audit.exceptions import match
     from kube_noob.audit.model import Severity, Stage
@@ -262,6 +274,7 @@ def snapshot(
             }
         )
     when = (taken_at or dt.datetime.now(dt.UTC)).replace(microsecond=0)
+    unread = sorted(dict.fromkeys(str(x) for x in not_read))
     return {
         "format": FORMAT,
         "takenAt": when.isoformat().replace("+00:00", "Z"),
@@ -269,7 +282,25 @@ def snapshot(
         "platform": platform,
         "objects": dict(sorted(items.items())),
         "findings": sorted(findings, key=lambda x: str(x["id"])),
+        "notRead": unread[:MAX_NOT_READ],
+        "notReadKinds": sorted(_kinds_not_read(unread)),
     }
+
+
+def _kinds_not_read(not_read: Iterable[str]) -> set[str]:
+    """The kinds behind ``collect_live``'s messages, so a diff can tell "deleted" from "not allowed to look".
+
+    ``collect_live`` writes ``"<resource>[ in <namespace>]: <reason>"``, so the resource is the first token, and
+    the live maps turn it into the kind that would have been stored under it.
+    """
+    resources = {**LIVE_RESOURCES, **EXTRA_LIVE}
+    kinds: set[str] = set()
+    for entry in not_read:
+        token = entry.split(":", 1)[0].split(" in ", 1)[0].strip()
+        kind = resources.get(token)
+        if kind:
+            kinds.add(kind)
+    return kinds
 
 
 def _counts(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
@@ -302,19 +333,31 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     def brief(f: dict[str, Any]) -> dict[str, Any]:
         return {k: f[k] for k in ("ruleId", "resource", "severity", "namespace", "owner")}
 
+    # A kind the new snapshot was refused cannot be said to have lost objects or had findings fixed: kube-noob
+    # stopped being able to look, which is not the same event and must not be published as the good one.
+    blind = set(new.get("notReadKinds") or ())
+    gone = sorted(set(a) - set(b))
+    removed = [k for k in gone if _kind_of(k) not in blind]
+    undetermined = [k for k in gone if _kind_of(k) in blind]
+    was_fixed = [old_f[i] for i in sorted(set(old_f) - set(new_f))]
+    fixed = [brief(f) for f in was_fixed if _kind_of(str(f["resource"])) not in blind]
+    undetermined_findings = [brief(f) for f in was_fixed if _kind_of(str(f["resource"])) in blind]
     return {
         "format": REPORT_FORMAT,
         "from": old["takenAt"],
         "to": new["takenAt"],
+        "notRead": list(new.get("notRead") or ()),
         "objects": {
             "added": sorted(set(b) - set(a)),
-            "removed": sorted(set(a) - set(b)),
+            "removed": removed,
+            "undetermined": undetermined,
             "changed": changed,
             "unchanged": sum(1 for k in set(a) & set(b) if a[k]["hash"] == b[k]["hash"]),
         },
         "findings": {
             "new": [brief(new_f[i]) for i in sorted(set(new_f) - set(old_f))],
-            "fixed": [brief(old_f[i]) for i in sorted(set(old_f) - set(new_f))],
+            "fixed": fixed,
+            "undetermined": undetermined_findings,
             "open": len(open_rows),
             "excepted": sum(1 for f in new["findings"] if f.get("excepted")),
         },
@@ -346,16 +389,42 @@ def markdown(report: dict[str, Any]) -> str:
         + ".",
         "",
     ]
+    # The record goes in the summary, before any count, because every count below it is over what could be read.
+    not_read = list(report.get("notRead") or ())
+    if not_read:
+        undet_o = len(o.get("undetermined") or ())
+        undet_f = len(f.get("undetermined") or ())
+        lines += [
+            f"**{len(not_read)} resource(s) could not be read, so this report is not a full picture.** "
+            f"{undet_o} object(s) and {undet_f} finding(s) are undetermined: they were in the previous snapshot "
+            "and are absent from this one, which here means kube-noob was not allowed to look, not that they "
+            "went away.",
+            "",
+            "| Could not be read |",
+            "| --- |",
+            *[f"| {entry} |" for entry in not_read[:20]],
+            "",
+        ]
+        if len(not_read) > 20:
+            lines += [f"...and {len(not_read) - 20} more.", ""]
     if o["changed"]:
         lines += ["## Changed", "", "| Object | Owner | Fields |", "| --- | --- | --- |"]
         for c in o["changed"]:
             more = f" +{c['more']}" if c.get("more") else ""
             lines.append(f"| {c['object']} | {c['owner']} | {', '.join(c['fields'])}{more} |")
         lines.append("")
-    for title, keys in (("Added", o["added"]), ("Removed", o["removed"])):
+    for title, keys in (
+        ("Added", o["added"]),
+        ("Removed", o["removed"]),
+        ("Undetermined: present before, not readable now", list(o.get("undetermined") or ())),
+    ):
         if keys:
             lines += [f"## {title}", "", *[f"- {k}" for k in keys], ""]
-    for title, rows in (("New findings", f["new"]), ("Fixed findings", f["fixed"])):
+    for title, rows in (
+        ("New findings", f["new"]),
+        ("Fixed findings", f["fixed"]),
+        ("Undetermined findings: not fixed, not readable", list(f.get("undetermined") or ())),
+    ):
         if rows:
             lines += [f"## {title}", "", "| Rule | Object | Severity | Owner |", "| --- | --- | --- | --- |"]
             lines += [f"| {r['ruleId']} | {r['resource']} | {r['severity']} | {r['owner']} |" for r in rows]

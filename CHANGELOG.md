@@ -48,6 +48,24 @@
   override the admin tier whichever way the tie lands. Two policies tied at one priority that agree still decide,
   and a duplicate priority is reported as a note either way, since the configuration is relying on undefined
   behaviour even in the runs where it happens to work.
+- **The drift report told you a critical finding had been fixed when all that had happened was losing permission
+  to look.** `drift.collect_live` returns what it could not read, and `snapshot`, `diff` and `markdown` never
+  received it: the CLI printed the first five entries to stderr, the scheduled job logged the first three, and
+  nothing durable held any of it. So when a service account lost `list networkpolicies` between two runs, the
+  objects were simply absent from the second snapshot, and the daily report said they were **removed** and their
+  findings **fixed** -- an RBAC regression published as a security improvement, in the one artefact an operator
+  reads every morning, and served verbatim over MCP by `posture_report`. `attack_paths` already carries its
+  `notRead` into its output and `build audit` does the same, so drift was the exception rather than an oversight
+  nobody had had the idea for. The snapshot now keeps the record and the kinds behind it; `diff` holds back any
+  object or finding whose kind the new snapshot was refused, under `undetermined` rather than `removed` and
+  `fixed`; and the Markdown says so in the summary line, above every count, because each of those counts is only
+  over what could be read. A genuinely deleted object is still a removal, and an unreadable resource does not
+  launder an unrelated one. `posture_report` also gained `ageSeconds`, which the RHACS output beside it already
+  had: the daily job swallows its own failures so one bad run cannot stop the service, which leaves the previous
+  report as the latest one, and without an age a month-old report read exactly like this morning's. The test that
+  should have caught all of this asserted that `collect_live` produced the record and then built a snapshot on the
+  next line without it, covering the collecting half only.
+
 - **The roadmap was a year-old shape with this week's findings missing from it.** It still said "updated after
   0.5.0" while 0.6.0, 0.7.0 and 0.7.1 had shipped, listed the OpenShift Helm catalog and the plugin directory as
   "not started" and "next" when one has never merged an `OWNERS` pull request and the other has ten versions held
