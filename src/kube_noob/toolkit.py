@@ -97,6 +97,14 @@ class AuditIn(ManifestsIn):
         "low", description="Hide findings below this severity."
     )
     stages: list[StageName] = Field(default_factory=lambda: list(ALL_STAGE_NAMES))
+    compact: bool = Field(
+        False,
+        description="Return the same report with each rule's constant fields (title, severity, stage, category, "
+        "remediation, citations, stackroxPolicies, controls) collected once into a `ruleInfo` map keyed by rule id "
+        "instead of repeated on every finding. Lossless and about a third smaller on a report where rules fire more "
+        "than once; the findings keep their order, rule id, resource, line and message. Off by default so the flat "
+        "shape stays what it was.",
+    )
 
 
 class FixIn(ManifestsIn):
@@ -822,10 +830,23 @@ class Toolkit:
         if review is not None:
             out["excepted"] = excepted
             out["exceptions"] = {**review.summary(), "unused": [e.id for e in review.active if e.id not in used]}
+            # `as_dict` built controlSummary from the findings that survived the filter, so a control held only by
+            # excepted findings disappeared -- an owned, reviewed, expiring exception looked exactly like a control
+            # nothing had ever evaluated. Rebuild it with both sets, counted apart.
+            from kube_noob.audit.controls import summary as control_summary
+
+            out["controlSummary"] = control_summary(
+                [f.rule_id for f in kept], [str(e["ruleId"]) for e in excepted if "ruleId" in e]
+            )
         self._observe(
             [f"platform:{out.get('platform')}"]
             + [f"rule:{f['ruleId']}" for f in out.get("findings", []) if "ruleId" in f]
         )
+        if p.compact:
+            from kube_noob.audit.compact import compact_report
+
+            # After _observe, so the counters see the findings whatever shape the caller asked for.
+            return compact_report(out)
         return out
 
     def red_team(self, p: ManifestsIn) -> dict[str, Any]:
@@ -1650,7 +1671,9 @@ class Toolkit:
                 "Audit manifests",
                 "Full deterministic audit: security, network exposure, storage access modes, reliability and "
                 "red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS "
-                "policy names.",
+                "policy names. On a large manifest set pass compact=true: the same report, with each rule's "
+                "constants hoisted once into ruleInfo instead of repeated on every finding, which is lossless and "
+                "about a third smaller.",
                 AuditIn,
                 self.audit,
             ),

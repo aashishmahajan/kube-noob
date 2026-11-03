@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+- **OpenShift 4.23 is mapped to Kubernetes 1.36 from the source rather than from the cadence rule.**
+  `OCP_TO_K8S` stopped at 4.22, and 4.23 was answered by the "OCP 4.x tracks 1.(x+13)" extrapolation. That
+  extrapolation happens to be right -- `openshift/kubernetes` `release-4.23` is taking v1.36.x rebases
+  (openshift/kubernetes#2839, 2 November 2026) -- so the row is now explicit and cited, and the test moved to
+  4.24 so the extrapolation branch stays covered instead of being shadowed by the new row.
+
+- **The FedRAMP 20x KSI mapping now has a release and a retirement list recorded before it is built.**
+  `FRMR.KSI.key-security-indicators.json` is at release 25.11C (published 2025-12-01), 20x is at
+  `current_status: Phase 2 Pilot`, the eleven families are intact, and seven indicators carry `retired: true`:
+  KSI-CMT-05, KSI-MLA-03, KSI-MLA-04, KSI-MLA-06, KSI-SVC-03, KSI-TPR-01, KSI-TPR-02. Evidence offered against a
+  withdrawn indicator is worse than no evidence, so `docs/roadmap.md` N3 and `docs/compliance.md` now say that
+  the allowlist ships with the release string and excludes those seven. Documentation only; no code claims a KSI
+  yet.
+
+- **Compaction skipped the excepted findings, so it did nothing for the callers who need it most.**
+  `compact_report` hoisted the per-rule constants out of `findings`, but `Toolkit.audit` puts the findings an
+  exceptions file accepted in a separate top-level `excepted` list, and that list was left untouched -- so every
+  caller with an exceptions file, which is every CI caller, got a report with hoisted findings beside un-hoisted
+  excepted ones, each still carrying its rule's `title`, `severity`, `stage`, `category`, `remediation`,
+  `citations`, `stackroxPolicies` and `controls` inline at about 794 bytes apiece. `expand_report` round-tripped
+  `findings` alone, so expanding such a report produced two finding lists of different shapes. Both lists are now
+  hoisted against one shared `ruleInfo` map and both are restored by `expand_report`; the per-finding `exception`
+  block is never hoisted. With one exception on `examples/netpol-shop.yaml` the result goes 39 025 -> 24 674 bytes
+  and the round trip through `Toolkit.audit` is exact. The existing round-trip test could not have caught this:
+  it called `analyze(...).as_dict()` directly and so never produced an `excepted` key at all (G169).
+
+- **`policy generate -o FILE` reported a byte count that was wrong on Windows.** The count was
+  `len(text.encode("utf-8"))` while the file was written with `write_text`, which translates `\n` to `\r\n` on
+  Windows -- so the file was larger than the number returned, and a caller checking the size would have seen a
+  mismatch on one platform only. It now writes the encoded bytes directly (G170).
+
+- **Filing an exception deleted the control it was filed against from the compliance record.** `Report.as_dict`
+  builds `controlSummary` from `self.findings`, and the exceptions filter in `Toolkit.audit` replaced that list
+  with the surviving findings *before* calling it -- so a control whose only evidence was an excepted finding
+  dropped out of the report entirely. On `examples/netpol-shop.yaml`, one well-formed exception against KN-N001
+  removed AC-4, SC-7 and SC-7(5) from `controlSummary`, leaving them indistinguishable from controls no rule had
+  ever evaluated. That is backwards: an exception is an owned, reviewed, expiring decision *about* a control, and
+  the one thing a compliance record must never do is make a signed-off control look unexamined. `controls.summary`
+  now takes the excepted rule ids as well and counts them apart, so those controls stay named with
+  `findings: 0, excepted: 1` and the note says what that means. A run with no exceptions is byte-for-byte what it
+  was (G168).
+
+- **Two results were mostly copies of themselves, and an MCP result is spent out of the caller's context
+  window.** `audit_manifests` carried each rule's `title`, `severity`, `stage`, `category`, `remediation`,
+  `citations`, `stackroxPolicies` and `controls` on every finding that rule produced: on `examples/` that is 105
+  findings over 19 distinct rules, so each constant appeared about five times and 53.9% of the 118 631-byte
+  result was duplicates (~29 700 tokens). `audit --compact`, and `compact=true` on the tool, now hoist those
+  fields once into a `ruleInfo` map keyed by rule id -- 118 631 -> 54 694 bytes, 37.9% on a single file -- and
+  `audit.compact.expand_report` is an exact inverse, asserted by a round-trip test, so this is a hoist and not a
+  guess about which fields a caller does not need. It is opt-in: the flat shape is what `/v1/audit` callers
+  parse, so the default does not move under them. The exit code is computed from the audit, never from the
+  emitted copy, because compaction moves `severity` off the findings and a gate must read the same verdict
+  either way (G165, G166).
+
+- **`policy generate -o FILE` wrote the file and still inlined all 358 KB of YAML, so asking for a file made the
+  result bigger.** 385 965 bytes with `-o` against 385 866 without, about 96 500 tokens either way, for a caller
+  that had just said where it wanted the bytes. With `-o` the result is now the path, the byte count and the
+  structured summary: 19 059 bytes, ~4 800 tokens, a 95% reduction. Without `-o` the YAML is still returned
+  inline, because there is nowhere else to put it (G167).
+
 - **Only four of the nineteen readers of untrusted JSON counted its depth first, and from Python 3.14 nothing
   else does.** `sanitize.json_nesting_ok` was written because `json.loads` recurses, and it was wired into the
   four paste paths (`server/rest`, `insight`, `signals/alertmanager`, `evals/problems`) and into none of the

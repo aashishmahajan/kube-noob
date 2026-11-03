@@ -82,6 +82,12 @@
       },
       "title": "Stages",
       "type": "array"
+     },
+     "compact": {
+      "default": false,
+      "description": "Return the same report with each rule's constant fields (title, severity, stage, category, remediation, citations, stackroxPolicies, controls) collected once into a `ruleInfo` map keyed by rule id instead of repeated on every finding. Lossless and about a third smaller on a report where rules fire more than once; the findings keep their order, rule id, resource, line and message. Off by default so the flat shape stays what it was.",
+      "title": "Compact",
+      "type": "boolean"
      }
     },
     "required": [
@@ -703,7 +709,7 @@
    "post": {
     "operationId": "post_audit_manifests",
     "summary": "Audit manifests against the rules for a platform and version",
-    "description": "Full deterministic audit: security, network exposure, storage access modes, reliability and red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS policy names.",
+    "description": "Full deterministic audit: security, network exposure, storage access modes, reliability and red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS policy names. On a large manifest set pass compact=true: the same report, with each rule's constants hoisted once into ruleInfo instead of repeated on every finding, which is lossless and about a third smaller.",
     "responses": {
      "200": {
       "description": "The tool's result (always carries knowledgeAsOf)",

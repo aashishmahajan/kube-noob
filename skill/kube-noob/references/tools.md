@@ -13,8 +13,9 @@ API removal history and version map. Removed/deprecated Kubernetes APIs relevant
 
 ## audit_manifests
 
-Audit manifests. Full deterministic audit: security, network exposure, storage access modes, reliability and red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS policy names.
+Audit manifests. Full deterministic audit: security, network exposure, storage access modes, reliability and red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS policy names. On a large manifest set pass compact=true: the same report, with each rule's constants hoisted once into ruleInfo instead of repeated on every finding, which is lossless and about a third smaller.
 
+- `compact` (boolean): Return the same report with each rule's constant fields (title, severity, stage, category, remediation, citations, stackroxPolicies, controls) collected once into a `ruleInfo` map keyed by rule id instead of repeated on every finding. Lossless and about a third smaller on a report where rules fire more than once; the findings keep their order, rule id, resource, line and message. Off by default so the flat shape stays what it was.
 - `exceptions` (null/string): An exception list (YAML, apiVersion kube-noob.io/v1, kind ExceptionList): each entry names a rule, a scope, an owner, a reason and an expiry date. Active entries hide the findings they cover; expired and refused entries are reported and fail the gate.
 - `manifests`* (string): One or more YAML documents (Kubernetes/OpenShift objects).
 - `min_severity` (string): Hide findings below this severity.

@@ -46,6 +46,19 @@ kube-noob helm-chart --name orders-api --namespace shop --image quay.io/acme/ord
 
 To gate pull requests, run `kube-noob audit -f k8s/ --fail-on high` in CI. It exits 1 on any HIGH or CRITICAL finding.
 
+When the report is going into a model's context rather than a terminal, add `--compact`:
+
+```bash
+kube-noob --format json audit -f k8s/ --platform openshift --compact
+```
+
+Each rule's constant fields -- title, severity, remediation, citations, controls and the rest -- are collected
+once into a `ruleInfo` map keyed by rule id instead of being repeated on every finding that rule produced. On
+this repository's `examples/` directory that is 105 findings over 19 rules, and the JSON goes from 118 631 to
+54 694 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
+exactly. The MCP and HTTP tool takes the same thing as `compact: true`, off by default so the flat shape stays
+what it was. The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
+
 ## SRE or on-call: diagnose before you change anything
 
 Not sure what you have? `insight` names it first (events, logs, a denial, manifests, a ticket, a build log, a
@@ -761,6 +774,11 @@ oc apply -f kube-noob-policies.yaml
 kube-noob policy generate --rule KN-S001 --rule KN-S009 --mode enforce --engine vap -o enforce.yaml
 kube-noob policy generate --engine kyverno --exclude-namespace legacy-apps -o kyverno.yaml
 ```
+
+With `-o`, the JSON or YAML result is the path, the file's size and the counts -- not the policy set as well.
+The whole generated set is about 358 KB of YAML, so returning it inline *and* writing it made the result larger
+with `-o` than without; a caller that names a file has already said where it wants the bytes. Without `-o` the
+rendered YAML is still returned inline, because there is nowhere else for it to go.
 
 ### Every finding as a kubectl warning: the admission webhook
 

@@ -780,6 +780,11 @@ OCP_TO_K8S: dict[str, str] = {
     "4.20": "1.33",
     "4.21": "1.34",
     "4.22": "1.35",
+    # 4.23 is not GA, and this row is behaviourally a no-op: the +13 extrapolation below already answers 1.36
+    # for it. It is written out because openshift/kubernetes has a release-4.23 branch and the rebase bot is
+    # opening v1.36.x rebases against it (openshift/kubernetes#2839, "Rebase v1.36.6 in release-4.23", opened
+    # 2 November 2026 -- closed, not merged, so this is the direction of travel and not a settled mapping).
+    "4.23": "1.36",
 }
 
 DEFAULT_K8S_VERSION = "1.35"

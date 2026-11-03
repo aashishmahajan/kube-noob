@@ -51,7 +51,11 @@ def test_ocp_version_map_is_contiguous() -> None:
     assert k8s_version_for("rosa-hcp", "4.20") == "1.33"
     assert k8s_version_for("openshift", None) == "1.35"
     assert k8s_version_for("kubernetes", "v1.29.3") == "1.29"
-    assert k8s_version_for("openshift", "4.23") == "1.36"  # future minors follow the documented cadence
+    # 4.23 is a cited row (openshift/kubernetes release-4.23 rebases v1.36.x), so it no longer exercises the
+    # extrapolation. 4.24 does: an unmapped future minor still has to follow the documented +13 cadence rather
+    # than falling back to the default, which would answer a question about a later release with today's data.
+    assert k8s_version_for("openshift", "4.23") == "1.36"
+    assert k8s_version_for("openshift", "4.24") == "1.37"
 
 
 def test_removed_and_deprecated_lookup() -> None:
