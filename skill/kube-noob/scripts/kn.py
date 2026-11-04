@@ -28,7 +28,7 @@ HERE = Path(__file__).resolve().parent
 MAX_INPUT_BYTES = 5 * 1024 * 1024  # the same cap kube-noob puts on manifests and pasted text
 # The versions the Claude plugin's uv.lock pins (a test keeps them equal), installed only when one is missing.
 NEEDED = (
-    ("pydantic", "pydantic==2.14.1"),
+    ("pydantic", "pydantic==2.14.2"),
     ("yaml", "PyYAML==6.0.3"),
     ("jsonschema", "jsonschema==4.26.0"),
 )
