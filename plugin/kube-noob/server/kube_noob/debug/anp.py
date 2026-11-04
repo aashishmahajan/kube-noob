@@ -155,6 +155,29 @@ def _rules(spec: Any, direction: str) -> list[Any]:
     return rules if isinstance(rules, list) else []
 
 
+def _subnet_of(
+    inner: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    outer: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> bool:
+    """True when ``inner`` is inside ``outer``. A v4 address is not inside a v6 prefix, and the reverse."""
+    if isinstance(inner, ipaddress.IPv4Network) and isinstance(outer, ipaddress.IPv4Network):
+        return inner.subnet_of(outer)
+    if isinstance(inner, ipaddress.IPv6Network) and isinstance(outer, ipaddress.IPv6Network):
+        return inner.subnet_of(outer)
+    return False
+
+
+def _overlaps(
+    left: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    right: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> bool:
+    if isinstance(left, ipaddress.IPv4Network) and isinstance(right, ipaddress.IPv4Network):
+        return left.overlaps(right)
+    if isinstance(left, ipaddress.IPv6Network) and isinstance(right, ipaddress.IPv6Network):
+        return left.overlaps(right)
+    return False
+
+
 def _outside_peer(peer: dict[str, Any], other: Endpoint) -> bool | None:
     """A ``nodes``, ``networks`` or ``domainNames`` peer.
 
@@ -167,9 +190,9 @@ def _outside_peer(peer: dict[str, Any], other: Endpoint) -> bool | None:
             return None
         if other.external and other.net is not None:
             dest = other.net
-            if any(dest.subnet_of(c) for c in cidrs):
+            if any(_subnet_of(dest, c) for c in cidrs):
                 return True
-            if any(dest.overlaps(c) for c in cidrs):
+            if any(_overlaps(dest, c) for c in cidrs):
                 return None
             return False
         if any(c.prefixlen == 0 for c in cidrs):
