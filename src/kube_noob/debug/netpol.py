@@ -610,10 +610,12 @@ def check_reachability(
     ]
     # `allowed` is false for an undetermined direction too (an unknown must not read as a pass). A summary that
     # says the policies "would deny" from that flag is describing a decision that was never made.
+    # evaluated_deny is every evaluated direction that is not allowed, so a non-empty evaluated set with no deny
+    # is an allow. No all() over that set: an empty one must not read as allowed.
     evaluated_answers = [r for r in (egress, ingress) if r.get("evaluated", True) and not r.get("undetermined")]
     if evaluated_deny:
         decided = "deny"
-    elif evaluated_answers and all(r["allowed"] for r in evaluated_answers):
+    elif evaluated_answers:
         decided = "allow"
     else:
         decided = None
@@ -701,32 +703,32 @@ def check_reachability(
         )
     changes = []
     for direction in blocked:
-        verdict = ingress if direction == "Ingress" else egress
+        decision = ingress if direction == "Ingress" else egress
         subject, peer = (dst, src) if direction == "Ingress" else (src, dst)
         word = direction.lower()
-        if verdict.get("tier") == ANP_KIND:
+        if decision.get("tier") == ANP_KIND:
             # A NetworkPolicy cannot undo this: the admin tier runs first and has already decided. Proposing one
             # would be applied, change nothing, and cost the next verdict its credibility.
             changes.append(
                 {
-                    "change": f"{verdict['policy']} {word} rule {verdict['rule']!r} denies this, and it is "
+                    "change": f"{decision['policy']} {word} rule {decision['rule']!r} denies this, and it is "
                     f"cluster-scoped: no NetworkPolicy in {subject.namespace} can override it. A cluster "
                     f"administrator has to narrow that rule's peers or ports, or add an Allow or Pass rule at a "
                     f"lower priority, for {peer.describe()} on {protocol} {port}.",
                     "requiresApproval": True,
                     "ownedBy": "cluster administrator",
-                    "policy": verdict["policy"],
-                    "rule": verdict["rule"],
+                    "policy": decision["policy"],
+                    "rule": decision["rule"],
                 }
             )
             continue
-        baseline = verdict.get("tier") == BANP_KIND
+        baseline = decision.get("tier") == BANP_KIND
         changes.append(
             {
                 "change": f"Allow {word} {'to' if direction == 'Ingress' else 'from'} {subject.describe()} "
                 f"{'from' if direction == 'Ingress' else 'to'} {peer.describe()} on {protocol} {port}"
                 + (
-                    f" -- {verdict['policy']} denies it as the baseline, and any NetworkPolicy that selects "
+                    f" -- {decision['policy']} denies it as the baseline, and any NetworkPolicy that selects "
                     f"{subject.describe()} for {direction} takes the decision away from the baseline"
                     if baseline
                     else ""
