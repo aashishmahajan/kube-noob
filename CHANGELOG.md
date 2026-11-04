@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A corpus shard bigger than the bundle allows is written as parts.** `redhat-vex.jsonl` is 2.78 GB, and `db-bundle` refuses a member over 300 MB, so the scheduled db image could not be built. The cap stays. A shard over 250 MB is `<name>.jsonl`, `<name>-2.jsonl`, and so on. A read concatenates them. A later write that fits in one file deletes the parts it no longer uses (G185).
+
 - **The plugin and the wheel pin pydantic 2.14.2.** 2.14.1 dropped JSON keys that matched an unused alias, and mishandled extra data on a TypedDict (GHSA-qpmf-fgh3-ff25, GHSA-3r8g-cqwr-jr29). The plugin lock moved and the skill install hint still said 2.14.1, so the bump could not merge. The hint, the plugin lock and `requirements.lock` now say 2.14.2.
 
 - **`policy reach` against a live cluster no longer treats a Cilium or Calico cluster policy as absent.** A pasted `CiliumClusterwideNetworkPolicy` or Calico `GlobalNetworkPolicy` was already `undetermined`. The live read never listed them, so the same objects on the cluster came back `allowed` and exit 0. Both are read once, cluster-scoped, from the published CRD (`cilium.io/v2` `ciliumclusterwidenetworkpolicies`, `crd.projectcalico.org/v1` `globalnetworkpolicies`). A 404 is "not installed". A 403 is not. The first read-only check is the get that lists that object. A namespace `CiliumNetworkPolicy` is still not read and still does not flip a pod-to-pod NetworkPolicy answer. The chart's cluster-scoped read role grants get and list for those two resources and nothing else new.
@@ -18,14 +20,7 @@
 
 - **A Jira run that cannot decrypt the previous main copy no longer starts a new one.** The decrypt failure used to exit 0 and fetch from scratch, so the first green run after a passphrase mismatch became the artifact every later run restored, and the previous copy stopped being the main copy. The run now fails, the previous artifact is left where it is, and only `fresh=true` discards it on purpose. The upload also refuses a snapshot with fewer tickets than the copy it restored. The forward pass asks Jira `ORDER BY updated DESC` and, if the request budget runs out, resumes that same query from the page it had not applied, so a later run does not skip updates and does not write the same ticket twice (G182). The scheduled default is every other day (`JIRA_EVERY_DAYS=1` for daily). Ticket text is still not published: it is queried locally with `kube-noob ticket` after `corpus import`.
 
-- **Both red scheduled workflows are diagnosed, and neither is a bug in the workflow.** the scheduled `db-image.yml` fails its
-  own member-size gate: `redhat-vex.jsonl` has grown past `db_bundle.MAX_MEMBER` (300 MB), so an upstream feed
-  outgrew a limit this project set. (The `db-image` job in `ci.yml` shares the name and is green: it bundles a
-  small public corpus and never downloads the VEX feed.) Raising the number buys a quarter; sharding the member, filtering the feed to
-  the products kube-noob answers about, or compressing it are the real options, and choosing between them is a
-  decision rather than a fix. `corpus-refresh` fails its privacy audit, which is the gate working -- and now
-  reports enough to triage (G179). A passphrase mismatch used to make every run start from scratch; that now fails
-  the run instead of replacing the copy (G182).
+- **Both red scheduled workflows were diagnosed before the VEX member was sharded.** `db-image` in `ci.yml` was never the failing job. The scheduled `db-image.yml` is the one that downloads the VEX feed, and that member is now parts (G185). `corpus-refresh` remains a privacy gate (G179, G182).
 
 - **`CHECKED_THROUGH` and the risk review's drift baseline are now held together by a test.** Both said
   Kubernetes 1.37, by the coincidence of having been edited the same day, and nothing connected them: raising the

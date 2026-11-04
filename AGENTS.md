@@ -101,3 +101,25 @@ merge it.
 
 Sign off every commit (`git commit -s`) to certify the Developer Certificate of Origin. Never force-push, rebase or
 rewrite history on a shared branch.
+
+## Already done (2026-11-04) — do not re-derive
+
+- Live `policy reach` reads Cilium `cilium.io/v2` `ciliumclusterwidenetworkpolicies` and Calico
+  `crd.projectcalico.org/v1` `globalnetworkpolicies`, cluster-scoped, once. A 404 stays a NetworkPolicy answer. A 403
+  does not. A namespace `CiliumNetworkPolicy` is not read and does not flip a pod-to-pod verdict. Merged as #38
+  (`cfe8acd`), on top of the file and hostNetwork case in #37 (`69a4959`).
+- pydantic is 2.14.2 in the plugin lock, the skill install hint and `requirements.lock` (#39, `e05e056`). The package
+  version is still 0.7.1. Do not tag, release or publish.
+- A corpus shard bigger than the bundle allows is stored as parts, not by raising `db_bundle.MAX_MEMBER` (300 MB).
+  `PART_MAX` is 250 MB. Files are `<shard>.jsonl` then `<shard>-2.jsonl`. `sources.parts.shard_paths` reads them.
+  The plugin imports `sources.parts`, not `sources.corpus`: `corpus` pulls the Jira client, and that client names
+  `JIRA_API_TOKEN`, which the plugin copy is not allowed to contain. Held by
+  `tests/test_db_bundle.py::test_a_shard_over_the_member_cap_is_written_as_parts_and_read_back` (G185).
+- `brew.yml` asks for macOS only on `workflow_dispatch` and `workflow_call`. A push, a pull request and the schedule
+  run Ubuntu. Run 41858323552 was cancelled because GitHub did not assign a macOS runner. The formula itself passed
+  on Ubuntu.
+- Issue #22 (weekly risk review 2026-W45) stays open until a later week supersedes it.
+- kube-noob.com is built by the private site repo and pushed to `kube-noob/kube-noob-www`. The deploy key is on that
+  repository. An SSH push to `aashishmahajan/kube-noob-www` is denied. The public site was last published from `main`
+  while the version string was still 0.7.1 (www `f6ff300`).
+

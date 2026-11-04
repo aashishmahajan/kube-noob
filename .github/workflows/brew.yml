@@ -33,8 +33,12 @@ jobs:
   install:
     strategy:
       fail-fast: false
+      # macos-latest is not being acquired (run 41858323552: "not acquired by Runner of type hosted", twice,
+      # with GitHub's own capacity notice). A run that can only finish by being cancelled is not a test of the
+      # formula, and it fails the workflow. Linux installs the formula the way the README says, on every event.
+      # macOS runs when someone dispatches this workflow, and from the release, where it can be re-run.
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: ${{ fromJSON((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && '["macos-latest", "ubuntu-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,8 +73,12 @@ jobs:
     if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
+      # macos-latest is not being acquired (run 41858323552: "not acquired by Runner of type hosted", twice,
+      # with GitHub's own capacity notice). A run that can only finish by being cancelled is not a test of the
+      # formula, and it fails the workflow. Linux installs the formula the way the README says, on every event.
+      # macOS runs when someone dispatches this workflow, and from the release, where it can be re-run.
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: ${{ fromJSON((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && '["macos-latest", "ubuntu-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Install the way users do (brew tap, brew trust, brew install kube-noob)

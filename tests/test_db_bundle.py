@@ -224,6 +224,46 @@ def test_pods_import_a_newer_bundle_on_start_and_skip_an_older_one(tmp_path: Pat
     assert newer and newer["bundle"]["builtAt"] == "2026-10-29T00:00:00+00:00"
 
 
+def test_a_shard_over_the_member_cap_is_written_as_parts_and_read_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Red Hat VEX shard outgrew `MAX_MEMBER`. Raising the cap would fail again next quarter. A shard is
+    written as `<name>.jsonl`, `<name>-2.jsonl`, ... each under the cap, and a read puts the parts back together.
+    A later write that fits in one file removes the parts it no longer uses, including from the manifest."""
+    from kube_noob.sources import corpus
+    from kube_noob.vuln import vex
+
+    assert corpus.PART_MAX < db_bundle.MAX_MEMBER
+    monkeypatch.setattr(corpus, "PART_MAX", 80)
+    records = []
+    for i in range(4):
+        records.append(
+            {
+                "id": f"vex-{i}",
+                "title": f"CVE-2099-100{i}",
+                "text": "x" * 40,
+                "sourceId": "redhat-vex",
+                "license": "CC-BY-4.0",
+                "redistributable": True,
+                "url": "https://access.redhat.com/security/data",
+                "cve": f"CVE-2099-100{i}",
+                "statements": [{"component": "nginx", "status": "fixed", "cpe": "cpe:/a:redhat:openshift:4"}],
+            }
+        )
+    entry = write_shard(tmp_path, "redhat-vex", records)
+    assert entry["parts"] > 1 and entry["records"] == 4
+    files = sorted((tmp_path / "corpus").glob("redhat-vex*.jsonl"))
+    assert len(files) == entry["parts"]
+    assert all(p.stat().st_size <= db_bundle.MAX_MEMBER for p in files)
+    built = db_bundle.build(tmp_path, tmp_path / "kube-noob-db.tgz")
+    assert built["records"] == 4 and "redhat-vex" in built["shards"]
+    assert set(vex.load(tmp_path).by_cve) == {f"CVE-2099-100{i}" for i in range(4)}
+    monkeypatch.setattr(corpus, "PART_MAX", 10_000_000)
+    write_shard(tmp_path, "redhat-vex", records[:1])
+    assert [p.name for p in (tmp_path / "corpus").glob("redhat-vex*.jsonl")] == ["redhat-vex.jsonl"]
+    assert set(read_manifest(tmp_path)["shards"]) == {"redhat-vex"}
+
+
 def test_cli_bundle_check_import_and_serve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

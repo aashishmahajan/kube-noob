@@ -164,21 +164,21 @@ class VexIndex:
 
 
 def _corpus_records(data_dir: Path) -> Iterator[dict[str, Any]]:
-    shard = data_dir / "corpus" / "redhat-vex.jsonl"
-    if not shard.is_file():
-        return
-    if shard.stat().st_size > MAX_SHARD_BYTES:
-        raise VexError(f"{shard}: larger than {MAX_SHARD_BYTES} bytes")
-    with shard.open(encoding="utf-8") as fh:
-        for line in fh:
-            if not line.strip() or len(line) > MAX_LINE:
-                continue
-            try:
-                rec = sanitize.loads_bounded(line, sanitize.MAX_JSON_DEPTH_FILE)
-            except ValueError:
-                continue
-            if isinstance(rec, dict):
-                yield rec
+    from kube_noob.sources.parts import shard_paths
+
+    for shard in shard_paths(data_dir, "redhat-vex"):
+        if shard.stat().st_size > MAX_SHARD_BYTES:
+            raise VexError(f"{shard}: larger than {MAX_SHARD_BYTES} bytes")
+        with shard.open(encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip() or len(line) > MAX_LINE:
+                    continue
+                try:
+                    rec = sanitize.loads_bounded(line, sanitize.MAX_JSON_DEPTH_FILE)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    yield rec
 
 
 def _documents(path: Path) -> Iterator[Any]:
