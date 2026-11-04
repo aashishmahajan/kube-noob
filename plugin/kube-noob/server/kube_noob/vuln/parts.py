@@ -1,21 +1,22 @@
 """Which files belong to one corpus shard.
 
-Nothing in this module imports the rest of ``sources``. The plugin reads VEX from these
-paths, and importing ``corpus`` from there would also ship the Jira client.
+This stays out of ``sources``. The plugin reads VEX from these paths, and anything under
+``sources`` is refused: that package is how the Jira client would get bundled.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from kube_noob.sanitize import loads_bounded
 
 
 def _manifest(data_dir: Path) -> dict[str, Any]:
     path = data_dir / "corpus" / "MANIFEST.json"
     if not path.is_file():
         return {"shards": {}}
-    loaded = json.loads(path.read_text(encoding="utf-8"))
+    loaded = loads_bounded(path.read_text(encoding="utf-8"))
     return loaded if isinstance(loaded, dict) else {"shards": {}}
 
 

@@ -111,10 +111,10 @@ rewrite history on a shared branch.
 - pydantic is 2.14.2 in the plugin lock, the skill install hint and `requirements.lock` (#39, `e05e056`). The package
   version is still 0.7.1. Do not tag, release or publish.
 - A corpus shard bigger than the bundle allows is stored as parts, not by raising `db_bundle.MAX_MEMBER` (300 MB).
-  `PART_MAX` is 250 MB. Files are `<shard>.jsonl` then `<shard>-2.jsonl`. `sources.parts.shard_paths` reads them.
-  The plugin imports `sources.parts`, not `sources.corpus`: `corpus` pulls the Jira client, and that client names
-  `JIRA_API_TOKEN`, which the plugin copy is not allowed to contain. Held by
-  `tests/test_db_bundle.py::test_a_shard_over_the_member_cap_is_written_as_parts_and_read_back` (G185).
+  `PART_MAX` is 250 MB. Files are `<shard>.jsonl` then `<shard>-2.jsonl`. `vuln.parts.shard_paths` reads them.
+  The plugin must not import `sources`: that package is how the Jira client, which names `JIRA_API_TOKEN`, would
+  be bundled. Held by `tests/test_db_bundle.py::test_a_shard_over_the_member_cap_is_written_as_parts_and_read_back`
+  and `tests/test_jira_main_copy.py::test_the_plugin_gets_reconciliation_without_the_jira_client` (G185).
 - `brew.yml` asks for macOS only on `workflow_dispatch` and `workflow_call`. A push, a pull request and the schedule
   run Ubuntu. Run 41858323552 was cancelled because GitHub did not assign a macOS runner. The formula itself passed
   on Ubuntu.

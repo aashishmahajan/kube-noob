@@ -130,8 +130,8 @@ def read_manifest(data_dir: Path) -> dict[str, Any]:
 
 
 def shard_paths(data_dir: Path, shard: str) -> list[Path]:
-    """Every file of ``shard``, in part order. See ``sources.parts``: that module is what the plugin imports."""
-    from kube_noob.sources.parts import shard_paths as paths
+    """Every file of ``shard``, in part order. The plugin reads the same function from ``vuln.parts``."""
+    from kube_noob.vuln.parts import shard_paths as paths
 
     return paths(data_dir, shard)
 

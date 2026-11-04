@@ -164,7 +164,7 @@ class VexIndex:
 
 
 def _corpus_records(data_dir: Path) -> Iterator[dict[str, Any]]:
-    from kube_noob.sources.parts import shard_paths
+    from kube_noob.vuln.parts import shard_paths
 
     for shard in shard_paths(data_dir, "redhat-vex"):
         if shard.stat().st_size > MAX_SHARD_BYTES:
