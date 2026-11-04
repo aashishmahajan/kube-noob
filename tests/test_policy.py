@@ -575,6 +575,8 @@ class FakeCluster:
             "daemonsets": "DaemonSet",
             "pods": "Pod",
             "clusternetworkpolicies": "ClusterNetworkPolicy",
+            "ciliumclusterwidenetworkpolicies": "CiliumClusterwideNetworkPolicy",
+            "globalnetworkpolicies": "GlobalNetworkPolicy",
             "adminnetworkpolicies": "AdminNetworkPolicy",
             "baselineadminnetworkpolicies": "BaselineAdminNetworkPolicy",
         }[resource]
@@ -605,7 +607,13 @@ def test_live_reachability_reads_only_what_it_needs() -> None:
     # The cluster-scoped tiers are read once each and never per namespace. ClusterNetworkPolicy is among them: the
     # evaluator does not understand v1alpha2 yet, but reading the kind is what lets the answer say it was present
     # and not evaluated, instead of answering as though no cluster-scoped policy existed.
-    cluster_scoped = {"clusternetworkpolicies", "adminnetworkpolicies", "baselineadminnetworkpolicies"}
+    cluster_scoped = {
+        "clusternetworkpolicies",
+        "ciliumclusterwidenetworkpolicies",
+        "globalnetworkpolicies",
+        "adminnetworkpolicies",
+        "baselineadminnetworkpolicies",
+    }
     assert {c[0] for c in cluster.calls} <= {"deployments", "networkpolicies", "namespaces"} | cluster_scoped
     for plural in cluster_scoped:
         assert [c[0] for c in cluster.calls].count(plural) == 1, f"{plural} must be read once, not per namespace"

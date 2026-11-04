@@ -403,7 +403,11 @@ def test_the_live_check_reads_the_admin_tiers_too() -> None:
                 return {"kind": "Namespace", "metadata": {"name": name, "labels": {"tier": "app"}}}
             if plural == "networkpolicies":
                 return {"items": []}
-            if plural == "clusternetworkpolicies":
+            if plural in (
+                "clusternetworkpolicies",
+                "ciliumclusterwidenetworkpolicies",
+                "globalnetworkpolicies",
+            ):
                 raise __import__("kube_noob.errors", fromlist=["x"]).ClusterAccessError(
                     "the server could not find the requested resource"
                 )
@@ -430,14 +434,18 @@ def test_a_cluster_that_has_no_admin_tier_api_is_not_an_error() -> None:
         name = "fake"
 
         def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> dict[str, Any]:
-            if plural in ("adminnetworkpolicies", "baselineadminnetworkpolicies", "clusternetworkpolicies"):
+            if plural in (
+                "adminnetworkpolicies",
+                "baselineadminnetworkpolicies",
+                "clusternetworkpolicies",
+                "ciliumclusterwidenetworkpolicies",
+                "globalnetworkpolicies",
+            ):
                 raise ClusterAccessError("the server could not find the requested resource")
             if plural == "namespaces":
                 return {"kind": "Namespace", "metadata": {"name": name, "labels": {}}}
             if plural == "networkpolicies":
                 return {"items": []}
-            if plural == "clusternetworkpolicies":
-                raise ClusterAccessError("the server could not find the requested resource")
             raise ClusterAccessError("not there")
 
     inv = inventory_from_cluster(Backend(), "monitoring/prometheus", "shop/orders")
@@ -677,7 +685,12 @@ def test_a_forbidden_read_of_the_admin_tier_is_not_a_networkpolicy_answer() -> N
         def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> dict[str, Any]:
             if plural == "adminnetworkpolicies":
                 raise ClusterAccessError("Forbidden by RBAC: GET adminnetworkpolicies")
-            if plural in ("baselineadminnetworkpolicies", "clusternetworkpolicies"):
+            if plural in (
+                "baselineadminnetworkpolicies",
+                "clusternetworkpolicies",
+                "ciliumclusterwidenetworkpolicies",
+                "globalnetworkpolicies",
+            ):
                 raise ClusterAccessError("the server could not find the requested resource")
             if plural == "namespaces":
                 return {"kind": "Namespace", "metadata": {"name": name, "labels": {"tier": "app"}}}
@@ -919,3 +932,151 @@ metadata:
     assert out["verdict"] == "undetermined", out["summary"]
     assert "would deny" not in out["summary"]
     assert "would allow" in out["summary"]
+
+
+# Published CRDs, not guessed names. Cilium v1.18.3
+# pkg/k8s/apis/cilium.io/client/crds/v2/ciliumclusterwidenetworkpolicies.yaml:
+# group cilium.io, version v2 (storage), scope Cluster, plural ciliumclusterwidenetworkpolicies, shortName ccnp.
+# Calico v3.30.3 libcalico-go/config/crd/crd.projectcalico.org_globalnetworkpolicies.yaml:
+# group crd.projectcalico.org, version v1 (storage), scope Cluster, plural globalnetworkpolicies, no shortName.
+_PUBLISHED_CLUSTER_POLICIES = (
+    ("CiliumClusterwideNetworkPolicy", "ciliumclusterwidenetworkpolicies", "cilium.io/v2", "ccnp"),
+    ("GlobalNetworkPolicy", "globalnetworkpolicies", "crd.projectcalico.org/v1", None),
+)
+
+
+def test_the_live_allowlist_uses_the_published_crd() -> None:
+    """A name that is not on the published CRD is a new guess. The namespace Cilium policy is a different
+    question and is not smuggled in beside the cluster-scoped one."""
+    from kube_noob.debug.cluster import ALIASES, ALLOWED_RESOURCES, ResourceDef
+
+    for _kind, plural, group_version, short in _PUBLISHED_CLUSTER_POLICIES:
+        assert ALLOWED_RESOURCES[plural] == ResourceDef(group_version, plural, False)
+        singular = plural[:-3] + "y" if plural.endswith("ies") else plural[:-1]
+        assert ALIASES[singular] == plural
+        if short:
+            assert ALIASES[short] == plural
+    assert "gnp" not in ALIASES
+    assert "ciliumnetworkpolicies" not in ALLOWED_RESOURCES
+
+
+def test_the_check_that_resolves_an_unread_cluster_policy_is_the_first_one() -> None:
+    """Naming the policy in JSON and then printing checks that cannot see it is the same miss as G177."""
+    for kind, plural, group_version, _short in _PUBLISHED_CLUSTER_POLICIES:
+        body = f"""
+apiVersion: {group_version}
+kind: {kind}
+metadata:
+  name: extra
+"""
+        out = _check(ALLOW_ALL_NP, body)
+        commands = [step["command"] for step in out["readOnlyNextSteps"]]
+        assert commands[0] == f"kubectl get {plural} -o yaml", commands
+
+
+def _live(extra: dict[str, Any], policies: str = ALLOW_ALL_NP) -> Any:
+    import yaml
+
+    from kube_noob.debug.netpol import inventory_from_cluster
+    from kube_noob.errors import ClusterAccessError
+
+    docs = [d for d in yaml.safe_load_all(WORKLOADS + "\n---\n" + policies) if isinstance(d, dict)]
+    absent = "the server could not find the requested resource"
+
+    class Backend:
+        name = "fake"
+
+        def __init__(self) -> None:
+            self.reads: list[tuple[str, str | None]] = []
+
+        def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> dict[str, Any]:
+            self.reads.append((plural, namespace))
+            if plural in extra:
+                spec = extra[plural]
+                if spec == "absent":
+                    raise ClusterAccessError(absent)
+                if spec == "forbidden":
+                    raise ClusterAccessError("Forbidden (403)")
+                return {"items": spec}
+            if plural in {
+                "adminnetworkpolicies",
+                "baselineadminnetworkpolicies",
+                "clusternetworkpolicies",
+                "ciliumclusterwidenetworkpolicies",
+                "globalnetworkpolicies",
+            }:
+                raise ClusterAccessError(absent)
+            if plural == "namespaces" and name:
+                for doc in docs:
+                    if doc.get("kind") == "Namespace" and doc["metadata"]["name"] == name:
+                        return doc
+            if plural == "networkpolicies":
+                return {
+                    "items": [
+                        doc
+                        for doc in docs
+                        if doc.get("kind") == "NetworkPolicy" and doc["metadata"].get("namespace") == namespace
+                    ]
+                }
+            if name:
+                wanted = {
+                    "deployments": "Deployment",
+                    "statefulsets": "StatefulSet",
+                    "daemonsets": "DaemonSet",
+                    "pods": "Pod",
+                }.get(plural)
+                for doc in docs:
+                    meta = doc.get("metadata") or {}
+                    if doc.get("kind") == wanted and meta.get("name") == name and meta.get("namespace") == namespace:
+                        return doc
+            raise ClusterAccessError("not there")
+
+    backend = Backend()
+    inv = inventory_from_cluster(backend, "monitoring/prometheus", "shop/orders")
+    return backend, inv
+
+
+@pytest.mark.parametrize(
+    "kind,plural",
+    [(k, p) for k, p, _gv, _s in _PUBLISHED_CLUSTER_POLICIES],
+)
+def test_a_live_cluster_policy_is_not_a_false_allow(kind: str, plural: str) -> None:
+    """Pasted files already refuse these. `policy reach` against the cluster did not list them, so the answer
+    an operator trusts more was still allowed."""
+    backend, inv = _live({plural: [{"metadata": {"name": "extra"}}]})
+    assert [ns for got, ns in backend.reads if got == plural] == [None]
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "undetermined", out["summary"]
+    assert f"{kind}/extra" in out["undeterminedBy"]
+    assert out["readOnlyNextSteps"][0]["command"] == f"kubectl get {plural} -o yaml"
+
+
+@pytest.mark.parametrize("plural", ["ciliumclusterwidenetworkpolicies", "globalnetworkpolicies"])
+def test_a_cluster_without_that_crd_keeps_the_networkpolicy_answer(plural: str) -> None:
+    _backend, inv = _live({plural: "absent"})
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "allowed", out["summary"]
+    assert plural not in " ".join(out.get("undeterminedBy") or [])
+    assert any("not installed" in note for note in inv.notes)
+
+
+@pytest.mark.parametrize(
+    "kind,plural",
+    [(k, p) for k, p, _gv, _s in _PUBLISHED_CLUSTER_POLICIES],
+)
+def test_a_forbidden_read_of_a_cluster_policy_is_not_installed(kind: str, plural: str) -> None:
+    _backend, inv = _live({plural: "forbidden"})
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "undetermined", out["summary"]
+    assert kind in out["undeterminedBy"]
+    assert not any("not installed" in note and kind in note for note in inv.notes)
+
+
+def test_a_live_cluster_policy_does_not_let_a_namespace_deny_stand_as_the_answer() -> None:
+    _backend, inv = _live(
+        {"ciliumclusterwidenetworkpolicies": [{"metadata": {"name": "extra"}}]},
+        policies=DENY_ALL_NP,
+    )
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "undetermined", out["summary"]
+    assert "would deny" in out["summary"]

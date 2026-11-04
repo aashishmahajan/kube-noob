@@ -44,6 +44,15 @@ rules:
   - apiGroups: [policy.networking.k8s.io]
     resources: [clusternetworkpolicies, adminnetworkpolicies, baselineadminnetworkpolicies]
     verbs: [get, list]
+  # Cilium clusterwide and Calico GlobalNetworkPolicy. Cluster-scoped, recorded, not parsed. The grant exists
+  # only on the ClusterRole. A cluster without the CRD answers 404. Groups are the published CRDs
+  # (cilium.io/v2, crd.projectcalico.org/v1), not a guess.
+  - apiGroups: [cilium.io]
+    resources: [ciliumclusterwidenetworkpolicies]
+    verbs: [get, list]
+  - apiGroups: [crd.projectcalico.org]
+    resources: [globalnetworkpolicies]
+    verbs: [get, list]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get, list]
