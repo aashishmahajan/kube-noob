@@ -106,7 +106,7 @@ Off until `cluster.enabled` is true. The backends are `KubectlBackend` (runs `ku
 - Flags it can pass: `--all-namespaces`, `--container`, `--context`, `--field-selector`, `--namespace`, `--output`, `--previous`, `--request-timeout`, `--selector`, `--tail`
 - API paths it builds: `/api/v1`, `/api/v1/namespaces/`, `/api/v1/namespaces/{namespace}/pods/{pod}/log`, `/apis/`, `/apis/{self.group_version}`, `/version`
 - Names, namespaces, selectors and containers taken from a caller must match strict patterns (`_NAME`, `_SELECTOR`, `_FIELD_SELECTOR`, `_CONTAINER` in `debug/cluster.py`), none of which admits `/`, `?`, `#` or a newline, so a name cannot add a path segment such as `/exec` or `/proxy`.
-- `resolve_resource` refuses `secrets` by name and any resource outside the allowlist below (38 resources, 55 short names); subresources such as `pods/exec` are not in it.
+- `resolve_resource` refuses `secrets` by name and any resource outside the allowlist below (40 resources, 58 short names); subresources such as `pods/exec` are not in it.
 - Output is redacted before it leaves the backend: 10 credential patterns for logs and text (markers `***JWT***`, `***PRIVATE KEY***`, `***aws-key-id***`, `***github-token***`, `***slack-token***`, `***vault-token***` and `***` for values), ConfigMap `data` and `binaryData` replaced by byte counts, sensitive `env` values, `last-applied-configuration` and sensitive annotations masked, `managedFields` dropped.
 
 Resources the backend can read (all `get` and `list`; `pods/log` through `logs`):
@@ -119,7 +119,9 @@ Resources the backend can read (all `get` and `list`; `pods/log` through `logs`)
 | apps/v1 | `daemonsets`, `deployments`, `replicasets`, `statefulsets` | namespaced |
 | autoscaling/v2 | `horizontalpodautoscalers` | namespaced |
 | batch/v1 | `cronjobs`, `jobs` | namespaced |
+| cilium.io/v2 | `ciliumclusterwidenetworkpolicies` | cluster |
 | config.openshift.io/v1 | `clusteroperators`, `clusterversions` | cluster |
+| crd.projectcalico.org/v1 | `globalnetworkpolicies` | cluster |
 | k8s.ovn.org/v1 | `egressfirewalls` | namespaced |
 | networking.k8s.io/v1 | `ingresses`, `networkpolicies` | namespaced |
 | platform.stackrox.io/v1alpha1 | `centrals`, `securedclusters` | namespaced |
@@ -152,7 +154,9 @@ Read statically from `deploy/helm/kube-noob/templates/rbac.yaml`, `rbac-tiers.ya
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `apps.openshift.io` | `deploymentconfigs` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `autoscaling` | `horizontalpodautoscalers` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `batch` | `jobs`, `cronjobs` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `cilium.io` | `ciliumclusterwidenetworkpolicies` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `config.openshift.io` | `clusteroperators`, `clusterversions` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
+| `rbac.yaml` | `ClusterRole <fullname>-read` | `crd.projectcalico.org` | `globalnetworkpolicies` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `k8s.ovn.org` | `egressfirewalls` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `networking.k8s.io` | `ingresses`, `networkpolicies` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |
 | `rbac.yaml` | `ClusterRole <fullname>-read` | `platform.stackrox.io` | `centrals`, `securedclusters` | `get`, `list` | `config.clusterEnabled` and `rbac.scope = "cluster"` | no |

@@ -63,6 +63,13 @@ UNEVALUATED_POLICY_KINDS = frozenset(
         "GlobalNetworkPolicy",
     }
 )
+# The read-only command that lists the object. ClusterNetworkPolicy stays the singular the CLI already prints.
+# The other two are the plurals on the published CRDs.
+_RESOLVING_GET = {
+    "ClusterNetworkPolicy": "clusternetworkpolicy",
+    "CiliumClusterwideNetworkPolicy": "ciliumclusterwidenetworkpolicies",
+    "GlobalNetworkPolicy": "globalnetworkpolicies",
+}
 OTHER_POLICY_KINDS = {
     ANP_KIND,
     BANP_KIND,
@@ -784,8 +791,13 @@ def check_reachability(
     # When a cluster-scoped kind this evaluator cannot read is what made the answer unknown, reading it is the
     # one step that resolves the verdict -- so it goes first. Printing checks that cannot settle the question,
     # and omitting the one that can, is the same failure as naming the policy in a field nobody reads.
-    if unevaluated_above:
-        checks.insert(0, f"{cli} get clusternetworkpolicy -o yaml")
+    unresolved = []
+    for ref in unevaluated_present:
+        kind_name = ref.split("/", 1)[0]
+        if kind_name in _RESOLVING_GET and kind_name not in unresolved:
+            unresolved.append(kind_name)
+    for kind_name in reversed(unresolved):
+        checks.insert(0, f"{cli} get {_RESOLVING_GET[kind_name]} -o yaml")
     if cli == "oc" and src.namespace in safe_ns:
         checks.append(f"oc get egressfirewall -n {src.namespace} -o yaml")
     out["readOnlyNextSteps"] = [_step(c) for c in checks if classify_step(c) == "read"]
@@ -868,14 +880,16 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
                 f"could not read namespace {ns}'s labels; only kubernetes.io/metadata.name is used for "
                 "namespaceSelector matches"
             )
-    # The admin tiers are cluster-scoped: read once, not per namespace. A cluster without the network-policy-api
-    # CRDs answers 404, which means the tier is not installed - not that the read failed.
-    # ClusterNetworkPolicy is read too, even though this evaluator does not yet understand v1alpha2: collecting it
-    # is what puts it in `other_policies`, which is what names it under "not evaluated" and caveats the proposed
-    # fix. Without the read, the live answer was confidently wrong in exactly the way the file answer no longer is.
+    # The admin tiers are cluster-scoped: read once, not per namespace. A cluster without the CRD answers 404,
+    # which means the tier is not installed - not that the read failed. ClusterNetworkPolicy, Cilium's
+    # clusterwide policy and Calico's GlobalNetworkPolicy are read even though this evaluator does not parse
+    # them: collecting one is what puts it in `other_policies`. Without the read, the live answer was allowed
+    # in exactly the way the file answer no longer is. A 403 stays a failed read.
     unreadable: list[str] = []
     for tier_plural, tier_kind in (
         ("clusternetworkpolicies", "ClusterNetworkPolicy"),
+        ("ciliumclusterwidenetworkpolicies", "CiliumClusterwideNetworkPolicy"),
+        ("globalnetworkpolicies", "GlobalNetworkPolicy"),
         ("adminnetworkpolicies", ANP_KIND),
         ("baselineadminnetworkpolicies", BANP_KIND),
     ):

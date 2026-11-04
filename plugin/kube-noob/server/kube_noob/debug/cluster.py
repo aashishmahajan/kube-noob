@@ -56,6 +56,11 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     # The two cluster-scoped tiers either side of NetworkPolicy. A cluster without the network-policy-api CRDs
     # answers 404 for both, which the reachability check treats as "not installed" rather than as a failure.
     "clusternetworkpolicies": ResourceDef("policy.networking.k8s.io/v1alpha2", "clusternetworkpolicies", False),
+    # Cluster-scoped CNI policies this evaluator records and does not parse. The group, version, plural and
+    # scope are the published CRDs: Cilium v1.18.3 cilium.io/v2, Calico v3.30.3 crd.projectcalico.org/v1.
+    # A namespace CiliumNetworkPolicy is not here. It is a different resource, and this allowlist does not guess it.
+    "ciliumclusterwidenetworkpolicies": ResourceDef("cilium.io/v2", "ciliumclusterwidenetworkpolicies", False),
+    "globalnetworkpolicies": ResourceDef("crd.projectcalico.org/v1", "globalnetworkpolicies", False),
     "adminnetworkpolicies": ResourceDef("policy.networking.k8s.io/v1alpha1", "adminnetworkpolicies", False),
     "baselineadminnetworkpolicies": ResourceDef(
         "policy.networking.k8s.io/v1alpha1", "baselineadminnetworkpolicies", False
@@ -112,6 +117,9 @@ ALIASES = {
     "networkpolicy": "networkpolicies",
     "cnp": "clusternetworkpolicies",
     "clusternetworkpolicy": "clusternetworkpolicies",
+    "ccnp": "ciliumclusterwidenetworkpolicies",
+    "ciliumclusterwidenetworkpolicy": "ciliumclusterwidenetworkpolicies",
+    "globalnetworkpolicy": "globalnetworkpolicies",
     "anp": "adminnetworkpolicies",
     "adminnetworkpolicy": "adminnetworkpolicies",
     "banp": "baselineadminnetworkpolicies",
