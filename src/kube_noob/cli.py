@@ -2479,6 +2479,8 @@ def _print_reach(out: dict[str, Any]) -> None:
         # terminal shows a conclusion with no reason while the JSON carries both `undeterminedBy` and `summary`.
         # A caveat belongs in the surface that is read, not only in the one that is parsed.
         _tprint(f"  unknown because: {', '.join(out['undeterminedBy'])} is not evaluated here")
+    for note in out.get("notes") or []:
+        _tprint(f"  note: {note}")
     if out.get("summary") and out["verdict"] == "undetermined":
         _tprint(f"  {out['summary']}")
     if out.get("warning"):

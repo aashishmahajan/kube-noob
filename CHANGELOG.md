@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A peer kube-noob cannot check no longer lets a later rule allow the traffic.** An AdminNetworkPolicy `networks` or `nodes` peer used to be skipped after a note, so a following `Allow` was `allowed` and exit 0. A CIDR is matched when the other side is an address, and `0.0.0.0/0` or `::/0` matches a pod whose IP is not in the manifests. Anything else that might match is `undetermined`. A priority above 99 is not evaluated: OVN-Kubernetes does not enforce it. A forbidden read of the admin tiers is not "the tier is not installed"; the namespace-scoped chart cannot read them, and that used to come back as a NetworkPolicy allow (G183).
+
 - **A Jira run that cannot decrypt the previous main copy no longer starts a new one.** The decrypt failure used to exit 0 and fetch from scratch, so the first green run after a passphrase mismatch became the artifact every later run restored, and the previous copy stopped being the main copy. The run now fails, the previous artifact is left where it is, and only `fresh=true` discards it on purpose. The upload also refuses a snapshot with fewer tickets than the copy it restored. The forward pass asks Jira `ORDER BY updated DESC` and, if the request budget runs out, resumes that same query from the page it had not applied, so a later run does not skip updates and does not write the same ticket twice (G182). The scheduled default is every other day (`JIRA_EVERY_DAYS=1` for daily). Ticket text is still not published: it is queried locally with `kube-noob ticket` after `corpus import`.
 
 - **Both red scheduled workflows are diagnosed, and neither is a bug in the workflow.** the scheduled `db-image.yml` fails its

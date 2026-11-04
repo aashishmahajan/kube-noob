@@ -29,7 +29,9 @@ should be reused on a v1alpha2 document without reading each of these:
   v1alpha1 -- so simply adding the kind to :func:`collect` would read a rule scoped to one port as a blanket
   rule, and widen every verdict. That is worse than not reading the kind at all.
 * The Baseline tier is no longer a singleton named ``default``, which :func:`collect` requires.
-* Egress peers gain ``nodes``, ``networks`` and ``domainNames``; none of the three is evaluated here.
+* Egress peers gain ``nodes``, ``networks`` and ``domainNames``. A CIDR is matched when the other side is an
+  address, or when it is ``0.0.0.0/0`` or ``::/0``. A peer that might match and cannot be checked stops the
+  tier as ``undetermined``; it is not skipped so a later rule can allow the traffic.
 * The per-list cap fell from 100 items to 25.
 
 Until that work is done, ``ClusterNetworkPolicy`` is listed in
@@ -42,6 +44,7 @@ read.
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 from typing import Any
 
@@ -72,9 +75,8 @@ def _str(v: Any) -> str:
 
 
 def _peer_matches(peer: Any, other: Endpoint, inv: Inventory) -> bool:
-    """One ``from``/``to`` entry of an admin rule. ``namespaces`` is a namespace selector; ``pods`` carries both a
-    namespace and a pod selector. ``nodes`` and ``networks`` are egress-only and are not matched here: a node or a
-    CIDR peer is reported as unevaluated rather than guessed at, because guessing either way is a wrong verdict."""
+    """One ``namespaces`` or ``pods`` entry. ``nodes``, ``networks`` and ``domainNames`` are handled by
+    :func:`_outside_peer`, which can say "unknown" rather than pretend the peer did not match."""
     if not isinstance(peer, dict):
         return False
     if "namespaces" in peer:
@@ -153,6 +155,52 @@ def _rules(spec: Any, direction: str) -> list[Any]:
     return rules if isinstance(rules, list) else []
 
 
+def _outside_peer(peer: dict[str, Any], other: Endpoint) -> bool | None:
+    """A ``nodes``, ``networks`` or ``domainNames`` peer.
+
+    ``True`` matches, ``False`` does not, ``None`` might and cannot be checked from what was passed in. ``None``
+    must stop the tier: skipping the rule and letting a later ``Allow`` decide is a guess.
+    """
+    if "networks" in peer:
+        cidrs = _cidrs(peer.get("networks"))
+        if cidrs is None:
+            return None
+        if other.external and other.net is not None:
+            dest = other.net
+            if any(dest.subnet_of(c) for c in cidrs):
+                return True
+            if any(dest.overlaps(c) for c in cidrs):
+                return None
+            return False
+        if any(c.prefixlen == 0 for c in cidrs):
+            return True
+        return None
+    if "nodes" in peer:
+        # A node peer selects node addresses. A normal pod is not one. A host-network pod or a raw IP might be.
+        if other.external or other.host_network:
+            return None
+        return False
+    if "domainNames" in peer:
+        # The caller named a workload or an IP, not a DNS name, so this peer does not select it.
+        return False
+    return False
+
+
+def _cidrs(value: Any) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network] | None:
+    if not isinstance(value, list):
+        return None
+    out: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for item in value:
+        raw = item if isinstance(item, str) else (item.get("cidr") if isinstance(item, dict) else None)
+        if not isinstance(raw, str):
+            return None
+        try:
+            out.append(ipaddress.ip_network(raw, strict=False))
+        except ValueError:
+            return None
+    return out
+
+
 def _policy_decision(
     pol: dict[str, Any],
     actions: tuple[str, ...],
@@ -184,16 +232,37 @@ def _policy_decision(
             continue
         peers = rule.get("from" if direction == "Ingress" else "to")
         peers = peers if isinstance(peers, list) else []
-        if direction == "Egress":
-            for peer in peers:
-                if isinstance(peer, dict) and ("nodes" in peer or "networks" in peer):
-                    notes.append(
-                        f"{name} {direction.lower()} {label}: a 'nodes' or 'networks' peer is not evaluated "
-                        "offline, so this rule may decide the traffic on the cluster"
-                    )
-        if not any(_peer_matches(p, other, inv) for p in peers):
-            continue
         if not _port_matches(rule.get("ports"), port, protocol, dest):
+            continue
+        matched = False
+        unknown = False
+        for peer in peers:
+            if not isinstance(peer, dict):
+                continue
+            if "namespaces" in peer or "pods" in peer:
+                if _peer_matches(peer, other, inv):
+                    matched = True
+                    break
+                continue
+            if "nodes" in peer or "networks" in peer or "domainNames" in peer:
+                got = _outside_peer(peer, other)
+                if got is True:
+                    matched = True
+                    break
+                if got is None:
+                    unknown = True
+        if not matched:
+            if unknown:
+                return Decision(
+                    "undetermined",
+                    name,
+                    label,
+                    reason=(
+                        f"{name} {direction.lower()} {label} has a nodes, networks or domainNames peer that "
+                        f"might select {other.describe()} on {protocol} {port}, and kube-noob cannot check it. "
+                        "A later rule is not allowed to allow the traffic instead."
+                    ),
+                )
             continue
         if action == "Pass":
             return Decision(
@@ -286,8 +355,9 @@ def collect(inv: Inventory, objects: list[dict[str, Any]]) -> tuple[list[dict[st
                 inv.notes.append(
                     f"{kind}/{name}: priority {priority} is above {OVN_PRIORITY_MAX}, which OVN-Kubernetes does not "
                     "implement (it raises ANPWithUnsupportedPriority and the policy has no effect on the cluster); "
-                    "it is evaluated here in priority order"
+                    "it is not evaluated, so it does not decide this traffic"
                 )
+                continue
             anps.append((priority, i, obj))
         elif kind == BANP_KIND:
             if name != "default":
