@@ -125,6 +125,11 @@ rewrite history on a shared branch.
   deploy`) because the organization has deploy keys turned off. Creating a key returns 422 "Deploy keys are
   disabled for this repository". The token available to an agent cannot change that organization setting (403).
   An owner turns Deploy keys back on under the organization's Member privileges, then checks that key 168088767
-  is enabled. Do not mint a replacement key unless that one is deleted. The public site content from `main` is
-  www `f6ff300`, published by hand because the workflow cannot push. The package version is still 0.7.1.
+  is enabled. Do not mint a replacement key unless that one is deleted. Do not force-push `kube-noob-www` by
+  hand. The hand publish `f6ff300` (2026-11-04) left Pages with `cname: null`, so https://kube-noob.com returns
+  GitHub's "Site not found" while https://kube-noob.github.io/kube-noob-www/ still serves the files. Putting the
+  domain back is `PUT /repos/kube-noob/kube-noob-www/pages` with `cname=kube-noob.com`. This token cannot do that
+  (403, including a workflow whose `GITHUB_TOKEN` has `pages: write`). An owner sets Custom domain to
+  `kube-noob.com` in the repository's Pages settings. `www` still CNAMEs to `aashishmahajan.github.io`, so that
+  name does not match the certificate. The package version is still 0.7.1.
 
