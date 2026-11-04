@@ -2,15 +2,16 @@
 
 ## Unreleased
 
+- **A Jira run that cannot decrypt the previous main copy no longer starts a new one.** The decrypt failure used to exit 0 and fetch from scratch, so the first green run after a passphrase mismatch became the artifact every later run restored, and the previous copy stopped being the main copy. The run now fails, the previous artifact is left where it is, and only `fresh=true` discards it on purpose. The upload also refuses a snapshot with fewer tickets than the copy it restored. The forward pass asks Jira `ORDER BY updated DESC` and, if the request budget runs out, resumes that same query from the page it had not applied, so a later run does not skip updates and does not write the same ticket twice (G182). The scheduled default is every other day (`JIRA_EVERY_DAYS=1` for daily). Ticket text is still not published: it is queried locally with `kube-noob ticket` after `corpus import`.
+
 - **Both red scheduled workflows are diagnosed, and neither is a bug in the workflow.** the scheduled `db-image.yml` fails its
   own member-size gate: `redhat-vex.jsonl` has grown past `db_bundle.MAX_MEMBER` (300 MB), so an upstream feed
   outgrew a limit this project set. (The `db-image` job in `ci.yml` shares the name and is green: it bundles a
   small public corpus and never downloads the VEX feed.) Raising the number buys a quarter; sharding the member, filtering the feed to
   the products kube-noob answers about, or compressing it are the real options, and choosing between them is a
   decision rather than a fix. `corpus-refresh` fails its privacy audit, which is the gate working -- and now
-  reports enough to triage (G179). Its run also warns that the stored copy no longer decrypts with the current
-  `CORPUS_PASSPHRASE`, so each run starts from scratch and discards an hour of paced fetching; that is a secret
-  rotation only the owner can settle. `docs/roadmap.md` P5 carries both diagnoses instead of "Not started".
+  reports enough to triage (G179). A passphrase mismatch used to make every run start from scratch; that now fails
+  the run instead of replacing the copy (G182).
 
 - **`CHECKED_THROUGH` and the risk review's drift baseline are now held together by a test.** Both said
   Kubernetes 1.37, by the coincidence of having been edited the same day, and nothing connected them: raising the

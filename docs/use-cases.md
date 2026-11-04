@@ -245,7 +245,7 @@ helm upgrade --install kube-noob deploy/helm/kube-noob --set jira.seed.source=im
 ```
 
 
-Nobody should wait hours for a first sync. Keep one main copy, refresh it daily (or every two days), and start every
+Nobody should wait hours for a first sync. Keep one main copy, refresh it every other day (or daily), and start every
 other install from it:
 
 ```bash
@@ -270,11 +270,12 @@ verdict, comments kept against what Jira reported, tickets cut at the size cap o
 coverage, size, sync state, what the anonymiser replaced, and a self-check that no email, account id or profile link
 is left (the daily workflow fails if one is).
 
-The `corpus-refresh` workflow keeps the main copy in GitHub Actions: daily at 05:17 UTC (set the repository variable
-`JIRA_EVERY_DAYS` to `2` for every two days), continuing the previous run's copy, with the changes and open tickets in
-the run summary, and the new copy uploaded only encrypted with your `CORPUS_PASSPHRASE`. In OpenShift, put the
-snapshot in a private image and set `jira.seed` so every new pod starts from it (an init container copies it; the
-image needs `cp` and must run as non-root):
+The `corpus-refresh` workflow keeps the main copy in GitHub Actions: every other day at 05:17 UTC (set the repository
+variable `JIRA_EVERY_DAYS` to `1` for every day), newest updates first, continuing the previous run's copy. A run that
+cannot decrypt that copy fails and leaves it in place. The changes and open tickets are in the run summary, and the
+new copy is uploaded only encrypted with your `CORPUS_PASSPHRASE`. Ticket text is not published on the website. In
+OpenShift, put the snapshot in a private image and set `jira.seed` so every new pod starts from it (an init container
+copies it; the image needs `cp` and must run as non-root):
 
 ```bash
 gh run download "$(gh run list --repo aashishmahajan/kube-noob --workflow corpus-refresh.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')" --repo aashishmahajan/kube-noob -n jira-main-copy-encrypted -D seed

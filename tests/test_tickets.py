@@ -384,9 +384,32 @@ def test_sync_copies_every_status_then_only_changes(tmp_path: Path) -> None:
     fake.updated = {"OCPBUGS-103": _issue("OCPBUGS-103", OVN["fields"]["summary"], "now merged", status="MODIFIED")}
     later = NOW + timedelta(hours=2)
     out = sync_projects(_client(fake, sleeps), ["OCPBUGS"], tmp_path, BASE, later)
-    assert fake.jql == ["project = OCPBUGS AND updated >= -130m ORDER BY updated ASC"]
+    assert fake.jql == ["project = OCPBUGS AND updated >= -130m ORDER BY updated DESC"]
     assert out["projects"][0]["fetched"] == 1 and out["projects"][0]["total"] == 4
     assert tickets.ticket("OCPBUGS-103", tmp_path)["verdict"] == "fix-in-progress"
+
+
+def test_a_forward_budget_resumes_newest_first_without_shrinking_the_copy(tmp_path: Path) -> None:
+    """Newest updates are fetched first. A budget stop keeps the unfetched page token, and the shard never shrinks."""
+    fake = FakeJira({"OCPBUGS": [ROUTER, MIRROR, OVN, ROUTER_DUP]}, page=1)
+    sync_projects(_client(fake, []), ["OCPBUGS"], tmp_path, BASE, NOW)
+    before = (tmp_path / "corpus" / "jira-ocpbugs.jsonl").read_text().count("\n")
+    fake.jql.clear()
+    fake.updated = {
+        "OCPBUGS-201": _issue("OCPBUGS-201", "newest", "one", status="MODIFIED"),
+        "OCPBUGS-202": _issue("OCPBUGS-202", "older update", "two", status="MODIFIED"),
+    }
+    later = NOW + timedelta(hours=2)
+    out = sync_projects(_client(fake, [], budget=1), ["OCPBUGS"], tmp_path, BASE, later)
+    assert out["stoppedBy"] == "budget"
+    assert fake.jql == ["project = OCPBUGS AND updated >= -130m ORDER BY updated DESC"]
+    resume = load_state(tmp_path)["projects"]["OCPBUGS"]["forwardResume"]
+    assert resume["jql"].endswith("ORDER BY updated DESC") and resume["token"]
+    assert (tmp_path / "corpus" / "jira-ocpbugs.jsonl").read_text().count("\n") >= before
+    fake.jql.clear()
+    done = sync_projects(_client(fake, []), ["OCPBUGS"], tmp_path, BASE, later)
+    assert done["projects"][0]["total"] >= before
+    assert "forwardResume" not in load_state(tmp_path)["projects"]["OCPBUGS"]
 
 
 def test_a_budget_stops_cleanly_and_the_next_run_resumes(tmp_path: Path) -> None:

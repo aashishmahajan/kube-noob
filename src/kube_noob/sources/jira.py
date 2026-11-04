@@ -279,6 +279,9 @@ class PullStats:
     kept: int = 0
     strategy: str = ""
     errors: list[str] = field(default_factory=list)
+    # Token of the search page that has not been fully applied. A budget stop resumes here instead of
+    # repeating the pages already kept. None once the search is finished.
+    resume_token: str | None = None
 
 
 def _obj(value: Any) -> dict[str, Any]:
@@ -378,11 +381,18 @@ class JiraClient:
         data = self.get(f"/rest/api/3/project/{project}/versions")
         return data if isinstance(data, list) else []
 
-    def search(self, jql: str, fields: str = DEFAULT_FIELDS, page_size: int = 100) -> Iterator[dict[str, Any]]:
-        """Enhanced JQL search. Long JQL goes in a POST body so it never hits URL length limits."""
-        token: str | None = None
+    def search(
+        self, jql: str, fields: str = DEFAULT_FIELDS, page_size: int = 100, page_token: str | None = None
+    ) -> Iterator[dict[str, Any]]:
+        """Enhanced JQL search. Long JQL goes in a POST body so it never hits URL length limits.
+
+        ``page_token`` resumes a search whose previous run stopped mid-pagination. ``stats.resume_token`` is the
+        page that has not been fully applied yet, so a budget stop can continue from it.
+        """
+        token: str | None = page_token or None
         use_post = len(jql) > LONG_JQL
         while True:
+            self.stats.resume_token = token
             if use_post:
                 body: dict[str, Any] = {"jql": jql, "fields": fields.split(","), "maxResults": page_size}
                 if token:
@@ -396,8 +406,9 @@ class JiraClient:
             self.stats.pages += 1
             issues = data.get("issues") or []
             yield from issues
-            token = data.get("nextPageToken")
+            token = data.get("nextPageToken") if isinstance(data.get("nextPageToken"), str) else None
             if data.get("isLast", token is None) or not token or not issues:
+                self.stats.resume_token = None
                 return
 
     def projects(self, page_size: int = 100) -> list[dict[str, str]]:
@@ -891,9 +902,12 @@ def sync_project(
 ) -> ProjectSync:
     """Update ``records`` (id -> record) and ``state`` for one project, in place; append what changed to ``changes``.
 
-    1. Forward: issues updated since the last completed forward pass. The window ``updated >= -Nm`` is relative to the
-       server's clock, and N comes from this machine's clock read just before the search, so time zones and a steady
-       clock offset never matter; ``OVERLAP_MINUTES`` covers drift. ``lastSyncAt`` only moves when the pass finished.
+    1. Forward: issues updated since the last completed forward pass, newest first (``ORDER BY updated DESC``). The
+       window ``updated >= -Nm`` is relative to the server's clock, and N comes from this machine's clock read just
+       before the search, so time zones and a steady clock offset never matter; ``OVERLAP_MINUTES`` covers drift.
+       ``lastSyncAt`` only moves when the pass finished. A budget stop keeps the unfetched page token with the exact
+       JQL and the next run continues there, so the same tickets are not fetched again and older updates in the
+       window are not skipped. Re-applying a page is safe: an unchanged ticket is not written twice.
     2. Open tickets, once per copy: every ticket still to do or in progress, newest first, so the tickets people
        reconcile are in a new copy first.
     3. Backfill: issues below the lowest key held, newest first, until the project is complete.
@@ -958,9 +972,23 @@ def sync_project(
         if last is not None:
             since = last - timedelta(minutes=OVERLAP_MINUTES)
             minutes = max(0, -int(-(started - last).total_seconds() // 60)) + OVERLAP_MINUTES  # rounded up
-            for issue in client.search(f"project = {project} AND updated >= -{minutes}m ORDER BY updated ASC", fields):
-                keep(issue)
-        state["lastSyncAt"] = retrieved  # the forward pass finished (or this is the first run): changes from here on
+            jql = f"project = {project} AND updated >= -{minutes}m ORDER BY updated DESC"
+            resume = state.get("forwardResume")
+            page_token = None
+            if isinstance(resume, dict) and resume.get("jql") == jql and isinstance(resume.get("token"), str):
+                page_token = resume["token"]
+            try:
+                for issue in client.search(jql, fields, page_token=page_token):
+                    keep(issue)
+            except BudgetExhausted:
+                token = client.stats.resume_token
+                if token:
+                    state["forwardResume"] = {"jql": jql, "token": token}
+                raise
+            state.pop("forwardResume", None)
+            state["lastSyncAt"] = retrieved  # the forward pass finished: changes from here on
+        else:
+            state["lastSyncAt"] = retrieved  # first run: no forward window yet
         if not state.get("complete") and not state.get("openDone"):
             phase = "open"
             _open_pass(client, project, fields, state, keep)
@@ -1158,12 +1186,18 @@ def sync_projects_locked(
     changed: dict[str, int] = {}
     for project in projects:
         records = load_shard(data_dir, project)
+        loaded = len(records)
         current = per.get(project)
         if not isinstance(current, dict) or current.get("shardSha256") != _shard_sha(data_dir, project):
             # no state, or the shard was replaced since (corpus import, an older kube-noob): derive it from the copy
             per[project] = state_from_records(records, project) if records else {}
         changes: list[dict[str, Any]] = []
         res = sync_project(client, project, records, per[project], base_url, now, target_field, changes)
+        if loaded and len(records) < loaded:
+            raise JiraError(
+                f"{project}: refusing to replace {loaded} stored tickets with {len(records)}. "
+                "A sync only adds or refreshes a ticket; a smaller shard would destroy the copy."
+            )
         if changes:
             append_changes(data_dir, changes)
             for c in changes:

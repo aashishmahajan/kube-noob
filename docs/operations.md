@@ -4,7 +4,8 @@
 
 | When (UTC) | What | Where |
 |---|---|---|
-| Sunday 05:17 | Corpus refresh (Git sources, release history, ROX Jira) | `corpus-refresh.yml` |
+| Daily 05:17 UTC, every other day by default | Red Hat Jira main copy. `JIRA_EVERY_DAYS=1` runs it daily. A run that cannot decrypt the previous copy fails and does not replace it | `corpus-refresh.yml` |
+| Sunday 03:41 UTC | Corpus refresh also ingests Git docs and release history | `corpus-refresh.yml` |
 | Monday 04:23 | CodeQL | `codeql.yml` |
 | Monday 06:41 | Risk review: dependency CVEs, released-image CVEs, upstream drift, SDK drift | `risk-review.yml` |
 | Monday 04:37 US Central (09:37 or 10:37 UTC) | Agent review: reads the issue and open Dependabot PRs, verifies facts, fixes, pushes a patch and hands back the tag command | Claude scheduled task "kube-noob weekly risk review" |
@@ -18,7 +19,22 @@ something wants doing, and a report that has been replaced is not making that cl
 closing anything if it cannot establish this week's issue number, because closing on an unknown number would
 close the week it had just written.
 
-### When the corpus refresh refuses the copy
+### The Red Hat Jira copy: where it lives
+
+Ticket text is not on kube-noob.com and is not in the public `kube-noob-db` image. Red Hat's issue content is not redistributable. The website's known-issues pages are the release-note bugs, which are a different, smaller set.
+
+The main copy is the encrypted artifact `jira-main-copy-encrypted` from the last successful `corpus-refresh` run. Import it locally (the passphrase is the `CORPUS_PASSPHRASE` Actions secret, not something to paste into a chat):
+
+```bash
+# after decrypting the artifact to jira-snapshot.tgz with that passphrase
+kube-noob corpus import jira-snapshot.tgz
+kube-noob ticket OCPBUGS-1234
+kube-noob corpus jira-changes --since 2d
+```
+
+A sync only adds or refreshes tickets. It will not write a shard smaller than the one it loaded. The scheduled pull runs every other day, newest updates first (`ORDER BY updated DESC`). Set the repository variable `JIRA_EVERY_DAYS` to `1` for a daily pull. Do not rotate `CORPUS_PASSPHRASE` until the current artifact has been re-encrypted with the new value: a mismatch now fails the workflow instead of discarding the copy, and `fresh=true` is the only way to start over on purpose.
+
+## When the corpus refresh refuses the copy
 
 The privacy audit exits 1 rather than keep a copy that still has person-shaped text in it, which is the right
 way round. Each finding now reads `<TICKET> <field>: <kind> <shape>`, where the shape is the match with its
