@@ -597,24 +597,36 @@ def test_a_cidr_that_covers_every_address_denies_before_a_later_allow() -> None:
 
 
 def test_an_address_inside_a_named_cidr_is_denied() -> None:
-    inv = Inventory.from_yaml(WORKLOADS + _egress(10, """
+    inv = Inventory.from_yaml(
+        WORKLOADS
+        + _egress(
+            10,
+            """
     - name: lab
       action: Deny
       to:
         - networks: ["203.0.113.0/24"]
-"""))
+""",
+        )
+    )
     out = check_reachability(inv, "shop/orders", "203.0.113.10", 443)
     assert out["verdict"] == "denied"
     assert out["egress"]["rule"] == "lab"
 
 
 def test_an_address_outside_a_named_cidr_is_not_denied_by_it() -> None:
-    inv = Inventory.from_yaml(WORKLOADS + _egress(10, """
+    inv = Inventory.from_yaml(
+        WORKLOADS
+        + _egress(
+            10,
+            """
     - name: lab
       action: Deny
       to:
         - networks: ["203.0.113.0/24"]
-"""))
+""",
+        )
+    )
     out = check_reachability(inv, "shop/orders", "198.51.100.10", 443)
     assert out["verdict"] == "allowed"
 
@@ -739,7 +751,6 @@ def test_the_text_surface_shows_the_note_and_exits_unknown(tmp_path: Path, capsy
     assert code == 1
     assert "UNDETERMINED" in text
     assert "might select" in text
-
 
 
 def test_a_lower_priority_decides_before_a_tie_higher_up() -> None:
@@ -908,4 +919,3 @@ metadata:
     assert out["verdict"] == "undetermined", out["summary"]
     assert "would deny" not in out["summary"]
     assert "would allow" in out["summary"]
-
