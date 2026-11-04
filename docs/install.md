@@ -1,6 +1,6 @@
 # Install kube-noob
 
-kube-noob needs Python 3.11 or newer. macOS's built-in `python3` (from the Xcode Command Line Tools) is 3.9, so a
+kube-noob needs Python 3.11.4 or newer. macOS's built-in `python3` (from the Xcode Command Line Tools) is 3.9, so a
 plain `pip install` there fails. Homebrew and uv bring their own Python (uv downloads one when yours is too old), and
 pipx installed with Homebrew uses Homebrew's.
 
@@ -37,7 +37,8 @@ The same tools as the MCP server, as an [Agent Skill](https://claude.com/docs/sk
 `SKILL.md`, a runner (`scripts/kn.py`, one tool per call, JSON out) and the readable server source the Claude plugin
 ships. Use it where no MCP server runs: chat on claude.ai (the plugin's local MCP server runs in Claude Code and
 Cowork only) and the Claude API's code execution. It runs with the offline lock on and needs Python 3.11 or later
-with pydantic, PyYAML and jsonschema; `kn.py check` says which are missing.
+with pydantic, PyYAML and jsonschema; `kn.py check` says which are missing. The runner in a built skill is
+`skill/kube-noob/scripts/kn.py` (the folder the zip unpacks as `kube-noob/`).
 
 | Where | Install |
 |---|---|
@@ -48,10 +49,10 @@ with pydantic, PyYAML and jsonschema; `kn.py check` says which are missing.
 Run it yourself to see what Claude sees:
 
 ```bash
-python3 -I -B kube-noob/scripts/kn.py check
-python3 -I -B kube-noob/scripts/kn.py tools
-python3 -I -B kube-noob/scripts/kn.py insight '{"text": "0/3 nodes are available: 3 Insufficient memory"}'
-python3 -I -B kube-noob/scripts/kn.py audit_manifests --text-file manifests=app.yaml
+python3 -I -B skill/kube-noob/scripts/kn.py check
+python3 -I -B skill/kube-noob/scripts/kn.py tools
+python3 -I -B skill/kube-noob/scripts/kn.py insight '{"text": "0/3 nodes are available: 3 Insufficient memory"}'
+python3 -I -B skill/kube-noob/scripts/kn.py audit_manifests --text-file manifests=app.yaml
 ```
 
 ## Errors and fixes
@@ -60,7 +61,7 @@ python3 -I -B kube-noob/scripts/kn.py audit_manifests --text-file manifests=app.
 |---|---|---|
 | `No available formula with the name "kube-noob"` | The tap is not added | `brew tap aashishmahajan/kube-noob https://github.com/aashishmahajan/kube-noob`, then `brew trust --formula aashishmahajan/kube-noob/kube-noob`, then `brew install kube-noob` |
 | `Refusing to load formula aashishmahajan/kube-noob/kube-noob from untrusted tap` | Homebrew 6 requires trust for third-party taps | `brew trust --formula aashishmahajan/kube-noob/kube-noob`, then `brew install kube-noob` |
-| `Requires-Python >=3.11.4` and `No matching distribution found for kube-noob` | Your `python3` is older than 3.11 | Use Homebrew, uv or pipx above, or a virtual environment made with Python 3.11+ |
+| `Requires-Python >=3.11.4` and `No matching distribution found for kube-noob` | Your `python3` is older than 3.11.4 (3.11.0 through 3.11.3 are not enough) | Use Homebrew, uv or pipx above, or a virtual environment made with Python 3.11.4+ |
 | `error: externally-managed-environment` | Homebrew's or the system's Python refuses packages installed into it (PEP 668) | Use pipx, uv or a virtual environment; do not add `--break-system-packages` |
 | `zsh: command not found: pip` | macOS has no `pip` command, only `pip3` | Use pipx or uv, or `python3 -m pip` inside a virtual environment |
 | `command not found: kube-noob` after pipx or uv | Their bin folder is not on your `PATH` yet | `pipx ensurepath` or `uv tool update-shell`, then open a new terminal |

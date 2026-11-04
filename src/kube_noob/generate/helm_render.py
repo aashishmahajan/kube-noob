@@ -21,12 +21,30 @@ def helm_binary() -> str | None:
     return shutil.which("helm")
 
 
+def kube_version_arg(platform: str, version: str | None) -> str | None:
+    """The Kubernetes version to pass to ``helm template --kube-version``, or None when the caller named none.
+
+    An OpenShift version is mapped with the table the removed-API checks already use. No version means no flag:
+    Helm's own default (v1.20 on Helm 4.0.0) must not be replaced with one kube-noob invented.
+    """
+    if not version:
+        return None
+    from kube_noob.catalog import k8s_version_for
+
+    try:
+        minor = k8s_version_for(platform, version)
+    except ValueError:
+        return None
+    return minor if minor.count(".") >= 2 else f"{minor}.0"
+
+
 def render_chart(
     chart_dir: str | Path,
     values_files: list[str] | None = None,
     namespace: str = "default",
     release: str = "release",
     timeout: float = 60.0,
+    kube_version: str | None = None,
 ) -> str:
     helm = helm_binary()
     if helm is None:
@@ -38,6 +56,8 @@ def render_chart(
     if not (chart / "Chart.yaml").is_file():
         raise KubeNoobError(f"{chart} is not a chart directory (no Chart.yaml)")
     args = [helm, "template", release, str(chart), "--namespace", namespace]
+    if kube_version:
+        args += ["--kube-version", kube_version]
     for vf in values_files or []:
         args += ["--values", vf]
     with tempfile.TemporaryDirectory() as home:
@@ -55,5 +75,5 @@ def audit_chart(
     values_files: list[str] | None = None,
     namespace: str = "default",
 ) -> tuple[Report, list[str]]:
-    rendered = render_chart(chart_dir, values_files, namespace)
+    rendered = render_chart(chart_dir, values_files, namespace, kube_version=kube_version_arg(platform, version))
     return analyze(rendered, platform=platform, version=version), lint_chart_metadata(chart_dir)

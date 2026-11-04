@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -224,5 +225,30 @@ def test_directory_walks_skip_what_is_not_a_manifest(tmp_path: Path) -> None:
     whys = {Path(x["file"]).name: x["why"] for x in rep["skipped"]}
     assert whys["deploy.yaml"].startswith("a Helm template") and "not a Kubernetes manifest" in whys["values.yaml"]
     assert "ci.yml" not in whys, "dot directories are not walked"
-    named = gate.run(gate.collect([str(chart / "values.yaml")], _read), platform="openshift", fail_on="never")
-    assert named["files"] and named["findings"], "a file named on the command line is always audited"
+    named = gate.collect([str(chart / "values.yaml")], _read)
+    with pytest.raises(gate.GateError, match="nothing here is a Kubernetes manifest"):
+        gate.run(named, platform="openshift", fail_on="never")
+
+
+def test_helm_render_passes_the_callers_kubernetes_version(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from kube_noob.generate.helm_render import kube_version_arg, render_chart
+
+    assert kube_version_arg("kubernetes", None) is None
+    assert kube_version_arg("openshift", None) is None
+    assert kube_version_arg("kubernetes", "1.33") == "1.33.0"
+    assert kube_version_arg("openshift", "4.20") == "1.33.0"
+    chart = tmp_path / "chart"
+    chart.mkdir()
+    (chart / "Chart.yaml").write_text("apiVersion: v2\nname: shop\nversion: 0.1.0\n")
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout="apiVersion: v1\nkind: ConfigMap\n", stderr="")
+
+    monkeypatch.setattr("kube_noob.generate.helm_render.helm_binary", lambda: "helm")
+    monkeypatch.setattr("kube_noob.generate.helm_render.subprocess.run", fake_run)
+    render_chart(chart, kube_version=None)
+    assert "--kube-version" not in seen["args"]
+    render_chart(chart, kube_version="1.33.0")
+    assert seen["args"][seen["args"].index("--kube-version") + 1] == "1.33.0"

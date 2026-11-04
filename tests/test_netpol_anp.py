@@ -769,3 +769,143 @@ def test_the_reach_command_prints_and_exits_on_an_undetermined_verdict(
     assert text.startswith("UNDETERMINED  "), text
     assert "deny-side" in text and "allow-side" in text
     assert "fix (needs approval)" not in text, text
+
+
+def test_a_host_network_pod_is_not_reported_as_allowed() -> None:
+    """NetworkPolicy does not apply to hostNetwork. The old answer said so and then set allowed, so the verdict
+    was allowed and a job exited 0. Unknown is the answer. It is not denied: the policy was not evaluated."""
+    host = WORKLOADS.replace(
+        "    spec:\n      containers:\n        - name: c\n          image: orders:1",
+        "    spec:\n      hostNetwork: true\n      containers:\n        - name: c\n          image: orders:1",
+        1,
+    )
+    inv = Inventory.from_yaml("\n---\n".join((host, ALLOW_ALL_NP)))
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "undetermined", out["summary"]
+    assert out["ingress"].get("undetermined") is True
+    assert out["ingress"]["allowed"] is False
+    assert "proposedChanges" not in out
+
+
+def test_a_host_network_direction_does_not_hide_a_deny() -> None:
+    """The source uses hostNetwork, so its egress is unknown. The destination's NetworkPolicy still denies
+    ingress. That deny stands. Unknown does not promote it, and it does not become allowed."""
+    host = WORKLOADS.replace(
+        "    spec:\n      containers:\n        - name: c\n          image: prom:1",
+        "    spec:\n      hostNetwork: true\n      containers:\n        - name: c\n          image: prom:1",
+        1,
+    )
+    inv = Inventory.from_yaml("\n---\n".join((host, DENY_ALL_NP)))
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "denied", out["summary"]
+    assert out["egress"].get("undetermined") is True
+    assert out["ingress"]["allowed"] is False
+
+
+@pytest.mark.parametrize("kind", ["CiliumClusterwideNetworkPolicy", "GlobalNetworkPolicy"])
+def test_an_unread_cluster_scoped_policy_is_not_allowed(kind: str) -> None:
+    body = f"""
+apiVersion: example.com/v1
+kind: {kind}
+metadata:
+  name: extra
+"""
+    out = _check(ALLOW_ALL_NP, body)
+    assert out["verdict"] == "undetermined", out
+    assert any(ref.startswith(f"{kind}/") for ref in out["undeterminedBy"])
+    assert "decided before any NetworkPolicy" not in out["summary"]
+
+
+@pytest.mark.parametrize("kind", ["CiliumNetworkPolicy", "MultiNetworkPolicy", "EgressFirewall", "EgressNetworkPolicy"])
+def test_a_policy_that_does_not_decide_this_flow_does_not_flip_it(kind: str) -> None:
+    """An EgressFirewall does not decide pod-to-pod traffic. A namespace Cilium policy and a MultiNetworkPolicy
+    do not decide the primary interface. Naming them is honest. Calling the NetworkPolicy answer unknown is not."""
+    body = f"""
+apiVersion: example.com/v1
+kind: {kind}
+metadata:
+  name: extra
+  namespace: shop
+"""
+    out = _check(ALLOW_ALL_NP, body)
+    assert out["verdict"] == "allowed", out["summary"]
+    assert any(kind in line for line in out["notEvaluated"])
+
+
+def test_a_host_network_direction_does_not_hide_an_admin_deny() -> None:
+    """The source uses hostNetwork, so its egress is unknown. An AdminNetworkPolicy still denies ingress.
+    That deny is a decision, and unknown must not promote it to allowed or to undetermined."""
+    host = WORKLOADS.replace(
+        "    spec:\n      containers:\n        - name: c\n          image: prom:1",
+        "    spec:\n      hostNetwork: true\n      containers:\n        - name: c\n          image: prom:1",
+        1,
+    )
+    inv = Inventory.from_yaml("\n---\n".join((host, ALLOW_ALL_NP, _anp(10, "Deny", "admin-deny"))))
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "denied", out["summary"]
+    assert out["egress"].get("undetermined") is True
+    assert out["ingress"]["allowed"] is False
+    assert out["ingress"]["tier"] == "AdminNetworkPolicy"
+
+
+def test_an_admin_deny_still_decides_a_host_network_subject() -> None:
+    """AdminNetworkPolicy runs before NetworkPolicy. hostNetwork makes the NetworkPolicy tier unknown; it does
+    not throw away a Deny the admin tier already returned for that same pod."""
+    host = WORKLOADS.replace(
+        "    spec:\n      containers:\n        - name: c\n          image: orders:1",
+        "    spec:\n      hostNetwork: true\n      containers:\n        - name: c\n          image: orders:1",
+        1,
+    )
+    inv = Inventory.from_yaml("\n---\n".join((host, ALLOW_ALL_NP, _anp(10, "Deny", "admin-deny"))))
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "denied", out["summary"]
+    assert out["ingress"]["tier"] == "AdminNetworkPolicy"
+    assert out["ingress"].get("undetermined") is not True
+
+
+def test_an_unread_cluster_policy_can_reverse_a_deny() -> None:
+    body = """
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: extra
+"""
+    out = _check(DENY_ALL_NP, body)
+    assert out["verdict"] == "undetermined", out["summary"]
+    assert "would deny" in out["summary"]
+    assert "decided before any NetworkPolicy" not in out["summary"]
+
+
+def test_an_egress_firewall_does_not_erase_a_pod_to_pod_deny() -> None:
+    body = """
+apiVersion: k8s.ovn.org/v1
+kind: EgressFirewall
+metadata:
+  name: extra
+  namespace: shop
+"""
+    out = _check(DENY_ALL_NP, body)
+    assert out["verdict"] == "denied", out["summary"]
+    assert any("EgressFirewall" in line for line in out["notEvaluated"])
+
+
+def test_host_network_plus_an_unread_policy_is_not_called_a_deny() -> None:
+    """hostNetwork sets allowed to false because unknown is not a pass. That flag must not be narrated as
+    'the NetworkPolicies would deny' when the only other fact is a policy that was never read."""
+    host = WORKLOADS.replace(
+        "    spec:\n      containers:\n        - name: c\n          image: orders:1",
+        "    spec:\n      hostNetwork: true\n      containers:\n        - name: c\n          image: orders:1",
+        1,
+    )
+    body = """
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: extra
+"""
+    inv = Inventory.from_yaml("\n---\n".join((host, ALLOW_ALL_NP, body)))
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "undetermined", out["summary"]
+    assert "would deny" not in out["summary"]
+    assert "would allow" in out["summary"]
+

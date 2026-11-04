@@ -31,6 +31,42 @@ def test_toolkit_availability_gates() -> None:
     assert {"web_fetch", "cluster_get", "cluster_debug_workload"} <= names_on
 
 
+def test_full_install_instructions_keep_the_pasted_tool_sentence() -> None:
+    """A full install still has Containerfile and code modules. The instructions must name both, and the
+    semicolons that split those clauses have to survive the conditional."""
+    from kube_noob.server.mcp_app import _instructions
+
+    text = _instructions(load_settings())
+    assert (
+        "pass the log to kubenoob_build_diagnose and a Containerfile to kubenoob_containerfile_audit; "
+        "for scanner output" in text
+    )
+    assert "rank 1 (shipped and exposed); for 'what could go wrong with this app?'" in text
+
+
+def test_instructions_omit_tools_the_build_does_not_ship(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The plugin drops kube_noob.build.containerfile and kube_noob.code.ship. Naming those tools tells the
+    model to call something this process cannot run."""
+    import importlib.util
+
+    from kube_noob.server.mcp_app import _instructions
+
+    real = importlib.util.find_spec
+
+    def fake(name: str, *args: object, **kwargs: object) -> object:
+        if name in {"kube_noob.build.containerfile", "kube_noob.code.ship"}:
+            return None
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake)
+    text = _instructions(load_settings())
+    assert "kubenoob_containerfile_audit" not in text
+    assert "kubenoob_code_report" not in text
+    assert "kubenoob_build_diagnose" in text
+    assert "kubenoob_vuln_report" in text
+    assert "; for 'what could go wrong with this app?'" in text
+
+
 def test_mcp_in_process(settings: Settings) -> None:
     server = build_server(settings)
 

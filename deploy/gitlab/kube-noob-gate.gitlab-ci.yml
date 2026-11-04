@@ -37,6 +37,10 @@
       for s in $KUBE_NOOB_SARIF_REPORTS; do set -- "$@" --sarif-report "$s"; done
       if [ -n "$KUBE_NOOB_VERSION" ]; then set -- "$@" --version "$KUBE_NOOB_VERSION"; fi
       if [ -n "$KUBE_NOOB_EXCEPTIONS" ]; then set -- "$@" --exceptions "$KUBE_NOOB_EXCEPTIONS"; fi
+      if [ ! -w . ]; then
+        echo "error: cannot write the gate reports in the job directory (uid $(id -u)). This image runs as uid 1001. Run the job as that user so the checkout is writable." >&2
+        exit 1
+      fi
       kube-noob gate "$@" --sarif kube-noob.sarif --summary kube-noob-summary.md \
         --codequality gl-code-quality-report.json --format text
   artifacts:

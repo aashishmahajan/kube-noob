@@ -55,7 +55,7 @@ kube-noob insight 'paste anything'
 kube-noob doctor
 ```
 
-No Homebrew: `uv tool install kube-noob` (Python 3.11+); [install help](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
+No Homebrew: `uv tool install kube-noob` (Python 3.11.4+); [install help](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md).
 
 ## Use with Claude or any MCP client
 

@@ -51,6 +51,18 @@ BANP_KIND = "BaselineAdminNetworkPolicy"
 # active development at kubernetes-sigs/network-policy-api; the v1alpha1 pair this evaluator does read are listed
 # upstream as "no longer actively developed".
 CLUSTER_SCOPED_ABOVE_NETWORKPOLICY = ("ClusterNetworkPolicy",)
+# Cluster-scoped kinds this evaluator records and does not read. A namespace deny does not answer the question
+# while one of them is in the input: it can reverse that deny. An EgressFirewall, a namespace CiliumNetworkPolicy
+# and a MultiNetworkPolicy are not in this set. The first does not decide pod-to-pod traffic, and the other two
+# do not decide the primary interface, so calling the whole answer unknown because they were present would be a
+# different lie. They stay on the "not evaluated" list.
+UNEVALUATED_POLICY_KINDS = frozenset(
+    {
+        *CLUSTER_SCOPED_ABOVE_NETWORKPOLICY,
+        "CiliumClusterwideNetworkPolicy",
+        "GlobalNetworkPolicy",
+    }
+)
 OTHER_POLICY_KINDS = {
     ANP_KIND,
     BANP_KIND,
@@ -432,9 +444,10 @@ def _networkpolicy_tier(
         return {
             "evaluated": False,
             "tier": "NetworkPolicy",
-            "allowed": True,
+            "allowed": False,
+            "undetermined": True,
             "reason": f"{subject.describe()} uses hostNetwork; NetworkPolicy does not apply to its {word} on most "
-            "network plugins.",
+            "network plugins, so this direction is unknown rather than allowed.",
         }
     selecting = [
         p
@@ -585,10 +598,35 @@ def check_reachability(
     unevaluated_above = [
         ref for ref in inv.other_policies if ref.split("/", 1)[0] in CLUSTER_SCOPED_ABOVE_NETWORKPOLICY
     ]
+    # Cilium clusterwide and Calico GlobalNetworkPolicy are cluster-scoped and unread. An EgressFirewall, a
+    # namespace CiliumNetworkPolicy and a MultiNetworkPolicy are not: they stay listed and do not flip the verdict.
+    unevaluated_present = [ref for ref in inv.other_policies if ref.split("/", 1)[0] in UNEVALUATED_POLICY_KINDS]
+    # A hostNetwork direction is unknown. It does not erase a deny a tier we did evaluate already returned.
+    # A cluster-scoped policy we did not read can, so that case stays unknown.
+    evaluated_deny = [
+        d
+        for d, r in (("Egress", egress), ("Ingress", ingress))
+        if r.get("evaluated", True) and not r.get("undetermined") and not r["allowed"]
+    ]
+    # `allowed` is false for an undetermined direction too (an unknown must not read as a pass). A summary that
+    # says the policies "would deny" from that flag is describing a decision that was never made.
+    evaluated_answers = [r for r in (egress, ingress) if r.get("evaluated", True) and not r.get("undetermined")]
+    if evaluated_deny:
+        decided = "deny"
+    elif evaluated_answers and all(r["allowed"] for r in evaluated_answers):
+        decided = "allow"
+    else:
+        decided = None
+    overrides = bool(unevaluated_present or unreadable)
+    unknown = bool(undetermined or overrides)
+    if unknown and (not evaluated_deny or overrides):
+        verdict = "undetermined"
+    elif not allowed or evaluated_deny:
+        verdict = "denied"
+    else:
+        verdict = "allowed"
     out: dict[str, Any] = {
-        "verdict": "undetermined"
-        if (undetermined or unevaluated_above or unreadable)
-        else ("allowed" if allowed else "denied"),
+        "verdict": verdict,
         "source": src.describe(),
         "destination": dst.describe(),
         "port": port,
@@ -601,27 +639,54 @@ def check_reachability(
     blocked = [d for d, r in (("Egress", egress), ("Ingress", ingress)) if not r["allowed"] and d not in undetermined]
     if unreadable:
         blocked = []
-    if undetermined:
+    if verdict == "undetermined" and undetermined and not overrides:
         out["undetermined"] = undetermined
         out["summary"] = (
             f"Undetermined: kube-noob could not determine whether {src.describe()} reaches {dst.describe()} on "
             f"{protocol} {port}. " + " ".join((ingress if d == "Ingress" else egress)["reason"] for d in undetermined)
         )
-    elif unevaluated_above:
-        out["undeterminedBy"] = unevaluated_above
-        out["summary"] = (
-            f"Undetermined: the NetworkPolicies in these manifests would {'allow' if allowed else 'deny'} "
-            f"{src.describe()} -> {dst.describe()} on {protocol} {port}, but "
-            + ", ".join(unevaluated_above[:10])
-            + " is cluster-scoped and decided before any NetworkPolicy, and kube-noob does not evaluate it yet. "
-            "It can reverse this either way, so the answer is unknown rather than allowed or denied."
-        )
+    elif verdict == "undetermined" and unevaluated_present:
+        out["undeterminedBy"] = unevaluated_present
+        names = ", ".join(unevaluated_present[:10])
+        if unevaluated_present == unevaluated_above:
+            if len(unevaluated_present) == 1:
+                detail = (
+                    f"{names} is cluster-scoped and decided before any NetworkPolicy, and kube-noob does not "
+                    "evaluate it yet. It can reverse this either way"
+                )
+            else:
+                detail = (
+                    f"{names} are cluster-scoped and decided before any NetworkPolicy, and kube-noob does not "
+                    "evaluate them yet. They can reverse this either way"
+                )
+        else:
+            pronoun = "it" if len(unevaluated_present) == 1 else "them"
+            detail = (
+                f"{names} {'is' if len(unevaluated_present) == 1 else 'are'} in the input and kube-noob does not "
+                f"evaluate {pronoun}. That can change this answer"
+            )
+        if decided:
+            body = (
+                f"the NetworkPolicies in these manifests would {decided} "
+                f"{src.describe()} -> {dst.describe()} on {protocol} {port}, but {detail}, so the answer is unknown "
+                "rather than allowed or denied."
+            )
+        else:
+            body = (
+                f"kube-noob could not determine whether {src.describe()} reaches {dst.describe()} on "
+                f"{protocol} {port}, and {detail}, so the answer is unknown rather than allowed or denied."
+            )
+        out["summary"] = f"Undetermined: {body}"
     elif unreadable:
         out["undeterminedBy"] = unreadable
+        if decided:
+            word = "denying" if decided == "deny" else "allowing"
+            tail = f"so the NetworkPolicies ({word} this traffic) are not the answer."
+        else:
+            tail = "so what the NetworkPolicies would do was not determined, and is not the answer."
         out["summary"] = (
             f"Undetermined: {', '.join(unreadable)} could not be read. A forbidden or failed read is not the "
-            f"same as the tier being absent, so the NetworkPolicies "
-            f"({'allowing' if allowed else 'denying'} this traffic) are not the answer."
+            f"same as the tier being absent, {tail}"
         )
     elif allowed:
         out["summary"] = (
@@ -678,14 +743,20 @@ def check_reachability(
                 "requiresApproval": True,
             }
         )
-    if unevaluated_above:
-        # The admin tier runs before NetworkPolicy and has the last word. kube-noob cannot evaluate these yet, so
-        # it must not let a NetworkPolicy fix go out as though nothing could override it.
-        caveat = (
-            "kube-noob did not evaluate " + ", ".join(unevaluated_above[:10]) + ", which is cluster-scoped and "
-            "decided before any NetworkPolicy. If one of them denies this traffic, the NetworkPolicy above is "
-            f"applied and changes nothing. Check it first: {cli} get clusternetworkpolicy -o yaml."
-        )
+    if unevaluated_present:
+        # The admin tier, and any policy in the input this evaluator did not read, can make a NetworkPolicy fix
+        # a no-op. Say that on the fix. Do not call an EgressFirewall cluster-scoped: it is not.
+        if unevaluated_above and unevaluated_present == unevaluated_above:
+            caveat = (
+                "kube-noob did not evaluate " + ", ".join(unevaluated_above[:10]) + ", which is cluster-scoped and "
+                "decided before any NetworkPolicy. If one of them denies this traffic, the NetworkPolicy above is "
+                f"applied and changes nothing. Check it first: {cli} get clusternetworkpolicy -o yaml."
+            )
+        else:
+            caveat = (
+                "kube-noob did not evaluate " + ", ".join(unevaluated_present[:10]) + ". If one of them decides this "
+                "traffic, the NetworkPolicy above is applied and changes nothing."
+            )
         for change in changes:
             if change.get("manifest"):
                 change["caveat"] = caveat
