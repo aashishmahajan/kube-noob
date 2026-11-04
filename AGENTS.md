@@ -119,7 +119,12 @@ rewrite history on a shared branch.
   run Ubuntu. Run 41858323552 was cancelled because GitHub did not assign a macOS runner. The formula itself passed
   on Ubuntu.
 - Issue #22 (weekly risk review 2026-W45) stays open until a later week supersedes it.
-- kube-noob.com is built by the private site repo and pushed to `kube-noob/kube-noob-www`. The deploy key is on that
-  repository. An SSH push to `aashishmahajan/kube-noob-www` is denied. The public site was last published from `main`
-  while the version string was still 0.7.1 (www `f6ff300`).
+- kube-noob.com is built by the private site repo and pushed to `kube-noob/kube-noob-www`. The path
+  `aashishmahajan/kube-noob-www` is the wrong target (site PR #4, merged). The push is still denied: both deploy
+  keys on `kube-noob-www` are `enabled: false` (ids 168038103 and 168088767, the second titled `kube-noob-site
+  deploy`) because the organization has deploy keys turned off. Creating a key returns 422 "Deploy keys are
+  disabled for this repository". The token available to an agent cannot change that organization setting (403).
+  An owner turns Deploy keys back on under the organization's Member privileges, then checks that key 168088767
+  is enabled. Do not mint a replacement key unless that one is deleted. The public site content from `main` is
+  www `f6ff300`, published by hand because the workflow cannot push. The package version is still 0.7.1.
 
