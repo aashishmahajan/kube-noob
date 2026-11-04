@@ -196,6 +196,7 @@ class Inventory:
         self.namespace_labels: dict[str, dict[str, str]] = {}
         self.other_policies: list[str] = []
         self.notes: list[str] = []
+        self.tier_unreadable: list[str] = []
         self.admin: list[dict[str, Any]] = []
         self.baseline: list[dict[str, Any]] = []
         for obj in objects:
@@ -572,6 +573,10 @@ def check_reachability(
     # would be a guess, and a proposed NetworkPolicy under it would be applied and change nothing if the admin
     # tier's tie lands on Deny.
     undetermined = [d for d, r in (("Egress", egress), ("Ingress", ingress)) if r.get("undetermined")]
+    # A forbidden or failed read of a tier that can overrule NetworkPolicy is not "the tier is absent".
+    # The namespace-scoped chart cannot read these, so treating that 403 as a NetworkPolicy-only allow
+    # is the answer an operator gets by default.
+    unreadable = list(inv.tier_unreadable)
     # A cluster-scoped kind that sits above NetworkPolicy and that this evaluator cannot read yet decides BEFORE
     # any NetworkPolicy and has the last word. Naming it under `notEvaluated` was not enough: the verdict still
     # read "allowed" and the CLI still exited 0, so a gate merged on an answer a ClusterNetworkPolicy `Deny` may
@@ -581,7 +586,9 @@ def check_reachability(
         ref for ref in inv.other_policies if ref.split("/", 1)[0] in CLUSTER_SCOPED_ABOVE_NETWORKPOLICY
     ]
     out: dict[str, Any] = {
-        "verdict": "undetermined" if (undetermined or unevaluated_above) else ("allowed" if allowed else "denied"),
+        "verdict": "undetermined"
+        if (undetermined or unevaluated_above or unreadable)
+        else ("allowed" if allowed else "denied"),
         "source": src.describe(),
         "destination": dst.describe(),
         "port": port,
@@ -592,6 +599,8 @@ def check_reachability(
     if isinstance(port, str) and port not in dst.ports:
         out["warning"] = f"named port {port!r} is not declared by {dst.describe()}'s containers in these manifests"
     blocked = [d for d, r in (("Egress", egress), ("Ingress", ingress)) if not r["allowed"] and d not in undetermined]
+    if unreadable:
+        blocked = []
     if undetermined:
         out["undetermined"] = undetermined
         out["summary"] = (
@@ -606,6 +615,13 @@ def check_reachability(
             + ", ".join(unevaluated_above[:10])
             + " is cluster-scoped and decided before any NetworkPolicy, and kube-noob does not evaluate it yet. "
             "It can reverse this either way, so the answer is unknown rather than allowed or denied."
+        )
+    elif unreadable:
+        out["undeterminedBy"] = unreadable
+        out["summary"] = (
+            f"Undetermined: {', '.join(unreadable)} could not be read. A forbidden or failed read is not the "
+            f"same as the tier being absent, so the NetworkPolicies "
+            f"({'allowing' if allowed else 'denying'} this traffic) are not the answer."
         )
     elif allowed:
         out["summary"] = (
@@ -714,6 +730,20 @@ def check_reachability(
     return out
 
 
+def _tier_absent(message: str) -> bool:
+    """A missing CRD is a 404. A 403, a timeout, or anything else is a read that failed."""
+    text = message.lower()
+    if "forbidden" in text or "403" in text:
+        return False
+    return (
+        "not found" in text
+        or "notfound" in text
+        or "could not find the requested resource" in text
+        or "doesn't have a resource type" in text
+        or "does not have a resource type" in text
+    )
+
+
 def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inventory:
     """Read (never write) the NetworkPolicies, namespaces and workloads the two endpoints need."""
     from kube_noob.errors import ClusterAccessError
@@ -770,6 +800,7 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
     # ClusterNetworkPolicy is read too, even though this evaluator does not yet understand v1alpha2: collecting it
     # is what puts it in `other_policies`, which is what names it under "not evaluated" and caveats the proposed
     # fix. Without the read, the live answer was confidently wrong in exactly the way the file answer no longer is.
+    unreadable: list[str] = []
     for tier_plural, tier_kind in (
         ("clusternetworkpolicies", "ClusterNetworkPolicy"),
         ("adminnetworkpolicies", ANP_KIND),
@@ -777,12 +808,20 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
     ):
         try:
             items = backend.get(tier_plural, namespace=None).get("items", [])
-        except ClusterAccessError:
-            notes.append(
-                f"{tier_kind} is not installed on this cluster, or could not be read; the answer is NetworkPolicy only"
-            )
+        except ClusterAccessError as exc:
+            if _tier_absent(str(exc)):
+                notes.append(
+                    f"{tier_kind} is not installed on this cluster, or could not be read; "
+                    "the answer is NetworkPolicy only"
+                )
+            else:
+                notes.append(
+                    f"{tier_kind} could not be read ({exc}); a failed read is not the same as the tier being absent"
+                )
+                unreadable.append(tier_kind)
             continue
         objects += [{**item, "kind": tier_kind} for item in items if isinstance(item, dict)]
     inv = Inventory(objects)
     inv.notes.extend(notes)
+    inv.tier_unreadable = unreadable
     return inv

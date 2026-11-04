@@ -403,6 +403,10 @@ def test_the_live_check_reads_the_admin_tiers_too() -> None:
                 return {"kind": "Namespace", "metadata": {"name": name, "labels": {"tier": "app"}}}
             if plural == "networkpolicies":
                 return {"items": []}
+            if plural == "clusternetworkpolicies":
+                raise __import__("kube_noob.errors", fromlist=["x"]).ClusterAccessError(
+                    "the server could not find the requested resource"
+                )
             if name == "orders":
                 import yaml
 
@@ -426,12 +430,14 @@ def test_a_cluster_that_has_no_admin_tier_api_is_not_an_error() -> None:
         name = "fake"
 
         def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> dict[str, Any]:
-            if plural in ("adminnetworkpolicies", "baselineadminnetworkpolicies"):
+            if plural in ("adminnetworkpolicies", "baselineadminnetworkpolicies", "clusternetworkpolicies"):
                 raise ClusterAccessError("the server could not find the requested resource")
             if plural == "namespaces":
                 return {"kind": "Namespace", "metadata": {"name": name, "labels": {}}}
             if plural == "networkpolicies":
                 return {"items": []}
+            if plural == "clusternetworkpolicies":
+                raise ClusterAccessError("the server could not find the requested resource")
             raise ClusterAccessError("not there")
 
     inv = inventory_from_cluster(Backend(), "monitoring/prometheus", "shop/orders")
@@ -537,6 +543,203 @@ def test_a_tie_at_a_priority_that_never_matches_is_still_only_a_note() -> None:
     assert out["verdict"] == "allowed"
     assert not out["ingress"].get("undetermined")
     assert "priority 10" in " ".join(out.get("notes") or [])
+
+
+def _egress(priority: int, body: str, name: str = "edge") -> str:
+    return f"""
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: {name}
+spec:
+  priority: {priority}
+  subject:
+    pods:
+      namespaceSelector:
+        matchLabels:
+          tier: app
+      podSelector:
+        matchLabels:
+          app: orders
+  egress:
+{body}
+"""
+
+
+def test_a_cidr_that_covers_every_address_denies_before_a_later_allow() -> None:
+    """0.0.0.0/0 matches the pod we do not have an IP for. Skipping it used to let the next Allow decide."""
+    inv = Inventory.from_yaml(
+        "\n---\n".join(
+            (
+                WORKLOADS,
+                _egress(
+                    10,
+                    """
+    - name: wide
+      action: Deny
+      to:
+        - networks: ["0.0.0.0/0"]
+    - name: later
+      action: Allow
+      to:
+        - namespaces:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+""",
+                ),
+            )
+        )
+    )
+    out = check_reachability(inv, "shop/orders", "monitoring/prometheus", 8080)
+    assert out["verdict"] == "denied"
+    assert out["egress"]["tier"] == "AdminNetworkPolicy"
+    assert out["egress"]["rule"] == "wide"
+
+
+def test_an_address_inside_a_named_cidr_is_denied() -> None:
+    inv = Inventory.from_yaml(WORKLOADS + _egress(10, """
+    - name: lab
+      action: Deny
+      to:
+        - networks: ["203.0.113.0/24"]
+"""))
+    out = check_reachability(inv, "shop/orders", "203.0.113.10", 443)
+    assert out["verdict"] == "denied"
+    assert out["egress"]["rule"] == "lab"
+
+
+def test_an_address_outside_a_named_cidr_is_not_denied_by_it() -> None:
+    inv = Inventory.from_yaml(WORKLOADS + _egress(10, """
+    - name: lab
+      action: Deny
+      to:
+        - networks: ["203.0.113.0/24"]
+"""))
+    out = check_reachability(inv, "shop/orders", "198.51.100.10", 443)
+    assert out["verdict"] == "allowed"
+
+
+def test_a_cidr_that_might_cover_a_pod_ip_does_not_let_a_later_rule_allow() -> None:
+    """The pod IP is not in the manifests. The Deny might match it, so the later Allow must not win."""
+    inv = Inventory.from_yaml(
+        "\n---\n".join(
+            (
+                WORKLOADS,
+                _egress(
+                    10,
+                    """
+    - name: lab
+      action: Deny
+      to:
+        - networks: ["203.0.113.0/24"]
+    - name: later
+      action: Allow
+      to:
+        - namespaces:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+""",
+                ),
+            )
+        )
+    )
+    out = check_reachability(inv, "shop/orders", "monitoring/prometheus", 8080)
+    assert out["verdict"] == "undetermined"
+    assert out["egress"].get("undetermined") is True
+
+
+def test_a_priority_ovn_does_not_implement_does_not_decide() -> None:
+    out = _check(ALLOW_ALL_NP, _anp(100, "Deny"))
+    assert out["verdict"] == "allowed"
+    assert out["ingress"].get("tier") != "AdminNetworkPolicy"
+    assert "not evaluated" in " ".join(out.get("notes") or [])
+
+
+def test_a_forbidden_read_of_the_admin_tier_is_not_a_networkpolicy_answer() -> None:
+    from kube_noob.debug.netpol import inventory_from_cluster
+    from kube_noob.errors import ClusterAccessError
+
+    class Backend:
+        name = "fake"
+
+        def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> dict[str, Any]:
+            if plural == "adminnetworkpolicies":
+                raise ClusterAccessError("Forbidden by RBAC: GET adminnetworkpolicies")
+            if plural in ("baselineadminnetworkpolicies", "clusternetworkpolicies"):
+                raise ClusterAccessError("the server could not find the requested resource")
+            if plural == "namespaces":
+                return {"kind": "Namespace", "metadata": {"name": name, "labels": {"tier": "app"}}}
+            if plural == "networkpolicies":
+                return {"items": []}
+            if name == "orders":
+                import yaml
+
+                for doc in yaml.safe_load_all(WORKLOADS):
+                    if doc and doc.get("metadata", {}).get("name") == "orders":
+                        return dict(doc)
+            if name == "prometheus":
+                import yaml
+
+                for doc in yaml.safe_load_all(WORKLOADS):
+                    if doc and doc.get("metadata", {}).get("name") == "prometheus":
+                        return dict(doc)
+            raise ClusterAccessError("the server could not find the requested resource")
+
+    inv = inventory_from_cluster(Backend(), "monitoring/prometheus", "shop/orders")
+    out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
+    assert out["verdict"] == "undetermined"
+    assert "AdminNetworkPolicy" in out["undeterminedBy"]
+    assert not out.get("proposedChanges")
+
+
+def test_the_text_surface_shows_the_note_and_exits_unknown(tmp_path: Path, capsys: Any) -> None:
+    from kube_noob.cli import main
+
+    manifest = tmp_path / "anp.yaml"
+    manifest.write_text(
+        "\n---\n".join(
+            (
+                WORKLOADS,
+                _egress(
+                    10,
+                    """
+    - name: lab
+      action: Deny
+      to:
+        - networks: ["203.0.113.0/24"]
+    - name: later
+      action: Allow
+      to:
+        - namespaces:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+""",
+                ),
+            )
+        ),
+        encoding="utf-8",
+    )
+    code = main(
+        [
+            "policy",
+            "reach",
+            "--from",
+            "shop/orders",
+            "--to",
+            "monitoring/prometheus",
+            "--port",
+            "8080",
+            "-f",
+            str(manifest),
+            "--format",
+            "text",
+        ]
+    )
+    text = capsys.readouterr().out
+    assert code == 1
+    assert "UNDETERMINED" in text
+    assert "might select" in text
+
 
 
 def test_a_lower_priority_decides_before_a_tie_higher_up() -> None:
