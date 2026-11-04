@@ -93,13 +93,20 @@ def _in_chart_templates(path: Path, parent: Path) -> bool:
     return parent.name == "templates" and (parent.parent / "Chart.yaml").is_file() and path.is_relative_to(parent)
 
 
-def render(charts: list[str], values: list[str], namespace: str) -> list[Source]:
+def render(
+    charts: list[str],
+    values: list[str],
+    namespace: str,
+    platform: str = "kubernetes",
+    version: str | None = None,
+) -> list[Source]:
     """``helm template`` each chart (the helm binary must be on PATH)."""
-    from kube_noob.generate.helm_render import render_chart
+    from kube_noob.generate.helm_render import kube_version_arg, render_chart
 
+    kube_version = kube_version_arg(platform, version)
     out = []
     for chart in charts:
-        text = render_chart(chart, values, namespace=namespace, release="kube-noob-gate")
+        text = render_chart(chart, values, namespace=namespace, release="kube-noob-gate", kube_version=kube_version)
         out.append(Source(f"{chart.rstrip('/')}/(rendered)", text, chart=chart.rstrip("/")))
     return out
 
@@ -251,7 +258,8 @@ def run(
     (shipping is then unknown, which fails like shipped code). ``repo``: the checkout, to tell a SARIF path that is
     no file of the repository (scanned elsewhere) from one no image ships."""
     from kube_noob.audit import exceptions as exc
-    from kube_noob.audit.engine import analyze
+    from kube_noob.audit.engine import analyze, refuse_if_not_manifests
+    from kube_noob.errors import ConfigError
 
     containerfiles = containerfiles or []
     scanner_reports = scanner_reports or []
@@ -269,6 +277,15 @@ def run(
     findings: list[dict[str, Any]] = []
     failures: list[str] = []
     combined = _combine(sources) if sources else ""
+    if sources:
+        # A path named with -f used to be audited even when it was a Helm values file, so `gate -f values.yaml`
+        # reported KN-V001 (missing apiVersion) and could fail the job. `audit` already refuses that input.
+        # A directory walk still classifies the same file as skipped, and a real manifest in the same command
+        # still proceeds: refuse_if_not_manifests returns as soon as one document has apiVersion and kind.
+        try:
+            refuse_if_not_manifests(combined)
+        except ConfigError as err:
+            raise GateError(str(err)) from err
     review = exc.review(exceptions) if exceptions else None
     enforced, not_generated = _admission(platform, version)
     excepted = 0

@@ -341,7 +341,9 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         containerfiles.append((b.containerfile, b.text))
         code_builds.append(b)
     try:
-        sources = gate.collect(a.file, _read) + gate.render(a.chart, a.values, a.namespace)
+        sources = gate.collect(a.file, _read) + gate.render(
+            a.chart, a.values, a.namespace, platform=a.platform or s.default_platform, version=a.pversion
+        )
         report = gate.run(
             sources,
             containerfiles=containerfiles,

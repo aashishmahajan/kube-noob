@@ -393,9 +393,12 @@ def test_layout_integrity_and_bounds(tmp_path: Path) -> None:
         oci.scan(bad)
     link = tmp_path / "link"
     _layout(link, [{"a": b"b"}])
-    target = next((link / "blobs" / "sha256").iterdir())
-    target.unlink()
-    target.symlink_to("/etc/hostname")
+    # Every blob, not whichever iterdir returns first. A layer symlink is caught and recorded; a manifest or
+    # config symlink is not, and that is the one this assertion is about. Replacing only one blob made the
+    # result depend on directory order.
+    for target in (link / "blobs" / "sha256").iterdir():
+        target.unlink()
+        target.symlink_to("/etc/hostname")
     with pytest.raises(oci.LayoutError):
         image.audit(None, layout=link)
 
