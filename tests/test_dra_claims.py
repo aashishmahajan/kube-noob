@@ -442,3 +442,65 @@ def test_the_admission_webhook_does_not_run_the_cross_bundle_claim_rule() -> Non
 
     assert "KN-C015" in SKIPPED_RULES, "without this the webhook warns about a claim it never looked for"
     assert "KN-C015" not in CROSS_OBJECT, "SKIPPED_RULES already stops it; listing both is a second answer"
+
+
+def test_pod_level_resource_claims_are_forbidden_outright() -> None:
+    """Upstream: "claims may not be set for Resources at pod-level". The schema accepts the field anyway."""
+    data = _fixture("KN-V022")
+    found = _findings(data["bad"], "KN-V022")
+    assert len(found) == 1 and found[0].path.endswith("spec.resources.claims"), found
+    assert "pod-level" in found[0].message or "pod level" in found[0].message, found[0].message
+    assert _findings(data["good"], "KN-V022") == [], "a container's claims are the supported place"
+
+
+def test_an_empty_pod_level_claims_list_is_still_forbidden() -> None:
+    """Upstream tests `!= nil`, so an empty list is set and refused; an explicit null is not set."""
+    base = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resources:
+    claims: {value}
+  containers:
+  - {name: c, image: i}
+"""
+    assert len(_findings(base.replace("{value}", "[]"), "KN-V022")) == 1
+    assert _findings(base.replace("{value}", "null"), "KN-V022") == []
+
+
+def test_pod_level_claims_are_found_in_a_nested_template() -> None:
+    text = """
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: nightly, namespace: ml}
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          resources:
+            claims:
+            - name: gpu
+          containers:
+          - {name: c, image: i}
+"""
+    found = _findings(text, "KN-V022")
+    assert len(found) == 1
+    assert found[0].path == "spec.jobTemplate.spec.template.spec.resources.claims", found[0].path
+
+
+def test_pod_level_resources_without_claims_is_not_a_finding() -> None:
+    """Pod-level resources itself is a supported field; only `claims` under it is forbidden."""
+    text = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resources:
+    requests: {cpu: 100m}
+  containers:
+  - {name: c, image: i}
+"""
+    assert _findings(text, "KN-V022") == []

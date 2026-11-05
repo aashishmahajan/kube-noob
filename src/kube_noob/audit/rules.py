@@ -1110,6 +1110,35 @@ def _s031(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                     )
 
 
+@rule(
+    "KN-V022",
+    "Resource claims set at pod level, where they are forbidden",
+    Stage.VALIDATE,
+    "schema",
+    Severity.HIGH,
+    "Move the claims onto the containers that use the devices: resources.claims belongs on a container, and "
+    "spec.resourceClaims is where the Pod declares them.",
+    "Pod-level resources carries no claims: the API server forbids the field outright, whatever names are in "
+    "it. The schema accepts it, because PodSpec.resources really does have a claims property, so nothing before "
+    "apply says the object will be refused.",
+)
+def _v022(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt in ctx.workloads():
+        resources = pt.spec.get("resources")
+        if not isinstance(resources, dict):
+            continue
+        # Upstream tests `spec.Resources.Claims != nil`, so an empty list is set and refused while an explicit
+        # null is not set at all. Presence of a non-null value is the condition, not a non-empty one.
+        if "claims" not in resources or resources["claims"] is None:
+            continue
+        yield r.finding(
+            d,
+            (*pt.path, "resources", "claims"),
+            "spec.resources.claims is set, and claims may not be set for resources at pod-level: the API server "
+            "refuses this object regardless of which claims are named.",
+        )
+
+
 # =====================================================================================================
 # AUDIT - security
 # =====================================================================================================

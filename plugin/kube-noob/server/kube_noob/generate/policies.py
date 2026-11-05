@@ -381,6 +381,7 @@ NOT_GENERATED: dict[str, str] = {
     "KN-V014": "duplicates are a property of a bundle; admission sees one object at a time",
     "KN-V020": "the API server refuses a claim name the Pod does not declare itself",
     "KN-V021": "the API server refuses a claim entry with neither or both sources itself",
+    "KN-V022": "the API server forbids pod-level resources.claims itself",
     "KN-C015": "needs the namespace's ResourceClaims and templates (other objects); `kube-noob audit` checks "
     "the bundle",
     "KN-S031": "the API server's own gate is the namespace label resource.kubernetes.io/admin-access, so it "
