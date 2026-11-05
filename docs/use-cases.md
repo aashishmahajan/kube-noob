@@ -439,8 +439,11 @@ which can be the opposite of the one that tier would have given. A CNI nobody do
 cilium:1.18`) is evaluated both ways -- with the tier and without it -- and the verdict is `undetermined` only
 where the two readings disagree: evaluating the tier would assume enforcement and dropping it would assume the
 reverse, but an answer that holds under both still holds. A Calico version too coarse to decide (`--cni calico:3`,
-which does not say whether the cluster is on 3.31 or 3.32) is treated the same way. Without the flag the
-OVN-Kubernetes semantics above are assumed, as before.
+which does not say whether the cluster is on 3.31 or 3.32) is treated the same way. With `--live` the flag is
+usually unnecessary: Calico publishes its version in `clusterinformations.crd.projectcalico.org` and kube-noob
+reads it, so the answer uses the cluster's real CNI rather than an assumption. A cluster without that CRD is not
+running Calico and behaves as before; a read the token is not allowed to make says so and changes nothing; and an
+explicit `--cni` always wins, because a caller who passes it knows something a forbidden read cannot see.
 
 `kube-noob audit --cni calico:3.32` turns the same fact into a finding a CI gate fails on: **KN-N014** reports an
 `AdminNetworkPolicy` or `BaselineAdminNetworkPolicy` that this CNI no longer enforces, at HIGH, because a policy

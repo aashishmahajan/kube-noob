@@ -1049,6 +1049,58 @@ def _tier_absent(message: str) -> bool:
     )
 
 
+def _cni_from_cluster(backend: Any) -> tuple[str | None, str]:
+    """Read the CNI and its version from the cluster, or say why not. Never guesses.
+
+    Returns a `NAME:VERSION` string for :func:`kube_noob.debug.cni.parse_cni`, and a note for the caller to show.
+    Four things deliberately return no version:
+
+    * a 404 -- the CRD is absent, so Calico is not installed; no note, because nothing changed;
+    * a 403 or any other failed read -- a note, and the behaviour it had before, since assuming a CNI from a read
+      that failed is exactly the shape G209 fixed;
+    * an object with no `calicoVersion`, or one that does not parse as a version;
+    * a `variant` other than open-source Calico, whose versions run on their own schedule, so the open-source
+      table does not apply to them.
+    """
+    from kube_noob.errors import ClusterAccessError
+
+    try:
+        items = backend.get("clusterinformations", namespace=None).get("items", [])
+    except ClusterAccessError as exc:
+        if _tier_absent(str(exc)):
+            return None, ""  # no Calico on this cluster
+        return None, (
+            f"the cluster's CNI could not be read ({exc}); AdminNetworkPolicy and BaselineAdminNetworkPolicy are "
+            "evaluated with the OVN-Kubernetes semantics kube-noob assumes by default. Pass --cni if you know it"
+        )
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("spec")
+        spec: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        version = str(spec.get("calicoVersion") or "").strip()
+        variant = str(spec.get("variant") or "").strip()
+        if not version:
+            continue
+        if variant and variant.lower() not in {"calico", "calico-oss", "oss"}:
+            return None, (
+                f"this cluster runs Calico variant {variant!r} at {version!r}, whose versions are numbered on "
+                "their own schedule, so kube-noob does not read it against the open-source support table. Pass "
+                "--cni if you know whether it enforces AdminNetworkPolicy"
+            )
+        try:
+            from kube_noob.debug.cni import parse_cni
+
+            parse_cni(f"calico:{version}")
+        except ValueError:
+            return None, (
+                f"this cluster reports Calico version {version!r}, which kube-noob could not read as a version, "
+                "so the admin tier is evaluated as before. Pass --cni if you know it"
+            )
+        return f"calico:{version}", f"CNI read from the cluster: Calico {version}"
+    return None, ""
+
+
 def inventory_from_cluster(backend: Any, source: str, destination: str, cni: str | None = None) -> Inventory:
     """Read (never write) the NetworkPolicies, namespaces and workloads the two endpoints need."""
     from kube_noob.errors import ClusterAccessError
@@ -1106,20 +1158,26 @@ def inventory_from_cluster(backend: Any, source: str, destination: str, cni: str
     # them: collecting one is what puts it in `other_policies`. Without the read, the live answer was allowed
     # in exactly the way the file answer no longer is. A 403 stays a failed read.
     unreadable: list[str] = []
-    # A tier the named CNI is documented as ignoring is not worth an API call, and a 403 on it must not withhold
-    # the verdict: the namespace-scoped RBAC that produces that 403 is the common `--live` case, so the first
-    # version of this left the flag's whole promise unapplied on the one path where the operator cannot read the
-    # policies for themselves. Skipped here rather than filtered afterwards, because the read is what fails.
-    skip: frozenset[str] = frozenset()
+    # A tier this CNI does not enforce is still read, and a failed read of it must not withhold the verdict.
+    # Two earlier versions each got half of this. The first let a 403 on the admin tier make the answer
+    # undetermined even where the caller had just said that tier is inert -- and the namespace-scoped RBAC that
+    # produces that 403 is the common `--live` case. The second stopped reading the tier at all, which dismissed
+    # the 403 and lost the finding that matters most: "this AdminNetworkPolicy is in your cluster and decides
+    # nothing" needs the policy in hand, and two API calls are a small price for it.
+    admin_tier_inert = False
+    if not cni:
+        # `--cni` is the caller's claim; on a live cluster the fact is readable. Calico publishes its version in
+        # `clusterinformations.crd.projectcalico.org` ("set automatically by calico/node"). A 404 means Calico is
+        # not installed, which is not an error and gets no note: the answer is what it was. A 403 does get one,
+        # because "I could not look" and "there is nothing there" are the two states this project never merges.
+        cni, why = _cni_from_cluster(backend)
+        if why:
+            notes.append(why)
     if cni:
-        from kube_noob.debug.cni import admin_tier_reason, admin_tier_support, parse_cni
+        from kube_noob.debug.cni import admin_tier_support, parse_cni
 
         cni_name, cni_version = parse_cni(cni)
-        if admin_tier_support(cni_name, cni_version) == "not-enforced":
-            skip = frozenset({ANP_KIND, BANP_KIND})
-            notes.append(
-                f"{ANP_KIND} and {BANP_KIND} were not read: {admin_tier_reason(cni_name, cni_version, 'not-enforced')}"
-            )
+        admin_tier_inert = admin_tier_support(cni_name, cni_version) == "not-enforced"
     for tier_plural, tier_kind in (
         ("clusternetworkpolicies", "ClusterNetworkPolicy"),
         ("ciliumclusterwidenetworkpolicies", "CiliumClusterwideNetworkPolicy"),
@@ -1127,8 +1185,6 @@ def inventory_from_cluster(backend: Any, source: str, destination: str, cni: str
         ("adminnetworkpolicies", ANP_KIND),
         ("baselineadminnetworkpolicies", BANP_KIND),
     ):
-        if tier_kind in skip:
-            continue
         try:
             items = backend.get(tier_plural, namespace=None).get("items", [])
         except ClusterAccessError as exc:
@@ -1136,6 +1192,13 @@ def inventory_from_cluster(backend: Any, source: str, destination: str, cni: str
                 notes.append(
                     f"{tier_kind} is not installed on this cluster, or could not be read; "
                     "the answer is NetworkPolicy only"
+                )
+            elif admin_tier_inert and tier_kind in {ANP_KIND, BANP_KIND}:
+                # This CNI does not enforce that tier, so what it holds cannot change the answer. Withholding
+                # the verdict over an unreadable tier that decides nothing is the 403 trap in reverse.
+                notes.append(
+                    f"{tier_kind} could not be read ({exc}), and this CNI does not enforce it, so it cannot "
+                    "change this answer"
                 )
             else:
                 notes.append(

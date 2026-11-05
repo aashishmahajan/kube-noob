@@ -262,10 +262,16 @@ def test_the_next_steps_name_the_kind_that_decides_now() -> None:
     assert any("adminnetworkpolicy" in c for c in commands)
 
 
-def test_a_tier_the_cni_ignores_is_not_read_from_the_cluster_at_all() -> None:
+def test_a_failed_read_of_a_tier_the_cni_ignores_does_not_withhold_the_verdict() -> None:
     """A 403 on a tier the caller has just said is inert was making the live answer undetermined: the flag's whole
-    promise was unapplied on the one path where the operator cannot read the policies themselves."""
+    promise was unapplied on the one path where the operator cannot read the policies themselves.
+
+    The first fix stopped reading that tier at all, which dismissed the 403 and lost the finding that matters
+    most -- "this AdminNetworkPolicy is in your cluster and decides nothing" needs the policy in hand. So the
+    tier is read, and only its FAILURE is dismissed. Written out because the two halves pull opposite ways.
+    """
     from kube_noob.debug.netpol import inventory_from_cluster
+    from kube_noob.errors import ClusterAccessError
 
     reads: list[str] = []
 
@@ -275,13 +281,15 @@ def test_a_tier_the_cni_ignores_is_not_read_from_the_cluster_at_all() -> None:
         def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> Any:
             reads.append(plural)
             if plural in ("adminnetworkpolicies", "baselineadminnetworkpolicies"):
-                raise RuntimeError("forbidden: User cannot list adminnetworkpolicies at the cluster scope")
+                # The error type a real backend raises. The first version of this fake raised RuntimeError and
+                # passed only because the tier was being skipped instead of read.
+                raise ClusterAccessError("forbidden: User cannot list adminnetworkpolicies at the cluster scope")
             return {"items": []}
 
     inv = inventory_from_cluster(Backend(), "monitoring/prometheus", "shop/orders", "calico:3.32")
-    assert "adminnetworkpolicies" not in reads, "a tier this CNI ignores is not worth an API call"
-    assert inv.tier_unreadable == []
-    assert any("not enforce" in n for n in inv.notes)
+    assert "adminnetworkpolicies" in reads, "the tier is read, so an inert policy can be reported as inert"
+    assert inv.tier_unreadable == [], "a failed read of a tier that decides nothing must not withhold the verdict"
+    assert any("does not enforce it" in n for n in inv.notes), inv.notes
 
 
 def test_a_bad_cni_is_refused_even_with_nothing_in_that_tier() -> None:
