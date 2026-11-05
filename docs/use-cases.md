@@ -883,6 +883,24 @@ own certificate and CA bundle. CI installs it on a kind cluster: warnings in war
 denied, 50 requests per second for 30 seconds under 50 ms at p99, denial of the enforced rule only, an update of an
 existing breaker admitted, and nothing blocked with the webhook scaled to zero.
 
+### Evidence an assessor can import: OSCAL assessment-results
+
+```bash
+kube-noob audit -f k8s/ --platform openshift --version 4.22 --oscal > assessment-results.json
+```
+
+An OSCAL 1.2.3 assessment-results document: each finding becomes an observation with method `EXAMINE`, and each
+control becomes an OSCAL finding targeting that control's objective id (`ac-6.10_obj`). A control is
+`satisfied` only where its rules actually ran and produced nothing; a control no rule evaluated is named under
+`exclude-controls` and gets no finding at all, so absence is never read as a pass. Every description ends with
+the same sentence the report carries: this is evidence about a control, not a claim of compliance.
+
+Every uuid is a v5 uuid over the input, so two runs over the same bundle produce the same document and a
+pipeline can diff it. `--oscal-import-ap https://grc.example.com/ap.json` points the required `import-ap` at
+your assessment plan; without it the document says plainly that no plan was imported rather than inventing one.
+The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
+
+
 ## Claude and MCP users
 
 Install the plugin or add the MCP server (see the [README](../README.md)), then ask for the `getting_started` prompt.

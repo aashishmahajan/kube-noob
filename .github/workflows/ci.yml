@@ -144,6 +144,22 @@ jobs:
         run: python scripts/e2e_plugin.py
       - name: Formula matches the PyPI release files
         run: python scripts/brew_formula.py --check
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: OSCAL output validates against the pinned NIST schema (ajv, not jsonschema)
+        run: |
+          npm install --no-save --no-audit --no-fund ajv@8.17.1 ajv-formats@3.0.1
+          python -m kube_noob audit -f examples/insecure-deployment.yaml --platform openshift --version 4.22 \
+            --oscal > /tmp/assessment-results.json || true
+          node scripts/oscal_validate.mjs tests/fixtures/oscal/oscal_assessment-results_schema.json \
+            /tmp/assessment-results.json
+      - name: The schema check ran rather than skipping for a missing ajv
+        run: |
+          out=$(python -m pytest tests/test_oscal.py -q -rs 2>&1)
+          echo "$out" | tail -5
+          echo "$out" | grep -q "ajv is not installed" && { echo "the OSCAL schema test SKIPPED"; exit 1; }
+          echo "$out" | grep -qE "[0-9]+ passed" || exit 1
 
   publishable:
     # Upload validation exactly as pypa/gh-action-pypi-publish runs it: same twine, same Python as its container.

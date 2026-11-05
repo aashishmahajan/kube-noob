@@ -18,6 +18,8 @@ dist/
 
 # demo video renders
 demos/video/node_modules/
+# ajv for the OSCAL schema check (npm install --no-save); never committed
+node_modules/
 .claude/worktrees/
 
 # graphify code-graph output (regenerate with: graphify update src/kube_noob), built at repo root. Anchored, not

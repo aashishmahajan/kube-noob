@@ -49,7 +49,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 
 - Per-user identity in the service: authorization is one shared token unless you add the OAuth proxy, and audit
   records do not carry the caller's identity yet.
-- Machine-readable output for assessors (OSCAL assessment results) and the FedRAMP 20x Key Security Indicator
+- Machine-readable output for assessors: `kube-noob audit --oscal` writes OSCAL 1.2.3 assessment-results, validated in CI against NIST's published schema and the FedRAMP 20x Key Security Indicator
   mapping. When that mapping ships it will name the release it was built from and carry the retirement list:
   `FRMR.KSI.key-security-indicators.json` is at release 25.11C (published 2025-12-01), 20x is at Phase 2 Pilot,
   and seven indicators are now marked `retired: true` -- KSI-CMT-05, KSI-MLA-03, KSI-MLA-04, KSI-MLA-06,

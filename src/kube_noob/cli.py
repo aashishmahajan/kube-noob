@@ -889,6 +889,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="exception list (kube-noob.io/v1 ExceptionList): active entries hide the findings they cover; an expired "
         "or refused entry fails the gate (exit 1)",
     )
+    a.add_argument(
+        "--oscal",
+        action="store_true",
+        help="emit an OSCAL 1.2.3 assessment-results document instead of the report: the findings as observations, "
+        "and one finding per control, satisfied only where that control's rules actually ran and found nothing. A "
+        "control no rule evaluated is named under exclude-controls and never reported satisfied. Every uuid is a v5 "
+        "uuid over the input, so two runs over the same bundle produce the same document and CI can diff it. The "
+        "exit code is unchanged, so a gate reads the same verdict with the flag as without",
+    )
+    a.add_argument(
+        "--oscal-import-ap",
+        default=None,
+        metavar="HREF",
+        help="the assessment plan this document is assessed against. OSCAL requires the field; without it the "
+        "document points at a local fragment and says plainly that no plan was imported",
+    )
     exc_p = sub.add_parser(
         "exceptions",
         help="Check an exception list: owner, reason, expiry and scope of every entry",
@@ -1881,7 +1897,14 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             except ExceptionsError as exc:
                 raise ConfigError(f"{a.exceptions}: {exc}") from exc
             rep["unreadable"] = unreadable
-            if a.format == "text":
+            if a.oscal:
+                from kube_noob.oscal import assessment_results
+
+                # The flag REPLACES the report: a caller asking for OSCAL wants a document it can hand to a
+                # tool, not a document with a human report printed above it. The exit code is unchanged, so a
+                # gate reads the same verdict with the flag as without.
+                _emit(assessment_results(rep, import_ap=a.oscal_import_ap), "json" if a.format == "text" else fmt)
+            elif a.format == "text":
                 _print_report(rep)
                 _print_exceptions(rep)
                 for b in unreadable:
