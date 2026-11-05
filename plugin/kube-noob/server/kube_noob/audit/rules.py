@@ -953,6 +953,117 @@ def _v021(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 )
 
 
+# A pod-level claim names its source by one of two fields, each naming a different kind.
+_CLAIM_SOURCE_KINDS = {"resourceClaimName": "ResourceClaim", "resourceClaimTemplateName": "ResourceClaimTemplate"}
+# Upstream `DRAAdminNamespaceLabelKey`: set to the string "true" (case-sensitive) on a namespace, it is what
+# permits `adminAccess: true` in that namespace's ResourceClaims and ResourceClaimTemplates at all.
+_ADMIN_NS_LABEL = "resource.kubernetes.io/admin-access"
+# ResourceClaim carries the request tree at spec.devices; ResourceClaimTemplate wraps it one deeper.
+_REQUEST_ROOTS: tuple[tuple[str, PathT], ...] = (
+    ("ResourceClaim", ("spec",)),
+    ("ResourceClaimTemplate", ("spec", "spec")),
+)
+
+
+@rule(
+    "KN-C015",
+    "Pod names a resource claim that is not in this bundle",
+    Stage.AUDIT,
+    "wiring",
+    Severity.HIGH,
+    "Add the ResourceClaim or ResourceClaimTemplate to this bundle, in the Pod's own namespace, or point the "
+    "entry at one that is already there.",
+    "A pod-level claim names a ResourceClaim or a ResourceClaimTemplate in the Pod's own namespace. If no such "
+    "object exists the Pod is admitted and then stays Pending, so the failure arrives after the deploy rather "
+    "than during it.",
+)
+def _c015(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        return  # a claim that lives in a file you did not pass is not a missing claim (G186)
+    present: dict[tuple[str, str], set[str]] = {}
+    for kind in _CLAIM_SOURCE_KINDS.values():
+        for d in ctx.by_kind(kind):
+            name = get_path(d.data, ("metadata", "name"))
+            if isinstance(name, str) and name:
+                present.setdefault((kind, ctx.ns(d)), set()).add(name)
+    for d, pt in ctx.workloads():
+        claims = pt.spec.get("resourceClaims")
+        if not isinstance(claims, list):
+            continue
+        ns = ctx.ns(d)
+        for i, item in enumerate(claims):
+            if not isinstance(item, dict):
+                continue
+            for field_name, kind in _CLAIM_SOURCE_KINDS.items():
+                target = item.get(field_name)
+                if not isinstance(target, str) or not target:
+                    continue
+                if target in present.get((kind, ns), set()):
+                    continue
+                yield r.finding(
+                    d,
+                    (*pt.path, "resourceClaims", i, field_name),
+                    f"Pod resource claim names the {kind} {target!r}, which no document in this bundle defines in "
+                    f"namespace {ns}. The Pod is admitted and then stays Pending.",
+                )
+
+
+@rule(
+    "KN-S031",
+    "Device claim requests administrative access",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Drop adminAccess unless this really is a monitoring or device-management workload, and keep such claims in "
+    'a namespace labelled resource.kubernetes.io/admin-access: "true" that only operators can write to.',
+    "A request with adminAccess ignores every ordinary claim to the device with respect to access modes and "
+    "resource allocations, so the workload reaches devices another tenant holds exclusively. It is the DRA "
+    "equivalent of a privileged container, and the only thing standing between it and any namespace is a label.",
+)
+def _s031(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    in_bundle: set[str] = set()
+    labelled: set[str] = set()
+    for d in ctx.by_kind("Namespace"):
+        name = get_path(d.data, ("metadata", "name"))
+        if not isinstance(name, str) or not name:
+            continue
+        in_bundle.add(name)
+        labels = get_path(d.data, ("metadata", "labels"))
+        if isinstance(labels, dict) and labels.get(_ADMIN_NS_LABEL) == "true":
+            labelled.add(name)
+    for kind, base in _REQUEST_ROOTS:
+        for d in ctx.by_kind(kind):
+            requests = get_path(d.data, (*base, "devices", "requests"))
+            if not isinstance(requests, list):
+                continue
+            for i, req in enumerate(requests):
+                if not isinstance(req, dict):
+                    continue
+                # Only ExactDeviceRequest carries adminAccess; DeviceSubRequest under firstAvailable omits it
+                # on purpose, so a key of that name there is not the API field and means nothing.
+                exactly = req.get("exactly")
+                if not isinstance(exactly, dict) or exactly.get("adminAccess") is not True:
+                    continue
+                ns = ctx.ns(d)
+                where = f"request '{req.get('name')}'" if isinstance(req.get("name"), str) else f"request {i}"
+                path: PathT = (*base, "devices", "requests", i, "exactly", "adminAccess")
+                if ns in in_bundle and ns not in labelled:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"{kind} {where} sets adminAccess: true, and namespace {ns} in this bundle does not carry "
+                        f'{_ADMIN_NS_LABEL}: "true". The API server will refuse this object, so the claim does not '
+                        "exist and nothing that depends on it will schedule.",
+                    )
+                else:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"{kind} {where} sets adminAccess: true, so it ignores every ordinary claim to the device "
+                        "and reaches devices another workload holds exclusively.",
+                    )
+
+
 # =====================================================================================================
 # AUDIT - security
 # =====================================================================================================

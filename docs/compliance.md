@@ -77,6 +77,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-C012 | HPA cannot compute CPU utilization | SC-6 |
 | KN-C013 | Pull secret exists only in another namespace | CM-6 |
 | KN-C014 | Workload scaled by an HPA also sets spec.replicas | CM-6, SC-6 |
+| KN-C015 | Pod names a resource claim that is not in this bundle | CM-6 |
 | KN-N001 | Namespace has workloads but no NetworkPolicy | SC-7, SC-7(5), AC-4 |
 | KN-N002 | Route without TLS | SC-8, SC-8(1) |
 | KN-N003 | Ingress without TLS | SC-8, SC-8(1) |
@@ -120,6 +121,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S028 | RBAC binding grants a role to everyone | AC-14, AC-3, AC-6 |
 | KN-S029 | Probe or lifecycle handler with a host | SC-7, CM-7 |
 | KN-S030 | Admission webhook fails open | CM-7, SI-7 |
+| KN-S031 | Device claim requests administrative access | AC-6, SC-4 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |

@@ -1,0 +1,41 @@
+rule: KN-C015
+good: |
+  apiVersion: v1
+  kind: Pod
+  metadata: {name: inference, namespace: ml}
+  spec:
+    resourceClaims:
+    - name: gpu
+      resourceClaimName: gpu-pool
+    containers:
+    - name: serve
+      image: registry.example.com/serve@sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+      resources:
+        claims:
+        - name: gpu
+  ---
+  apiVersion: resource.k8s.io/v1
+  kind: ResourceClaim
+  metadata: {name: gpu-pool, namespace: ml}
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: example.com-gpu
+          allocationMode: ExactCount
+          count: 1
+bad: |
+  apiVersion: v1
+  kind: Pod
+  metadata: {name: inference, namespace: ml}
+  spec:
+    resourceClaims:
+    - name: gpu
+      resourceClaimName: gpu-pool
+    containers:
+    - name: serve
+      image: registry.example.com/serve@sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+      resources:
+        claims:
+        - name: gpu

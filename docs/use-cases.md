@@ -97,9 +97,34 @@ The same rule fires when the Pod declares no `resourceClaims` at all, which is t
 produces. `KN-V021` covers the other half: a `spec.resourceClaims` entry that sets both `resourceClaimName` and
 `resourceClaimTemplateName`, or neither -- the API server refuses both, and nothing before apply says which.
 
-What neither rule claims is `cannot allocate all claims`, the scheduler event users actually report. Allocation is
-matched against the `ResourceSlice` objects a driver publishes from the hardware it found, so no manifest can
-decide it; these two rules answer the part a file proves, and say nothing about the part it does not.
+Two more rules read across the bundle. Audit the **directory**, not one file, because both depend on objects the
+other documents carry:
+
+```console
+$ kube-noob audit -f k8s/ --version 1.35
+[HIGH    ] KN-C015   Pod/ml/inference L11 spec.resourceClaims[0].resourceClaimName
+           Pod resource claim names the ResourceClaim 'gpu-pool', which no document in this bundle defines in namespace ml. The Pod is admitted and then stays Pending.
+[HIGH    ] KN-S031   ResourceClaim/ml/telemetry L30 spec.devices.requests[0].exactly.adminAccess
+           ResourceClaim request 'gpu' sets adminAccess: true, and namespace ml in this bundle does not carry resource.kubernetes.io/admin-access: "true". The API server will refuse this object, so the claim does not exist and nothing that depends on it will schedule.
+```
+
+`KN-C015` is the post-deploy failure: the Pod is admitted and then sits Pending, so nothing goes red until
+someone looks. It is namespaced and kind-exact -- a `ResourceClaim` called `gpu-pool` does not satisfy a
+`resourceClaimTemplateName: gpu-pool` -- and `audit -f one-file.yaml` says nothing, because a claim in a file you
+did not pass is not a missing claim.
+
+`KN-S031` is the privilege one. `adminAccess` ignores every ordinary claim to the device with respect to access
+modes and allocations, so the workload reaches devices another tenant holds exclusively; it is the DRA equivalent
+of a privileged container, and the only gate is a namespace label. When the `Namespace` is in the bundle and does
+not carry that label, the message above says the API server will refuse the object, because that is a verdict
+rather than a risk. Without the `Namespace` the same finding reports the privilege and claims nothing about
+admission.
+
+What none of the four rules claims is `cannot allocate all claims`, the scheduler event users actually report.
+Allocation is matched against the `ResourceSlice` objects a driver publishes from the hardware it found, so no
+manifest can decide it. For the same reason there is no rule for a `deviceClassName` that names no `DeviceClass`
+in the bundle: a `DeviceClass` is cluster-scoped and installed by the driver, so it is absent from almost every
+manifest set and such a rule would fire on every correct repository.
 
 ## SRE or on-call: diagnose before you change anything
 

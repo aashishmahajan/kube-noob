@@ -31,6 +31,7 @@ TITLES: dict[str, str] = {
     "IA-5": "Authenticator Management",
     "IA-5(7)": "Authenticator Management | No Embedded Unencrypted Static Authenticators",
     "SA-22": "Unsupported System Components",
+    "SC-4": "Information in Shared System Resources",
     "SC-5": "Denial-of-service Protection",
     "SC-6": "Resource Availability",
     "SC-7": "Boundary Protection",
@@ -135,6 +136,8 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-V019": ("SA-22",),  # the retired ingress-nginx receives no fixes
     "KN-V020": _VALIDATION,
     "KN-V021": _VALIDATION,
+    "KN-C015": ("CM-6",),  # a claim that does not exist: the workload never schedules
+    "KN-S031": ("AC-6", "SC-4"),  # device access across tenants, and the device keeps prior state
 }
 
 

@@ -128,3 +128,140 @@ def test_partial_bundle_does_not_silence_them() -> None:
         whole = [f.rule_id for f in analyze(bad, "kubernetes").findings if f.rule_id == rule_id]
         part = [f.rule_id for f in analyze(bad, "kubernetes", partial_bundle=True).findings if f.rule_id == rule_id]
         assert whole == part and whole, rule_id
+
+
+# =====================================================================================================
+# The cross-object half, and adminAccess (G193)
+# =====================================================================================================
+
+_CLAIM = """
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata: {{name: {name}, namespace: {ns}}}
+spec:
+  devices:
+    requests:
+    - name: gpu
+      exactly:
+        deviceClassName: example.com-gpu
+        allocationMode: ExactCount
+        count: 1
+"""
+
+_TEMPLATE = """
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata: {{name: {name}, namespace: {ns}}}
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: example.com-gpu
+          allocationMode: ExactCount
+          count: 1
+          {extra}
+"""
+
+_POD = """
+apiVersion: v1
+kind: Pod
+metadata: {{name: inference, namespace: {ns}}}
+spec:
+  resourceClaims:
+  - name: gpu
+    {source}: {target}
+  containers:
+  - name: serve
+    image: registry.example.com/s@sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+    resources:
+      claims:
+      - name: gpu
+"""
+
+
+def test_a_claim_in_the_bundle_clears_the_reference_and_an_absent_one_does_not() -> None:
+    pod = _POD.format(ns="ml", source="resourceClaimName", target="gpu-pool")
+    together = pod + "---\n" + _CLAIM.format(name="gpu-pool", ns="ml")
+    assert len(list(yaml.safe_load_all(together))) == 2, "the two documents must parse as two"
+    assert _findings(together, "KN-C015") == []
+    found = _findings(pod, "KN-C015")
+    assert len(found) == 1 and "'gpu-pool'" in found[0].message, found
+
+
+def test_the_reference_is_namespaced() -> None:
+    """A ResourceClaim is namespaced, so one of the same name in another namespace does not satisfy it."""
+    pod = _POD.format(ns="ml", source="resourceClaimName", target="gpu-pool")
+    elsewhere = pod + "---\n" + _CLAIM.format(name="gpu-pool", ns="other")
+    found = _findings(elsewhere, "KN-C015")
+    assert len(found) == 1 and "namespace ml" in found[0].message, found
+
+
+def test_a_template_reference_needs_a_template_not_a_claim() -> None:
+    pod = _POD.format(ns="ml", source="resourceClaimTemplateName", target="gpu-pool")
+    # A ResourceClaim of that name is the wrong kind to satisfy a template reference.
+    wrong_kind = _findings(pod + "---\n" + _CLAIM.format(name="gpu-pool", ns="ml"), "KN-C015")
+    assert len(wrong_kind) == 1 and "ResourceClaimTemplate" in wrong_kind[0].message, wrong_kind
+    right_kind = pod + "---\n" + _TEMPLATE.format(name="gpu-pool", ns="ml", extra="")
+    assert len(list(yaml.safe_load_all(right_kind))) == 2
+    assert _findings(right_kind, "KN-C015") == []
+
+
+def test_a_partial_bundle_cannot_tell_an_absent_claim_from_one_you_did_not_pass() -> None:
+    pod = _POD.format(ns="ml", source="resourceClaimName", target="gpu-pool")
+    assert [f for f in analyze(pod, "kubernetes", partial_bundle=True).findings if f.rule_id == "KN-C015"] == []
+
+
+def test_admin_access_is_reported_on_a_claim_and_on_a_template() -> None:
+    bad = _fixture("KN-S031")["bad"]
+    found = _findings(bad, "KN-S031")
+    assert len(found) == 1 and found[0].severity >= Severity.HIGH
+    assert "adminAccess" in found[0].message and found[0].path.endswith(
+        "spec.devices.requests[0].exactly.adminAccess"
+    ), found[0].path
+    assert _findings(_fixture("KN-S031")["good"], "KN-S031") == []
+    template = _TEMPLATE.format(name="gpu-pool", ns="ml", extra="adminAccess: true")
+    tf = _findings(template, "KN-S031")
+    assert len(tf) == 1 and tf[0].path.endswith("spec.spec.devices.requests[0].exactly.adminAccess"), tf[0].path
+
+
+def test_admin_access_false_is_not_a_finding() -> None:
+    """Upstream: admin access is disabled if the field is unset or set to false."""
+    assert _findings(_fixture("KN-S031")["bad"].replace("adminAccess: true", "adminAccess: false"), "KN-S031") == []
+
+
+def test_a_namespace_in_the_bundle_without_the_label_makes_it_a_refusal_not_a_warning() -> None:
+    """`resource.kubernetes.io/admin-access: "true"` on the namespace is what permits adminAccess at all."""
+    ns = "apiVersion: v1\nkind: Namespace\nmetadata: {name: ml}\n---\n"
+    refused = _findings(ns + _fixture("KN-S031")["bad"], "KN-S031")
+    assert len(refused) == 1 and "refuse" in refused[0].message, refused
+    labelled = (
+        "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: ml\n  labels:\n"
+        '    resource.kubernetes.io/admin-access: "true"\n---\n'
+    )
+    allowed = _findings(labelled + _fixture("KN-S031")["bad"], "KN-S031")
+    assert len(allowed) == 1 and "refuse" not in allowed[0].message, allowed
+
+
+def test_admin_access_survives_a_non_mapping_request_tree() -> None:
+    for text in (
+        "apiVersion: resource.k8s.io/v1\nkind: ResourceClaim\nmetadata: {name: c, namespace: ml}\nspec: notamap\n",
+        "apiVersion: resource.k8s.io/v1\nkind: ResourceClaim\nmetadata: {name: c, namespace: ml}\n"
+        "spec: {devices: {requests: notalist}}\n",
+        "apiVersion: resource.k8s.io/v1\nkind: ResourceClaim\nmetadata: {name: c, namespace: ml}\n"
+        "spec: {devices: {requests: [7]}}\n",
+        "apiVersion: resource.k8s.io/v1\nkind: ResourceClaim\nmetadata: {name: c, namespace: ml}\n"
+        "spec: {devices: {requests: [{name: a, exactly: notamap}]}}\n",
+    ):
+        assert _findings(text, "KN-S031") == [], text
+
+
+def test_admin_access_is_not_read_from_a_firstavailable_subrequest() -> None:
+    """DeviceSubRequest deliberately omits adminAccess, so a key of that name there is not the API field."""
+    text = (
+        "apiVersion: resource.k8s.io/v1\nkind: ResourceClaim\nmetadata: {name: c, namespace: ml}\n"
+        "spec:\n  devices:\n    requests:\n    - name: gpu\n      firstAvailable:\n"
+        "      - name: big\n        deviceClassName: example.com-gpu\n        adminAccess: true\n"
+    )
+    assert _findings(text, "KN-S031") == []
