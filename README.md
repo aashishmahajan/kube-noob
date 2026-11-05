@@ -76,7 +76,7 @@ Desktop app, claude.ai chat and the Agent Skill: [install.md](https://github.com
 
 As a token-protected service, loopback-only sidecar or Lightspeed tool:
 [docs/openshift.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/openshift.md). The chart ships
-NetworkPolicies and runs under `restricted-v2`.
+NetworkPolicies, written for `restricted-v2`.
 
 ## Safe by default
 

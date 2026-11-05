@@ -163,6 +163,8 @@ jobs:
         run: python scripts/build_skill.py --check
       - name: Compliance document's rule and control tables match the code
         run: python scripts/compliance_doc.py --check
+      - name: Documented measurements match what the commands produce
+        run: python scripts/doc_numbers.py --check
       - name: Plugin lock matches its pyproject
         run: uv lock --check --project plugin/kube-noob --default-index https://pypi.org/simple
       - name: Plugin dependency vulnerability audit

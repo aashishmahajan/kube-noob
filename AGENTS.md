@@ -26,6 +26,7 @@ Do not report a change as working until that exit status is 0. "The tests I wrot
 python scripts/sync_plugin_server.py
 python scripts/safety_contract.py --check
 python scripts/compliance_doc.py --check
+python scripts/doc_numbers.py --check
 ```
 
 `src/` is the only source of truth. `plugin/kube-noob/server/kube_noob/` is a **generated copy** — never edit it, and
@@ -43,6 +44,12 @@ rewrites only those three regions and leaves the prose alone, and it REFUSES rat
 whose shape has changed. A control the document evidences through posture rather than through a rule (`SC-13`,
 via `kube-noob doctor`) lives in `POSTURE_CONTROLS` in that script, because generating from `RULE_CONTROLS` alone
 would delete it.
+
+`scripts/doc_numbers.py` does the same for the measured numbers in `docs/limits.md` (how many rules generate an
+admission policy per platform) and `docs/use-cases.md` (the compaction measurement). Both are measured by running
+the command the document shows -- the compaction one shells out to the CLI, because the sentence is about the
+bytes that command writes and an in-process reconstruction was 20 bytes off. Four of these numbers were wrong at
+once on 2026-11-05, and two of them summed to a rule count retired three releases ago (G212).
 
 ## Tests first, and make them fail first
 

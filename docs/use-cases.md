@@ -68,8 +68,8 @@ kube-noob --format json audit -f k8s/ --platform openshift --compact
 
 Each rule's constant fields -- title, severity, remediation, citations, controls and the rest -- are collected
 once into a `ruleInfo` map keyed by rule id instead of being repeated on every finding that rule produced. On
-this repository's `examples/` directory that is 105 findings over 19 rules, and the JSON goes from 118 631 to
-54 694 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
+this repository's `examples/` directory that is 115 findings over 21 rules, and the JSON goes from 141 349 to
+69 936 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
 exactly. The MCP and HTTP tool takes the same thing as `compact: true`, off by default so the flat shape stays
 what it was. The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
 
@@ -138,8 +138,11 @@ the name of its subject: every Gatekeeper post says "gatekeeper".
 kube-noob insight -f whatever-you-copied.txt
 oc describe pod web-1 -n shop | kube-noob insight --platform openshift
 kube-noob insight 'why does my pod stay Pending?'
-kube-noob insight -f trace.pcap --format json
 ```
+
+`insight` recognises a packet capture by its header and reports it under `skipped`, with the reason, because the
+pcap analyser is not built: it does not pretend to have read it. That is why the line is not in the block above --
+a command in a block of working commands reads as a capability.
 
 1. Paste events, `describe` output or logs into `diagnose`: as quoted text (multi-line is fine; single quotes stop the
    shell expanding `$`), as a file with `-f`, or piped in. An Alertmanager webhook payload works as it is. You get

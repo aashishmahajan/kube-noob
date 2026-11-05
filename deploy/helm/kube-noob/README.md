@@ -17,8 +17,11 @@ Clients connect to `http://<release>-kube-noob.<namespace>.svc:8080/mcp` with `A
 
 ## Secure by default
 
-- Pods run under `restricted-v2` (arbitrary UID, no capabilities, `RuntimeDefault` seccomp, read-only root
-  filesystem) and Pod Security `restricted`.
+- Pods are written for `restricted-v2` (arbitrary UID, no capabilities, `RuntimeDefault` seccomp, read-only root
+  filesystem). The Pod Security `restricted` half is enforced in CI; `restricted-v2` is an OpenShift SCC and
+  every CI cluster is kind, so that half is the pod spec meeting the SCC's requirements rather than an SCC
+  admitting it -- [docs/roadmap.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md) tracks
+  the OpenShift cluster that would close it.
 - NetworkPolicy: ingress only from the same namespace and the OpenShift router; egress to DNS only.
 - No web access, no cluster access and no model calls unless you turn them on.
 - The admission webhook is off unless you set `admission.enabled`, and denies nothing unless you list a rule in
