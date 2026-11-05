@@ -13,7 +13,6 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from kube_noob.admission import SYSTEM_NAMESPACES
 from kube_noob.audit.controls import controls_for
 from kube_noob.audit.model import Finding, Severity, Stage
 from kube_noob.audit.podspec import (
@@ -1175,6 +1174,14 @@ def _c016(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         return
     quota_ns = {ctx.ns(d) for d in ctx.by_kind("ResourceQuota")}
     limit_ns = {ctx.ns(d) for d in ctx.by_kind("LimitRange")}
+    # An object with no `metadata.namespace` lands wherever it is applied, so a bundle carrying one is
+    # ambiguous rather than missing it -- the kustomize and `apply -n` shape. Claiming "none in this bundle"
+    # about a bundle that contains one is the false statement this rule's hedging exists to avoid.
+    any_quota = "<default>" in quota_ns or bool(ctx.by_kind("ClusterResourceQuota"))
+    any_limit = "<default>" in limit_ns
+    # The remediation tells the reader to confirm a ClusterResourceQuota covers it; one in the same bundle is
+    # that confirmation. Presence is enough here: matching its selector is a finer answer than the message
+    # claims, and over-claiming is the failure being fixed.
     # Only namespaces this bundle DECLARES. A workload whose Namespace is managed elsewhere has its quota
     # managed elsewhere too, and firing there would report nearly every application repository for an object
     # it is not responsible for. If you ship the Namespace, you own its guardrails.
@@ -1186,9 +1193,19 @@ def _c016(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     flagged: set[str] = set()
     for d, _pt in ctx.workloads():
         ns = ctx.ns(d)
-        if d.kind not in LONG_RUNNING_KINDS | {"Pod"} or ns in flagged or ns not in declared:
+        # Every workload kind, not just the long-running ones. A bare Pod was reported and a recurring
+        # CronJob was not, which is backwards: a runaway CronJob is the textbook reason a namespace needs
+        # `count/jobs.batch`, and a Job's pod inherits no limits just as a Deployment's does.
+        if ns in flagged or ns not in declared or platform_owned_namespace(ctx, ns):
             continue
-        missing = [name for name, have in (("ResourceQuota", quota_ns), ("LimitRange", limit_ns)) if ns not in have]
+        missing = [
+            label
+            for label, have, blanket in (
+                ("ResourceQuota", quota_ns, any_quota),
+                ("LimitRange", limit_ns, any_limit),
+            )
+            if ns not in have and not blanket
+        ]
         if not missing:
             continue
         flagged.add(ns)
@@ -1215,6 +1232,8 @@ def _c016(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 )
 def _s033(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d in ctx.by_kind("MachineConfigPool"):
+        if api_group(str(d.data.get("apiVersion", ""))) != "machineconfiguration.openshift.io":
+            continue  # other APIs can use the kind; this rule is about OpenShift's pools
         spec = d.data.get("spec") if isinstance(d.data, dict) else None
         if not isinstance(spec, dict) or spec.get("paused") is not True:
             continue
@@ -1268,6 +1287,18 @@ def _s034(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 # upstream's (`staging/src/k8s.io/pod-security-admission/api/constants.go`): the prefix, and the three levels.
 PSA_ENFORCE_LABEL = "pod-security.kubernetes.io/enforce"
 PSA_LEVELS = ("privileged", "baseline", "restricted")
+# `SYSTEM_NAMESPACES` mixes the two platforms: `openshift` belongs to OpenShift and the `kube-*` ones to every
+# cluster. Skipping `openshift` and `openshift-*` on vanilla Kubernetes gave an ordinary namespace on EKS or
+# GKE a silent pass, because the reason for the skip -- OpenShift owns those namespaces and its Pod Security
+# syncer is permanently off for them -- is an OpenShift fact (G204).
+_PLATFORM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease", "default"})
+
+
+def platform_owned_namespace(ctx: AuditContext, name: str) -> bool:
+    """True when the platform owns this namespace, so its guardrails are not the author's to set."""
+    if name in _PLATFORM_NAMESPACES:
+        return True
+    return ctx.is_openshift and (name == "openshift" or name.startswith("openshift-"))
 
 
 @rule(
@@ -1284,13 +1315,28 @@ PSA_LEVELS = ("privileged", "baseline", "restricted")
     "namespace enforces nothing, and no manifest in it will say so.",
 )
 def _s032(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    seen: set[str] = set()
     for d in ctx.by_kind("Namespace"):
         name = get_path(d.data, ("metadata", "name"))
-        name = name if isinstance(name, str) else ""
-        if name in SYSTEM_NAMESPACES or name.startswith("openshift-") or name == "default":
-            continue  # the platform owns these, and Pod Security sync is permanently off for them
+        if not isinstance(name, str) or not name:
+            continue  # KN-V007 already refuses the object, and a nameless namespace is not actionable here
+        if platform_owned_namespace(ctx, name) or name in seen:
+            continue
+        seen.add(name)
         labels = get_path(d.data, ("metadata", "labels"))
         level = labels.get(PSA_ENFORCE_LABEL) if isinstance(labels, dict) else None
+        if level is not None and not (isinstance(level, str) and level in PSA_LEVELS):
+            # The enum is exactly the three lowercase strings, so `Privileged` is not a level. Reporting
+            # nothing here made the rule QUIETER about a namespace that looks privileged than about one with
+            # no label at all. What the cluster does with an invalid value is not claimed.
+            yield r.finding(
+                d,
+                ("metadata", "labels", PSA_ENFORCE_LABEL),
+                f"Namespace {name} sets {PSA_ENFORCE_LABEL}: {level!r}, which is not one of Pod Security's "
+                "levels -- they are privileged, baseline or restricted, lower-case. The namespace does not "
+                "enforce the level this label appears to name.",
+            )
+            continue
         if level == "privileged":
             yield r.finding(
                 d,

@@ -78,15 +78,20 @@ def test_an_empty_labels_map_is_the_same_as_no_labels() -> None:
     assert len(_findings(_ns(labels={}))) == 1
 
 
-@pytest.mark.parametrize("name", ["kube-system", "kube-public", "kube-node-lease", "openshift", "default"])
+@pytest.mark.parametrize("name", ["kube-system", "kube-public", "kube-node-lease", "default"])
 def test_the_namespaces_the_platform_owns_are_skipped(name: str) -> None:
     assert _findings(_ns(name)) == []
 
 
-def test_a_system_openshift_namespace_is_skipped() -> None:
-    """Pod Security sync is permanently off for openshift-* system namespaces."""
-    assert _findings(_ns("openshift-monitoring")) == []
-    assert _findings(_ns("openshift-operators")) == []
+def test_a_system_openshift_namespace_is_skipped_on_openshift() -> None:
+    """Pod Security sync is permanently off for openshift-* system namespaces -- on OpenShift.
+
+    This test first asserted the skip on the default platform, which is `kubernetes`, and so pinned the bug a
+    red team later found: a namespace merely NAMED openshift-something on EKS or GKE got a silent pass.
+    """
+    for name in ("openshift-monitoring", "openshift-operators", "openshift"):
+        assert _findings(_ns(name), "openshift", "4.22") == [], name
+        assert len(_findings(_ns(name))) == 1, f"{name} is an ordinary namespace on vanilla Kubernetes"
 
 
 def test_a_user_namespace_whose_name_merely_contains_openshift_is_not_skipped() -> None:
@@ -118,3 +123,46 @@ def test_it_survives_a_non_mapping_metadata_or_labels() -> None:
 def test_the_finding_carries_a_line_and_a_locator() -> None:
     for f in _findings(_ns(labels={PSA_ENFORCE_LABEL: "privileged"})):
         assert f.line is not None and f.locator
+
+
+# =====================================================================================================
+# Red team, 2026-11-05 (G204)
+# =====================================================================================================
+
+
+@pytest.mark.parametrize("value", ["Privileged", "Restricted", "RESTRICTED", "resticted", "baseline-ish", "true"])
+def test_a_value_that_is_not_one_of_the_three_levels_is_reported(value: str) -> None:
+    """The enum is exactly privileged/baseline/restricted. Anything else is a typo, not a judgement.
+
+    Before this, `Privileged` was SILENT while an absent label was MEDIUM: the rule was quieter about a
+    namespace that looks privileged than about one with no label at all.
+    """
+    found = _findings(_ns(labels={PSA_ENFORCE_LABEL: value}))
+    assert len(found) == 1, f"{value!r} cleared the rule"
+    assert repr(value) in found[0].message or value in found[0].message
+    assert "privileged, baseline or restricted" in found[0].message
+
+
+def test_an_openshift_namespace_name_is_only_special_on_openshift() -> None:
+    """The skip exists because OpenShift's syncer owns those namespaces. Vanilla Kubernetes has no syncer."""
+    assert len(_findings(_ns("openshift-apps"))) == 1, "an ordinary namespace on EKS/GKE got a silent pass"
+    assert len(_findings(_ns("openshift"))) == 1
+    assert _findings(_ns("openshift-apps"), "openshift", "4.22") == []
+    assert _findings(_ns("openshift"), "openshift", "4.22") == []
+
+
+@pytest.mark.parametrize("name", ["kube-system", "kube-public", "kube-node-lease", "default"])
+def test_the_kubernetes_system_namespaces_are_skipped_on_every_platform(name: str) -> None:
+    assert _findings(_ns(name)) == []
+    assert _findings(_ns(name), "openshift", "4.22") == []
+
+
+def test_a_namespace_with_no_usable_name_is_left_to_the_schema_rule() -> None:
+    """A finding about a nameless namespace is unactionable, and KN-V007 already refuses the object."""
+    for meta in ("{name: 7}", "{name: null}", "{}", "notamap"):
+        text = f"apiVersion: v1\nkind: Namespace\nmetadata: {meta}\n"
+        assert _findings(text) == [], meta
+
+
+def test_the_same_namespace_declared_twice_is_reported_once() -> None:
+    assert len(_findings(_ns("shop") + "---\n" + _ns("shop"))) == 1

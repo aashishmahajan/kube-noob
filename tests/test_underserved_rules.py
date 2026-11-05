@@ -138,3 +138,96 @@ def test_the_subscription_rule_survives_a_non_mapping_spec() -> None:
     for spec in ("notamap", "[a]", "{installPlanApproval: 7}"):
         text = f"apiVersion: operators.coreos.com/v1alpha1\nkind: Subscription\nmetadata: {{name: s}}\nspec: {spec}\n"
         _f(text, "KN-S034")  # must not raise
+
+
+# =====================================================================================================
+# Red team, 2026-11-05 (G204)
+# =====================================================================================================
+
+_NS = "apiVersion: v1\nkind: Namespace\nmetadata: {name: shop}\n"
+_DEP = """---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api, namespace: shop}
+spec:
+  replicas: 2
+  selector: {matchLabels: {a: b}}
+  template:
+    metadata: {labels: {a: b}}
+    spec: {containers: [{name: c, image: i}]}
+"""
+
+
+def test_a_cronjob_namespace_is_reported_like_any_other_workload() -> None:
+    """A bare Pod was reported and a recurring CronJob was not, which is the wrong way round."""
+    cron = """---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: nightly, namespace: shop}
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec: {restartPolicy: OnFailure, containers: [{name: c, image: i}]}
+"""
+    assert len(_f(_NS + cron, "KN-C016")) == 1, "a runaway CronJob is what a quota exists for"
+    job = """---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: once, namespace: shop}
+spec:
+  template:
+    spec: {restartPolicy: Never, containers: [{name: c, image: i}]}
+"""
+    assert len(_f(_NS + job, "KN-C016")) == 1
+
+
+def test_a_cluster_resource_quota_in_the_bundle_clears_the_quota_half() -> None:
+    """The remediation says to confirm a ClusterResourceQuota covers it; one in the same bundle does."""
+    crq = """---
+apiVersion: quota.openshift.io/v1
+kind: ClusterResourceQuota
+metadata: {name: gold}
+spec:
+  quota: {hard: {requests.cpu: "8"}}
+  selector: {labels: {matchLabels: {t: gold}}}
+"""
+    lr = (
+        "---\napiVersion: v1\nkind: LimitRange\nmetadata: {name: lr, namespace: shop}\n"
+        "spec: {limits: [{type: Container, default: {cpu: 500m}}]}\n"
+    )
+    assert _f(_NS + _DEP + crq + lr, "KN-C016") == [], "the bundle shows exactly what the message denied"
+    # With no LimitRange, only that half is named.
+    found = _f(_NS + _DEP + crq, "KN-C016")
+    assert len(found) == 1 and "no LimitRange in this bundle" in found[0].message
+
+
+def test_an_unnamespaced_quota_is_not_called_absent() -> None:
+    """kustomize and `apply -n` omit the namespace; the bundle is ambiguous, not missing the object."""
+    rq = "---\napiVersion: v1\nkind: ResourceQuota\nmetadata: {name: rq}\nspec: {hard: {requests.cpu: '4'}}\n"
+    lr = (
+        "---\napiVersion: v1\nkind: LimitRange\nmetadata: {name: lr}\n"
+        "spec: {limits: [{type: Container, default: {cpu: 500m}}]}\n"
+    )
+    assert _f(_NS + _DEP + rq + lr, "KN-C016") == []
+
+
+@pytest.mark.parametrize("name", ["kube-system", "kube-public", "kube-node-lease", "default"])
+def test_the_platform_owns_its_own_namespaces_quotas(name: str) -> None:
+    text = _NS.replace("shop", name) + _DEP.replace("shop", name)
+    assert _f(text, "KN-C016") == [], name
+
+
+def test_an_openshift_namespace_quota_is_skipped_on_openshift_only() -> None:
+    text = _NS.replace("shop", "openshift-logging") + _DEP.replace("shop", "openshift-logging")
+    assert _f(text, "KN-C016") == []
+    assert len(_f(text, "KN-C016", platform="kubernetes", version=None)) == 1
+
+
+def test_the_pool_rule_checks_its_api_group_like_the_subscription_rule_does() -> None:
+    """KN-S034 guards the group because other APIs reuse the kind; KN-S033 did not."""
+    text = "apiVersion: evil.example.com/v1\nkind: MachineConfigPool\nmetadata: {name: w}\nspec: {paused: true}\n"
+    assert _f(text, "KN-S033") == []
+    assert _f(text.replace("evil.example.com/v1", "machineconfiguration.openshift.io/v1"), "KN-S033")
+    assert _f("kind: MachineConfigPool\nmetadata: {name: w}\nspec: {paused: true}\n", "KN-S033") == []
