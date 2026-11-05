@@ -75,6 +75,27 @@ def test_apt_can_neither_prompt_nor_wait_forever_for_the_dpkg_lock() -> None:
                 assert "-o DPkg::Lock::Timeout=" in line, line
 
 
+def test_the_apt_step_survives_a_slow_mirror_and_still_fails_loudly() -> None:
+    """A bound that is below the slowest real transfer turns someone else's slow mirror into a red pull request.
+
+    The 4-minute bound this step carried was guessed: the measurements beside it cover pip, npm and the render,
+    and the comment itself named apt as the thing they could not measure. Then a run measured it -- on 2026-11-05
+    at 21:19Z the Azure Ubuntu mirror served one 13.6 MB package in 62 seconds and the step was killed mid-
+    download on a commit whose other 19 checks were green. So the step now skips apt when the runner image
+    already ships ffmpeg, lets apt retry a dropped connection, and tries twice. What it must NOT do is pass when
+    ffmpeg is still missing: a silent pass here would surface three steps later as a render failure, which is the
+    diagnosis problem this job was split up to solve, one step further along.
+    """
+    steps = _wf("ci.yml")["jobs"]["videos"]["steps"]
+    step = next(s for s in steps if s.get("name") == "ffmpeg")
+    assert int(step["timeout-minutes"]) >= 8, "below the slowest transfer measured on a real runner"
+    run = step["run"]
+    assert "command -v ffmpeg" in run, "do not pay for apt when the image already has it"
+    assert "Acquire::Retries=" in run, "let apt retry a dropped connection itself"
+    assert "for attempt in" in run, "one slow mirror should not be one red build"
+    assert run.rstrip().endswith("exit 1"), "the last word of a failed install is a non-zero exit, not a shrug"
+
+
 def test_the_browser_install_does_not_shell_out_to_apt_again() -> None:
     """`playwright install --with-deps` runs apt inside Playwright's own sudo, where neither the frontend setting
     nor the lock timeout above reaches it. A missing library instead fails the render in seconds, by name."""
