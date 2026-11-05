@@ -208,6 +208,26 @@ def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
             + ", ".join(out["unmappedControls"]),
             "",
         ]
+    for note in out.get("assumptions") or []:
+        lines += [f"assumed: {note}", ""]
+    for bad in out.get("unreadable") or []:
+        lines += [f"not read: {bad['path']}: {bad['why']}"]
+    if out.get("unreadable"):
+        lines += ["", "This is not a complete audit, so no row below is a clean result.", ""]
+    for miss in out.get("findingsNotMapped") or []:
+        lines += [f"{miss['findings']} finding(s) from {miss['ruleId']} reach no indicator: {miss['why']}"]
+    if out.get("findingsNotMapped"):
+        lines.append("")
+    f = out.get("filtered")
+    if f:
+        lines += [
+            f"showing {f['shown']} of {f['of']} indicators"
+            + (f"; --evidenced-only hid {f['evidencedOnly']}" if f.get("evidencedOnly") else ""),
+            "",
+        ]
+        if f.get("why"):
+            lines += [f["why"], ""]
+    lines += [out["sharedControlCaveat"], ""]
     counted = "  findings  excepted  clean  not evaluated  withheld" if audited else ""
     lines.append(f"{'INDICATOR':<14}{'FAM':<5}{'NAME':<36}{counted}")
     for r in out["indicators"]:
@@ -230,6 +250,8 @@ def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
             )
         ev = fedramp.EVIDENCE.get(r["id"])
         if ev:
+            if not ev["onSubject"]:
+                lines.append(f"{'':<19}WARNING: these rules reach this indicator only through a shared control.")
             lines.append(f"{'':<19}shows: {ev['shows']}")
             lines.append(f"{'':<19}does NOT show: {ev['doesNotShow']}")
     return "\n".join(lines)
@@ -1438,7 +1460,12 @@ def build_parser() -> argparse.ArgumentParser:
         "and reports, per indicator, what was found. A mapping is evidence, never a compliance claim. "
         "Example: kube-noob ksi -f deploy/ --format json",
     )
-    ksi.add_argument("-f", "--file", action="append", default=[], help="manifest, directory or '-' for stdin")
+    ksi.add_argument("-f", "--file", default=None, help="manifest, directory or '-' for stdin")
+    ksi.add_argument(
+        "--skip-unreadable",
+        action="store_true",
+        help="audit the readable files and list the rest in the report instead of refusing",
+    )
     ksi.add_argument("--platform", choices=PLATFORMS, default=None)
     ksi.add_argument("--version", dest="pversion", help="target OpenShift or Kubernetes version")
     ksi.add_argument("--indicator", default=None, help="one indicator by id, e.g. KSI-IAM-ELP")
@@ -2203,24 +2230,64 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         rule_ids: list[str] = []
         evaluated: list[str] | None = None
         fired: list[str] | None = None
+        not_read: list[dict[str, str]] = []
+        assumptions: list[str] = []
         if a.file:
-            from kube_noob.audit.engine import analyze
+            # The same input pipeline as `audit`, not a shortcut past it. Reading the files directly meant a Helm
+            # values file was audited as one object and reported 31 least-privilege rules clean (`audit` refuses
+            # it); one file counted the rules that fire on an absent object as clean instead of not evaluated,
+            # which is G202 through a second door; and an unreadable file in a directory was dropped without a
+            # word where `audit` exits 5 and names it.
+            from kube_noob.audit.engine import analyze, refuse_if_not_manifests
 
-            text = "\n---\n".join(_read(f) for f in a.file)
-            audited = analyze(text, platform=a.platform or s.default_platform, version=a.pversion)
+            text, not_read = _manifest_input(a)
+            if not_read and not a.skip_unreadable:
+                _refuse_unreadable(not_read)
+                return 5
+            refuse_if_not_manifests(text)
+            audited = analyze(
+                text,
+                platform=a.platform or s.default_platform,
+                version=a.pversion,
+                partial_bundle=_partial_input(a),
+            )
             rule_ids = [f.rule_id for f in audited.findings]
             evaluated, fired = sorted(audited.evaluated_rules), sorted(audited.fired_rules)
+            assumptions = list(audited.assumptions)
         out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired)
+        if assumptions:
+            # What the audit assumed decides what its counts mean: an API "removed in the target version" is
+            # evidence against an assumed version, and a partial bundle is why a row says notEvaluated.
+            out["assumptions"] = assumptions
+        if not_read:
+            out["unreadable"] = not_read
         rows = out["indicators"]
+        total = len(rows)
+        hidden: dict[str, Any] = {}
         if a.indicator:
             rows = [r for r in rows if r["id"] == a.indicator]
+            hidden["indicator"] = a.indicator
         if a.control:
-            cited = set(fedramp.BY_CONTROL[a.control])
+            cited = set(fedramp.indicators_for(a.control))
             rows = [r for r in rows if r["id"] in cited]
             out["forControl"] = {"id": a.control, "indicators": sorted(cited)}
         if a.evidenced_only:
+            before = len(rows)
             rows = [r for r in rows if r["evidenced"]]
+            hidden["evidencedOnly"] = before - len(rows)
         out["indicators"] = rows
+        if len(rows) != total:
+            # A filter that quietly removes rows is the G215 defect in another costume: a reader counts what is
+            # on the page. This says how many are not, and an empty page says why rather than printing a header.
+            hidden["shown"] = len(rows)
+            hidden["of"] = total
+            if not rows:
+                hidden["why"] = (
+                    f"no indicator matches these filters: {a.indicator or 'any indicator'}"
+                    + (f" and the indicators citing {a.control}" if a.control else "")
+                    + (", with --evidenced-only" if a.evidenced_only else "")
+                )
+            out["filtered"] = hidden
         if a.format == "text":
             _tprint(_ksi_markdown(out, audited=bool(a.file)))
         else:

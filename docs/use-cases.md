@@ -668,11 +668,24 @@ gives evidence about, and the crosswalk is the inversion. With `-f` it audits fi
 findings, the rules that ran and found nothing, and the rules that did not run at all -- a zero on its own cannot
 tell a clean indicator from one nothing looked at.
 
-Read the two lines under a curated indicator before quoting the first one. `KSI-CNA-RNT` (Restricting Network
-Traffic) is evidence that policies exist, not that the cluster enforces them; `KSI-SVC-VRI` (Validating Resource
-Integrity) is evidence that images are pinned by digest, not that any signature verifies; `KSI-RPL-ABO` (Aligning
-Backups with Objectives) is about surviving the loss of a pod, and says nothing about backups at all. 18 of the 46
-indicators have no kube-noob rule behind them and say so instead of showing a zero.
+Read the two lines under a curated indicator before quoting the first one, and read the rule titles printed beside
+them. `KSI-CNA-RNT` (Restricting Network Traffic) is evidence that policies exist, not that the cluster enforces
+them; `KSI-SVC-VRI` (Validating Resource Integrity) is evidence that images are pinned by digest, not that any
+signature verifies; `KSI-RPL-ABO` (Aligning Backups with Objectives) is about surviving the loss of a pod, and says
+nothing about backups at all. 18 of the 46 indicators have no kube-noob rule behind them and say so instead of
+showing a zero.
+
+Two rows carry a warning rather than evidence, and they are the most useful thing in the page. An indicator and a
+rule meet here only because they name the same NIST control, and a shared control is not shared subject matter:
+`KSI-IAM-SNU` is about how non-user credentials are issued, it cites `ac-4` (Information Flow Enforcement), and
+kube-noob maps its NetworkPolicy rules to `ac-4` because that is what `ac-4` is -- so eight traffic and RBAC rules
+arrive under an authentication indicator. Those rows say so on their face.
+
+`ksi -f` reads its input exactly as `audit` does, which is deliberate: it refuses a Helm values file instead of
+scoring it, treats one file as part of a namespace rather than the whole of it, exits 5 and names a file it could
+not read, and carries the audit's own assumptions into the page. A finding whose rule reaches no indicator -- a
+schema error, or a rule whose only control nothing cites -- is listed under `findingsNotMapped` rather than
+dropped, and a filter that hides rows says how many.
 
 ```bash
 kube-noob ksi

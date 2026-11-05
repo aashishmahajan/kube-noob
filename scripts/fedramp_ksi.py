@@ -18,6 +18,7 @@ hash, and rewrites the vendored extract when it has moved. Everything else is of
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
 import re
@@ -173,6 +174,8 @@ def doc_text(doc: dict[str, Any]) -> str:
         "",
         f"{fedramp.APPLICABILITY}",
         "",
+        f"{fedramp.SHARED_CONTROL_IS_NOT_SHARED_SUBJECT}",
+        "",
         f"## Coverage: {len(mapped)} of kube-noob's {len(TITLES)} controls are cited by an indicator",
         "",
         f"{len(fedramp.UNMAPPED_CONTROLS)} are cited by none, so no finding of kube-noob's is evidence for any "
@@ -190,6 +193,10 @@ def doc_text(doc: dict[str, Any]) -> str:
         "statement about an organisation's practice; kube-noob reads configuration. The gap is not a detail.",
         "",
     ]
+    from kube_noob.audit.rules import RULES
+
+    rule_list = list(RULES.values() if isinstance(RULES, dict) else RULES)
+    titles = {r.rule_id: r.title for r in rule_list}
     for ind in sorted(fedramp.EVIDENCE):
         body = inds[ind]
         ev = fedramp.EVIDENCE[ind]
@@ -197,12 +204,25 @@ def doc_text(doc: dict[str, Any]) -> str:
         out += [
             f"### {ind} — {body['name']} ({fedramp.FAMILIES[body['family']]})",
             "",
+        ]
+        if not ev["onSubject"]:
+            out += [
+                "> **These rules reach this indicator only through a shared control.** Read the row as a "
+                "warning, not as evidence.",
+                "",
+            ]
+        out += [
             f"- **Shows:** {ev['shows']}",
             f"- **Does not show:** {ev['doesNotShow']}",
             f"- kube-noob controls: {', '.join(fedramp.controls_for(ind)) or 'none'}",
-            f"- Rules that are evidence ({len(rules)}): {', '.join(f'`{r}`' for r in rules[:12])}"
+            f"- Rules that are evidence ({len(rules)}), of which the sentences above name "
+            f"{len(ev['rules'])}: {', '.join(f'`{r}`' for r in rules[:12])}"
             + (f" and {len(rules) - 12} more" if len(rules) > 12 else ""),
+            "",
+            "| Rule named above | Its own title, so the sentence can be checked against it |",
+            "|---|---|",
         ]
+        out += [f"| `{r}` | {titles.get(r, 'NOT IN THE CATALOGUE')} |" for r in ev["rules"]]
         if body["variesByClass"]:
             out.append(
                 "- Varies by service class: "
@@ -237,10 +257,21 @@ def refresh() -> int:
     digest = hashlib.sha256(raw).hexdigest()
     upstream = json.loads(raw)
     doc = _vendored()
-    if digest == doc["source"]["sha256"]:
-        print(f"upstream unchanged ({doc['source']['version']}, sha256 {digest[:12]})")
-        return 0
     ksi = upstream["KSI"]
+    today = dt.datetime.now(dt.UTC).date().isoformat()
+    if digest == doc["source"]["sha256"]:
+        # Not "nothing to do": the upstream file matching its recorded hash says nothing about whether the
+        # VENDORED extract still equals upstream's KSI section. A tampered extract with a recomputed
+        # extract_sha256 passes --check, and this was the one place that could notice.
+        if _extract_text(ksi) != _extract_text(doc["KSI"]):
+            print(
+                "upstream is unchanged but the vendored extract does not match its KSI section; the vendored "
+                "file has been edited. Re-vendoring from upstream.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"upstream unchanged ({doc['source']['version']}, sha256 {digest[:12]}, checked {today})")
+            return 0
     doc = {
         "source": {
             **doc["source"],
@@ -249,6 +280,9 @@ def refresh() -> int:
             "last_updated": upstream["info"]["last_updated"],
             "sha256": digest,
             "bytes": len(raw),
+            # Not carried over from the previous vendoring: the old date would then assert a retrieval that did
+            # not happen, in the module, in every `ksi` run and in the generated document.
+            "retrieved": today,
             "extract_sha256": hashlib.sha256(_extract_text(ksi).encode()).hexdigest(),
         },
         "KSI": ksi,

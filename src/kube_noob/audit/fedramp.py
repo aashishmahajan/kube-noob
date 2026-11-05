@@ -862,114 +862,228 @@ NOT_A_COMPLIANCE_CLAIM = (
 )
 
 APPLICABILITY = (
-    "FedRAMP's own dataset instructs a reader to \"account for framework applicability, service class, document "
-    'status, and effective dates" (FedRAMP Consolidated Rules, `info.description`). Five indicators carry a '
-    "`varies_by_class` block instead of one statement, and for one of the two classes the statement is marked "
-    "optional -- so the same configuration evidence can speak to a required indicator for one service class and "
-    "an optional one for another. kube-noob does not know a system's service class and never infers it."
+    "FedRAMP's own repository tells a reader to \"account for framework applicability, service class, document "
+    'status, and effective dates" when interpreting the rules (FedRAMP/rules README, "Using The '
+    'Information", retrieved 2026-11-05 -- the README is not vendored here, so that citation is dated rather '
+    "than hash-checked, unlike the dataset itself). Five indicators carry a `varies_by_class` block instead of "
+    "one statement, and for class b the statement is marked optional -- so the same configuration evidence can "
+    "speak to a required indicator for one service class and an optional one for another. kube-noob does not "
+    "know a system's service class and never infers it."
 )
 
-#: The indicators where a kube-noob finding is real configuration evidence, one line each on both halves. Keyed
-#: by indicator id; ``scripts/fedramp_ksi.py --check`` refuses an id the dataset does not have, and
-#: ``tests/test_fedramp_ksi.py`` refuses an entry with no kube-noob rule behind it.
-EVIDENCE: dict[str, dict[str, str]] = {
-    "KSI-IAM-ELP": {
-        "shows": "the privileges a workload asks the cluster for -- privileged containers, root users, "
-        "escalation left on, host namespaces, wildcard RBAC verbs and resources, and a service-account token "
-        "mounted where nothing uses it.",
-        "doesNotShow": "anything about people. No identity provider, no MFA, no joiner-mover-leaver process, and "
-        "no evidence that the privileges that are declared were reviewed by anyone.",
-    },
-    "KSI-IAM-JIT": {
-        "shows": "standing authorisation written into manifests: ClusterRoleBindings to broad roles, "
-        "`cluster-admin` subjects, and roles that permit `escalate`, `bind` or `impersonate`.",
-        "doesNotShow": "whether access is time-bound. A manifest records a grant, not when it was requested, who "
-        "approved it or when it expired -- which is the whole substance of just-in-time.",
-    },
-    "KSI-IAM-SNU": {
-        "shows": "how non-user identities are wired in configuration: service-account tokens mounted by default, "
-        "long-lived tokens in a Secret, and credentials passed as literal environment values.",
-        "doesNotShow": "how those credentials are issued, rotated or federated. kube-noob never reads a Secret's "
-        "value, so it cannot tell a short-lived projected token from a static one that was pasted in.",
+SHARED_CONTROL_IS_NOT_SHARED_SUBJECT = (
+    "An indicator and a rule meet here only because they name the same NIST control, and a shared control is not "
+    "shared subject matter. FedRAMP cites broad control sets -- `KSI-IAM-SNU` (non-user authentication) cites "
+    "`ac-4`, Information Flow Enforcement -- and kube-noob maps its NetworkPolicy rules to `ac-4` because that "
+    "is what `ac-4` is. The join is then arithmetically correct and about nothing: eight network and RBAC rules "
+    "reported under an indicator about how service credentials are issued. Entries below marked `onSubject: "
+    "False` are exactly that case, and saying so is the only honest thing a crosswalk can do about it."
+)
+
+#: The indicators a kube-noob finding speaks to, one line each on what the evidence shows and what it does not.
+#:
+#: ``rules`` is not decoration. The first version of this table described each indicator's evidence in prose
+#: written from the CONTROL names, and a red team checked all thirteen sentences against the rules
+#: :func:`indicator_rules` actually returns: eight were wrong. ``KSI-CNA-MAT`` ("Minimizing Attack Surface")
+#: claimed host namespaces, hostPath, privileged containers and capabilities -- the first four things anyone
+#: would call attack surface, and none of them reach that indicator, which cites `sc-7.5`, `sc-8` and `si-10`.
+#: ``KSI-SVC-SIN`` claimed a volume-encryption rule that does not exist in the catalogue at all. So every
+#: sentence here now names the rules it is about, ``tests/test_fedramp_ksi.py`` refuses a rule that is not behind
+#: that indicator or not in the catalogue, and the generated document prints each rule's own title beside the
+#: sentence, where a reader can see whether the two agree.
+EVIDENCE: dict[str, dict[str, Any]] = {
+    "KSI-CMT-RMV": {
+        "onSubject": True,
+        "rules": ("KN-S012", "KN-C013", "KN-C014", "KN-C015", "KN-C006"),
+        "shows": "whether a workload could be redeployed to a known state at all -- a mutable image reference "
+        "(KN-S012), a pull secret that exists only in another namespace (KN-C013), a replica count fighting an "
+        "HPA (KN-C014), a resource claim no object in the bundle defines (KN-C015), a request above its limit "
+        "(KN-C006).",
+        "doesNotShow": "how changes reach the cluster, which is what the indicator is about. This is the widest "
+        "row in the table because it cites `cm-6` (Configuration Settings) and a third of kube-noob's rules are "
+        "evidence about `cm-6`, so the count here is a weak signal and the named findings are the useful part.",
     },
     "KSI-CNA-MAT": {
-        "shows": "surface a workload opens by configuration -- host network, host paths, host PID and IPC, "
-        "privileged and capability-bearing containers, and namespaces with no default-deny NetworkPolicy.",
-        "doesNotShow": "whether lateral movement is actually possible. That is a runtime question; kube-noob does "
-        "not reach into a running pod, and a cloud security group it cannot see may block or allow more.",
+        "onSubject": True,
+        "rules": ("KN-N001", "KN-N007", "KN-N012", "KN-N014", "KN-N008", "KN-N006", "KN-S025", "KN-ST006"),
+        "shows": "the traffic surface the bundle declares and the paths it passes through: a namespace with "
+        "workloads and no NetworkPolicy (KN-N001), a policy allowing all ingress (KN-N007), a policy selecting "
+        "no pod (KN-N012), an admin policy the CNI does not enforce (KN-N014), a Service with externalIPs "
+        "(KN-N008), a shadowed EgressFirewall rule (KN-N006), and shell or traversal characters in a subPath or "
+        "PersistentVolume path (KN-S025, KN-ST006).",
+        "doesNotShow": "the host-level surface, which is the first thing most readers mean by attack surface: "
+        "privileged containers, host namespaces, hostPath and added capabilities are evidence about `ac-6`, "
+        "`cm-7` and `sc-39`, and this indicator cites none of those -- they reach KSI-IAM-ELP and KSI-IAM-JIT "
+        "instead. Nor anything about lateral movement at runtime, or a cloud security group kube-noob cannot "
+        "see.",
     },
     "KSI-CNA-RNT": {
-        "shows": "the traffic rules that exist: NetworkPolicy and AdminNetworkPolicy ingress and egress, "
-        "OpenShift EgressFirewall, and the DNS hole a deny-all egress policy leaves behind.",
-        "doesNotShow": "whether the cluster enforces them. A NetworkPolicy with no CNI to implement it is an inert "
-        "object, which is why reachability is a separate question kube-noob answers from the cluster and declines "
-        "to answer from a manifest alone.",
-    },
-    "KSI-CNA-ULN": {
-        "shows": "the logical boundaries in the bundle: namespaces, policy objects that scope traffic between "
-        "them, and workloads that bypass them through the host network.",
-        "doesNotShow": "the network underneath -- which CNI is installed, which mode it runs in, or what the "
-        "provider's own subnets and routes permit.",
+        "onSubject": True,
+        "rules": ("KN-N001", "KN-N007", "KN-N012", "KN-N014", "KN-N006"),
+        "shows": "that traffic rules exist and are coherent: a namespace with no NetworkPolicy (KN-N001), one "
+        "that allows all ingress (KN-N007), one that selects no pod in the bundle (KN-N012), a shadowed "
+        "EgressFirewall rule (KN-N006), and -- the case this indicator most needs -- an AdminNetworkPolicy the "
+        "cluster's CNI does not enforce (KN-N014), which is a rule that exists and does nothing.",
+        "doesNotShow": "egress as such. The DNS hole a deny-all egress policy leaves behind (KN-N013) is "
+        "evidence about `sc-7` and `cp-10`, and this indicator cites `sc-7.5` and `si-10`, so that finding "
+        "reaches KSI-CNA-ULN and not this row -- the indicator names inbound and outbound traffic, and only the "
+        "inbound half arrives here.",
     },
     "KSI-CNA-RVP": {
-        "shows": "the configuration that decides whether one workload can exhaust a node: missing memory and CPU "
-        "limits, a namespace with workloads and no ResourceQuota or LimitRange, and an aggressive liveness probe "
-        "that restarts a pod under load.",
-        "doesNotShow": "any protection in front of the cluster, and nothing about the review itself. Whether a "
-        "denial-of-service defence works is measured, not read.",
+        "onSubject": True,
+        "rules": ("KN-C005", "KN-C016", "KN-C003"),
+        "shows": "the three settings that decide whether one workload can exhaust a node: a container with no "
+        "memory limit (KN-C005), a namespace with workloads and no ResourceQuota or LimitRange (KN-C016), and an "
+        "aggressive liveness probe that restarts a pod under load (KN-C003).",
+        "doesNotShow": "CPU. No rule reports a missing CPU limit; KN-C004 is about missing requests and is "
+        "evidence about `sc-6`, which no indicator in the dataset cites. Nor any protection in front of the "
+        "cluster, nor the review the indicator asks for -- whether a denial-of-service defence works is "
+        "measured, not read.",
     },
-    "KSI-SVC-SIN": {
-        "shows": "where transport and storage are declared insecure: a Route or Ingress with no TLS, edge "
-        "termination to a plaintext backend, and a volume or claim with no encryption class.",
-        "doesNotShow": "whether the data is in fact encrypted. Cipher suites, key custody, KMS configuration and "
-        "the provider's at-rest encryption are all outside what a manifest states.",
+    "KSI-CNA-ULN": {
+        "onSubject": True,
+        "rules": ("KN-N005", "KN-N004", "KN-N008", "KN-S011", "KN-S029", "KN-N013", "KN-V015", "KN-N009"),
+        "shows": "where a workload reaches around the cluster's own networking: a NodePort Service (KN-N005), a "
+        "LoadBalancer open to the internet (KN-N004), externalIPs (KN-N008), a hostPort (KN-S011), a probe or "
+        "lifecycle handler pointed at a host (KN-S029), egress denied without allowing cluster DNS (KN-N013), an "
+        "EgressFirewall under the wrong name and so not applied (KN-V015), and risky ingress-nginx annotations "
+        "(KN-N009).",
+        "doesNotShow": "the host network itself -- sharing the node's namespaces (KN-S009) is evidence about "
+        "`ac-6` and `sc-39`, which this indicator does not cite -- and nothing about the network underneath: "
+        "which CNI is installed, which mode it runs in, or what the provider's subnets permit.",
     },
-    "KSI-SVC-ACM": {
-        "shows": "drift, directly: two posture snapshots name every object whose configuration changed and every "
-        "finding that opened or closed between them, and the rules themselves catch the settings most often "
-        "changed by hand -- a mutable image tag, a replica count fighting an HPA, a request above its limit.",
-        "doesNotShow": "whether automation made the change. kube-noob sees that an object differs, not whether a "
-        "pipeline applied it or somebody ran `kubectl edit`.",
+    "KSI-IAM-ELP": {
+        "onSubject": True,
+        "rules": (
+            "KN-S001",
+            "KN-S002",
+            "KN-S003",
+            "KN-S005",
+            "KN-S006",
+            "KN-S009",
+            "KN-S010",
+            "KN-S014",
+            "KN-S015",
+            "KN-S016",
+            "KN-S017",
+            "KN-S028",
+            "KN-S032",
+        ),
+        "shows": "the privileges a workload asks the cluster for and the ones RBAC hands out: privileged "
+        "containers (KN-S001), escalation left on (KN-S002), running as root (KN-S003), capabilities added or "
+        "not dropped (KN-S005, KN-S006), host namespaces and hostPath (KN-S009, KN-S010), a service-account "
+        "token mounted where nothing uses it (KN-S014), wildcard grants (KN-S015), bindings to cluster-admin "
+        "(KN-S016), escalation paths through RBAC (KN-S017), a role granted to everyone (KN-S028), and a "
+        "namespace enforcing no pod security level (KN-S032).",
+        "doesNotShow": "anything about people. No identity provider, no MFA, no joiner-mover-leaver process, and "
+        "no evidence that the privileges that are declared were ever reviewed by anyone.",
     },
-    "KSI-SVC-VRI": {
-        "shows": "the integrity controls a bundle declares: images pinned by digest rather than tag, a writable "
-        "root filesystem, and an admission webhook whose failure policy lets unchecked objects through.",
-        "doesNotShow": "whether any signature verifies. kube-noob does not fetch an image, a signature or an "
-        "attestation, so a digest-pinned image is evidence of intent, not of a validated artefact.",
+    "KSI-IAM-JIT": {
+        "onSubject": True,
+        "rules": ("KN-S015", "KN-S016", "KN-S017", "KN-S028", "KN-S019"),
+        "shows": "standing authorisation written into manifests: wildcard verbs and resources (KN-S015), a "
+        "binding to cluster-admin (KN-S016), roles permitting escalate, bind or impersonate (KN-S017), a role "
+        "granted to every authenticated user (KN-S028), and a permissive SecurityContextConstraints (KN-S019).",
+        "doesNotShow": "whether access is time-bound, which is the whole substance of just-in-time. A manifest "
+        "records a grant, not when it was requested, who approved it, or when it expires.",
     },
-    "KSI-CMT-RMV": {
-        "shows": "whether a workload could be redeployed to a known state at all: a mutable image reference, a "
-        "pull secret that exists only in another namespace, and a resource claim no object in the bundle "
-        "defines.",
-        "doesNotShow": "how changes reach the cluster. This indicator is about a deployment practice, and the "
-        "widest part of this mapping -- most rules touch `CM-6`, so most of them land here -- which makes the "
-        "count a weak signal and the individual findings the useful ones.",
-    },
-    "KSI-SCR-MIT": {
-        "shows": "supply-chain facts the gate already reads: vulnerabilities in a scanner report that are fixable "
-        "or known-exploited, images on an API or a controller release that is past its support, and a retired "
-        "ingress controller still being targeted.",
-        "doesNotShow": "anything about suppliers. No vendor assessment, no provenance for the registry, and no "
-        "SBOM completeness check -- an absent component cannot be found in a report that omits it.",
+    "KSI-IAM-SNU": {
+        "onSubject": False,
+        "rules": ("KN-N001", "KN-N004", "KN-N006", "KN-N007", "KN-N008", "KN-N012", "KN-N014", "KN-S016"),
+        "shows": "nothing about authentication, and this row should be read as a warning rather than as "
+        "evidence. The indicator cites `ac-4` and `ac-6.5`; what reaches it from kube-noob is seven traffic "
+        "rules -- no NetworkPolicy in a namespace with workloads (KN-N001), a LoadBalancer open to the "
+        "internet (KN-N004), a shadowed EgressFirewall rule (KN-N006), a policy allowing all ingress "
+        "(KN-N007), externalIPs (KN-N008), a policy selecting no pod (KN-N012), an admin policy the CNI does "
+        "not enforce (KN-N014) -- plus the cluster-admin binding rule (KN-S016). Those are real findings "
+        "about traffic and about one RBAC grant, and none of them is about how a non-user credential is "
+        "issued.",
+        "doesNotShow": "the indicator's actual subject. Service-account token mounting (KN-S014), a legacy token "
+        "Secret (KN-S027) and credentials in environment values (KN-S013) are the findings a reader expects "
+        "here, and all three are evidence about controls this indicator does not cite, so they arrive under "
+        "KSI-IAM-ELP and KSI-SVC-SIN instead. Nor does kube-noob ever read a Secret's value, so it cannot tell a "
+        "short-lived projected token from a static one.",
     },
     "KSI-RPL-ABO": {
-        "shows": "the resilience settings a recovery objective depends on: replica counts, PodDisruptionBudgets "
-        "that block or permit eviction, probes, termination grace, and a ReadWriteOnce volume shared by a rolling "
-        "Deployment.",
-        "doesNotShow": "backups. Not their schedule, not a restore test, not an RPO or an RTO. These rules are "
-        "about surviving the loss of a pod or a node, which is a different thing from recovering from a backup, "
-        "and reading this row as backup evidence would be the mistake this file exists to prevent.",
+        "onSubject": False,
+        "rules": ("KN-C007", "KN-C008", "KN-C009", "KN-C001", "KN-C002", "KN-C011", "KN-ST002"),
+        "shows": "the resilience settings a recovery objective depends on, reached through `cp-10` alone: a "
+        "single replica (KN-C007), a missing PodDisruptionBudget or one that blocks every voluntary eviction "
+        "(KN-C008, KN-C009), missing probes (KN-C001, KN-C002), a zero termination grace period (KN-C011), and a "
+        "ReadWriteOnce volume shared by a rolling Deployment (KN-ST002).",
+        "doesNotShow": "backups. Not their schedule, not a restore test, not an RPO or an RTO, and nothing about "
+        "the alignment the indicator's name asks about. These rules are about surviving the loss of a pod or a "
+        "node, which is a different thing, and reading this row as backup evidence is the mistake this table "
+        "exists to prevent.",
+    },
+    "KSI-SCR-MIT": {
+        "onSubject": True,
+        "rules": ("KN-S024", "KN-V005", "KN-V006", "KN-V008", "KN-V019"),
+        "shows": "components the bundle depends on that are past their support, through `sa-22`: an "
+        "ingress-nginx controller image below the fixed releases (KN-S024), an API removed or deprecated in the "
+        "target version (KN-V005, KN-V006), a DeploymentConfig (KN-V008), and an Ingress still targeting the "
+        "retired ingress-nginx (KN-V019).",
+        "doesNotShow": "vulnerabilities. `ksi` takes no scanner report, and a gate's scanner findings carry the "
+        "CVE id as their rule id, which is in no control mapping, so they reach no indicator by any route. Nor "
+        "anything about suppliers: no vendor assessment, no registry provenance, no SBOM completeness check -- a "
+        "component a report omits cannot be found in it.",
+    },
+    "KSI-SVC-ACM": {
+        "onSubject": True,
+        "rules": ("KN-S012", "KN-C014", "KN-C006", "KN-S003", "KN-S008", "KN-ST001"),
+        "shows": "the settings most often changed by hand, through `cm-2` and `cm-6`: a mutable image tag "
+        "(KN-S012), a replica count fighting an HPA (KN-C014), a request above its limit (KN-C006), a "
+        "container that may run as root (KN-S003), no seccomp profile (KN-S008), and ReadWriteMany asked of a "
+        "StorageClass that only offers ReadWriteOnce (KN-ST001).",
+        "doesNotShow": "drift, and whether automation made the change. kube-noob does measure drift -- `posture "
+        "diff` names every object whose configuration changed between two snapshots and reports standing per "
+        "control -- but that output does not feed this view, so nothing in this row is evidence of drift over "
+        "time. It is one audit of one bundle, like every other row.",
+    },
+    "KSI-SVC-SIN": {
+        "onSubject": True,
+        "rules": ("KN-N002", "KN-N003", "KN-V016", "KN-S013", "KN-S018", "KN-S026"),
+        "shows": "where the bundle leaves information in the clear: a Route or Ingress with no TLS (KN-N002, "
+        "KN-N003), a Route whose TLS configuration is invalid and so does not do what it says (KN-V016), a "
+        "secret value hard-coded in an environment variable (KN-S013), secret material committed in a manifest "
+        "(KN-S018), and a credential stored in a ConfigMap (KN-S026).",
+        "doesNotShow": "data at rest, despite the indicator citing `sc-28`. No rule in the catalogue checks a "
+        "volume, a claim or a StorageClass for encryption, so nothing here is evidence about it. Nor cipher "
+        "suites, key custody, KMS configuration or the provider's own at-rest encryption.",
+    },
+    "KSI-SVC-VRI": {
+        "onSubject": True,
+        "rules": ("KN-S012", "KN-S007", "KN-S030"),
+        "shows": "the integrity controls the bundle declares, through `si-7`: an image referenced by a mutable "
+        "tag rather than a digest (KN-S012), a writable root filesystem (KN-S007), and an admission webhook "
+        "whose failure policy lets unchecked objects through (KN-S030).",
+        "doesNotShow": "whether any signature verifies. kube-noob fetches no image, no signature and no "
+        "attestation, so a digest-pinned image is evidence of intent and not of a validated artefact.",
     },
 }
 
 
 def indicators_for(control: str) -> tuple[str, ...]:
-    """The indicators citing one of kube-noob's controls (``AC-6``). Empty is an answer, not a miss."""
-    return BY_CONTROL.get(control, ())
+    """The indicators citing one of kube-noob's controls (``AC-6``). Empty is an answer; unknown is an error.
+
+    ``SC-6`` returns ``()`` because no indicator cites it, and that is a fact worth reporting. ``ac-6`` -- the
+    OSCAL spelling -- used to return ``()`` as well, which is the same answer to a different question and would
+    let a caller conclude from a typo that kube-noob has no evidence for a control it has thirty rules for.
+    """
+    if control not in BY_CONTROL:
+        raise KeyError(
+            f"{control!r} is not one of kube-noob's controls. They are spelled as NIST prints them, AC-6(10) "
+            f"rather than the OSCAL id ac-6.10; see kube_noob.audit.controls.TITLES"
+        )
+    return BY_CONTROL[control]
 
 
 def controls_for(indicator: str) -> tuple[str, ...]:
     """kube-noob's own controls that this indicator cites, in kube-noob's spelling (``AC-6(10)``)."""
+    if indicator not in INDICATORS:
+        raise KeyError(
+            f"{indicator!r} is not an indicator in {DATASET} {DATASET_VERSION}. Ids are mnemonics, KSI-IAM-ELP"
+        )
     return tuple(c for c, inds in BY_CONTROL.items() if indicator in inds)
 
 
@@ -979,6 +1093,35 @@ def indicator_rules(indicator: str) -> tuple[str, ...]:
 
     controls = set(controls_for(indicator))
     return tuple(sorted(r for r, cs in RULE_CONTROLS.items() if controls.intersection(cs)))
+
+
+def _unreached(rule_ids: list[str]) -> list[dict[str, Any]]:
+    """Findings that reach no indicator at all, counted and named rather than dropped.
+
+    Three ways a finding gets here: its rule maps to no control (a schema error, KN-V007); its rule maps only to
+    controls no indicator cites (``SC-6``, ``SC-36``); or it is not a rule at all -- a gate's scanner findings
+    carry the CVE id as their rule id. Each one used to vanish between the audit and this view, so a bundle with
+    findings could produce a page of zeroes. The OSCAL emitter already declares this case (G200); this did not.
+    """
+    from kube_noob.audit.controls import RULE_CONTROLS
+
+    out: dict[str, dict[str, Any]] = {}
+    for rid in rule_ids:
+        controls = RULE_CONTROLS.get(rid)
+        if controls and any(BY_CONTROL.get(c) for c in controls):
+            continue
+        if rid not in out:
+            why = (
+                "this rule is evidence about "
+                + ", ".join(controls)
+                + ", and no indicator in the dataset cites "
+                + ("it" if len(controls) == 1 else "any of them")
+                if controls
+                else "no control is mapped to this rule id, so it reaches no indicator"
+            )
+            out[rid] = {"ruleId": rid, "findings": 0, "why": why}
+        out[rid]["findings"] += 1
+    return [out[k] for k in sorted(out)]
 
 
 def summary(
@@ -991,9 +1134,14 @@ def summary(
 
     The argument shapes are :func:`kube_noob.audit.controls.summary`'s, and the buckets mean the same thing --
     ``clean`` is a rule that ran and found nothing, ``notEvaluated`` is a rule that did not run, ``withheld`` is a
-    rule that found something a severity filter then removed. Every indicator is listed, including the 20 or so no
-    kube-noob rule touches: those carry ``evidenced: false`` and no counts at all, because a zero in a column
-    reads as a pass and an indicator kube-noob cannot see has not passed anything.
+    rule that found something a severity filter then removed. ``withheld`` appears only when the caller says what
+    fired, exactly as it does there: without that list a filtered rule is indistinguishable from a clean one, and
+    printing ``withheld: 0`` would assert that none was filtered (G199).
+
+    Every indicator is listed, including the ones no kube-noob rule touches: those carry ``evidenced: false`` and
+    no counts at all, because a zero in a column reads as a pass and an indicator kube-noob cannot see has passed
+    nothing. Findings whose rule reaches no indicator are counted under ``findingsNotMapped`` rather than
+    dropped.
     """
     from kube_noob.audit.controls import RULE_CONTROLS
 
@@ -1023,19 +1171,24 @@ def summary(
             "variesByClass": list(body["variesByClass"]),
             "optionalFor": list(body["optionalFor"]),
         }
+        curated = EVIDENCE.get(ind)
+        if curated is not None:
+            row["onSubject"] = bool(curated["onSubject"])
         if rules:
             row["findings"] = found.get(ind, 0)
             if excepted.get(ind):
                 row["excepted"] = excepted[ind]
             if evaluated_rule_ids is not None:
                 rest = [r for r in rules if r not in with_findings]
-                row["withheld"] = sum(1 for r in rest if r in hidden)
+                if fired_rule_ids is not None:
+                    row["withheld"] = sum(1 for r in rest if r in hidden)
                 row["clean"] = sum(1 for r in rest if r not in hidden and r in ran)
                 row["notEvaluated"] = sum(1 for r in rest if r not in hidden and r not in ran)
         else:
             row["why"] = "no kube-noob rule is evidence for any control this indicator cites"
         rows.append(row)
-    return {
+    unreached = _unreached(rule_ids)
+    out: dict[str, Any] = {
         "dataset": {
             "name": DATASET,
             "version": DATASET_VERSION,
@@ -1048,4 +1201,8 @@ def summary(
         "unmappedControls": list(UNMAPPED_CONTROLS),
         "note": NOT_A_COMPLIANCE_CLAIM,
         "applicability": APPLICABILITY,
+        "sharedControlCaveat": SHARED_CONTROL_IS_NOT_SHARED_SUBJECT,
     }
+    if unreached:
+        out["findingsNotMapped"] = unreached
+    return out
