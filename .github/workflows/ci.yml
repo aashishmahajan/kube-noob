@@ -83,15 +83,42 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      - name: kube-noob, ffmpeg and Chromium (pinned in demos/video/package-lock.json)
+      # One command per step, each bounded, because a job timeout is not a diagnosis. The first version of this
+      # was one 12-minute install step and it died at its own limit, which said only "something in here hangs".
+      # Measured on this code: pip 20s, npm ci 3s, the whole render about 90 seconds (voiceover 7-17s per video,
+      # capture --check 6-9s, stills 5-7s, walkthrough and thumbnail 11s, 23 stills out). So the hang is in one
+      # of the two commands that cannot be measured off a runner -- apt, or the browser download -- and these
+      # steps name which.
+      - name: kube-noob and its video dependencies
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip && pip install . "numpy==2.5.3" "pytest>=8.3"
-          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
-          cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
+      # DPkg::Lock::Timeout is the fix for the known runner hang: unattended-upgrades holds the dpkg lock and
+      # apt-get waits for it forever by default. DEBIAN_FRONTEND needs `sudo -E`, which plain sudo would drop.
+      - name: ffmpeg
+        timeout-minutes: 4
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          sudo -E apt-get update -q -o DPkg::Lock::Timeout=180
+          sudo -E apt-get install -y -q -o DPkg::Lock::Timeout=180 ffmpeg
+      - name: Video node modules (pinned in demos/video/package-lock.json)
+        timeout-minutes: 4
+        run: cd demos/video && npm ci --ignore-scripts --no-audit --no-fund
+      # `--with-deps` is deliberately NOT used: it shells out to apt a second time, inside Playwright's own sudo
+      # where neither DEBIAN_FRONTEND nor the lock timeout above reaches it. The ubuntu-latest image already
+      # carries Chromium's libraries, and if one is ever missing the render step fails in seconds naming the
+      # library -- a loud failure, where an unbounded apt was a silent one.
+      - name: Chromium for Playwright (no apt)
+        timeout-minutes: 6
+        run: cd demos/video && timeout 300 npx playwright install chromium
       - name: Video tests with ffmpeg (loudness, captions, facts, brand)
+        timeout-minutes: 4
         run: python -m pytest -q tests/test_video_loudness.py tests/test_video_captions.py tests/test_video_facts.py tests/test_brand.py tests/test_video_workflows.py tests/test_video_voice.py
       - name: Video scripts, facts and layout rules on every frame, and stills (silent voice)
+        timeout-minutes: 6
         env:
           NODE_PATH: ${{ github.workspace }}/demos/video/node_modules
           KN_SIDECAR_TRANSCRIPT: ${{ github.workspace }}/tests/fixtures/video-sidecar-transcript.txt
@@ -134,6 +161,10 @@ jobs:
         run: python scripts/safety_contract.py --check
       - name: Agent Skill is valid and its tool reference matches the code
         run: python scripts/build_skill.py --check
+      - name: Compliance document's rule and control tables match the code
+        run: python scripts/compliance_doc.py --check
+      - name: Documented measurements match what the commands produce
+        run: python scripts/doc_numbers.py --check
       - name: Plugin lock matches its pyproject
         run: uv lock --check --project plugin/kube-noob --default-index https://pypi.org/simple
       - name: Plugin dependency vulnerability audit
@@ -144,6 +175,22 @@ jobs:
         run: python scripts/e2e_plugin.py
       - name: Formula matches the PyPI release files
         run: python scripts/brew_formula.py --check
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: OSCAL output validates against the pinned NIST schema (ajv, not jsonschema)
+        run: |
+          npm install --no-save --no-audit --no-fund ajv@8.17.1 ajv-formats@3.0.1
+          python -m kube_noob audit -f examples/insecure-deployment.yaml --platform openshift --version 4.22 \
+            --oscal > /tmp/assessment-results.json || true
+          node scripts/oscal_validate.mjs tests/fixtures/oscal/oscal_assessment-results_schema.json \
+            /tmp/assessment-results.json
+      - name: The schema check ran rather than skipping for a missing ajv
+        run: |
+          out=$(python -m pytest tests/test_oscal.py -q -rs 2>&1)
+          echo "$out" | tail -5
+          echo "$out" | grep -q "ajv is not installed" && { echo "the OSCAL schema test SKIPPED"; exit 1; }
+          echo "$out" | grep -qE "[0-9]+ passed" || exit 1
 
   publishable:
     # Upload validation exactly as pypa/gh-action-pypi-publish runs it: same twine, same Python as its container.
@@ -563,15 +610,17 @@ jobs:
           base="--set auth.existingSecret=kn-token --set admission.enabled=true"
           at() { helm template kn deploy/helm/kube-noob -n kube-noob $base "$@"; }
           helm lint --strict deploy/helm/kube-noob $base
+          exc="--exceptions .github/kube-noob-exceptions.yaml"
+          kube-noob exceptions check .github/kube-noob-exceptions.yaml
           for v in 1.33.0 1.35.0; do
             at --kube-version "$v" --set networkPolicy.allowRouter=false \
               --set admission.certificates=secret --set admission.tls.secretName=kn-tls --set admission.tls.caBundle=Zm9v \
-              | kube-noob audit -f - --platform kubernetes --fail-on medium
+              | kube-noob audit -f - --platform kubernetes --fail-on medium $exc
           done
           for v in 4.20:1.33.0 4.22:1.35.0; do
             at --kube-version "${v#*:}" --api-versions security.openshift.io/v1 --set admission.lookups=true \
               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" --set "admission.enforce={KN-S001}" \
-              | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium
+              | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium $exc
           done
           at --kube-version 1.33.0 --api-versions security.openshift.io/v1 > /tmp/adm-sca.yaml
           at --kube-version 1.33.0 --set admission.certificates=cert-manager \

@@ -40,6 +40,10 @@ Until that work is done, ``ClusterNetworkPolicy`` is listed in
 removed AdminNetworkPolicy and BaselineAdminNetworkPolicy enforcement outright in favour of
 ``ClusterNetworkPolicy``, so on such a cluster the policy that actually decides is the kind this module cannot
 read.
+
+The other half of that is :mod:`kube_noob.debug.cni`: everything here is the semantics of a tier the CNI may not
+apply at all, so when the caller names the CNI, the policies this module would have evaluated are withheld from
+it rather than fed through it.
 """
 
 from __future__ import annotations

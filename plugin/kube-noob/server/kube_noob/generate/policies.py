@@ -379,10 +379,35 @@ NOT_GENERATED: dict[str, str] = {
     "bundle",
     "KN-V012": "needs the containers the Service selects (another object); `kube-noob audit` checks the bundle",
     "KN-V014": "duplicates are a property of a bundle; admission sees one object at a time",
+    "KN-N014": "needs the cluster's CNI and its version, which no admitted object carries; `kube-noob audit --cni` "
+    "decides it",
+    "KN-V023": "needs the containerPorts the Service's selected pods declare (other objects), and the mismatch is "
+    "advisory rather than a refusal; `kube-noob audit` checks the bundle",
+    "KN-V020": "the API server refuses a claim name the Pod does not declare itself",
+    "KN-V021": "the API server refuses a claim entry with neither or both sources itself",
+    "KN-V022": "the API server forbids pod-level resources.claims itself",
+    "KN-S032": "the answer depends on the platform and on the cluster's PodSecurity AdmissionConfiguration "
+    "default, neither of which is a property of the Namespace object an admission policy sees",
+    "KN-C016": "needs the namespace's ResourceQuota and LimitRange (other objects); `kube-noob audit` "
+    "checks the bundle",
+    "KN-S033": "pausing a pool is a legitimate maintenance step, and the finding is about a pool LEFT "
+    "paused, which one object at one moment cannot tell from one paused a minute ago",
+    "KN-S034": "the webhook and the generated policies exempt openshift-* namespaces, where operator "
+    "Subscriptions normally live, so a policy would not see the objects this rule is about",
+    "KN-C015": "needs the namespace's ResourceClaims and templates (other objects); `kube-noob audit` checks "
+    "the bundle",
+    "KN-S031": "the API server's own gate is the namespace label resource.kubernetes.io/admin-access, so it "
+    "already refuses adminAccess where that label is absent and permits it where a cluster admin set it; a policy "
+    "here would restrict a grant the admin made, which is a decision to ask for rather than to generate",
     "KN-V018": "duplicate YAML keys are lost when the client parses the file; kubectl's strict field validation (the "
     "default) refuses them",
     "KN-S018": "every Secret in a cluster carries its data; the rule is about Secrets committed to Git, so it belongs "
     "in CI (`kube-noob audit`), not at admission",
+    "KN-N013": "needs the other NetworkPolicies of the namespace (policies are additive, so another one "
+    "may allow port 53); `kube-noob audit` checks the bundle",
+    "KN-S030": "the API server does not send webhook configurations to admission webhooks, and a "
+    "ValidatingAdmissionPolicy cannot validate another one, so no admission policy can see this object; "
+    "`kube-noob audit` checks it",
     "KN-N001": "needs the NetworkPolicies of the namespace (other objects); `kube-noob audit` checks the bundle",
     "KN-ST001": "needs the StorageClass the claim names (another object); `kube-noob audit` checks the bundle",
     "KN-ST002": "needs the claim's access modes (another object); `kube-noob audit` checks the bundle",

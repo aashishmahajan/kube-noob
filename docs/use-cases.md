@@ -68,10 +68,63 @@ kube-noob --format json audit -f k8s/ --platform openshift --compact
 
 Each rule's constant fields -- title, severity, remediation, citations, controls and the rest -- are collected
 once into a `ruleInfo` map keyed by rule id instead of being repeated on every finding that rule produced. On
-this repository's `examples/` directory that is 105 findings over 19 rules, and the JSON goes from 118 631 to
-54 694 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
+this repository's `examples/` directory that is 115 findings over 21 rules, and the JSON goes from 141 349 to
+69 936 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
 exactly. The MCP and HTTP tool takes the same thing as `compact: true`, off by default so the flat shape stays
 what it was. The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
+
+### The GPU claim that will be refused on apply
+
+Dynamic Resource Allocation is GA from Kubernetes 1.34, and its wiring is three names deep: a container names a
+pod-level claim, which in turn names a `ResourceClaim` or a `ResourceClaimTemplate`. A plural on one of those names
+reads at a glance like a device request that was made, and `kubectl apply --dry-run=client` does not catch it
+either, because a client dry run only validates against the schema and the schema cannot express the reference:
+
+```console
+$ kube-noob validate -f k8s/trainer.yaml
+kube-noob audit | platform=kubernetes k8s=1.35 | score=90.0 | high=1
+  note: No Kubernetes version given; assumed 1.35.
+[HIGH    ] KN-V020   Deployment/ml/trainer L18 spec.template.spec.containers[0].resources.claims[0].name
+           Container 'train' claims 'gpus', which is not one of the Pod's resource claims: the Pod declares gpu.
+           fix: Name a claim the Pod declares: every resources.claims[].name has to match a spec.resourceClaims[].name.
+```
+
+The path is printed by index, but the `fingerprint` the JSON report carries beside it is computed from a
+name-keyed locator (`containers[name=train]`), so inserting a sidecar ahead of this container does not rotate
+the identity a baseline matches on (G190).
+
+The same rule fires when the Pod declares no `resourceClaims` at all, which is the shape a copied container block
+produces. `KN-V021` covers the other half: a `spec.resourceClaims` entry that sets both `resourceClaimName` and
+`resourceClaimTemplateName`, or neither -- the API server refuses both, and nothing before apply says which.
+
+Two more rules read across the bundle. Audit the **directory**, not one file, because both depend on objects the
+other documents carry:
+
+```console
+$ kube-noob audit -f k8s/ --version 1.35
+[HIGH    ] KN-C015   Pod/ml/inference L11 spec.resourceClaims[0].resourceClaimName
+           Pod resource claim names the ResourceClaim 'gpu-pool', which no document in this bundle defines in namespace ml. The Pod is admitted and then stays Pending.
+[HIGH    ] KN-S031   ResourceClaim/ml/telemetry L30 spec.devices.requests[0].exactly.adminAccess
+           ResourceClaim request 'gpu' sets adminAccess: true, and namespace ml in this bundle does not carry resource.kubernetes.io/admin-access: "true". The API server will refuse this object, so the claim does not exist and nothing that depends on it will schedule.
+```
+
+`KN-C015` is the post-deploy failure: the Pod is admitted and then sits Pending, so nothing goes red until
+someone looks. It is namespaced and kind-exact -- a `ResourceClaim` called `gpu-pool` does not satisfy a
+`resourceClaimTemplateName: gpu-pool` -- and `audit -f one-file.yaml` says nothing, because a claim in a file you
+did not pass is not a missing claim.
+
+`KN-S031` is the privilege one. `adminAccess` ignores every ordinary claim to the device with respect to access
+modes and allocations, so the workload reaches devices another tenant holds exclusively; it is the DRA equivalent
+of a privileged container, and the only gate is a namespace label. When the `Namespace` is in the bundle and does
+not carry that label, the message above says the API server will refuse the object, because that is a verdict
+rather than a risk. Without the `Namespace` the same finding reports the privilege and claims nothing about
+admission.
+
+What none of the four rules claims is `cannot allocate all claims`, the scheduler event users actually report.
+Allocation is matched against the `ResourceSlice` objects a driver publishes from the hardware it found, so no
+manifest can decide it. For the same reason there is no rule for a `deviceClassName` that names no `DeviceClass`
+in the bundle: a `DeviceClass` is cluster-scoped and installed by the driver, so it is absent from almost every
+manifest set and such a rule would fire on every correct repository.
 
 ## SRE or on-call: diagnose before you change anything
 
@@ -85,8 +138,11 @@ the name of its subject: every Gatekeeper post says "gatekeeper".
 kube-noob insight -f whatever-you-copied.txt
 oc describe pod web-1 -n shop | kube-noob insight --platform openshift
 kube-noob insight 'why does my pod stay Pending?'
-kube-noob insight -f trace.pcap --format json
 ```
+
+`insight` recognises a packet capture by its header and reports it under `skipped`, with the reason, because the
+pcap analyser is not built: it does not pretend to have read it. That is why the line is not in the block above --
+a command in a block of working commands reads as a capability.
 
 1. Paste events, `describe` output or logs into `diagnose`: as quoted text (multi-line is fine; single quotes stop the
    shell expanding `$`), as a file with `-f`, or piped in. An Alertmanager webhook payload works as it is. You get
@@ -374,10 +430,32 @@ policies, both admin tiers, namespace labels and workloads from the cluster (rea
 `network-policy-api` CRDs is a note, not a failure. EgressFirewall and CNI-specific policies are listed as not
 evaluated.
 
+Those two cluster-scoped tiers only decide on a cluster whose CNI enforces them, and Calico stopped: it removed
+`AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` support in 3.32 in favour of `ClusterNetworkPolicy` and does
+not enforce them from 3.32 onward, without reporting an error. Pass `--cni calico:3.32` and every policy in that
+tier is reported as **NOT ENFORCED** -- read, named, and not allowed to decide -- with the replacement kind, so an
+`ANP` that looks like a guardrail is shown as the no-op it has become. The NetworkPolicies then give the answer,
+which can be the opposite of the one that tier would have given. A CNI nobody documents either way (`--cni
+cilium:1.18`) is evaluated both ways -- with the tier and without it -- and the verdict is `undetermined` only
+where the two readings disagree: evaluating the tier would assume enforcement and dropping it would assume the
+reverse, but an answer that holds under both still holds. A Calico version too coarse to decide (`--cni calico:3`,
+which does not say whether the cluster is on 3.31 or 3.32) is treated the same way. With `--live` the flag is
+usually unnecessary: Calico publishes its version in `clusterinformations.crd.projectcalico.org` and kube-noob
+reads it, so the answer uses the cluster's real CNI rather than an assumption. A cluster without that CRD is not
+running Calico and behaves as before; a read the token is not allowed to make says so and changes nothing; and an
+explicit `--cni` always wins, because a caller who passes it knows something a forbidden read cannot see.
+
+`kube-noob audit --cni calico:3.32` turns the same fact into a finding a CI gate fails on: **KN-N014** reports an
+`AdminNetworkPolicy` or `BaselineAdminNetworkPolicy` that this CNI no longer enforces, at HIGH, because a policy
+gate that silently stopped applying is worse than one that was never there. `gate --cni` takes it too. Without the
+flag the rule is reported as NOT EVALUATED rather than clean: no manifest states which CNI runs the cluster, and
+"nobody told me" is not "the policy is enforced".
+
 ```bash
 kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-shop.yaml
 kube-noob policy reach --from shop/orders-api --to shop/payments --port 9090 -f examples/netpol-shop.yaml
 kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-admin-tiers.yaml
+kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-admin-tiers.yaml --cni calico:3.32
 kube-noob policy reach --from shop/orders-api --to shop/payments --port grpc --live --cluster-enabled
 ```
 
@@ -829,6 +907,31 @@ On OpenShift the service CA operator issues the serving certificate and injects 
 own certificate and CA bundle. CI installs it on a kind cluster: warnings in warn mode, 600 fuzzed reviews never
 denied, 50 requests per second for 30 seconds under 50 ms at p99, denial of the enforced rule only, an update of an
 existing breaker admitted, and nothing blocked with the webhook scaled to zero.
+
+### Evidence an assessor can import: OSCAL assessment-results
+
+```bash
+kube-noob audit -f k8s/ --platform openshift --version 4.22 --oscal > assessment-results.json
+kube-noob gate  -f k8s/ --platform openshift --version 4.22 --oscal > assessment-results.json
+```
+
+An OSCAL 1.2.3 assessment-results document, from either command: each finding becomes an observation with
+method `EXAMINE`, and each control becomes an OSCAL finding targeting that control's objective id
+(`ac-6.10_obj`). What it will not say is the point. A control is `satisfied` only where its rules actually ran
+and produced nothing. A control no rule evaluated is named under `exclude-controls` and gets no finding at all.
+A control whose rules ran and reported findings that a `--min-severity` filter removed is `not-satisfied` with
+reason `other`, never a pass -- so the verdict per control is the same at every filter level, and no flag turns
+a failing audit into a clean record. An accepted exception is `not-satisfied` too, with the same reason: a
+signed-off finding is a recorded decision, not a met objective. Every description ends with the sentence the
+report carries, that this is evidence about a control and not a claim of compliance.
+
+Every uuid is a v5 uuid over the assessment -- the objects, every finding's identity, each control's coverage
+and the imported plan -- so two runs over the same bundle are byte-identical and a pipeline can diff them,
+while two runs that reach different verdicts cannot collide on one identity.
+`--oscal-import-ap https://grc.example.com/ap.json` points the required `import-ap` at your assessment plan;
+without it the document says plainly that no plan was imported rather than inventing one. The exit code is the
+audit's or the gate's either way, so the verdict is the same with the flag as without.
+
 
 ## Claude and MCP users
 

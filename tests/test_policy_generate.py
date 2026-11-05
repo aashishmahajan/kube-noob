@@ -30,9 +30,9 @@ def _fixture(rule_id: str) -> dict[str, Any]:
     return data
 
 
-def _audit_ids(text: str, platform: str, version: str | None) -> set[str]:
+def _audit_ids(text: str, platform: str, version: str | None, cni: str | None = None) -> set[str]:
     docs = load_documents(text)
-    ctx = build_context(docs, platform, version)
+    ctx = build_context(docs, platform, version, False, cni)
     found: set[str] = set()
     for rid, rule in RULES.items():
         if rule.check is not None and any(True for _ in rule.check(ctx, rule)):
@@ -63,16 +63,18 @@ def test_every_rule_ships_a_good_and_a_bad_fixture() -> None:
     for rid in RULES:
         data = _fixture(rid)
         assert data["rule"] == rid
-        assert set(data) <= {"rule", "platform", "version", "good", "bad"}, rid
+        # `cni` is for a rule whose answer depends on the cluster's CNI rather than on the documents (KN-N014):
+        # no manifest states it, so without it the rule declines to decide and the bad fixture cannot fire.
+        assert set(data) <= {"rule", "platform", "version", "cni", "good", "bad"}, rid
         assert data.get("good", "").strip() and data.get("bad", "").strip(), f"{rid} needs good and bad"
 
 
 @pytest.mark.parametrize("rule_id", sorted(RULES))
 def test_audit_flags_the_bad_fixture_and_not_the_good(rule_id: str) -> None:
     data = _fixture(rule_id)
-    platform, version = data.get("platform", "kubernetes"), data.get("version")
-    assert rule_id in _audit_ids(data["bad"], platform, version), "bad fixture not flagged"
-    assert rule_id not in _audit_ids(data["good"], platform, version), "good fixture flagged"
+    platform, version, cni = data.get("platform", "kubernetes"), data.get("version"), data.get("cni")
+    assert rule_id in _audit_ids(data["bad"], platform, version, cni), "bad fixture not flagged"
+    assert rule_id not in _audit_ids(data["good"], platform, version, cni), "good fixture flagged"
 
 
 # --- R3.1: every rule generated or explained ----------------------------------------------------------------------

@@ -373,12 +373,21 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             trust_report_vex=a.trust_report_vex,
             sarif_reports=[(p, _read(p)) for p in a.sarif_report],
             source_roots=[str(Path.cwd().resolve()), *(r.rstrip("/") for r in a.source_root if r.startswith("/"))],
+            cni=a.cni,
         )
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
     quiet_pass = getattr(a, "quiet", False) and report["passed"]
-    if a.format == "text":
+    if getattr(a, "oscal", False):
+        from kube_noob.oscal import assessment_results, check_import_ap
+
+        # The flag REPLACES the gate report, the same way it does for `audit`. SARIF and the Markdown summary
+        # are still written to their files, because those are paths the caller asked for.
+        check_import_ap(a.oscal_import_ap)
+        if not quiet_pass:
+            _emit(assessment_results(report, import_ap=a.oscal_import_ap), "json" if a.format == "text" else fmt)
+    elif a.format == "text":
         if not quiet_pass:
             _tprint(gate.markdown(report, top=50))
     elif not quiet_pass:
@@ -882,12 +891,36 @@ def build_parser() -> argparse.ArgumentParser:
         "finding: the same report, losslessly, about a third smaller where a rule fires more than once. The exit "
         "code is unchanged, so a gate reads the same verdict either way",
     )
+    a.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest "
+        "states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, "
+        "which Calico did in 3.32 without reporting an error -- is reported as NOT EVALUATED until you name it, "
+        "rather than counted clean",
+    )
     a.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     a.add_argument(
         "--exceptions",
         default=None,
         help="exception list (kube-noob.io/v1 ExceptionList): active entries hide the findings they cover; an expired "
         "or refused entry fails the gate (exit 1)",
+    )
+    a.add_argument(
+        "--oscal",
+        action="store_true",
+        help="emit an OSCAL 1.2.3 assessment-results document instead of the report: the findings as observations, "
+        "and one finding per control, satisfied only where that control's rules actually ran and found nothing. A "
+        "control no rule evaluated is named under exclude-controls and never reported satisfied. Every uuid is a v5 "
+        "uuid over the input, so two runs over the same bundle produce the same document and CI can diff it. The "
+        "exit code is unchanged, so a gate reads the same verdict with the flag as without",
+    )
+    a.add_argument(
+        "--oscal-import-ap",
+        default=None,
+        metavar="HREF",
+        help="the assessment plan this document is assessed against. OSCAL requires the field; without it the "
+        "document points at a local fragment and says plainly that no plan was imported",
     )
     exc_p = sub.add_parser(
         "exceptions",
@@ -925,6 +958,28 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--platform", choices=PLATFORMS)
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
+    gt.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest "
+        "states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, "
+        "which Calico did in 3.32 without reporting an error -- is reported as NOT EVALUATED until you name it, "
+        "rather than counted clean",
+    )
+    gt.add_argument(
+        "--oscal",
+        action="store_true",
+        help="emit an OSCAL 1.2.3 assessment-results document instead of the gate report: the same document "
+        "`kube-noob audit --oscal` writes, from the gate's own coverage record. The exit code is unchanged, so "
+        "the gate verdict is the same with the flag as without",
+    )
+    gt.add_argument(
+        "--oscal-import-ap",
+        default=None,
+        metavar="HREF",
+        help="the assessment plan this document is assessed against; without it the document says plainly that "
+        "no plan was imported",
+    )
     gt.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     gt.add_argument(
         "--quiet",
@@ -1384,6 +1439,13 @@ def build_parser() -> argparse.ArgumentParser:
     prc.add_argument("--namespace", dest="default_namespace", default="default", help="for objects without one")
     prc.add_argument("--live", action="store_true", help="read the policies from the cluster (read-only)")
     prc.add_argument("--platform", choices=PLATFORMS)
+    prc.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Calico ignores "
+        "AdminNetworkPolicy and BaselineAdminNetworkPolicy from 3.32 onward, so with it those policies are reported "
+        "as inert instead of deciding; an undocumented CNI makes the verdict undetermined",
+    )
     pgen = psub.add_parser(
         "generate",
         help="Turn kube-noob's audit rules into ValidatingAdmissionPolicy and Kyverno ValidatingPolicy YAML",
@@ -1876,12 +1938,25 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                         min_severity=a.min_severity,
                         exceptions=exceptions,
                         partial_bundle=_partial_input(a),
+                        cni=a.cni,
                     )
                 )
             except ExceptionsError as exc:
                 raise ConfigError(f"{a.exceptions}: {exc}") from exc
             rep["unreadable"] = unreadable
-            if a.format == "text":
+            if a.oscal:
+                from kube_noob.oscal import assessment_results, check_import_ap
+
+                # The flag REPLACES the report: a caller asking for OSCAL wants a document it can hand to a
+                # tool, not a document with a human report printed above it. The exit code is unchanged, so a
+                # gate reads the same verdict with the flag as without.
+                check_import_ap(a.oscal_import_ap)
+                _emit(assessment_results(rep, import_ap=a.oscal_import_ap), "json" if a.format == "text" else fmt)
+                # The document names the skipped files in its remarks, and the operator still gets the notice
+                # on stderr: a partial audit must not look clean on either channel.
+                for b in unreadable:
+                    print(f"not read: {b['path']} ({b['why']})", file=sys.stderr)
+            elif a.format == "text":
                 _print_report(rep)
                 _print_exceptions(rep)
                 for b in unreadable:
@@ -2513,6 +2588,11 @@ def _print_reach(out: dict[str, Any]) -> None:
         # terminal shows a conclusion with no reason while the JSON carries both `undeterminedBy` and `summary`.
         # A caveat belongs in the surface that is read, not only in the one that is parsed.
         _tprint(f"  unknown because: {', '.join(out['undeterminedBy'])} is not evaluated here")
+    for entry in out.get("inertPolicies", []):
+        # The verdict can read ALLOWED while the operator believes an AdminNetworkPolicy is denying it. That gap
+        # is the whole finding, so it goes on the line below the verdict, not into the JSON alone.
+        _tprint(f"  NOT ENFORCED  {entry['policy']}: {entry['reason']}")
+        _tprint(f"                replace it with an equivalent {entry['replacement']}, or remove it")
     for note in out.get("notes") or []:
         _tprint(f"  note: {note}")
     if out.get("summary") and out["verdict"] == "undetermined":
@@ -2557,7 +2637,14 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
         if not s.cluster.enabled:
             raise ConfigError("--live needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
         out = kit.cluster_check_traffic(
-            tk.TrafficIn(source=a.source, destination=a.destination, port=port, protocol=a.protocol, platform=platform)
+            tk.TrafficIn(
+                source=a.source,
+                destination=a.destination,
+                port=port,
+                protocol=a.protocol,
+                platform=platform,
+                cni=a.cni,
+            )
         )
     else:
         if not a.file:
@@ -2572,6 +2659,7 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
                 protocol=a.protocol,
                 platform=platform,
                 default_namespace=a.default_namespace,
+                cni=a.cni,
             )
         )
     _print_reach(out) if a.format == "text" else _emit(out, fmt)

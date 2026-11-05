@@ -915,7 +915,13 @@ metadata:
 
 def test_host_network_plus_an_unread_policy_is_not_called_a_deny() -> None:
     """hostNetwork sets allowed to false because unknown is not a pass. That flag must not be narrated as
-    'the NetworkPolicies would deny' when the only other fact is a policy that was never read."""
+    'the NetworkPolicies would deny' when the only other fact is a policy that was never read.
+
+    Nor as 'would allow', which is what this test used to assert. `decided` was computed from the directions that
+    WERE evaluated, so one allowed direction beside one undetermined direction read as "the NetworkPolicies would
+    allow this traffic" -- a claim about a decision nobody made. With a direction undecided the pair has no
+    answer, and the summary now carries that direction's own reason instead.
+    """
     host = WORKLOADS.replace(
         "    spec:\n      containers:\n        - name: c\n          image: orders:1",
         "    spec:\n      hostNetwork: true\n      containers:\n        - name: c\n          image: orders:1",
@@ -931,7 +937,8 @@ metadata:
     out = check_reachability(inv, "monitoring/prometheus", "shop/orders", 8080)
     assert out["verdict"] == "undetermined", out["summary"]
     assert "would deny" not in out["summary"]
-    assert "would allow" in out["summary"]
+    assert "would allow" not in out["summary"]
+    assert "hostNetwork" in out["summary"] and out["undetermined"] == ["Ingress"]
 
 
 # Published CRDs, not guessed names. Cilium v1.18.3

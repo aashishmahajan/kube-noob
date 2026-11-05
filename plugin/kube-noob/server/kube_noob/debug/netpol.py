@@ -13,6 +13,11 @@ BaselineAdminNetworkPolicy where no NetworkPolicy selects the pod (``kube_noob.d
 the deciding tier has no determinate answer -- two AdminNetworkPolicies at one priority whose rules disagree, which
 the API leaves undefined -- the verdict is ``undetermined`` and no fix is proposed, rather than a guess.
 
+Those two tiers only decide on a cluster whose CNI enforces them. Pass the CNI (``cni="calico:3.32"``) and
+``kube_noob.debug.cni`` says whether it does: a CNI documented as ignoring the tier makes every policy in it
+``inertPolicies`` -- read, named, and not allowed to decide -- and a CNI nobody documents either way makes the
+verdict ``undetermined``. Without the argument the OVN-Kubernetes semantics above are assumed, as before.
+
 Not evaluated, and said so in every result: ClusterNetworkPolicy, OpenShift EgressFirewall and EgressNetworkPolicy,
 CNI-specific policies (Cilium, Calico), host-network pods, and firewalls outside the cluster.
 """
@@ -271,7 +276,9 @@ def _endpoint_from(kind: str, data: dict[str, Any], default_ns: str) -> Endpoint
 class Inventory:
     """NetworkPolicies, workloads and namespace labels: what the evaluation reads."""
 
-    def __init__(self, objects: list[dict[str, Any]], default_namespace: str = "default") -> None:
+    def __init__(
+        self, objects: list[dict[str, Any]], default_namespace: str = "default", cni: str | None = None
+    ) -> None:
         self.default_namespace = default_namespace
         self.policies: list[dict[str, Any]] = []
         self.workloads: dict[tuple[str, str, str], Endpoint] = {}
@@ -282,6 +289,10 @@ class Inventory:
         self.invalid_policies: list[str] = []
         self.admin: list[dict[str, Any]] = []
         self.baseline: list[dict[str, Any]] = []
+        # An admin policy the cluster's CNI does not enforce, and one whose enforcement is unknown. Both are read
+        # and then NOT evaluated: see _apply_cni.
+        self.inert: list[dict[str, str]] = []
+        self.enforcement_unknown: list[str] = []
         for obj in objects:
             if not isinstance(obj, dict):
                 continue
@@ -313,10 +324,58 @@ class Inventory:
         if self.admin or self.baseline:
             # Evaluated now, so they must not also be listed as policies that were only found.
             self.other_policies = [p for p in self.other_policies if p.split("/", 1)[0] not in admin_kinds]
+        self._apply_cni(cni)
+
+    def _apply_cni(self, cni: str | None) -> None:
+        """Drop the admin tier when the named CNI does not enforce it, or when nobody says whether it does.
+
+        Evaluating ``AdminNetworkPolicy`` assumes the CNI applies it. Calico stopped doing so in 3.32 "without
+        reporting an error", so the assumption is wrong on a current Calico cluster and the verdict it produces is
+        a deny that is not happening. Dropping the tier is the right answer only where that is documented: where
+        it is not, the policies are dropped too and the verdict becomes undetermined, because evaluating guesses
+        enforcement and ignoring guesses the reverse. ``kube_noob.debug.cni`` holds the table and its sources.
+        """
+        if not cni:
+            return
+        from kube_noob.debug.cni import REPLACEMENT, admin_tier_reason, admin_tier_support, parse_cni
+
+        # Parsed before the empty-tier check, so a library caller's typo is refused rather than ignored whenever
+        # the bundle happens to carry no admin policy.
+        name, version = parse_cni(cni)
+        if not (self.admin or self.baseline):
+            return
+        support = admin_tier_support(name, version)
+        if support == "enforced":
+            return
+        reason = admin_tier_reason(name, version, support)
+        refs = [
+            f"{kind}/{(pol.get('metadata') or {}).get('name', '')!s}"
+            for kind, tier in ((ANP_KIND, self.admin), (BANP_KIND, self.baseline))
+            for pol in tier
+        ]
+        if support == "not-enforced":
+            # Dropped only here, where the CNI is documented as ignoring them. No note beside this: `inertPolicies`
+            # and the summary both carry it, and the CLI prints them, so a note would repeat the same sentence.
+            self.admin, self.baseline = [], []
+            self.inert = [{"policy": ref, "reason": reason, "replacement": REPLACEMENT} for ref in refs]
+            return
+        # NOT dropped here. An unknown must not read as a pass, and it must not discard an answer that is the
+        # same under both readings either: check_reachability evaluates the tier and withholds it, and only calls
+        # the question unanswerable when the two disagree.
+        self.enforcement_unknown = refs
+        self.notes.append(f"{', '.join(refs)}: {reason}.")
+
+    def without_admin_tier(self) -> Inventory:
+        """A shallow view of this inventory with the two admin tiers empty, for the second reading above."""
+        import copy
+
+        bare = copy.copy(self)
+        bare.admin, bare.baseline = [], []
+        return bare
 
     @classmethod
-    def from_yaml(cls, text: str, default_namespace: str = "default") -> Inventory:
-        return cls([d.data for d in load_documents(text)], default_namespace)
+    def from_yaml(cls, text: str, default_namespace: str = "default", cni: str | None = None) -> Inventory:
+        return cls([d.data for d in load_documents(text)], default_namespace, cni)
 
     def ns_labels(self, ns: str) -> dict[str, str]:
         return {**self.namespace_labels.get(ns, {}), "kubernetes.io/metadata.name": ns}
@@ -641,6 +700,20 @@ def _step(check: str) -> dict[str, str]:
     return {"command": cmd, **({"why": why} if why else {})}
 
 
+def _same_answer(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Do two readings of one direction reach the same verdict?
+
+    Only the three states are compared -- allowed, denied, undetermined -- not which policy decided or why. A
+    reading that reaches the same state by another route does not leave the question open; it changes the
+    explanation, and the explanation reported is the one that holds under both (the withheld reading).
+    """
+    return (
+        bool(a["allowed"]) == bool(b["allowed"])
+        and bool(a.get("undetermined")) == bool(b.get("undetermined"))
+        and bool(a.get("evaluated", True)) == bool(b.get("evaluated", True))
+    )
+
+
 def check_reachability(
     inv: Inventory, source: str, destination: str, port: int | str, protocol: str = "TCP", cli: str = "kubectl"
 ) -> dict[str, Any]:
@@ -658,6 +731,27 @@ def check_reachability(
         raise ValueError("at least one side must be a workload in the cluster")
     egress = _direction(inv, src, dst, "Egress", port, protocol, dst)
     ingress = _direction(inv, dst, src, "Ingress", port, protocol, dst)
+    # A CNI nobody documents either way leaves the admin tier in doubt, not the question. Evaluate it and withhold
+    # it, and only call the answer unknown where the two readings disagree: an unknown must not read as a pass, and
+    # it must not throw away an answer that holds under both readings either. On a Cilium cluster the first version
+    # of this made every question unanswerable as long as one AdminNetworkPolicy existed anywhere.
+    enforcement_unknown = list(inv.enforcement_unknown)
+    if enforcement_unknown:
+        bare = inv.without_admin_tier()
+        withheld = (
+            _direction(bare, src, dst, "Egress", port, protocol, dst),
+            _direction(bare, dst, src, "Ingress", port, protocol, dst),
+        )
+        agree = all(_same_answer(a, b) for a, b in zip((egress, ingress), withheld, strict=True))
+        # The withheld reading is the one reported either way: the tier may not apply, so its reason must not be
+        # the one the operator reads.
+        egress, ingress = withheld
+        if agree:
+            enforcement_unknown = []
+            inv.notes.append(
+                "Both readings of that tier -- enforced and ignored -- give the same answer here, so the verdict "
+                "stands either way."
+            )
     allowed = bool(egress["allowed"] and ingress["allowed"])
     # A direction whose deciding tier has no determinate answer is neither allowed nor denied. Calling it either
     # would be a guess, and a proposed NetworkPolicy under it would be applied and change nothing if the admin
@@ -692,11 +786,15 @@ def check_reachability(
     evaluated_answers = [r for r in (egress, ingress) if r.get("evaluated", True) and not r.get("undetermined")]
     if evaluated_deny:
         decided = "deny"
-    elif evaluated_answers:
+    elif evaluated_answers and not undetermined:
+        # Both directions must have an answer before the pair has one. With one direction allowed and the other
+        # never decided, "the NetworkPolicies would allow this traffic" is a claim about a decision nobody made.
         decided = "allow"
     else:
         decided = None
-    overrides = bool(unevaluated_present or unreadable)
+    # A policy whose tier this CNI may or may not apply was read and then withheld. It is not "unreadable"
+    # -- the document is right here -- and it is not "absent", so it gets its own reason rather than borrowing one.
+    overrides = bool(unevaluated_present or unreadable or enforcement_unknown)
     unknown = bool(undetermined or overrides)
     if unknown and (not evaluated_deny or overrides):
         verdict = "undetermined"
@@ -751,11 +849,39 @@ def check_reachability(
                 "rather than allowed or denied."
             )
         else:
+            # Where a direction is undetermined in its own right, its reason belongs here too: this branch used to
+            # drop it, so a hostNetwork destination behind an unread policy was reported with neither fact.
+            why = " ".join((ingress if d == "Ingress" else egress)["reason"] for d in undetermined)
             body = (
                 f"kube-noob could not determine whether {src.describe()} reaches {dst.describe()} on "
                 f"{protocol} {port}, and {detail}, so the answer is unknown rather than allowed or denied."
+                + (f" {why}" if why else "")
             )
+            if undetermined:
+                out["undetermined"] = undetermined
         out["summary"] = f"Undetermined: {body}"
+    elif enforcement_unknown:
+        out["undeterminedBy"] = enforcement_unknown
+        if undetermined:
+            out["undetermined"] = undetermined
+        if decided:
+            tail = (
+                f"the NetworkPolicies in these manifests would {decided} this traffic, but that is the answer only "
+                "if the admin tier does not decide it first"
+            )
+        elif undetermined:
+            reasons = " ".join((ingress if d == "Ingress" else egress)["reason"] for d in undetermined)
+            tail = f"the {' and '.join(d.lower() for d in undetermined)} direction was not determined either. {reasons}"
+        else:
+            tail = "what the NetworkPolicies would do was not determined either"
+        plural = len(enforcement_unknown) != 1
+        out["summary"] = (
+            f"Undetermined: {', '.join(enforcement_unknown)} "
+            f"{'were' if plural else 'was'} read and not evaluated, because whether this CNI enforces that tier is "
+            f"not documented either way, so {tail}"
+        ).rstrip(".") + "."
+        if plural:
+            out["summary"] = out["summary"].replace("was read and not evaluated", "were read and not evaluated")
     elif unreadable:
         out["undeterminedBy"] = unreadable
         if decided:
@@ -777,6 +903,13 @@ def check_reachability(
             f"Denied: {src.describe()} -> {dst.describe()} on {protocol} {port} is blocked by "
             + " and ".join(f"the {d.lower()} policies of {(src if d == 'Egress' else dst).describe()}" for d in blocked)
             + "."
+        )
+    if inv.inert:
+        out["inertPolicies"] = [dict(entry) for entry in inv.inert]
+        names = ", ".join(entry["policy"] for entry in inv.inert)
+        out["summary"] = (
+            f"{out['summary']} {names} {'is' if len(inv.inert) == 1 else 'are'} in the input and NOT enforced by "
+            f"this CNI, so {'it' if len(inv.inert) == 1 else 'they'} did not decide this answer."
         )
     changes = []
     for direction in blocked:
@@ -822,6 +955,17 @@ def check_reachability(
                 "requiresApproval": True,
             }
         )
+    if enforcement_unknown and not unevaluated_present:
+        # The withheld tier is the case where a proposed NetworkPolicy is MOST likely to change nothing, and the
+        # first version of this was the only branch that left the caveat off.
+        caveat = (
+            "kube-noob withheld " + ", ".join(enforcement_unknown[:10]) + ", because whether this CNI enforces "
+            "that tier is not documented either way. If it does and one of them denies this traffic, the "
+            "NetworkPolicy above is applied and changes nothing."
+        )
+        for change in changes:
+            if change.get("manifest"):
+                change["caveat"] = caveat
     if unevaluated_present:
         # The admin tier, and any policy in the input this evaluator did not read, can make a NetworkPolicy fix
         # a no-op. Say that on the fix. Do not call an EgressFirewall cluster-scoped: it is not.
@@ -858,6 +1002,12 @@ def check_reachability(
         checks.insert(0, anp_check)
     else:
         checks.append(anp_check)
+    if inv.inert:
+        # The tier is inert, so reading it answers nothing and its CRDs may not even be served. The kind that
+        # decides instead is the one to read, and it was missing from this list entirely.
+        replacement = {entry["replacement"] for entry in inv.inert}
+        for kind_name in sorted(replacement):
+            checks.insert(0, f"{cli} get {_RESOLVING_GET.get(kind_name, kind_name.lower())} -o yaml")
     # When a cluster-scoped kind this evaluator cannot read is what made the answer unknown, reading it is the
     # one step that resolves the verdict -- so it goes first. Printing checks that cannot settle the question,
     # and omitting the one that can, is the same failure as naming the policy in a field nobody reads.
@@ -899,7 +1049,59 @@ def _tier_absent(message: str) -> bool:
     )
 
 
-def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inventory:
+def _cni_from_cluster(backend: Any) -> tuple[str | None, str]:
+    """Read the CNI and its version from the cluster, or say why not. Never guesses.
+
+    Returns a `NAME:VERSION` string for :func:`kube_noob.debug.cni.parse_cni`, and a note for the caller to show.
+    Four things deliberately return no version:
+
+    * a 404 -- the CRD is absent, so Calico is not installed; no note, because nothing changed;
+    * a 403 or any other failed read -- a note, and the behaviour it had before, since assuming a CNI from a read
+      that failed is exactly the shape G209 fixed;
+    * an object with no `calicoVersion`, or one that does not parse as a version;
+    * a `variant` other than open-source Calico, whose versions run on their own schedule, so the open-source
+      table does not apply to them.
+    """
+    from kube_noob.errors import ClusterAccessError
+
+    try:
+        items = backend.get("clusterinformations", namespace=None).get("items", [])
+    except ClusterAccessError as exc:
+        if _tier_absent(str(exc)):
+            return None, ""  # no Calico on this cluster
+        return None, (
+            f"the cluster's CNI could not be read ({exc}); AdminNetworkPolicy and BaselineAdminNetworkPolicy are "
+            "evaluated with the OVN-Kubernetes semantics kube-noob assumes by default. Pass --cni if you know it"
+        )
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("spec")
+        spec: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        version = str(spec.get("calicoVersion") or "").strip()
+        variant = str(spec.get("variant") or "").strip()
+        if not version:
+            continue
+        if variant and variant.lower() not in {"calico", "calico-oss", "oss"}:
+            return None, (
+                f"this cluster runs Calico variant {variant!r} at {version!r}, whose versions are numbered on "
+                "their own schedule, so kube-noob does not read it against the open-source support table. Pass "
+                "--cni if you know whether it enforces AdminNetworkPolicy"
+            )
+        try:
+            from kube_noob.debug.cni import parse_cni
+
+            parse_cni(f"calico:{version}")
+        except ValueError:
+            return None, (
+                f"this cluster reports Calico version {version!r}, which kube-noob could not read as a version, "
+                "so the admin tier is evaluated as before. Pass --cni if you know it"
+            )
+        return f"calico:{version}", f"CNI read from the cluster: Calico {version}"
+    return None, ""
+
+
+def inventory_from_cluster(backend: Any, source: str, destination: str, cni: str | None = None) -> Inventory:
     """Read (never write) the NetworkPolicies, namespaces and workloads the two endpoints need."""
     from kube_noob.errors import ClusterAccessError
 
@@ -956,6 +1158,26 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
     # them: collecting one is what puts it in `other_policies`. Without the read, the live answer was allowed
     # in exactly the way the file answer no longer is. A 403 stays a failed read.
     unreadable: list[str] = []
+    # A tier this CNI does not enforce is still read, and a failed read of it must not withhold the verdict.
+    # Two earlier versions each got half of this. The first let a 403 on the admin tier make the answer
+    # undetermined even where the caller had just said that tier is inert -- and the namespace-scoped RBAC that
+    # produces that 403 is the common `--live` case. The second stopped reading the tier at all, which dismissed
+    # the 403 and lost the finding that matters most: "this AdminNetworkPolicy is in your cluster and decides
+    # nothing" needs the policy in hand, and two API calls are a small price for it.
+    admin_tier_inert = False
+    if not cni:
+        # `--cni` is the caller's claim; on a live cluster the fact is readable. Calico publishes its version in
+        # `clusterinformations.crd.projectcalico.org` ("set automatically by calico/node"). A 404 means Calico is
+        # not installed, which is not an error and gets no note: the answer is what it was. A 403 does get one,
+        # because "I could not look" and "there is nothing there" are the two states this project never merges.
+        cni, why = _cni_from_cluster(backend)
+        if why:
+            notes.append(why)
+    if cni:
+        from kube_noob.debug.cni import admin_tier_support, parse_cni
+
+        cni_name, cni_version = parse_cni(cni)
+        admin_tier_inert = admin_tier_support(cni_name, cni_version) == "not-enforced"
     for tier_plural, tier_kind in (
         ("clusternetworkpolicies", "ClusterNetworkPolicy"),
         ("ciliumclusterwidenetworkpolicies", "CiliumClusterwideNetworkPolicy"),
@@ -971,6 +1193,13 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
                     f"{tier_kind} is not installed on this cluster, or could not be read; "
                     "the answer is NetworkPolicy only"
                 )
+            elif admin_tier_inert and tier_kind in {ANP_KIND, BANP_KIND}:
+                # This CNI does not enforce that tier, so what it holds cannot change the answer. Withholding
+                # the verdict over an unreadable tier that decides nothing is the 403 trap in reverse.
+                notes.append(
+                    f"{tier_kind} could not be read ({exc}), and this CNI does not enforce it, so it cannot "
+                    "change this answer"
+                )
             else:
                 notes.append(
                     f"{tier_kind} could not be read ({exc}); a failed read is not the same as the tier being absent"
@@ -978,7 +1207,7 @@ def inventory_from_cluster(backend: Any, source: str, destination: str) -> Inven
                 unreadable.append(tier_kind)
             continue
         objects += [{**item, "kind": tier_kind} for item in items if isinstance(item, dict)]
-    inv = Inventory(objects)
+    inv = Inventory(objects, cni=cni)
     inv.notes.extend(notes)
     inv.tier_unreadable = unreadable
     return inv

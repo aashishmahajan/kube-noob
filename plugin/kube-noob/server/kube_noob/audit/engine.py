@@ -14,7 +14,11 @@ ALL_STAGES = frozenset(Stage)
 
 
 def build_context(
-    docs: list[Document], platform: str, version: str | None, partial_bundle: bool = False
+    docs: list[Document],
+    platform: str,
+    version: str | None,
+    partial_bundle: bool = False,
+    cni: str | None = None,
 ) -> AuditContext:
     if platform not in PLATFORMS:
         raise ValueError(f"Unknown platform {platform!r}; use one of {', '.join(PLATFORMS)}")
@@ -26,6 +30,7 @@ def build_context(
         k8s_version=k8s,
         platform_version=platform_version,
         partial_bundle=partial_bundle,
+        cni=cni,
     )
 
 
@@ -37,9 +42,10 @@ def analyze(
     min_severity: Severity = Severity.INFO,
     schema: bool = True,
     partial_bundle: bool = False,
+    cni: str | None = None,
 ) -> Report:
     docs = load_documents(manifests) if isinstance(manifests, str) else manifests
-    ctx = build_context(docs, platform, version, partial_bundle)
+    ctx = build_context(docs, platform, version, partial_bundle, cni)
     report = Report(
         platform=platform,
         kubernetes_version=ctx.k8s_version,
@@ -61,7 +67,9 @@ def analyze(
         report.assumptions.append("Input contained no YAML documents.")
         return report
     rule_stages: set[Stage] = {s for s in stages if s is not Stage.RED_TEAM}
-    findings = run_rules(ctx, rule_stages) if rule_stages else []
+    evaluated: list[str] = []
+    findings = run_rules(ctx, rule_stages, evaluated) if rule_stages else []
+    report.evaluated_rules = evaluated
     if schema and Stage.VALIDATE in stages:
         schema_findings, notes = validate_documents(docs)
         findings.extend(schema_findings)
@@ -70,6 +78,8 @@ def analyze(
         # Red team always reasons over the complete finding set, even if the caller filters the output.
         all_findings = findings if rule_stages >= {Stage.AUDIT, Stage.CALIBRATE} else run_rules(ctx, None)
         report.scenarios = red_team(ctx, all_findings)
+    # Recorded BEFORE the filter: a rule that fired must not look clean because this view hides its finding.
+    report.fired_rules = sorted({f.rule_id for f in findings})
     report.findings = [f for f in findings if f.severity >= min_severity]
     return report
 

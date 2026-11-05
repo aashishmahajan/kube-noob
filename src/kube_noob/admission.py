@@ -58,13 +58,22 @@ SKIPPED_RULES = frozenset(
         "KN-V011",  # needs pods that are created after the Service
         "KN-N012",  # needs pods that are created after the NetworkPolicy
         "KN-V012",
+        "KN-V023",  # same: the containerPorts the Service's pods declare are in other objects
+        "KN-N014",  # needs the cluster's CNI and version, which no admitted object carries
         "KN-V014",  # bundle properties
         "KN-V018",
         "KN-S018",  # every Secret in a cluster holds data: the rule is about Git
         "KN-C013",  # needs Secrets of other namespaces, which kube-noob never reads
+        # The context cache fetches PDBs, NetworkPolicies, PVCs, HPAs and StorageClasses and nothing else, so
+        # with lookups on this rule warned that a ResourceClaim was missing from a bundle it never looked in --
+        # on every correct DRA Pod. Fetching them would need get and list on resourceclaims, a privilege the
+        # chart does not grant and should not need for a warning `kube-noob audit` already gives on a directory.
+        "KN-C015",
     }
 )
-CROSS_OBJECT = frozenset({"KN-N001", "KN-C008", "KN-C009", "KN-ST001", "KN-ST002", "KN-C012", "KN-C014"})
+CROSS_OBJECT = frozenset(
+    {"KN-N001", "KN-N013", "KN-C008", "KN-C009", "KN-ST001", "KN-ST002", "KN-C012", "KN-C014", "KN-C016"}
+)
 CONTEXT_RESOURCES = ("poddisruptionbudgets", "networkpolicies", "persistentvolumeclaims", "horizontalpodautoscalers")
 CONTEXT_KINDS = {
     "poddisruptionbudgets": "PodDisruptionBudget",

@@ -1,0 +1,37 @@
+rule: KN-N014
+cni: calico:3.32
+good: |
+  # The kind this CNI does enforce, carrying the same intent.
+  apiVersion: policy.networking.k8s.io/v1alpha2
+  kind: ClusterNetworkPolicy
+  metadata:
+    name: no-cross-team
+  spec:
+    tier: Admin
+    priority: 10
+    subject:
+      namespaces:
+        matchLabels: {tier: app}
+    ingress:
+    - name: deny-other-teams
+      action: Deny
+      from:
+      - namespaces:
+          matchLabels: {team: other}
+bad: |
+  # In the cluster, evaluated by kube-noob, and enforced by nothing.
+  apiVersion: policy.networking.k8s.io/v1alpha1
+  kind: AdminNetworkPolicy
+  metadata:
+    name: no-cross-team
+  spec:
+    priority: 10
+    subject:
+      namespaces:
+        matchLabels: {tier: app}
+    ingress:
+    - name: deny-other-teams
+      action: Deny
+      from:
+      - namespaces:
+          matchLabels: {team: other}

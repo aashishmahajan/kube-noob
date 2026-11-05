@@ -42,6 +42,46 @@ def test_ci_checks_every_video_on_every_change_without_the_voice_model() -> None
     assert "tests/fixtures/video-sidecar-transcript.txt" in str(job["steps"])
 
 
+def test_every_step_of_the_ci_videos_job_is_bounded_on_its_own() -> None:
+    """A job timeout is not a diagnosis.
+
+    A run of this job was cancelled at 30m19s with every other check green and no failing step, so the 30 minutes
+    said only "something took too long". The whole render takes about 90 seconds on this code, so each step now
+    carries its own budget and a hang fails with its own name. The budgets must also leave the job's own limit
+    room, or a step timeout would never be the thing that fires.
+    """
+    job = _wf("ci.yml")["jobs"]["videos"]
+    runnable = [s for s in job["steps"] if s.get("run")]
+    assert runnable, "the videos job runs commands"
+    for step in runnable:
+        assert step.get("timeout-minutes"), step.get("name")
+    assert sum(int(s["timeout-minutes"]) for s in runnable) <= int(job["timeout-minutes"])
+
+
+def test_apt_can_neither_prompt_nor_wait_forever_for_the_dpkg_lock() -> None:
+    """Both ways apt hangs a runner: a prompt with no tty, and the dpkg lock unattended-upgrades holds.
+
+    A 12-minute step died on one of them. DEBIAN_FRONTEND answers the first and needs `sudo -E`, which plain sudo
+    would drop; DPkg::Lock::Timeout answers the second, where apt's default is to wait with no limit.
+    """
+    steps = _wf("ci.yml")["jobs"]["videos"]["steps"]
+    apt = [s for s in steps if "apt-get" in str(s.get("run", ""))]
+    assert apt, "the videos job installs ffmpeg"
+    for step in apt:
+        assert step.get("env", {}).get("DEBIAN_FRONTEND") == "noninteractive", step.get("name")
+        assert "sudo -E apt-get" in step["run"], "sudo drops the environment without -E"
+        for line in step["run"].splitlines():
+            if "apt-get" in line:
+                assert "-o DPkg::Lock::Timeout=" in line, line
+
+
+def test_the_browser_install_does_not_shell_out_to_apt_again() -> None:
+    """`playwright install --with-deps` runs apt inside Playwright's own sudo, where neither the frontend setting
+    nor the lock timeout above reaches it. A missing library instead fails the render in seconds, by name."""
+    run = _run(_wf("ci.yml")["jobs"]["videos"])
+    assert "playwright install chromium" in run and "--with-deps" not in run
+
+
 def test_every_release_renders_and_attaches_measured_4k_masters() -> None:
     release = _wf("release.yml")["jobs"]["videos"]
     assert release["uses"] == "./.github/workflows/videos.yml" and release["needs"] == "github-release"

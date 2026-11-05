@@ -1,0 +1,23 @@
+rule: KN-S033
+good: |
+  apiVersion: machineconfiguration.openshift.io/v1
+  kind: MachineConfigPool
+  metadata: {name: worker}
+  spec:
+    paused: false
+    maxUnavailable: 1
+    machineConfigSelector:
+      matchLabels: {machineconfiguration.openshift.io/role: worker}
+    nodeSelector:
+      matchLabels: {node-role.kubernetes.io/worker: ""}
+bad: |
+  apiVersion: machineconfiguration.openshift.io/v1
+  kind: MachineConfigPool
+  metadata: {name: worker}
+  spec:
+    paused: true
+    maxUnavailable: 1
+    machineConfigSelector:
+      matchLabels: {machineconfiguration.openshift.io/role: worker}
+    nodeSelector:
+      matchLabels: {node-role.kubernetes.io/worker: ""}

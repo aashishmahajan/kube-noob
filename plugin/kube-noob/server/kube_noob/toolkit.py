@@ -81,6 +81,16 @@ class _In(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
 
 
+def _normalised_cni(value: str | None) -> str | None:
+    """Refuse an unparseable CNI at the boundary rather than ignoring it later, and store one spelling."""
+    if value is None:
+        return None
+    from kube_noob.debug.cni import parse_cni
+
+    name, version = parse_cni(value)
+    return f"{name}:{version}" if version else name
+
+
 class ManifestsIn(_In):
     manifests: str = Field(
         ...,
@@ -111,6 +121,20 @@ class AuditIn(ManifestsIn):
         "PodDisruptionBudget, a StorageClass not declared here -- are then not evaluated, because from a partial "
         "bundle they cannot tell a real gap from an object you did not pass. The report says so in its assumptions.",
     )
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No "
+        "manifest states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped "
+        "enforcing, which Calico did in 3.32 without reporting an error -- is NOT EVALUATED unless you name it, "
+        "rather than counted clean.",
+    )
+
+    @field_validator("cni")
+    @classmethod
+    def _audit_cni(cls, v: str | None) -> str | None:
+        return _normalised_cni(v)
+
     compact: bool = Field(
         False,
         description="Return the same report with each rule's constant fields (title, severity, stage, category, "
@@ -422,6 +446,19 @@ class TrafficIn(_In):
     port: int | str = Field(..., description="Destination port number (1-65535) or a named container port.")
     protocol: Literal["TCP", "UDP", "SCTP"] = "TCP"
     platform: PlatformT | None = None
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Given, "
+        "it decides whether AdminNetworkPolicy and BaselineAdminNetworkPolicy are enforced at all: Calico ignores "
+        "both from 3.32 onward, so policies in that tier are reported as inert instead of deciding the answer, and "
+        "a CNI whose enforcement is undocumented makes the verdict undetermined rather than guessing either way.",
+    )
+
+    @field_validator("cni")
+    @classmethod
+    def _cni(cls, v: str | None) -> str | None:
+        return _normalised_cni(v)
 
     @field_validator("port")
     @classmethod
@@ -846,6 +883,7 @@ class Toolkit:
             stages=stages,
             min_severity=Severity.parse(p.min_severity),
             partial_bundle=p.partial_bundle,
+            cni=p.cni,
         )
         excepted: list[dict[str, Any]] = []
         review = exc.review(p.exceptions) if p.exceptions else None
@@ -872,7 +910,14 @@ class Toolkit:
             from kube_noob.audit.controls import summary as control_summary
 
             out["controlSummary"] = control_summary(
-                [f.rule_id for f in kept], [str(e["ruleId"]) for e in excepted if "ruleId" in e]
+                [f.rule_id for f in kept],
+                [str(e["ruleId"]) for e in excepted if "ruleId" in e],
+                # The coverage record has to survive the rebuild too, or filing an exception would drop
+                # every checked-and-clean control from the report and make the two states one again.
+                r.evaluated_rules or None,
+                # And the fired set, or a withheld finding would become clean again on any report that
+                # applies an exception list (G199).
+                r.fired_rules or None,
             )
         self._observe(
             [f"platform:{out.get('platform')}"]
@@ -1479,7 +1524,7 @@ class Toolkit:
         return out
 
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
-        inv = Inventory.from_yaml(p.manifests, p.default_namespace)
+        inv = Inventory.from_yaml(p.manifests, p.default_namespace, p.cni)
         cli = "oc" if p.platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
         out = check_reachability(inv, p.source, p.destination, p.port, p.protocol, cli)
         self._observe([f"netpol:{out['verdict']}"])
@@ -1487,7 +1532,7 @@ class Toolkit:
 
     def cluster_check_traffic(self, p: TrafficIn) -> dict[str, Any]:
         backend = get_backend(self.settings)
-        inv = inventory_from_cluster(backend, p.source, p.destination)
+        inv = inventory_from_cluster(backend, p.source, p.destination, p.cni)
         platform = p.platform
         if platform is None:
             with contextlib.suppress(Exception):  # the platform only picks oc or kubectl in the commands

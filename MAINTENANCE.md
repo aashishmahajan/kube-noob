@@ -41,6 +41,14 @@ Apache-2.0 and stay that way. The generated ValidatingAdmissionPolicies and Kyve
 objects with no runtime dependency on kube-noob: once applied, your cluster enforces them whether or not this project
 continues. That is deliberate, and it is the main thing protecting you from the bus factor above.
 
+## Bill of materials
+
+[`docs/sbom.spdx.json`](docs/sbom.spdx.json) is an SPDX 2.3 inventory of everything a release installs,
+generated offline from `requirements.lock` by `scripts/sbom.py` and carrying the per-artifact SHA-256 hashes
+the lock pins. It is reproducible: the same lock gives byte-identical output, with no timestamp and no UUID, so
+a stale document is a diff rather than a judgement call. A test fails when it drifts, and the release attaches
+it beside the wheel.
+
 ## Supported versions
 
 | What | Supported |

@@ -15,6 +15,7 @@ API removal history and version map. Removed/deprecated Kubernetes APIs relevant
 
 Audit manifests. Full deterministic audit: security, network exposure, storage access modes, reliability and red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS policy names. On a large manifest set pass compact=true: the same report, with each rule's constants hoisted once into ruleInfo instead of repeated on every finding, which is lossless and about a third smaller.
 
+- `cni` (null/string): The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, which Calico did in 3.32 without reporting an error -- is NOT EVALUATED unless you name it, rather than counted clean.
 - `compact` (boolean): Return the same report with each rule's constant fields (title, severity, stage, category, remediation, citations, stackroxPolicies, controls) collected once into a `ruleInfo` map keyed by rule id instead of repeated on every finding. Lossless and about a third smaller on a report where rules fire more than once; the findings keep their order, rule id, resource, line and message. Off by default so the flat shape stays what it was.
 - `exceptions` (null/string): An exception list (YAML, apiVersion kube-noob.io/v1, kind ExceptionList): each entry names a rule, a scope, an owner, a reason and an expiry date. Active entries hide the findings they cover; expired and refused entries are reported and fail the gate.
 - `manifests`* (string): One or more YAML documents (Kubernetes/OpenShift objects).
@@ -36,6 +37,7 @@ Diagnose a failed build log. Read a failed GitHub Actions, Jenkins, Tekton or Op
 
 Would this traffic be allowed?. Evaluate NetworkPolicies offline: can the source reach the destination on this port? Checks egress from the source and ingress to the destination, names the policy and rule that decide each, says why the other rules did not match, and proposes the smallest NetworkPolicy that would allow it.
 
+- `cni` (null/string): The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Given, it decides whether AdminNetworkPolicy and BaselineAdminNetworkPolicy are enforced at all: Calico ignores both from 3.32 onward, so policies in that tier are reported as inert instead of deciding the answer, and a CNI whose enforcement is undocumented makes the verdict undetermined rather than guessing either way.
 - `default_namespace` (string): For objects without one.
 - `destination`* (string): Where it goes: namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod labels, or an IP address / CIDR outside the cluster.
 - `manifests`* (string): The NetworkPolicies and the workloads they apply to (Deployments, Pods ...); add Namespace objects when policies select namespaces by label.

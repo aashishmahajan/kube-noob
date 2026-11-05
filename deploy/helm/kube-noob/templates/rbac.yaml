@@ -50,8 +50,13 @@ rules:
   - apiGroups: [cilium.io]
     resources: [ciliumclusterwidenetworkpolicies]
     verbs: [get, list]
+  # `clusterinformations` carries Calico's own version, which decides whether this cluster still enforces
+  # AdminNetworkPolicy at all (Calico stopped at 3.32). Read-only, cluster-scoped, and no personal data: the
+  # object holds a version, a variant, a cluster type and a generated GUID. The comment sits above the rule
+  # rather than inside it because scripts/safety_contract.py parses these rules as one expression, and a comment
+  # between `apiGroups:` and `resources:` makes it refuse to prove anything (which is the right refusal).
   - apiGroups: [crd.projectcalico.org]
-    resources: [globalnetworkpolicies]
+    resources: [globalnetworkpolicies, clusterinformations]
     verbs: [get, list]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]

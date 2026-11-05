@@ -61,6 +61,12 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     # A namespace CiliumNetworkPolicy is not here. It is a different resource, and this allowlist does not guess it.
     "ciliumclusterwidenetworkpolicies": ResourceDef("cilium.io/v2", "ciliumclusterwidenetworkpolicies", False),
     "globalnetworkpolicies": ResourceDef("crd.projectcalico.org/v1", "globalnetworkpolicies", False),
+    # Calico publishes its own version here, "set automatically by calico/node": group
+    # crd.projectcalico.org, version v1 (served and storage), scope Cluster, plural clusterinformations,
+    # from projectcalico/calico libcalico-go/config/crd/crd.projectcalico.org_clusterinformations.yaml
+    # (retrieved 2026-11-05). Read so that `policy reach --live` can tell whether this cluster's CNI still
+    # enforces the admin tier, instead of assuming OVN-Kubernetes semantics on a Calico 3.32 cluster.
+    "clusterinformations": ResourceDef("crd.projectcalico.org/v1", "clusterinformations", False),
     "adminnetworkpolicies": ResourceDef("policy.networking.k8s.io/v1alpha1", "adminnetworkpolicies", False),
     "baselineadminnetworkpolicies": ResourceDef(
         "policy.networking.k8s.io/v1alpha1", "baselineadminnetworkpolicies", False
