@@ -140,6 +140,9 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-C015": ("CM-6",),  # a claim that does not exist: the workload never schedules
     "KN-S031": ("AC-6", "SC-4"),  # device access across tenants, and the device keeps prior state
     "KN-S032": ("AC-6", "CM-6"),  # the pod security level the namespace enforces
+    "KN-S033": ("SI-2",),  # a paused pool stops receiving OS and runtime patches
+    "KN-S034": ("CM-3(2)",),  # an operator upgrade nobody reviewed
+    "KN-C016": ("SC-5", "SC-6"),  # one namespace can take the cluster's capacity
 }
 
 

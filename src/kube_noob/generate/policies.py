@@ -384,6 +384,12 @@ NOT_GENERATED: dict[str, str] = {
     "KN-V022": "the API server forbids pod-level resources.claims itself",
     "KN-S032": "the answer depends on the platform and on the cluster's PodSecurity AdmissionConfiguration "
     "default, neither of which is a property of the Namespace object an admission policy sees",
+    "KN-C016": "needs the namespace's ResourceQuota and LimitRange (other objects); `kube-noob audit` "
+    "checks the bundle",
+    "KN-S033": "pausing a pool is a legitimate maintenance step, and the finding is about a pool LEFT "
+    "paused, which one object at one moment cannot tell from one paused a minute ago",
+    "KN-S034": "the webhook and the generated policies exempt openshift-* namespaces, where operator "
+    "Subscriptions normally live, so a policy would not see the objects this rule is about",
     "KN-C015": "needs the namespace's ResourceClaims and templates (other objects); `kube-noob audit` checks "
     "the bundle",
     "KN-S031": "the API server's own gate is the namespace label resource.kubernetes.io/admin-access, so it "

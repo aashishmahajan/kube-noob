@@ -90,19 +90,20 @@ EXPECTED: dict[str, Any] = {
             },
         ],
         "undetermined": [],
-        "open": 3,
+        "open": 5,
         "excepted": 0,
     },
     "violations": {
         "byNamespace": [
-            {"namespace": "ops", "findings": 2, "critical": 1, "medium": 1},
-            {"namespace": "shop", "findings": 1, "low": 1},
+            {"namespace": "ops", "findings": 3, "critical": 1, "low": 1, "medium": 1},
+            {"namespace": "shop", "findings": 2, "low": 2},
         ],
         "byOwner": [
-            {"owner": "unowned", "findings": 2, "critical": 1, "medium": 1},
-            {"owner": "team-shop", "findings": 1, "low": 1},
+            {"owner": "unowned", "findings": 3, "critical": 1, "low": 1, "medium": 1},
+            {"owner": "team-shop", "findings": 2, "low": 2},
         ],
         "byRule": [
+            {"ruleId": "KN-C016", "findings": 2, "low": 2},
             {"ruleId": "KN-S001", "findings": 1, "critical": 1},
             {"ruleId": "KN-S002", "findings": 1, "medium": 1},
             {"ruleId": "KN-S017", "findings": 1, "low": 1},
@@ -190,7 +191,8 @@ def test_excepted_findings_are_not_counted_open() -> None:
     )
     rep = drift.diff(_snap("day1.yaml", T1), _snap("day2.yaml", T2, exceptions=rev))
     assert [f["ruleId"] for f in rep["findings"]["new"]] == ["KN-S002", "KN-S017"]
-    assert rep["findings"]["open"] == 2 and rep["findings"]["excepted"] == 1
+    # +2: KN-C016 reports `shop` and `ops` for a missing ResourceQuota on both days, so both stay open.
+    assert rep["findings"]["open"] == 4 and rep["findings"]["excepted"] == 1
 
 
 def test_the_daily_report_folder_keeps_the_newest_and_is_owner_only(tmp_path: Path) -> None:
@@ -269,7 +271,7 @@ def test_cli_snapshot_diff_and_report(tmp_path: Path, capsys: pytest.CaptureFixt
     s1, s2 = tmp_path / "1.json", tmp_path / "2.json"
     assert main(["posture", "snapshot", "-f", str(FIX / "day1.yaml"), "-o", str(s1)]) == 0
     assert main(["posture", "snapshot", "-f", str(FIX / "day2.yaml"), "-o", str(s2)]) == 0
-    assert "11 objects, 1 findings" in capsys.readouterr().out
+    assert "11 objects, 3 findings" in capsys.readouterr().out
     md = tmp_path / "r.md"
     assert main(["--format", "json", "posture", "diff", str(s1), str(s2), "--markdown", str(md)]) == 0
     rep = json.loads(capsys.readouterr().out)
@@ -281,7 +283,7 @@ def test_cli_snapshot_diff_and_report(tmp_path: Path, capsys: pytest.CaptureFixt
     assert main(["posture", "report", "-f", str(FIX / "day1.yaml"), "--state-dir", str(state)]) == 0
     assert main(["posture", "report", "-f", str(FIX / "day2.yaml"), "--state-dir", str(state)]) == 0
     out = capsys.readouterr().out
-    assert "3 new, 1 fixed, 3 open" in out
+    assert "3 new, 1 fixed, 5 open" in out
     for argv in (
         ["posture", "snapshot", "-o", str(s1)],
         ["posture", "report", "--live"],

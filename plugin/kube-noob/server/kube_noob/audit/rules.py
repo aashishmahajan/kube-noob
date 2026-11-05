@@ -1155,6 +1155,115 @@ def _v022(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 # AUDIT - security
 # =====================================================================================================
 
+
+@rule(
+    "KN-C016",
+    "Namespace has workloads but no ResourceQuota or LimitRange",
+    Stage.CALIBRATE,
+    "resources",
+    Severity.LOW,
+    "Add a ResourceQuota for the namespace's aggregate limits and a LimitRange for per-container defaults, or "
+    "confirm a ClusterResourceQuota or a cluster default already covers it.",
+    "Without a quota one namespace can take the cluster's schedulable capacity, and without a LimitRange a "
+    "container that declares no limits inherits none. A ClusterResourceQuota or a cluster-wide default can "
+    "supply either, and no manifest in the namespace shows that, so this is advisory.",
+)
+def _c016(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        # The namespace's ResourceQuota and LimitRange were not passed, so their absence here means nothing.
+        ctx.cannot_decide(r.rule_id)
+        return
+    quota_ns = {ctx.ns(d) for d in ctx.by_kind("ResourceQuota")}
+    limit_ns = {ctx.ns(d) for d in ctx.by_kind("LimitRange")}
+    # Only namespaces this bundle DECLARES. A workload whose Namespace is managed elsewhere has its quota
+    # managed elsewhere too, and firing there would report nearly every application repository for an object
+    # it is not responsible for. If you ship the Namespace, you own its guardrails.
+    declared = {
+        name
+        for d in ctx.by_kind("Namespace")
+        if isinstance(name := get_path(d.data, ("metadata", "name")), str) and name
+    }
+    flagged: set[str] = set()
+    for d, _pt in ctx.workloads():
+        ns = ctx.ns(d)
+        if d.kind not in LONG_RUNNING_KINDS | {"Pod"} or ns in flagged or ns not in declared:
+            continue
+        missing = [name for name, have in (("ResourceQuota", quota_ns), ("LimitRange", limit_ns)) if ns not in have]
+        if not missing:
+            continue
+        flagged.add(ns)
+        yield r.finding(
+            d,
+            ("metadata",),
+            f"Namespace {ns} has workloads and no {' or '.join(missing)} in this bundle. A "
+            "ClusterResourceQuota or a cluster default may still cover it; this bundle cannot show that.",
+        )
+
+
+@rule(
+    "KN-S033",
+    "MachineConfigPool is paused",
+    Stage.AUDIT,
+    "platform",
+    Severity.MEDIUM,
+    'Unpause the pool (oc patch machineconfigpool/<name> --type merge -p \'{"spec":{"paused":false}}\') once '
+    "the maintenance that needed it is over, and track the pause so it cannot be forgotten.",
+    "A paused MachineConfigPool stops generating a new desiredMachineConfig and stops updating machines, so "
+    "every node in the pool keeps the OS, kubelet and container runtime it has -- including their unpatched "
+    "flaws -- until the pool is unpaused. Pausing is a legitimate maintenance step; leaving it paused is how a "
+    "cluster silently stops receiving them.",
+)
+def _s033(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("MachineConfigPool"):
+        spec = d.data.get("spec") if isinstance(d.data, dict) else None
+        if not isinstance(spec, dict) or spec.get("paused") is not True:
+            continue
+        name = get_path(d.data, ("metadata", "name"))
+        yield r.finding(
+            d,
+            ("spec", "paused"),
+            f"MachineConfigPool {name if isinstance(name, str) else '<unnamed>'} is paused, so no machine in it "
+            "receives a new rendered MachineConfig: OS, kubelet and runtime updates stop for every node in the "
+            "pool until it is unpaused.",
+        )
+
+
+@rule(
+    "KN-S034",
+    "Operator Subscription upgrades without review",
+    Stage.AUDIT,
+    "supply-chain",
+    Severity.MEDIUM,
+    "Set spec.installPlanApproval: Manual and approve each InstallPlan deliberately, or record that automatic "
+    "upgrades on this channel are an accepted risk for this operator.",
+    "An OLM Subscription with automatic approval installs whatever the channel publishes next, with no review "
+    "of what changed, and the field is Automatic unless it explicitly says Manual -- so omitting it chooses "
+    "automatic upgrades rather than deferring the decision.",
+)
+def _s034(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Subscription"):
+        if api_group(str(d.data.get("apiVersion", ""))) != "operators.coreos.com":
+            continue  # other APIs use the kind too; this rule is about OLM
+        spec = d.data.get("spec") if isinstance(d.data, dict) else None
+        spec = spec if isinstance(spec, dict) else {}
+        approval = spec.get("installPlanApproval")
+        if isinstance(approval, str) and approval == "Manual":
+            continue
+        name = get_path(d.data, ("metadata", "name"))
+        name = name if isinstance(name, str) else "<unnamed>"
+        channel = spec.get("channel")
+        where: PathT = ("spec", "installPlanApproval") if approval is not None else ("spec",)
+        stated = f"installPlanApproval: {approval!r}" if approval is not None else "no installPlanApproval"
+        yield r.finding(
+            d,
+            where,
+            f"Subscription {name} has {stated}, so OLM installs whatever "
+            f"{f'channel {channel} ' if isinstance(channel, str) and channel else 'the channel '}publishes next "
+            "without anyone approving the InstallPlan. Absent, the field means Automatic: upstream returns "
+            "Manual only when it is set to Manual.",
+        )
+
+
 # Pod Security admission reads three labels per mode off the NAMESPACE, not off the workload. The constants are
 # upstream's (`staging/src/k8s.io/pod-security-admission/api/constants.go`): the prefix, and the three levels.
 PSA_ENFORCE_LABEL = "pod-security.kubernetes.io/enforce"
