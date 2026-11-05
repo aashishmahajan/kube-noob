@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from kube_noob import __version__, sanitize
+from kube_noob import __version__, completion, sanitize
 from kube_noob.config import Settings, load_settings
 from kube_noob.errors import ClarificationNeeded, ConfigError, KubeNoobError
 
@@ -1783,6 +1783,15 @@ def build_parser() -> argparse.ArgumentParser:
     tsub.add_parser("tasks", help="List benchmark tasks")
 
     sub.add_parser("config", help="Show the effective configuration")
+    cmp_p = sub.add_parser(
+        "completion",
+        help="Print a shell completion script (bash, zsh or fish), generated from this CLI",
+        description="Print a completion script for your shell. It is walked off the parser at the moment you run "
+        "it, so it lists the commands this build actually has. bash: source <(kube-noob completion bash). "
+        'zsh: kube-noob completion zsh > "${fpath[1]}/_kube-noob". fish: kube-noob completion fish > '
+        "~/.config/fish/completions/kube-noob.fish",
+    )
+    cmp_p.add_argument("shell", choices=list(completion.SHELLS))
     sub.add_parser("doctor", help="Show what kube-noob can reach (network, cluster, model); exit 1 on conflicts")
     st = sub.add_parser("selftest", help="Answer a battery of real questions offline and score the results")
     st.add_argument("--category", choices=["kubernetes", "helm", "openshift", "rosa-hcp", "rhacs", "everyday"])
@@ -1842,6 +1851,9 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     fmt = "yaml" if a.format == "text" else a.format
     platform = getattr(a, "platform", None) or s.default_platform
 
+    if a.cmd == "completion":
+        print(completion.script(a.shell, build_parser()), end="")
+        return 0
     if a.cmd in {"audit", "validate", "redteam", "fix"}:
         text, unreadable = _manifest_input(a)
         if unreadable and not getattr(a, "skip_unreadable", False):
