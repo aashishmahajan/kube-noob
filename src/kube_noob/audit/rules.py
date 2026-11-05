@@ -41,6 +41,7 @@ from kube_noob.catalog import (
     parse_minor,
     removed_api,
 )
+from kube_noob.debug.netpol import policy_types
 from kube_noob.yamlio import Document, PathT, fmt_path, get_path
 
 
@@ -2422,37 +2423,56 @@ def _n012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             )
 
 
-_DNS_PORTS = frozenset({"53", "5353"})  # 53 is the Service port; OpenShift CoreDNS pods listen on 5353
+_DNS_PORTS = frozenset({53, 5353})  # 53 is the Service port; OpenShift CoreDNS pods listen on 5353
+
+
+def _rule_allows_dns(rule: dict[str, Any]) -> bool:
+    """True when this one egress rule lets UDP reach a DNS port.
+
+    UDP, not TCP. ``NetworkPolicyPort.protocol`` defaults to TCP, so a bare ``{port: 53}`` permits TCP
+    only, and a resolver queries UDP first -- glibc falls back to TCP only on a truncated answer and
+    musl does not fall back at all. Allowing TCP 53 alone leaves lookups timing out, which is the
+    commonest forgotten-``protocol: UDP`` mistake, so it must not clear the finding.
+
+    A rule with no ``ports`` permits every port and protocol to its peers, and an empty rule permits
+    everything. A port range is honoured (``{port: 1, endPort: 1024}`` covers 53). A named port cannot
+    be resolved from the manifest -- the DNS pod that declares it is never in the bundle -- so it is
+    treated as permitting DNS: the manifest does not prove stranding, and reporting it would flag a
+    policy that works.
+    """
+    ports = rule.get("ports")
+    if ports is None:
+        return True
+    if not isinstance(ports, list):
+        return False
+    for entry in ports:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("protocol") or "TCP").upper() != "UDP":
+            continue
+        port = entry.get("port")
+        if port is None:
+            return True  # every port to these peers
+        if isinstance(port, int) or (isinstance(port, str) and port.isdigit()):
+            lo = int(port)
+            hi = int(entry["endPort"]) if str(entry.get("endPort") or "").isdigit() else lo
+            if any(lo <= dns <= hi for dns in _DNS_PORTS):
+                return True
+        else:
+            return True  # a named port: not resolvable here, and not disprovable either
+    return False
 
 
 def _egress_allows_dns(spec: dict[str, Any]) -> bool:
-    """True when this policy lets the pods it selects reach port 53.
+    """True when this policy lets the pods it selects reach cluster DNS.
 
-    An egress rule with no ``ports`` key permits every port to its peers, and an empty rule permits
-    everything, so both clear DNS. Peers are deliberately not checked: cluster DNS is reached by a
-    service address that a manifest need not mention, and demanding a kube-system peer here would
-    report a policy that works.
-
-    5353 counts as well as 53. A NetworkPolicy matches the destination POD's port, after the Service
-    has been translated, and OpenShift's CoreDNS pods listen on 5353 while the dns-default Service
-    publishes 53. On OpenShift the correct allowance is therefore 5353, and a rule that insisted on 53
-    would report every correctly configured cluster.
+    Peers are deliberately not checked: cluster DNS is reached by a Service address that a manifest need
+    not mention, and demanding a kube-system peer here would report a policy that works.
     """
     rules = spec.get("egress")
     if not isinstance(rules, list):
         return False
-    for rule in rules:
-        if not isinstance(rule, dict):
-            continue
-        ports = rule.get("ports")
-        if ports is None:
-            return True
-        if not isinstance(ports, list):
-            continue
-        for port in ports:
-            if isinstance(port, dict) and str(port.get("port")) in _DNS_PORTS:
-                return True
-    return False
+    return any(_rule_allows_dns(r) for r in rules if isinstance(r, dict))
 
 
 @rule(
@@ -2472,11 +2492,13 @@ def _n013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         return  # another policy in the namespace may allow 53, and it was not passed
     by_ns: dict[str, list[dict[str, str]]] = {}
     for d, pt in ctx.workloads():
+        if (pt.spec or {}).get("hostNetwork") is True:
+            continue  # NetworkPolicy does not govern host-networked pods on the common plugins
         by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
     egress_policies: dict[str, list[Document]] = {}
     for d in ctx.by_kind("NetworkPolicy"):
         spec = d.data.get("spec")
-        if isinstance(spec, dict) and "Egress" in (spec.get("policyTypes") or []):
+        if isinstance(spec, dict) and "Egress" in policy_types(spec):
             egress_policies.setdefault(ctx.ns(d), []).append(d)
     for ns, policies in egress_policies.items():
         pods = by_ns.get(ns) or []
@@ -2503,7 +2525,7 @@ def _n013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                     d,
                     ("spec", "egress"),
                     f"Egress is restricted for {len(stranded)} pod template(s) in namespace {ns} and no policy "
-                    "selecting them allows port 53 or 5353, so they cannot resolve any name.",
+                    "selecting them allows UDP to port 53 or 5353, so they cannot resolve any name.",
                 )
 
 
@@ -2527,14 +2549,27 @@ def _s030(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         if not isinstance(hooks, list):
             continue
         for i, hook in enumerate(hooks):
-            if not isinstance(hook, dict) or hook.get("failurePolicy") != "Ignore":
+            if not isinstance(hook, dict):
+                continue
+            policy = hook.get("failurePolicy")
+            if policy is None or policy == "Fail":
                 continue  # absent means Fail, which is the safe default
             name = str(hook.get("name") or f"webhooks[{i}]")
+            if policy != "Ignore":
+                # Invalid is not the safe default. The API server refuses the object, so the control the
+                # manifest describes does not exist at all -- the same stance selectors take (G185).
+                yield r.finding(
+                    d,
+                    ("webhooks", i, "failurePolicy"),
+                    f"Webhook '{name}' sets failurePolicy: {policy!r}, which is neither Fail nor Ignore. The API "
+                    "server refuses this object, so the check it describes is not running at all.",
+                )
+                continue
             yield r.finding(
                 d,
                 ("webhooks", i, "failurePolicy"),
                 f"Webhook '{name}' sets failurePolicy: Ignore, so the object is admitted whenever this webhook "
-                "cannot be reached and the check it performs is skipped without a trace.",
+                "cannot be reached and the check it performs is skipped without rejecting anything.",
             )
 
 

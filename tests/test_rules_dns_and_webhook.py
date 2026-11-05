@@ -143,3 +143,69 @@ def test_openshift_dns_port_5353_counts() -> None:
     listen on 5353 while the dns-default Service publishes 53. Insisting on 53 would report every
     correctly configured OpenShift cluster -- the repo's own gate fixture is one."""
     assert "KN-N013" not in _ids(_APP, _OPENSHIFT_DNS)
+
+
+# -- red team: every case below was a wrong answer before the reach engine's helpers were reused ----------
+
+
+def _np(body: str, name: str = "p") -> str:
+    head = "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n"
+    return f"{head}metadata: {{name: {name}, namespace: prod}}\nspec:\n{body}"
+
+
+def test_tcp_only_53_does_not_clear_dns() -> None:
+    """protocol defaults to TCP, and resolvers query UDP first: glibc falls back to TCP only on a
+    truncated answer and musl does not fall back at all. TCP-only 53 leaves lookups timing out."""
+    tcp_only = _np("  podSelector: {}\n  policyTypes: [Egress]\n  egress:\n    - ports: [{port: 53}]\n")
+    assert "KN-N013" in _ids(_APP, tcp_only)
+
+
+def test_udp_53_clears_dns() -> None:
+    udp = _np("  podSelector: {}\n  policyTypes: [Egress]\n  egress:\n    - ports: [{protocol: UDP, port: 53}]\n")
+    assert "KN-N013" not in _ids(_APP, udp)
+
+
+def test_sctp_on_53_does_not_clear_dns() -> None:
+    sctp = _np("  podSelector: {}\n  policyTypes: [Egress]\n  egress:\n    - ports: [{protocol: SCTP, port: 53}]\n")
+    assert "KN-N013" in _ids(_APP, sctp)
+
+
+def test_policy_types_defaults_are_honoured() -> None:
+    """The API adds Egress whenever egress rules are present, so an omitted policyTypes still restricts."""
+    restricting = _np("  podSelector: {}\n  egress:\n    - ports: [{protocol: TCP, port: 443}]\n", "api-egress")
+    assert "KN-N013" in _ids(_APP, restricting), "an omitted policyTypes hid a real stranding"
+    allowing = _np("  podSelector: {}\n  egress:\n    - ports: [{protocol: UDP, port: 53}]\n", "allow-dns")
+    assert "KN-N013" not in _ids(_APP, _DENY_EGRESS, allowing), "an omitted policyTypes hid a working allowance"
+
+
+def test_a_port_range_covering_53_clears_dns() -> None:
+    """`{port: 1, endPort: 65535}` is the common 'all ports to this peer' idiom."""
+    ranged = _np(
+        "  podSelector: {}\n  policyTypes: [Egress]\n"
+        "  egress:\n    - ports: [{protocol: UDP, port: 1, endPort: 1024}]\n"
+    )
+    assert "KN-N013" not in _ids(_APP, ranged)
+    high = _np(
+        "  podSelector: {}\n  policyTypes: [Egress]\n"
+        "  egress:\n    - ports: [{protocol: UDP, port: 8000, endPort: 9000}]\n"
+    )
+    assert "KN-N013" in _ids(_APP, high), "a range that excludes 53 must still report"
+
+
+def test_a_named_port_clears_dns() -> None:
+    """CoreDNS names its ports `dns`/`dns-tcp`. The DNS pod is never in the bundle, so the manifest
+    cannot prove stranding, and a rule that reported it would flag a policy that works."""
+    named = _np("  podSelector: {}\n  policyTypes: [Egress]\n  egress:\n    - ports: [{protocol: UDP, port: dns}]\n")
+    assert "KN-N013" not in _ids(_APP, named)
+
+
+def test_a_host_network_pod_is_not_governed_by_networkpolicy() -> None:
+    host = _APP.replace("    spec:\n", "    spec:\n      hostNetwork: true\n", 1)
+    assert "KN-N013" not in _ids(host, _DENY_EGRESS)
+
+
+def test_an_invalid_failure_policy_is_not_the_safe_default() -> None:
+    """The API server refuses the object, so the check it describes is not running at all (G185)."""
+    for bad in ("ignore", "Fial"):
+        found = _ids(_WEBHOOK % ("ValidatingWebhookConfiguration", bad))
+        assert "KN-S030" in found, bad
