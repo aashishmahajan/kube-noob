@@ -260,7 +260,9 @@ class Facts:
 
         kit = _kit()
         manifests = _product(EXAMPLE).read_text(encoding="utf-8")
-        a = kit.audit(AuditIn(manifests=manifests, platform=PLATFORM, version=VERSION))
+        # EXAMPLE is one file, and the recording below runs `audit -f <that file>`, which reports a partial
+        # bundle. The numbers in the script have to be the numbers on screen, so ask for the same thing.
+        a = kit.audit(AuditIn(manifests=manifests, platform=PLATFORM, version=VERSION, partial_bundle=True))
         counts = a["summary"]["counts"]
         self._values.update(
             {

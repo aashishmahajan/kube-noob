@@ -74,6 +74,17 @@ def _manifest_input(a: argparse.Namespace) -> tuple[str, list[dict[str, str]]]:
     return "\n---\n".join(text for _, text in ok), bad
 
 
+def _partial_input(a: argparse.Namespace) -> bool:
+    """True when the caller named one file or stdin rather than a directory.
+
+    A directory is taken to be the whole namespace, so rules that fire on an absent object are evaluated.
+    One file is not: `audit -f deployment.yaml` cannot tell "this namespace has no NetworkPolicy" from
+    "you did not pass it", and reporting the first would be a finding on every correct repository.
+    """
+    f = getattr(a, "file", None)
+    return not (isinstance(f, str) and f != "-" and Path(f).is_dir())
+
+
 def _refuse_unreadable(bad: list[dict[str, str]], flag: str = "--skip-unreadable") -> None:
     for b in bad:
         print(f"error: {b['path']}: {b['why']}", file=sys.stderr)
@@ -1852,6 +1863,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                         version=a.pversion,
                         min_severity=a.min_severity,
                         exceptions=exceptions,
+                        partial_bundle=_partial_input(a),
                     )
                 )
             except ExceptionsError as exc:

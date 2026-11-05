@@ -13,12 +13,20 @@ from kube_noob.yamlio import Document, load_documents
 ALL_STAGES = frozenset(Stage)
 
 
-def build_context(docs: list[Document], platform: str, version: str | None) -> AuditContext:
+def build_context(
+    docs: list[Document], platform: str, version: str | None, partial_bundle: bool = False
+) -> AuditContext:
     if platform not in PLATFORMS:
         raise ValueError(f"Unknown platform {platform!r}; use one of {', '.join(PLATFORMS)}")
     k8s = k8s_version_for(platform, version)
     platform_version = version if platform in OPENSHIFT_FAMILY else None
-    return AuditContext(docs=docs, platform=platform, k8s_version=k8s, platform_version=platform_version)
+    return AuditContext(
+        docs=docs,
+        platform=platform,
+        k8s_version=k8s,
+        platform_version=platform_version,
+        partial_bundle=partial_bundle,
+    )
 
 
 def analyze(
@@ -28,9 +36,10 @@ def analyze(
     stages: frozenset[Stage] | set[Stage] = ALL_STAGES,
     min_severity: Severity = Severity.INFO,
     schema: bool = True,
+    partial_bundle: bool = False,
 ) -> Report:
     docs = load_documents(manifests) if isinstance(manifests, str) else manifests
-    ctx = build_context(docs, platform, version)
+    ctx = build_context(docs, platform, version, partial_bundle)
     report = Report(
         platform=platform,
         kubernetes_version=ctx.k8s_version,
@@ -41,6 +50,13 @@ def analyze(
         report.assumptions.append(f"No OpenShift version given; assumed Kubernetes {ctx.k8s_version} semantics.")
     if platform == "kubernetes" and version is None:
         report.assumptions.append(f"No Kubernetes version given; assumed {ctx.k8s_version}.")
+    if partial_bundle:
+        report.assumptions.append(
+            "Audited part of a namespace, so rules that fire because another object is absent "
+            "(no NetworkPolicy selects this workload, no PodDisruptionBudget, an undeclared StorageClass) "
+            "were not evaluated: from these documents alone they cannot tell a real gap from an object you "
+            "did not pass. Audit the directory to evaluate them."
+        )
     if not docs:
         report.assumptions.append("Input contained no YAML documents.")
         return report

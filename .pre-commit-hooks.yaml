@@ -13,11 +13,11 @@
 
 - id: kube-noob-changed
   name: kube-noob (changed files only)
-  description: >-
-    Audit only the staged manifests. Faster on a large repository, but bundle-wide rules see
-    only the files you staged: "no NetworkPolicy selects this workload" will be reported even
-    when the policy exists one file away, because that file was not passed. Prefer the
-    `kube-noob` hook unless the full audit is too slow for you.
+    Audit only the staged manifests. Faster on a large repository. Rules that fire because another
+    object is absent are not evaluated from a partial bundle and the report says so, so this hook
+    will not report a missing NetworkPolicy that exists in a file you did not stage -- but it will
+    not catch a genuinely missing one either. Prefer the `kube-noob` hook unless the full audit is
+    too slow for you.
   entry: kube-noob gate --fail-on high --quiet -f
   language: python
   files: \.(ya?ml)$

@@ -83,6 +83,12 @@
       "title": "Stages",
       "type": "array"
      },
+     "partial_bundle": {
+      "default": false,
+      "description": "Set when these documents are only part of a namespace (one file, a diff, staged changes). Rules that fire because another object is absent -- no NetworkPolicy selects this workload, no PodDisruptionBudget, a StorageClass not declared here -- are then not evaluated, because from a partial bundle they cannot tell a real gap from an object you did not pass. The report says so in its assumptions.",
+      "title": "Partial Bundle",
+      "type": "boolean"
+     },
      "compact": {
       "default": false,
       "description": "Return the same report with each rule's constant fields (title, severity, stage, category, remediation, citations, stackroxPolicies, controls) collected once into a `ruleInfo` map keyed by rule id instead of repeated on every finding. Lossless and about a third smaller on a report where rules fire more than once; the findings keep their order, rule id, resource, line and message. Off by default so the flat shape stays what it was.",
