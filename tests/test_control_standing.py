@@ -127,3 +127,133 @@ def test_a_rule_that_maps_to_no_control_does_not_vanish_silently() -> None:
     without the report saying so."""
     unmapped = sorted(r for r in ("KN-C016", "KN-S001") if r not in RULE_CONTROLS)
     assert unmapped == []  # if this ever fails, the grouping needs an "unmapped" row before shipping
+
+
+# -- a red team on the above found these ------------------------------------------------------------------------
+
+
+def test_a_kind_the_tracker_does_not_watch_is_still_audited() -> None:
+    """`watched()` decides what is TRACKED for drift. Feeding the rules that subset made two wrong answers:
+    KN-C016 reported "no ResourceQuota in this namespace" for a bundle holding one, and a rule whose subject kind
+    was filtered out ran against nothing, found nothing, and was recorded evaluated -- which N4 then reported as
+    a per-control `clean`."""
+    bundle = [
+        {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "shop"}},
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "web", "namespace": "shop"},
+            "spec": {
+                "selector": {"matchLabels": {"app": "web"}},
+                "template": {
+                    "metadata": {"labels": {"app": "web"}},
+                    "spec": {"containers": [{"name": "c", "image": "r/x@sha256:" + "a" * 64}]},
+                },
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "ResourceQuota",
+            "metadata": {"name": "q", "namespace": "shop"},
+            "spec": {"hard": {"pods": "10"}},
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "LimitRange",
+            "metadata": {"name": "l", "namespace": "shop"},
+            "spec": {"limits": [{"type": "Container", "default": {"cpu": "1"}}]},
+        },
+    ]
+    snap = drift.snapshot(bundle, source="manifests", taken_at=T2)
+    rules = {f["ruleId"] for f in snap["findings"]}
+    assert "KN-C016" not in rules, "the quota is in the bundle; reporting it missing is a false finding"
+
+
+def test_a_generator_of_objects_is_read_once() -> None:
+    """`objects` is an Iterable and is now needed twice. Taking it twice read an exhausted generator and produced
+    a snapshot with zero findings, which looks exactly like a clean cluster."""
+    docs = iter(_docs("day2.yaml"))
+    snap = drift.snapshot(docs, source="manifests", taken_at=T2)
+    assert snap["findings"], "a snapshot built from a generator still finds what is there"
+
+
+def test_a_snapshot_that_could_not_read_everything_claims_no_standing() -> None:
+    """A rule whose SUBJECT kind was refused runs against nothing and would be reported clean. The engine knows
+    which rules fire on another object's absence, but not which kind each rule reads, so no `clean` on such a
+    snapshot can be trusted and none is offered."""
+    kept = [d for d in _docs("day2.yaml") if d["kind"] not in {"Role", "RoleBinding"}]
+    snap = drift.snapshot(
+        kept, source="live", taken_at=T2, not_read=["roles in shop: forbidden", "rolebindings in shop: forbidden"]
+    )
+    report = drift.first_report(snap)
+    assert "controlStanding" not in report
+    assert any("could not be read" in n and "standing" in n for n in report["notes"]), report["notes"]
+    assert report["violations"]["byControl"], "what WAS found is still reported"
+
+
+def test_an_unreadable_resource_does_not_manufacture_an_absence_finding() -> None:
+    """KN-N001 fires when no NetworkPolicy selects a workload. With the policies unreadable that is not a gap,
+    and the partial-bundle guard is what says so (G186, G202)."""
+    kept = [d for d in _docs("day2.yaml") if d["kind"] != "NetworkPolicy"]
+    snap = drift.snapshot(kept, source="live", taken_at=T2, not_read=["networkpolicies in shop: forbidden"])
+    assert "KN-N001" not in {f["ruleId"] for f in snap["findings"]}
+
+
+def test_the_markdown_shows_every_bucket_its_note_describes() -> None:
+    """A CRITICAL finding somebody accepted, and one a severity filter removed, both rendered as a row of zeros
+    beside a `Clean` count -- while the note under the table explained two columns that were not there."""
+    text = drift.markdown(_report())
+    header = next(line for line in text.splitlines() if line.startswith("| Control | Findings"))
+    for column in ("Excepted", "Withheld", "Clean", "Not evaluated"):
+        assert column in header, column
+
+
+def test_the_truncated_namespace_list_says_how_many_are_missing() -> None:
+    docs: list[dict[str, Any]] = []
+    for i in range(drift.MAX_CONTROL_NAMESPACES + 5):
+        ns = f"ns{i:02d}"
+        docs.append({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}})
+        docs.append(
+            {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {"name": "api", "namespace": ns},
+                "spec": {
+                    "selector": {"matchLabels": {"app": "a"}},
+                    "template": {
+                        "metadata": {"labels": {"app": "a"}},
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "c",
+                                    "image": "r/x@sha256:" + "a" * 64,
+                                    "securityContext": {"privileged": True},
+                                }
+                            ]
+                        },
+                    },
+                },
+            }
+        )
+    report = drift.first_report(drift.snapshot(docs, source="manifests", taken_at=T2))
+    row = next(r for r in report["violations"]["byControl"] if r["control"] == "CM-7")
+    assert len(row["namespaces"]) == drift.MAX_CONTROL_NAMESPACES
+    assert row["moreNamespaces"] == 5
+    assert "+5 more" in drift.markdown(report)
+
+
+def test_a_cluster_scoped_finding_is_labelled_not_left_as_a_dash() -> None:
+    bundle = [
+        {
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "ClusterRoleBinding",
+            "metadata": {"name": "too-much"},
+            "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "cluster-admin"},
+            "subjects": [{"kind": "ServiceAccount", "name": "default", "namespace": "shop"}],
+        }
+    ]
+    report = drift.first_report(drift.snapshot(bundle, source="manifests", taken_at=T2))
+    rows = report["violations"]["byControl"]
+    if rows:  # only if a rule fired on it
+        assert all("-" not in r["namespaces"] for r in rows)
+        assert any("(cluster-scoped)" in r["namespaces"] for r in rows)

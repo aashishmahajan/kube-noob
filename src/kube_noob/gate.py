@@ -393,6 +393,8 @@ def run(
             for r in findings
             if Severity.parse(r["severity"]) >= floor and not r.get("vulnerability") and not r.get("code")
         ]
+        for r in over:
+            r["failsGate"] = True
         if over:
             failures.append(f"{len(over)} finding(s) at {fail_on} or above")
     known = _known(kinds, platform, version, data_dir)
@@ -535,6 +537,7 @@ def _code_findings(
             }
         )
         if floor is not None and not unshipped and Severity.parse(f.severity) >= floor:
+            findings[-1]["failsGate"] = True
             failing += 1
     summary = {
         "tools": sorted({t for r in parsed for t in r.tools}),
@@ -620,6 +623,10 @@ def _vulnerabilities(
             }
         )
         if floor is not None and Severity.parse(sev) >= floor and (f["fixVersion"] or f["knownExploited"]):
+            # Marked on the finding, not re-derived later. A vulnerability at or above the floor with no fix and
+            # no KEV entry does NOT fail the gate, so an annotation that called it an error would show a red
+            # cross on a green step -- the same "publish what you computed" lesson as G201.
+            findings[-1]["failsGate"] = True
             failing += 1
     summary = {
         **out["counts"],
@@ -726,7 +733,10 @@ def _annotation(level: str, finding: dict[str, Any]) -> str:
         # A raw newline ends the command and an unescaped % corrupts the next escape. In a property, a comma or a
         # colon ends the property list, so those go too.
         out = str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-        return out.replace(",", "%2C").replace("::", "%3A%3A") if prop else out
+        # In a property a comma ends the property and a colon ends the property LIST, so both go -- every colon,
+        # not just a pair of them: a value ending in ":" produced `title=x:::[KN-X] ...`, and the runner then cut
+        # the title and moved the colon into the message.
+        return out.replace(",", "%2C").replace(":", "%3A") if prop else out
 
     rule = str(finding.get("ruleId") or "kube-noob")
     heading = f"{rule} {finding.get('title') or ''}".strip()
@@ -757,21 +767,22 @@ def github_annotations(report: dict[str, Any]) -> list[str]:
     Not named `annotations`: this module starts with `from __future__ import annotations`, so that name is
     already bound and a function with it shadows the feature flag -- mypy refuses it, and rightly.
 
-    Findings at or above `failOn` are errors and the rest are warnings, which matches what the gate did with the
-    exit code -- with `--fail-on never` nothing fails, so nothing is an error here either.
+    A finding is an error when it is one the gate FAILED on (`failsGate`, set where that decision was made) and a
+    warning otherwise. The first version read the severity instead, which annotated an unfixable critical CVE as
+    an error on a step that passed -- the gate fails on a vulnerability only when it is fixable or known
+    exploited, and on a code finding only when an image ships the file. The reasons in `failures` are annotated
+    too: a gate can fail with no finding at all (an expired exception, a Containerfile that would not parse), and
+    those left the step red with nothing on the pull request.
 
     GitHub's caps decide the shape: 10 of each type per step and 50 per job (actions/toolkit,
     docs/problem-matchers.md). The eleventh annotation of a kind is dropped with no message, so a developer who
     saw ten would reasonably believe there were ten. The last slot of each kind therefore carries the count that
     was not shown and points at the SARIF and the job summary, which have all of them.
     """
-    from kube_noob.audit.model import Severity
-
     rows = [f for f in report.get("findings") or () if isinstance(f, dict)]
-    if not rows:
+    reasons = [str(x) for x in report.get("failures") or () if str(x).strip()]
+    if not rows and not reasons:
         return []
-    fail_on = str(report.get("failOn") or "high")
-    floor = None if fail_on == "never" else Severity.parse(fail_on)
 
     def rank(f: dict[str, Any]) -> tuple[int, str, str]:
         sev = str(f.get("severity") or "info")
@@ -780,17 +791,31 @@ def github_annotations(report: dict[str, Any]) -> list[str]:
 
     buckets: dict[str, list[dict[str, Any]]] = {"error": [], "warning": []}
     for f in sorted(rows, key=rank):
-        above = floor is not None and Severity.parse(str(f.get("severity") or "info")) >= floor
-        buckets["error" if above else "warning"].append(f)
+        # `failsGate` is set where the gate DECIDED, so the annotation level matches the exit code. Deriving it
+        # from severity here instead put a red cross on a green step: an unfixable critical CVE with no KEV entry
+        # is at or above the floor and does not fail the gate, and nor does a code finding in an image that
+        # ships nothing.
+        buckets["error" if f.get("failsGate") else "warning"].append(f)
     out: list[str] = []
+    # A gate can fail with no finding at all -- an expired exception, a Containerfile that would not parse, a
+    # SARIF file that could not be read. Those went unannotated, so the step was red and the pull request said
+    # nothing. They come first, because they are why the step failed.
+    for reason in reasons[:MAX_ANNOTATIONS_PER_TYPE]:
+        out.append(f"::error title=kube-noob gate::{reason}")
+    if len(reasons) > MAX_ANNOTATIONS_PER_TYPE:
+        out[-1] = (
+            f"::error title=kube-noob gate::{len(reasons) - MAX_ANNOTATIONS_PER_TYPE + 1} more reason(s) this "
+            "gate failed are not annotated; the job summary has all of them."
+        )
     for level in ("error", "warning"):
         found = buckets[level]
-        if not found:
+        room = MAX_ANNOTATIONS_PER_TYPE - sum(1 for line in out if line.startswith(f"::{level} "))
+        if not found or room <= 0:
             continue
-        if len(found) <= MAX_ANNOTATIONS_PER_TYPE:
+        if len(found) <= room:
             out += [_annotation(level, f) for f in found]
             continue
-        shown = found[: MAX_ANNOTATIONS_PER_TYPE - 1]
+        shown = found[: room - 1]
         out += [_annotation(level, f) for f in shown]
         hidden = len(found) - len(shown)
         out.append(

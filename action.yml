@@ -150,7 +150,10 @@ runs:
         kube-noob gate "${args[@]}" --sarif "$KN_SARIF" --summary "$RUNNER_TEMP/kube-noob-summary.md" \
           --format json > "$raw" || rc=$?
         grep '^::' "$raw" || true
-        grep -v '^::' "$raw" > "$RUNNER_TEMP/kube-noob-gate.json"
+        # `|| true` on both: grep exits 1 when nothing matches, and under `set -e` that aborted the step before
+        # `exit "$rc"` below -- so a configuration error (gate exit 2, which prints nothing on stdout) came out
+        # as exit 1, and the summary and the result output were skipped.
+        grep -v '^::' "$raw" > "$RUNNER_TEMP/kube-noob-gate.json" || true
         if [ -f "$RUNNER_TEMP/kube-noob-summary.md" ]; then cat "$RUNNER_TEMP/kube-noob-summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
         if [ "$rc" = 0 ]; then echo "result=passed" >> "$GITHUB_OUTPUT"; elif [ "$rc" = 1 ]; then echo "result=failed" >> "$GITHUB_OUTPUT"; fi
         exit "$rc"

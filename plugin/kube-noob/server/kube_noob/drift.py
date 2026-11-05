@@ -233,7 +233,11 @@ def snapshot(
     from kube_noob.audit.model import Severity, Stage
     from kube_noob.yamlio import load_documents
 
-    objs = watched(objects)
+    # Materialised once: `objects` is an Iterable, and the audit below needs it again. Taking it twice read
+    # an exhausted generator and silently produced a snapshot with zero findings -- which the CLI test
+    # caught, and which would otherwise have looked like a clean cluster.
+    raw = [o for o in objects if isinstance(o, dict) and o.get("kind")]
+    objs = watched(raw)
     ns_owner = _namespace_owners(objs)
     items: dict[str, dict[str, Any]] = {}
     owners: dict[str, str] = {}
@@ -250,8 +254,25 @@ def snapshot(
             "hash": _digest(norm),
             "fields": _fields(norm),
         }
-    docs = load_documents(yaml.safe_dump_all([{k: v for k, v in o.items() if k != "status"} for o in objs]))
-    report = analyze(docs, platform, version, stages={Stage.VALIDATE, Stage.AUDIT, Stage.CALIBRATE}, schema=False)
+    # Audited over EVERY object collected, not the watched subset. `watched()` decides what is TRACKED for drift
+    # (hashes per object), which is a different question from what the rules may look at -- and feeding them the
+    # subset made two wrong answers: KN-C016 reported "no ResourceQuota in this namespace" for a bundle holding
+    # one, because ResourceQuota is not a watched kind, and a rule whose subject kind was filtered out ran
+    # against nothing, found nothing, and was recorded as evaluated. With N4 that second one became a per-control
+    # `clean`, which is the absence-read-as-pass this project exists to catch.
+    docs = load_documents(yaml.safe_dump_all([{k: v for k, v in o.items() if k != "status"} for o in raw]))
+    # A resource the cluster would not show is exactly "you did not pass it": the rules that fire because another
+    # object is absent cannot tell that from a real gap, so they decline to decide and land in `notEvaluated`
+    # rather than `clean` (G186, G202). Without this, a forbidden `roles` read left AC-6 reading "16 clean".
+    partial = bool(list(not_read))
+    report = analyze(
+        docs,
+        platform,
+        version,
+        stages={Stage.VALIDATE, Stage.AUDIT, Stage.CALIBRATE},
+        schema=False,
+        partial_bundle=partial,
+    )
     findings: list[dict[str, Any]] = []
     seen: set[str] = set()
     for f in report.findings:
@@ -334,17 +355,24 @@ def _by_control(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
         for control in RULE_CONTROLS.get(str(r.get("ruleId")), ()):
             by.setdefault(control, Counter())[str(r["severity"])] += 1
-            where.setdefault(control, set()).add(str(r.get("namespace") or "-"))
-    out = [
-        {
+            # A finding on a cluster-scoped object has no namespace. Named rather than left as a bare "-",
+            # which read as a namespace called "-" and took one of the listed slots without saying what it was.
+            where.setdefault(control, set()).add(str(r.get("namespace") or "(cluster-scoped)"))
+    out = []
+    for control, counts in by.items():
+        names = sorted(where[control])
+        row: dict[str, Any] = {
             "control": control,
             "title": TITLES[control],
             "findings": sum(counts.values()),
             **dict(sorted(counts.items())),
-            "namespaces": sorted(where[control])[:MAX_CONTROL_NAMESPACES],
+            "namespaces": names[:MAX_CONTROL_NAMESPACES],
         }
-        for control, counts in by.items()
-    ]
+        # A silent slice makes the row claim fewer namespaces than there are. The count of the rest is part of
+        # the answer, the same way a `changed` row carries `more`.
+        if len(names) > MAX_CONTROL_NAMESPACES:
+            row["moreNamespaces"] = len(names) - MAX_CONTROL_NAMESPACES
+        out.append(row)
     return sorted(out, key=lambda x: (-int(x["findings"]), str(x["control"])))
 
 
@@ -358,6 +386,17 @@ def _standing(new: dict[str, Any], open_rows: list[dict[str, Any]]) -> tuple[dic
     """
     from kube_noob.audit.controls import summary as control_summary
 
+    unread = [str(x) for x in new.get("notRead") or ()]
+    if unread:
+        # A rule whose SUBJECT kind was refused runs against nothing, finds nothing, and would be reported
+        # `clean`. The engine knows which rules fire on another object's absence (they decline to decide on a
+        # partial bundle) but not which kind each rule reads, so no `clean` on this snapshot can be trusted and
+        # none is offered. Counts still stand: a finding that was reported was reported.
+        return None, (
+            f"{len(unread)} resource(s) could not be read in this snapshot, so no per-control standing is "
+            "reported: a rule whose subject kind was refused finds nothing and would look clean. The open "
+            "findings per control below are still what was found. First: " + "; ".join(unread[:3])
+        )
     coverage = new.get("coverage")
     if not isinstance(coverage, dict) or not isinstance(coverage.get("evaluatedRules"), list):
         return None, (
@@ -523,7 +562,9 @@ def markdown(report: dict[str, Any]) -> str:
         ]
         lines += [
             f"| {r['control']} | {r['title']} | {r['findings']} | {r.get('critical', 0)} | "
-            f"{r.get('high', 0)} | {', '.join(r['namespaces'])} |"
+            f"{r.get('high', 0)} | {', '.join(r['namespaces'])}"
+            + (f", +{r['moreNamespaces']} more" if r.get("moreNamespaces") else "")
+            + " |"
             for r in controls
         ]
         lines.append("")
@@ -531,14 +572,18 @@ def markdown(report: dict[str, Any]) -> str:
     if standing:
         # The point of this table is the two columns a count cannot have: a control whose rules ran and found
         # nothing, and one nothing evaluated. Reported together so neither can be read as the other.
+        # Every bucket, because the note under this table explains `excepted` and `withheld` and the first
+        # version of the table did not have those columns: a CRITICAL finding somebody accepted, and one a
+        # severity filter removed, both rendered as a row of zeros beside a `Clean` count.
         lines += [
             "## Control standing",
             "",
-            "| Control | Findings | Clean | Not evaluated |",
-            "| --- | --- | --- | --- |",
+            "| Control | Findings | Excepted | Withheld | Clean | Not evaluated |",
+            "| --- | --- | --- | --- | --- | --- |",
         ]
         lines += [
-            f"| {c['id']} | {c['findings']} | {c.get('clean', 0)} | {c.get('notEvaluated', 0)} |"
+            f"| {c['id']} | {c['findings']} | {c.get('excepted', 0)} | {c.get('withheld', 0)} | "
+            f"{c.get('clean', 0)} | {c.get('notEvaluated', 0)} |"
             for c in standing["controls"]
         ]
         lines += ["", standing["note"], ""]

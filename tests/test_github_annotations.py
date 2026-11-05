@@ -24,8 +24,21 @@ from kube_noob import gate
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _finding(rule: str, severity: str, uri: str | None = "k8s/deploy.yaml", line: int | None = 7) -> dict[str, Any]:
+def _finding(
+    rule: str,
+    severity: str,
+    uri: str | None = "k8s/deploy.yaml",
+    line: int | None = 7,
+    fails: bool = True,
+) -> dict[str, Any]:
+    """`fails` is what `gate.run` marks on a finding it actually failed on.
+
+    Set explicitly here rather than derived from the severity, because that derivation was the defect: the gate
+    fails on a vulnerability only when it is fixable or known exploited, and on a code finding only when an image
+    ships the file, so severity alone annotated passing findings as errors.
+    """
     return {
+        "failsGate": fails,
         "ruleId": rule,
         "severity": severity,
         "title": f"{rule} title",
@@ -38,8 +51,13 @@ def _finding(rule: str, severity: str, uri: str | None = "k8s/deploy.yaml", line
     }
 
 
-def _report(findings: list[dict[str, Any]], fail_on: str = "high") -> dict[str, Any]:
-    return {"findings": findings, "failOn": fail_on, "passed": False, "failures": ["x"]}
+def _report(findings: list[dict[str, Any]], fail_on: str = "high", failures: list[str] | None = None) -> dict[str, Any]:
+    return {
+        "findings": findings,
+        "failOn": fail_on,
+        "passed": False,
+        "failures": [] if failures is None else failures,
+    }
 
 
 def test_a_finding_at_or_above_the_threshold_is_an_error_annotation() -> None:
@@ -51,7 +69,7 @@ def test_a_finding_at_or_above_the_threshold_is_an_error_annotation() -> None:
 
 
 def test_a_finding_below_the_threshold_is_a_warning() -> None:
-    lines = gate.github_annotations(_report([_finding("KN-C001", "low")]))
+    lines = gate.github_annotations(_report([_finding("KN-C001", "low", fails=False)]))
     assert lines[0].startswith("::warning ")
 
 
@@ -86,7 +104,7 @@ def test_the_last_annotation_says_how_many_were_not_shown() -> None:
 
 def test_both_kinds_are_capped_independently() -> None:
     findings = [_finding(f"KN-S{i:03d}", "critical") for i in range(12)]
-    findings += [_finding(f"KN-C{i:03d}", "low") for i in range(12)]
+    findings += [_finding(f"KN-C{i:03d}", "low", fails=False) for i in range(12)]
     lines = gate.github_annotations(_report(findings))
     errors = [x for x in lines if x.startswith("::error ")]
     warnings = [x for x in lines if x.startswith("::warning ")]
@@ -104,14 +122,14 @@ def test_the_worst_findings_come_first() -> None:
 
 
 def test_never_as_a_threshold_makes_every_finding_a_warning() -> None:
-    """`--fail-on never` means nothing fails, so nothing should be an error annotation either."""
-    lines = gate.github_annotations(_report([_finding("KN-S001", "critical")], fail_on="never"))
+    """`--fail-on never` means nothing fails, so the gate marks nothing and nothing is an error."""
+    lines = gate.github_annotations(_report([_finding("KN-S001", "critical", fails=False)], fail_on="never"))
     assert lines[0].startswith("::warning ")
 
 
 def test_the_total_stays_under_githubs_per_job_cap() -> None:
     findings = [_finding(f"KN-S{i:03d}", "critical") for i in range(40)]
-    findings += [_finding(f"KN-C{i:03d}", "low") for i in range(40)]
+    findings += [_finding(f"KN-C{i:03d}", "low", fails=False) for i in range(40)]
     assert len(gate.github_annotations(_report(findings))) <= 50
 
 
@@ -144,3 +162,50 @@ def test_a_json_report_is_unchanged_by_the_flag(capsys: pytest.CaptureFixture[st
     out = capsys.readouterr().out
     body = "\n".join(line for line in out.splitlines() if not line.startswith("::"))
     assert json.loads(body)["findings"], "the JSON report survives beside the annotations"
+
+
+# -- a red team on the above found these ------------------------------------------------------------------------
+
+
+def test_a_finding_the_gate_did_not_fail_on_is_not_an_error() -> None:
+    """The headline defect. An unfixable critical CVE with no KEV entry is at or above the floor and does NOT
+    fail the gate, so annotating it as an error put a red cross on a step that passed."""
+    report = _report([_finding("CVE-2099-0001", "critical", uri="trivy.json", line=None, fails=False)])
+    report["passed"] = True
+    lines = gate.github_annotations(report)
+    assert lines[0].startswith("::warning ")
+
+
+def test_the_reason_a_gate_failed_with_no_findings_is_annotated() -> None:
+    """An expired exception list, a Containerfile that would not parse, an unreadable SARIF file: the step was
+    red and the pull request said nothing at all."""
+    lines = gate.github_annotations(_report([], failures=["the exception list has expired or refused entries"]))
+    assert len(lines) == 1
+    assert lines[0].startswith("::error title=kube-noob gate::")
+    assert "expired" in lines[0]
+
+
+def test_the_reasons_come_before_the_findings() -> None:
+    report = _report([_finding("KN-S001", "critical")], failures=["3 finding(s) at high or above"])
+    lines = gate.github_annotations(report)
+    assert "kube-noob gate" in lines[0] and "KN-S001" in lines[1]
+
+
+def test_the_reasons_and_the_findings_share_the_one_error_budget() -> None:
+    """GitHub counts ten errors per step whoever wrote them, so the reasons cannot push the findings over."""
+    report = _report(
+        [_finding(f"KN-S{i:03d}", "critical") for i in range(20)],
+        failures=[f"reason {i}" for i in range(4)],
+    )
+    lines = gate.github_annotations(report)
+    assert len([x for x in lines if x.startswith("::error ")]) == gate.MAX_ANNOTATIONS_PER_TYPE
+
+
+def test_a_property_value_ending_in_a_colon_does_not_eat_the_separator() -> None:
+    """`title=x:` plus `::` is three colons, and the runner ends the properties at the first two: the title lost
+    its colon and the message gained one. Every colon in a property is escaped now."""
+    f = _finding("KN-X", "critical", uri="path:")
+    f["title"] = "ends with colon:"
+    line = gate.github_annotations(_report([f]))[0]
+    props = line.partition("::")[2].partition("::")[0]
+    assert ":" not in props and "%3A" in props
