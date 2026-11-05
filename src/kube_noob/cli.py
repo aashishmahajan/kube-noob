@@ -366,9 +366,11 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
+    quiet_pass = getattr(a, "quiet", False) and report["passed"]
     if a.format == "text":
-        _tprint(gate.markdown(report, top=50))
-    else:
+        if not quiet_pass:
+            _tprint(gate.markdown(report, top=50))
+    elif not quiet_pass:
         _emit(report, fmt)
     if report.get("unreadable") and not a.skip_unreadable:
         _refuse_unreadable([{"path": u["file"], "why": u["why"]} for u in report["unreadable"]])
@@ -913,6 +915,12 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
     gt.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
+    gt.add_argument(
+        "--quiet",
+        action="store_true",
+        help="print nothing when the gate passes (a failing gate still reports in full). For pre-commit hooks and "
+        "other places where a silent success is the point; the exit code carries the verdict either way",
+    )
     gt.add_argument(
         "--skip-unreadable",
         action="store_true",

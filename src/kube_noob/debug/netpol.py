@@ -157,6 +157,69 @@ def selector_matches(sel: Any, labels: dict[str, str]) -> bool:
     return True
 
 
+_SELECTOR_OPS = ("In", "NotIn", "Exists", "DoesNotExist")
+
+
+def selector_problem(sel: Any) -> str | None:
+    """Why the API server would refuse this label selector, or None when it is well formed.
+
+    An invalid selector is not a selector that matches nothing. ``operator: Exist`` (for ``Exists``) makes
+    ``selector_matches`` return False for every pod, so a default-deny NetworkPolicy reads as "selects no pods",
+    the policy reads as absent and the verdict flips from denied to allowed -- on a policy the API server would
+    have rejected outright. Dropping an unreadable policy always widens the answer, so these are reported as
+    undetermined instead of evaluated (see docs/limits.md, "a policy document that cannot be parsed is not the
+    same as a policy that does not exist").
+    """
+    if sel is None:
+        return None
+    if not isinstance(sel, dict):
+        return f"selector is {type(sel).__name__}, not a mapping"
+    labels = sel.get("matchLabels")
+    if labels is not None and not isinstance(labels, dict):
+        return f"matchLabels is {type(labels).__name__}, not a mapping"
+    exprs = sel.get("matchExpressions")
+    if exprs is not None and not isinstance(exprs, list):
+        return f"matchExpressions is {type(exprs).__name__}, not a list"
+    for e in exprs or []:
+        if not isinstance(e, dict):
+            return f"matchExpressions entry is {type(e).__name__}, not a mapping"
+        op = e.get("operator")
+        if op not in _SELECTOR_OPS:
+            return f"matchExpressions operator {op!r} is not one of {', '.join(_SELECTOR_OPS)}"
+        if op in ("In", "NotIn") and not (isinstance(e.get("values"), list) and e.get("values")):
+            return f"matchExpressions operator {op} needs a non-empty values list"
+    return None
+
+
+def policy_problem(pol: dict[str, Any]) -> str | None:
+    """The first reason the API server would refuse this NetworkPolicy's selectors, or None."""
+    spec = pol.get("spec")
+    if not isinstance(spec, dict):
+        return f"spec is {type(spec).__name__}, not a mapping"
+    why = selector_problem(spec.get("podSelector"))
+    if why:
+        return f"spec.podSelector: {why}"
+    for direction in ("ingress", "egress"):
+        rules = spec.get(direction)
+        if rules is None:
+            continue
+        if not isinstance(rules, list):
+            return f"spec.{direction} is {type(rules).__name__}, not a list"
+        for i, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                return f"spec.{direction}[{i}] is {type(rule).__name__}, not a mapping"
+            peers = rule.get("from") if direction == "ingress" else rule.get("to")
+            for j, peer in enumerate(peers or []):
+                if not isinstance(peer, dict):
+                    continue
+                for sel_field in ("podSelector", "namespaceSelector"):
+                    why = selector_problem(peer.get(sel_field))
+                    if why:
+                        side = "from" if direction == "ingress" else "to"
+                        return f"spec.{direction}[{i}].{side}[{j}].{sel_field}: {why}"
+    return None
+
+
 def describe_selector(sel: Any) -> str:
     if not isinstance(sel, dict):
         return "nothing"
@@ -216,6 +279,7 @@ class Inventory:
         self.other_policies: list[str] = []
         self.notes: list[str] = []
         self.tier_unreadable: list[str] = []
+        self.invalid_policies: list[str] = []
         self.admin: list[dict[str, Any]] = []
         self.baseline: list[dict[str, Any]] = []
         for obj in objects:
@@ -226,8 +290,14 @@ class Inventory:
             name = str(meta.get("name", ""))
             if kind == "NetworkPolicy":
                 pol = dict(obj)
-                pol["metadata"] = {**meta, "namespace": str(meta.get("namespace") or default_namespace)}
-                self.policies.append(pol)
+                pol_ns = str(meta.get("namespace") or default_namespace)
+                pol["metadata"] = {**meta, "namespace": pol_ns}
+                why = policy_problem(pol)
+                if why:
+                    # Not evaluated and not treated as absent: an unreadable policy only ever widens the answer.
+                    self.invalid_policies.append(f"NetworkPolicy/{pol_ns}/{name} ({why})")
+                else:
+                    self.policies.append(pol)
             elif kind == "Namespace":
                 self.namespace_labels[name] = _labels(meta.get("labels"))
             elif kind in WORKLOAD_KINDS:
@@ -596,7 +666,7 @@ def check_reachability(
     # A forbidden or failed read of a tier that can overrule NetworkPolicy is not "the tier is absent".
     # The namespace-scoped chart cannot read these, so treating that 403 as a NetworkPolicy-only allow
     # is the answer an operator gets by default.
-    unreadable = list(inv.tier_unreadable)
+    unreadable = list(inv.tier_unreadable) + list(inv.invalid_policies)
     # A cluster-scoped kind that sits above NetworkPolicy and that this evaluator cannot read yet decides BEFORE
     # any NetworkPolicy and has the last word. Naming it under `notEvaluated` was not enough: the verdict still
     # read "allowed" and the CLI still exited 0, so a gate merged on an answer a ClusterNetworkPolicy `Deny` may
