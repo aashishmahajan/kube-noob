@@ -17,6 +17,11 @@ Sources of truth, read them at the start of every iteration:
    acceptance rules. Every item must meet both.
 3. `CONTRIBUTING.md`, `docs/guidance.md`, `docs/architecture.md`, and the code you are about to change.
 
+`.claude/loop/` is gitignored on purpose -- it is the owner's private queue and may hold third-party material, so
+it is never published. This prompt is tracked and that directory is not, which means a fresh clone has the prompt
+and no queue. If those two files are missing, do not invent a queue or work from this prompt alone: say they are
+missing, ask for them, and in the meantime take direction from `docs/roadmap.md`, which is the public roadmap.
+
 If `$ARGUMENTS` names an item ID, work on that item (if its dependencies are not done, do them first). Otherwise take
 the first `in-progress` row in STATE.md, else the first `todo` row whose dependencies are all `done`.
 
@@ -24,15 +29,20 @@ the first `in-progress` row in STATE.md, else the first `todo` row whose depende
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
+branch="$(sed -n 's/^Work branch: `\(.*\)`$/\1/p' .claude/loop/STATE.md)"
+test -n "$branch" || { echo "STATE.md has no 'Work branch:' line"; exit 1; }
 git fetch origin
-git checkout claude/exciting-hawking-pg0uin
-git pull --ff-only origin claude/exciting-hawking-pg0uin
+git checkout "$branch"
+git pull --ff-only origin "$branch"
 git log --oneline -1 origin/main; git merge-base --is-ancestor origin/main HEAD || echo "main moved"
 ```
 
-- Work only on `claude/exciting-hawking-pg0uin`. Never commit to or push `main`. Never force-push, rebase pushed
-  history, tag, release, bump versions, publish packages or open pull requests unless STATE.md records the owner's
-  approval.
+- Work only on the branch STATE.md's `Work branch:` line names, and never name a branch in this prompt: an earlier
+  version of it did, and the branch it named stopped being the branch in use without anyone noticing, which would
+  have had an iteration build on stale code. If the current branch differs from that line, stop and reconcile the
+  two before writing anything.
+- Never commit to or push `main`. Never force-push, rebase pushed history, tag, release, bump versions, publish
+  packages or open pull requests unless STATE.md records the owner's approval.
 - If `main` moved, merge `origin/main` into the branch with a merge commit, resolve conflicts (regenerate generated
   files with their scripts, never by hand), run `scripts/check.sh`, commit and push before starting new work.
 - Set up the environment if needed: `uv venv && . .venv/bin/activate && uv pip install -e ".[dev]"` (or
@@ -105,7 +115,7 @@ Follow this order. Do not skip steps.
    ```bash
    git add -A
    git commit -s -m "<area>: <what shipped>" -m "<why, what it enables, how it was verified>"
-   git push -u origin claude/exciting-hawking-pg0uin
+   git push -u origin "$branch"
    ```
    Retry the push only on network errors: wait 2, 4, 8, 16 seconds between attempts.
 3. If context and time allow, start the next item from step 1 of section 2 in the same run. Never leave an item
