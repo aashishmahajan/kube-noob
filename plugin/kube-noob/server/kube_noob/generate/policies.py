@@ -383,6 +383,11 @@ NOT_GENERATED: dict[str, str] = {
     "default) refuses them",
     "KN-S018": "every Secret in a cluster carries its data; the rule is about Secrets committed to Git, so it belongs "
     "in CI (`kube-noob audit`), not at admission",
+    "KN-N013": "needs the other NetworkPolicies of the namespace (policies are additive, so another one "
+    "may allow port 53); `kube-noob audit` checks the bundle",
+    "KN-S030": "the API server does not send webhook configurations to admission webhooks, and a "
+    "ValidatingAdmissionPolicy cannot validate another one, so no admission policy can see this object; "
+    "`kube-noob audit` checks it",
     "KN-N001": "needs the NetworkPolicies of the namespace (other objects); `kube-noob audit` checks the bundle",
     "KN-ST001": "needs the StorageClass the claim names (another object); `kube-noob audit` checks the bundle",
     "KN-ST002": "needs the claim's access modes (another object); `kube-noob audit` checks the bundle",

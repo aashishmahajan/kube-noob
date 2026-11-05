@@ -2422,6 +2422,122 @@ def _n012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             )
 
 
+_DNS_PORTS = frozenset({"53", "5353"})  # 53 is the Service port; OpenShift CoreDNS pods listen on 5353
+
+
+def _egress_allows_dns(spec: dict[str, Any]) -> bool:
+    """True when this policy lets the pods it selects reach port 53.
+
+    An egress rule with no ``ports`` key permits every port to its peers, and an empty rule permits
+    everything, so both clear DNS. Peers are deliberately not checked: cluster DNS is reached by a
+    service address that a manifest need not mention, and demanding a kube-system peer here would
+    report a policy that works.
+
+    5353 counts as well as 53. A NetworkPolicy matches the destination POD's port, after the Service
+    has been translated, and OpenShift's CoreDNS pods listen on 5353 while the dns-default Service
+    publishes 53. On OpenShift the correct allowance is therefore 5353, and a rule that insisted on 53
+    would report every correctly configured cluster.
+    """
+    rules = spec.get("egress")
+    if not isinstance(rules, list):
+        return False
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        ports = rule.get("ports")
+        if ports is None:
+            return True
+        if not isinstance(ports, list):
+            continue
+        for port in ports:
+            if isinstance(port, dict) and str(port.get("port")) in _DNS_PORTS:
+                return True
+    return False
+
+
+@rule(
+    "KN-N013",
+    "Egress is denied without allowing cluster DNS",
+    Stage.AUDIT,
+    "network",
+    Severity.MEDIUM,
+    "Add an egress rule allowing UDP and TCP port 53 to the cluster DNS namespace, or widen this policy.",
+    "A policy that restricts egress and allows no route to port 53 stops every pod it selects from resolving "
+    "names. The pods keep running and every outbound connection fails on lookup, which reads as an application "
+    "outage rather than as a policy change.",
+    ("k8s-networkpolicy",),
+)
+def _n013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        return  # another policy in the namespace may allow 53, and it was not passed
+    by_ns: dict[str, list[dict[str, str]]] = {}
+    for d, pt in ctx.workloads():
+        by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
+    egress_policies: dict[str, list[Document]] = {}
+    for d in ctx.by_kind("NetworkPolicy"):
+        spec = d.data.get("spec")
+        if isinstance(spec, dict) and "Egress" in (spec.get("policyTypes") or []):
+            egress_policies.setdefault(ctx.ns(d), []).append(d)
+    for ns, policies in egress_policies.items():
+        pods = by_ns.get(ns) or []
+        for d in policies:
+            spec = d.data.get("spec") or {}
+            sel = spec.get("podSelector")
+            if not isinstance(sel, dict):
+                continue
+            selected = [labels for labels in pods if selector_matches(sel, labels)]
+            if not selected:
+                continue
+            # Policies are additive, so DNS is reachable when ANY egress policy selecting the pod allows it.
+            stranded = [
+                labels
+                for labels in selected
+                if not any(
+                    _egress_allows_dns(other.data.get("spec") or {})
+                    for other in policies
+                    if selector_matches((other.data.get("spec") or {}).get("podSelector") or {}, labels)
+                )
+            ]
+            if stranded:
+                yield r.finding(
+                    d,
+                    ("spec", "egress"),
+                    f"Egress is restricted for {len(stranded)} pod template(s) in namespace {ns} and no policy "
+                    "selecting them allows port 53 or 5353, so they cannot resolve any name.",
+                )
+
+
+@rule(
+    "KN-S030",
+    "Admission webhook fails open",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Set failurePolicy: Fail, and scope the webhook with namespaceSelector or objectSelector so a failure "
+    "cannot stall the whole cluster.",
+    "failurePolicy: Ignore means the API server admits the object when the webhook cannot be reached. The "
+    "control appears to be in place and is silently not applied whenever the service is down, upgrading or "
+    "unreachable, which is also when a bad object is most likely to be admitted. The API default is Fail, so "
+    "Ignore is a decision rather than an oversight.",
+    ("k8s-admission-webhook-failure-policy",),
+)
+def _s030(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("ValidatingWebhookConfiguration", "MutatingWebhookConfiguration"):
+        hooks = d.data.get("webhooks")
+        if not isinstance(hooks, list):
+            continue
+        for i, hook in enumerate(hooks):
+            if not isinstance(hook, dict) or hook.get("failurePolicy") != "Ignore":
+                continue  # absent means Fail, which is the safe default
+            name = str(hook.get("name") or f"webhooks[{i}]")
+            yield r.finding(
+                d,
+                ("webhooks", i, "failurePolicy"),
+                f"Webhook '{name}' sets failurePolicy: Ignore, so the object is admitted whenever this webhook "
+                "cannot be reached and the check it performs is skipped without a trace.",
+            )
+
+
 # =====================================================================================================
 # AUDIT - storage
 # =====================================================================================================

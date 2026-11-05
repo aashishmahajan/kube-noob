@@ -122,7 +122,7 @@ taking privileges the tool has promised not to take, and it does not mean compet
 
 ## The honest ceiling on compliance
 
-kube-noob names 27 of NIST SP 800-53 Rev. 5's controls across its 78 rules. The right sentence is **"machine-readable
+kube-noob names 27 of NIST SP 800-53 Rev. 5's controls across its 80 rules. The right sentence is **"machine-readable
 evidence bearing on these 27 controls, from these object kinds, over this scope, with these rules not applicable and
 these inputs unreadable"** — never "compliance coverage", never a percentage. It does not assess the other controls,
 it does not scan nodes itself, and it is not a substitute for a continuous posture platform. A GRC team will not

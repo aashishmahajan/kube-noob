@@ -70,6 +70,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S019": ("AC-6", "CM-7", "SC-39"),
     "KN-S020": ("SC-39", "CM-7"),
     "KN-S029": ("SC-7", "CM-7"),  # the kubelet is made to cross a boundary on the pod's behalf
+    "KN-S030": ("CM-7", "SI-7"),  # a control the cluster believes it has is skipped when the hook is down
     "KN-S021": ("SI-2", "CM-7", "SC-39"),  # a deprecated volume driver with a published breakout
     "KN-S022": ("SI-2", "SC-39", "CM-7"),
     "KN-S023": ("SI-2", "SC-39"),
@@ -91,6 +92,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-N010": ("CM-6", "CM-7", "SI-2"),
     "KN-N011": ("SI-2", "SI-10", "CM-7"),
     "KN-N012": ("SC-7", "SC-7(5)", "AC-4"),  # a policy that selects no pod enforces nothing
+    "KN-N013": ("SC-7", "CP-10"),  # egress denied without DNS: the workload cannot resolve and stops serving
     # Storage
     "KN-ST001": ("CM-6",),
     "KN-ST002": ("CM-6", "CP-10"),

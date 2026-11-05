@@ -89,6 +89,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-N010 | ingress-nginx ConfigMap widens what an Ingress may ask of the controller | CM-6, CM-7, SI-2 |
 | KN-N011 | Ingress path type ImplementationSpecific on ingress-nginx | SI-2, SI-10, CM-7 |
 | KN-N012 | NetworkPolicy selects no pod in this bundle | SC-7, SC-7(5), AC-4 |
+| KN-N013 | Egress is denied without allowing cluster DNS | SC-7, CP-10 |
 | KN-S001 | Privileged container | AC-6, CM-7, SC-39 |
 | KN-S002 | Privilege escalation not disabled | AC-6, AC-6(10), CM-7 |
 | KN-S003 | Container may run as root | AC-6, CM-6 |
@@ -118,6 +119,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S027 | Legacy ServiceAccount token Secret | IA-5, AC-6 |
 | KN-S028 | RBAC binding grants a role to everyone | AC-14, AC-3, AC-6 |
 | KN-S029 | Probe or lifecycle handler with a host | SC-7, CM-7 |
+| KN-S030 | Admission webhook fails open | CM-7, SI-7 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |

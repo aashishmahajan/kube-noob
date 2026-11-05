@@ -71,6 +71,12 @@ SOURCES: dict[str, Citation] = {
         "https://kubernetes.io/docs/concepts/storage/storage-classes/#volume-binding-mode",
         "CC-BY-4.0",
     ),
+    "k8s-admission-webhook-failure-policy": Citation(
+        "k8s-admission-webhook-failure-policy",
+        "Dynamic Admission Control: failure policy",
+        "https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#failure-policy",
+        "CC-BY-4.0",
+    ),
     "k8s-networkpolicy": Citation(
         "k8s-networkpolicy",
         "Network Policies",
