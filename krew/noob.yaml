@@ -1,0 +1,35 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: noob
+spec:
+  version: v0.7.1
+  homepage: https://github.com/kube-noob/kube-noob
+  shortDescription: Audit, debug and learn Kubernetes offline. No AI inside.
+  description: |
+    kube-noob audits manifests against 84 deterministic rules, explains why a NetworkPolicy allows or
+    denies traffic, diagnoses pasted events and logs, and reads an OpenShift must-gather -- offline, with no
+    model and no network. Findings name the NIST SP 800-53 Rev. 5 controls they are evidence for, and a verdict
+    it cannot reach is reported as undetermined rather than as a pass.
+
+    This plugin forwards every argument to the kube-noob CLI unchanged:
+
+      kubectl noob audit -f k8s/ --platform openshift --version 4.22
+      kubectl get deploy api -o yaml | kubectl noob audit -f -
+      kubectl noob policy explain --from web/frontend --to shop/orders-api --port 8080
+
+    It uses kube-noob from your PATH when it is there, and otherwise runs this pinned release through uvx, so
+    the plugin is usable on a machine with no Python environment set up.
+  caveats: |
+    Needs either kube-noob on PATH (pipx install kube-noob, or brew install kube-noob/tap/kube-noob) or uv
+    installed, in which case the pinned release is fetched on first use. Nothing in kube-noob reaches the
+    network or your cluster unless you enable it explicitly.
+  platforms:
+    - bin: kubectl-noob
+      uri: https://github.com/kube-noob/kube-noob/releases/download/v0.7.1/kubectl-noob-v0.7.1.tar.gz
+      sha256: 9c9f1470037c0e9a10e39e29244c4273ddf38932e23eb5b03b120bc5ddebca52
+      selector:
+        matchExpressions:
+          - key: os
+            operator: In
+            values: [darwin, linux]

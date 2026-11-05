@@ -39,6 +39,15 @@ jobs:
       - name: SBOM matches the lock file it was generated from
         run: python scripts/sbom.py --check
       - run: cp docs/sbom.spdx.json dist/
+      - name: krew plugin and manifest match this version, and the archive matches the manifest digest
+        run: python scripts/krew_manifest.py --check
+      - name: Build the krew archive the manifest names
+        run: |
+          v=$(python -c 'import sys; sys.path.insert(0, "src"); from kube_noob import __version__; print(__version__)')
+          python scripts/krew_manifest.py --archive "dist/kubectl-noob-v$v.tar.gz"
+          want=$(python -c 'import sys; sys.path.insert(0, "scripts"); import hashlib, krew_manifest; print(hashlib.sha256(krew_manifest.archive()).hexdigest())')
+          got=$(sha256sum "dist/kubectl-noob-v$v.tar.gz" | cut -d" " -f1)
+          test "$want" = "$got" || { echo "archive digest $got != manifest digest $want"; exit 1; }
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: github.event_name == 'push'
         with:
