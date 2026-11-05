@@ -42,6 +42,29 @@ def test_ci_checks_every_video_on_every_change_without_the_voice_model() -> None
     assert "tests/fixtures/video-sidecar-transcript.txt" in str(job["steps"])
 
 
+def test_every_step_of_the_ci_videos_job_is_bounded_on_its_own() -> None:
+    """A job timeout is not a diagnosis.
+
+    A run of this job was cancelled at 30m19s with every other check green and no failing step, so the 30 minutes
+    said only "something took too long". The whole render takes about 90 seconds on this code, so each step now
+    carries its own budget and a hang fails with its own name. The budgets must also leave the job's own limit
+    room, or a step timeout would never be the thing that fires.
+    """
+    job = _wf("ci.yml")["jobs"]["videos"]
+    runnable = [s for s in job["steps"] if s.get("run")]
+    assert runnable, "the videos job runs commands"
+    for step in runnable:
+        assert step.get("timeout-minutes"), step.get("name")
+    assert sum(int(s["timeout-minutes"]) for s in runnable) <= int(job["timeout-minutes"])
+
+
+def test_apt_cannot_prompt_in_the_videos_install_step() -> None:
+    """`playwright install --with-deps` runs apt-get, and an apt prompt on a runner with no tty waits forever."""
+    install = next(s for s in _wf("ci.yml")["jobs"]["videos"]["steps"] if "--with-deps" in str(s.get("run", "")))
+    assert install.get("env", {}).get("DEBIAN_FRONTEND") == "noninteractive"
+    assert "sudo -E apt-get" in install["run"], "sudo drops the environment without -E"
+
+
 def test_every_release_renders_and_attaches_measured_4k_masters() -> None:
     release = _wf("release.yml")["jobs"]["videos"]
     assert release["uses"] == "./.github/workflows/videos.yml" and release["needs"] == "github-release"
