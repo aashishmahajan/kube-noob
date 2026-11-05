@@ -126,6 +126,9 @@ class Report:
     findings: list[Finding] = field(default_factory=list)
     scenarios: list[RedTeamScenario] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    # Every rule that actually ran. Empty means the caller did not record it, and the control summary
+    # then omits its coverage columns rather than claiming a coverage it cannot support.
+    evaluated_rules: list[str] = field(default_factory=list)
 
     def max_severity(self) -> Severity | None:
         return max((f.severity for f in self.findings), default=None)
@@ -155,7 +158,11 @@ class Report:
             },
             "assumptions": self.assumptions,
             "findings": [f.as_dict() for f in sorted(self.findings, key=_sort_key)],
-            "controlSummary": control_summary([f.rule_id for f in self.findings]),
+            "controlSummary": control_summary(
+                [f.rule_id for f in self.findings],
+                None,
+                self.evaluated_rules or None,
+            ),
             "redTeam": [s.as_dict() for s in self.scenarios],
             # Only when the target is past the minor the removal table was read at, so every result that was
             # already complete stays byte-identical. See `catalog.not_checked_beyond`.

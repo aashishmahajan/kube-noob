@@ -144,7 +144,11 @@ def describe(rule_id: str) -> list[dict[str, str]]:
     return [{"id": c, "title": TITLES[c]} for c in RULE_CONTROLS.get(rule_id, ())]
 
 
-def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> dict[str, Any]:
+def summary(
+    rule_ids: list[str],
+    excepted_rule_ids: list[str] | None = None,
+    evaluated_rule_ids: list[str] | None = None,
+) -> dict[str, Any]:
     """Controls touched by a set of findings, most findings first: for an audit report.
 
     ``excepted_rule_ids`` are the rules whose findings an exceptions file accepted. They are counted separately
@@ -152,6 +156,12 @@ def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> 
     control -- it is evidence *about* that control, so a control held only by excepted findings must stay named.
     Dropping it would make a control somebody signed off on indistinguishable from a control nothing evaluated,
     which is the one confusion a compliance record must not create.
+
+    ``evaluated_rule_ids`` is every rule that actually ran. With it, that same confusion is resolved for the
+    other direction too: a control whose rules ran and found nothing is reported with ``clean``, and one whose
+    rules did not run at all is reported with ``notEvaluated``, instead of both being absent from the list.
+    Without it the older shape is kept, so a caller that cannot say what ran does not get a coverage claim it
+    has not earned.
     """
     counts: dict[str, int] = {}
     excepted: dict[str, int] = {}
@@ -161,8 +171,19 @@ def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> 
     for rid in excepted_rule_ids or ():
         for c in RULE_CONTROLS.get(rid, ()):
             excepted[c] = excepted.get(c, 0) + 1
+    clean: dict[str, int] = {}
+    unevaluated: dict[str, int] = {}
+    if evaluated_rule_ids is not None:
+        ran = set(evaluated_rule_ids)
+        with_findings = set(rule_ids) | set(excepted_rule_ids or ())
+        for rid, cs in RULE_CONTROLS.items():
+            bucket = clean if rid in ran else unevaluated
+            if rid in with_findings:
+                continue  # already counted as a finding or an accepted exception
+            for c in cs:
+                bucket[c] = bucket.get(c, 0) + 1
     ordered = sorted(
-        set(counts) | set(excepted),
+        set(counts) | set(excepted) | set(clean) | set(unevaluated),
         key=lambda c: (-counts.get(c, 0), -excepted.get(c, 0), c),
     )
     controls: list[dict[str, Any]] = []
@@ -170,6 +191,9 @@ def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> 
         entry: dict[str, Any] = {"id": c, "title": TITLES[c], "findings": counts.get(c, 0)}
         if excepted.get(c):
             entry["excepted"] = excepted[c]
+        if evaluated_rule_ids is not None:
+            entry["clean"] = clean.get(c, 0)
+            entry["notEvaluated"] = unevaluated.get(c, 0)
         controls.append(entry)
     out: dict[str, Any] = {"catalog": CATALOG, "controls": controls}
     note = "Findings are evidence about these controls; an assessment decides whether a control is met."

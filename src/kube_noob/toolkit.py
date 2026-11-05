@@ -872,7 +872,11 @@ class Toolkit:
             from kube_noob.audit.controls import summary as control_summary
 
             out["controlSummary"] = control_summary(
-                [f.rule_id for f in kept], [str(e["ruleId"]) for e in excepted if "ruleId" in e]
+                [f.rule_id for f in kept],
+                [str(e["ruleId"]) for e in excepted if "ruleId" in e],
+                # The coverage record has to survive the rebuild too, or filing an exception would drop
+                # every checked-and-clean control from the report and make the two states one again.
+                r.evaluated_rules or None,
             )
         self._observe(
             [f"platform:{out.get('platform')}"]

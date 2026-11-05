@@ -61,7 +61,9 @@ def analyze(
         report.assumptions.append("Input contained no YAML documents.")
         return report
     rule_stages: set[Stage] = {s for s in stages if s is not Stage.RED_TEAM}
-    findings = run_rules(ctx, rule_stages) if rule_stages else []
+    evaluated: list[str] = []
+    findings = run_rules(ctx, rule_stages, evaluated) if rule_stages else []
+    report.evaluated_rules = evaluated
     if schema and Stage.VALIDATE in stages:
         schema_findings, notes = validate_documents(docs)
         findings.extend(schema_findings)

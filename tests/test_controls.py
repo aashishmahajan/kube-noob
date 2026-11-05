@@ -35,9 +35,15 @@ def test_findings_and_reports_carry_controls(capsys: pytest.CaptureFixture[str])
     report = analyze((ROOT / "examples" / "insecure-deployment.yaml").read_text(), "openshift", "4.22").as_dict()
     secret = next(f for f in report["findings"] if f["ruleId"] == "KN-S013")
     assert secret["controls"] == ["IA-5(7)", "SC-28"]
-    touched = {c["id"]: c["findings"] for c in report["controlSummary"]["controls"]}
+    # The summary now also names controls whose rules ran and found nothing, so compare the findings
+    # side against the findings side: a control at zero is coverage, not a finding (G191).
+    touched = {c["id"]: c["findings"] for c in report["controlSummary"]["controls"] if c["findings"]}
     expected = summary([f["ruleId"] for f in report["findings"]])
     assert touched == {c["id"]: c["findings"] for c in expected["controls"]} and touched["AC-6"] >= 1
+    clean = [c for c in report["controlSummary"]["controls"] if c["findings"] == 0]
+    assert clean and all("clean" in c and "notEvaluated" in c for c in clean), (
+        "a control that was checked and found nothing must be named, not absent"
+    )
     assert "assessment" in report["controlSummary"]["note"]
     main(["audit", "-f", str(ROOT / "examples" / "insecure-deployment.yaml"), "--platform", "openshift"])
     assert "NIST SP 800-53 controls with findings: " in capsys.readouterr().out

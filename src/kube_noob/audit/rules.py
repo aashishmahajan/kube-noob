@@ -3191,11 +3191,19 @@ def _c014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 )
 
 
-def run_rules(ctx: AuditContext, stages: set[Stage] | None = None) -> list[Finding]:
+def run_rules(ctx: AuditContext, stages: set[Stage] | None = None, evaluated: list[str] | None = None) -> list[Finding]:
+    """Every rule in ``stages``, appending the ids that actually ran to ``evaluated`` when given.
+
+    The caller needs that list because a rule producing no findings and a rule that never ran look
+    identical in the output otherwise, and a compliance record built on that cannot tell a control
+    that was checked and is clean from one nothing looked at.
+    """
     findings: list[Finding] = []
     for r in RULES.values():
         if stages is not None and r.stage not in stages:
             continue
         if r.check is not None:
+            if evaluated is not None:
+                evaluated.append(r.rule_id)
             findings.extend(r.check(ctx, r))
     return findings
