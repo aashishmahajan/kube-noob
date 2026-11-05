@@ -192,3 +192,41 @@ def fmt_path(path: PathT) -> str:
     for p in path:
         s += f"[{p}]" if isinstance(p, int) else (f".{p}" if s else str(p))
     return s
+
+
+def locator(data: Any, path: PathT) -> str:
+    """``fmt_path`` with list indices replaced by the key that identifies the item.
+
+    ``spec.template.spec.containers[0].securityContext`` becomes
+    ``spec.template.spec.containers[name=api].securityContext``.
+
+    An index is a position, and positions move: inserting a sidecar at the front renames every finding
+    on every other container, so anything keyed on the raw path reports N fixed and N new findings for
+    a change that fixed nothing. The container's name is the thing that did not move, and it lives only
+    in the finding's message, which is the one field an identity must not use because messages carry
+    counts and sorted lists that change on their own.
+
+    Items with no natural key keep the index, and that is honest: a NetworkPolicy's ``ingress[1]`` and
+    an RBAC ``rules[0]`` are identified by position in the API itself, so there is nothing better to use.
+    """
+    out = ""
+    for i, seg in enumerate(path):
+        if not isinstance(seg, int):
+            out += f".{seg}" if out else str(seg)
+            continue
+        item = get_path(data, tuple(path[: i + 1]))
+        key = ""
+        if isinstance(item, dict):
+            for field_name in ("name", "containerName"):
+                value = item.get(field_name)
+                if isinstance(value, str) and value:
+                    key = f"{field_name}={value}"
+                    break
+            else:
+                meta = item.get("metadata")
+                if isinstance(meta, dict) and isinstance(meta.get("name"), str) and meta["name"]:
+                    key = f"metadata.name={meta['name']}"
+        elif isinstance(item, str) and item:
+            key = item  # a scalar list entry identifies itself: capabilities.add[ALL]
+        out += f"[{key or seg}]"
+    return out

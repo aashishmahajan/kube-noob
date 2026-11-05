@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -48,10 +49,26 @@ class Finding:
     message: str
     remediation: str
     path: str = ""
+    locator: str = ""
     line: int | None = None
     doc_index: int | None = None
     citations: list[str] = field(default_factory=list)
     stackrox_policies: list[str] = field(default_factory=list)
+
+    def fingerprint(self) -> str:
+        """A stable identity for this finding, for baselines and for tracking it across runs.
+
+        Hashes the rule, the object and the name-keyed location. Deliberately NOT the message, the
+        file path, the line, the document index or the severity: messages carry counts and sorted
+        lists that change on their own, a file move or a gate run from a subdirectory rewrites the
+        path, the document index shifts when a file is added to the bundle, and several rules override
+        severity per finding. Each of those would rotate the identity of a finding that did not change.
+
+        This is separate from the SARIF ``partialFingerprints`` that gate.py emits, and does not touch
+        it: that one is GitHub's alert-matching key and redefining it would reset every alert's history.
+        """
+        key = "\x1f".join((self.rule_id, self.resource, self.locator or self.path))
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
 
     def citation_objects(self) -> list[Citation]:
         return [SOURCES[c] for c in self.citations if c in SOURCES]
@@ -66,6 +83,7 @@ class Finding:
             "resource": self.resource,
             "docIndex": self.doc_index,
             "path": self.path,
+            "fingerprint": self.fingerprint(),
             "line": self.line,
             "message": self.message,
             "remediation": self.remediation,

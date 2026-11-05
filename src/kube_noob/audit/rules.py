@@ -42,7 +42,7 @@ from kube_noob.catalog import (
     removed_api,
 )
 from kube_noob.debug.netpol import policy_types
-from kube_noob.yamlio import Document, PathT, fmt_path, get_path
+from kube_noob.yamlio import Document, PathT, fmt_path, get_path, locator
 
 
 @dataclass
@@ -112,6 +112,7 @@ class Rule:
             message=message,
             remediation=remediation or self.remediation,
             path=fmt_path(path),
+            locator=locator(doc.data, path) if doc else fmt_path(path),
             line=doc.line_for(path) if doc else None,
             doc_index=doc.index if doc else None,
             citations=list(self.citations),
