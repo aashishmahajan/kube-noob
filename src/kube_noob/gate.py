@@ -290,13 +290,20 @@ def run(
     enforced, not_generated = _admission(platform, version)
     excepted = 0
     kinds: set[str] = set()
+    # The gate already runs `analyze`, so it HAS the coverage record; it just never published it, and a
+    # compliance document built from the gate could therefore only ever say not-satisfied (G201).
+    coverage: dict[str, Any] = {}
     if sources:
         report = analyze(combined, platform, version)
+        kept_rules: list[str] = []
+        excepted_rules: list[str] = []
         kinds = set(_KIND.findall(combined))
         for f in report.findings:
             if review is not None and exc.match(review, f.rule_id, f.resource) is not None:
                 excepted += 1
+                excepted_rules.append(f.rule_id)
                 continue
+            kept_rules.append(f.rule_id)
             uri, line = _where(sources, f.line, chart_path)
             findings.append(
                 {
@@ -313,6 +320,18 @@ def run(
                     "helpUri": next((c.url for c in f.citation_objects()), INFO_URI),
                 }
             )
+        from kube_noob.audit.controls import summary as control_summary
+
+        coverage = {
+            "kubernetesVersion": report.kubernetes_version,
+            "resources": report.resources,
+            "controlSummary": control_summary(
+                kept_rules,
+                excepted_rules or None,
+                report.evaluated_rules or None,
+                report.fired_rules or None,
+            ),
+        }
         if review is not None and not review.summary()["gate"]:
             failures.append("the exception list has expired or refused entries (kube-noob exceptions check)")
     for uri, text in containerfiles:
@@ -386,6 +405,9 @@ def run(
         "counts": counts,
         "excepted": excepted,
         "findings": findings,
+        # Empty when the gate audited no manifests (Containerfiles or scanner reports only), in which case
+        # there is no coverage to claim and the OSCAL emitter degrades on its own.
+        **coverage,
         "admission": {
             "refusedInEnforceMode": sum(1 for r in findings if r["admission"].startswith("refused in enforce mode")),
             "command": f"kube-noob policy generate --platform {platform}"

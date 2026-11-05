@@ -58,6 +58,15 @@ class AuditContext:
     # reporting a finding the reader cannot act on. Never inferred from len(docs): the admission webhook
     # audits a one-document bundle on purpose and needs those rules to fire (tests/test_admission.py).
     partial_bundle: bool = False
+    # Rules that declined to DECIDE on this input: the partial-bundle guard returned before they could
+    # evaluate anything. `run_rules` keeps them out of the evaluated list, because "it skipped" and "it ran
+    # and found nothing" are the two states a compliance record must never merge -- G186 made these rules
+    # silent, G191 started calling a silent rule clean, and together they said a skipped rule had passed
+    # (G202). A rule whose guard skips one branch but evaluates the rest does NOT register here.
+    undecided: set[str] = field(default_factory=set)
+
+    def cannot_decide(self, rule_id: str) -> None:
+        self.undecided.add(rule_id)
 
     @property
     def is_openshift(self) -> bool:
@@ -1009,7 +1018,9 @@ _FLATTENED_GROUP_VERSION = "resource.k8s.io/v1beta1"
 )
 def _c015(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     if ctx.partial_bundle:
-        return  # a claim that lives in a file you did not pass is not a missing claim (G186)
+        # a claim that lives in a file you did not pass is not a missing claim (G186)
+        ctx.cannot_decide(r.rule_id)
+        return
     present: dict[tuple[str, str], set[str]] = {}
     for kind in _CLAIM_SOURCE_KINDS.values():
         for d in ctx.by_kind(kind):
@@ -2322,7 +2333,9 @@ def _s028(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 )
 def _n001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     if ctx.partial_bundle:
-        return  # the namespace's NetworkPolicies were not passed, so their absence here means nothing
+        # the namespace's NetworkPolicies were not passed, so their absence here means nothing
+        ctx.cannot_decide(r.rule_id)
+        return
     netpol_ns = {ctx.ns(d) for d in ctx.by_kind("NetworkPolicy")}
     flagged: set[str] = set()
     for d, _pt in ctx.workloads():
@@ -2829,7 +2842,9 @@ def _egress_allows_dns(spec: dict[str, Any]) -> bool:
 )
 def _n013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     if ctx.partial_bundle:
-        return  # another policy in the namespace may allow 53, and it was not passed
+        # another policy in the namespace may allow 53, and it was not passed
+        ctx.cannot_decide(r.rule_id)
+        return
     by_ns: dict[str, list[dict[str, str]]] = {}
     for d, pt in ctx.workloads():
         if (pt.spec or {}).get("hostNetwork") is True:
@@ -3348,7 +3363,9 @@ def _pdbs_for(ctx: AuditContext, d: Document, labels: dict[str, str]) -> list[Do
 )
 def _c008(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     if ctx.partial_bundle:
-        return  # the namespace's PodDisruptionBudgets were not passed, so no match here means nothing
+        # the namespace's PodDisruptionBudgets were not passed, so no match here means nothing
+        ctx.cannot_decide(r.rule_id)
+        return
     for d, pt in ctx.workloads():
         if d.kind in REPLICATED_KINDS and (replicas(d) or 1) >= 2 and not _pdbs_for(ctx, d, pt.labels()):
             yield r.finding(d, ("spec",), "No PodDisruptionBudget selects this workload.")
@@ -3536,13 +3553,17 @@ def run_rules(ctx: AuditContext, stages: set[Stage] | None = None, evaluated: li
     The caller needs that list because a rule producing no findings and a rule that never ran look
     identical in the output otherwise, and a compliance record built on that cannot tell a control
     that was checked and is clean from one nothing looked at.
+
+    The id is appended AFTER the check runs, and only when the rule did not call ``cannot_decide``: a rule
+    the partial-bundle guard skipped produces no findings, and recording it as evaluated made the control
+    summary report it as checked-and-clean (G202).
     """
     findings: list[Finding] = []
     for r in RULES.values():
         if stages is not None and r.stage not in stages:
             continue
         if r.check is not None:
-            if evaluated is not None:
-                evaluated.append(r.rule_id)
             findings.extend(r.check(ctx, r))
+            if evaluated is not None and r.rule_id not in ctx.undecided:
+                evaluated.append(r.rule_id)
     return findings

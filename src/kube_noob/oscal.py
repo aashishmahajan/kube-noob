@@ -77,6 +77,15 @@ def _uuid(*parts: str) -> str:
     return str(uuid.uuid5(NAMESPACE, "\x1f".join(parts)))
 
 
+def _identity(f: dict[str, Any]) -> str:
+    """A finding's stable identity. `gate` builds its findings by hand and carries no fingerprint, so the
+    fallback has to be more than the rule id or two gate runs with different findings would share a uuid."""
+    fp = f.get("fingerprint")
+    if isinstance(fp, str) and fp:
+        return fp
+    return "|".join(str(f.get(k, "")) for k in ("ruleId", "resource", "path", "uri", "line"))
+
+
 def _scope(report: dict[str, Any], import_ap: str | None) -> str:
     """A stable identity for this ASSESSMENT, not merely for the objects it looked at.
 
@@ -92,11 +101,7 @@ def _scope(report: dict[str, Any], import_ap: str | None) -> str:
         str(report.get("platform") or "kubernetes"),
         str(report.get("kubernetesVersion") or ""),
         *sorted(str(r) for r in report.get("resources") or []),
-        *sorted(
-            str(f.get("fingerprint") or f.get("ruleId", ""))
-            for f in report.get("findings") or []
-            if isinstance(f, dict)
-        ),
+        *sorted(_identity(f) for f in report.get("findings") or [] if isinstance(f, dict)),
         *sorted(
             "{}={},{},{},{},{}".format(
                 c.get("id"),
@@ -183,9 +188,7 @@ def _observations(findings: list[dict[str, Any]], collected: str, scope: str) ->
         # different observations may not share a uuid -- a consumer resolving `related-observations` would reach
         # one of them and never the other -- so the message joins the key here. It is stable for a given input,
         # which is what reproducibility needs.
-        key = "\x1f".join(
-            [str(f.get("fingerprint") or f"{f.get('ruleId', '')}:{i}"), str(f.get("message", "")), str(i)]
-        )
+        key = "\x1f".join([_identity(f), str(f.get("message", "")), str(i)])
         entry: dict[str, Any] = {
             "uuid": _uuid("observation", scope, key),
             "title": f"{f.get('ruleId', '')} {f.get('title', '')}".strip(),

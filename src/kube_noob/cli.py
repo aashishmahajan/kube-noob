@@ -378,7 +378,15 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
     quiet_pass = getattr(a, "quiet", False) and report["passed"]
-    if a.format == "text":
+    if getattr(a, "oscal", False):
+        from kube_noob.oscal import assessment_results, check_import_ap
+
+        # The flag REPLACES the gate report, the same way it does for `audit`. SARIF and the Markdown summary
+        # are still written to their files, because those are paths the caller asked for.
+        check_import_ap(a.oscal_import_ap)
+        if not quiet_pass:
+            _emit(assessment_results(report, import_ap=a.oscal_import_ap), "json" if a.format == "text" else fmt)
+    elif a.format == "text":
         if not quiet_pass:
             _tprint(gate.markdown(report, top=50))
     elif not quiet_pass:
@@ -941,6 +949,20 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--platform", choices=PLATFORMS)
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
+    gt.add_argument(
+        "--oscal",
+        action="store_true",
+        help="emit an OSCAL 1.2.3 assessment-results document instead of the gate report: the same document "
+        "`kube-noob audit --oscal` writes, from the gate's own coverage record. The exit code is unchanged, so "
+        "the gate verdict is the same with the flag as without",
+    )
+    gt.add_argument(
+        "--oscal-import-ap",
+        default=None,
+        metavar="HREF",
+        help="the assessment plan this document is assessed against; without it the document says plainly that "
+        "no plan was imported",
+    )
     gt.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     gt.add_argument(
         "--quiet",
