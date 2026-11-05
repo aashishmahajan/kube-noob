@@ -292,7 +292,7 @@ class Inventory:
         # An admin policy the cluster's CNI does not enforce, and one whose enforcement is unknown. Both are read
         # and then NOT evaluated: see _apply_cni.
         self.inert: list[dict[str, str]] = []
-        self.unknown_enforcement: list[str] = []
+        self.enforcement_unknown: list[str] = []
         for obj in objects:
             if not isinstance(obj, dict):
                 continue
@@ -335,11 +335,15 @@ class Inventory:
         it is not, the policies are dropped too and the verdict becomes undetermined, because evaluating guesses
         enforcement and ignoring guesses the reverse. ``kube_noob.debug.cni`` holds the table and its sources.
         """
-        if not cni or not (self.admin or self.baseline):
+        if not cni:
             return
         from kube_noob.debug.cni import REPLACEMENT, admin_tier_reason, admin_tier_support, parse_cni
 
+        # Parsed before the empty-tier check, so a library caller's typo is refused rather than ignored whenever
+        # the bundle happens to carry no admin policy.
         name, version = parse_cni(cni)
+        if not (self.admin or self.baseline):
+            return
         support = admin_tier_support(name, version)
         if support == "enforced":
             return
@@ -349,14 +353,25 @@ class Inventory:
             for kind, tier in ((ANP_KIND, self.admin), (BANP_KIND, self.baseline))
             for pol in tier
         ]
-        self.admin, self.baseline = [], []
         if support == "not-enforced":
-            # No note beside this: `inertPolicies` and the summary both carry it, and the CLI prints them, so a
-            # note would repeat the same sentence twice in the terminal.
+            # Dropped only here, where the CNI is documented as ignoring them. No note beside this: `inertPolicies`
+            # and the summary both carry it, and the CLI prints them, so a note would repeat the same sentence.
+            self.admin, self.baseline = [], []
             self.inert = [{"policy": ref, "reason": reason, "replacement": REPLACEMENT} for ref in refs]
             return
-        self.unknown_enforcement = refs
+        # NOT dropped here. An unknown must not read as a pass, and it must not discard an answer that is the
+        # same under both readings either: check_reachability evaluates the tier and withholds it, and only calls
+        # the question unanswerable when the two disagree.
+        self.enforcement_unknown = refs
         self.notes.append(f"{', '.join(refs)}: {reason}.")
+
+    def without_admin_tier(self) -> Inventory:
+        """A shallow view of this inventory with the two admin tiers empty, for the second reading above."""
+        import copy
+
+        bare = copy.copy(self)
+        bare.admin, bare.baseline = [], []
+        return bare
 
     @classmethod
     def from_yaml(cls, text: str, default_namespace: str = "default", cni: str | None = None) -> Inventory:
@@ -685,6 +700,20 @@ def _step(check: str) -> dict[str, str]:
     return {"command": cmd, **({"why": why} if why else {})}
 
 
+def _same_answer(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Do two readings of one direction reach the same verdict?
+
+    Only the three states are compared -- allowed, denied, undetermined -- not which policy decided or why. A
+    reading that reaches the same state by another route does not leave the question open; it changes the
+    explanation, and the explanation reported is the one that holds under both (the withheld reading).
+    """
+    return (
+        bool(a["allowed"]) == bool(b["allowed"])
+        and bool(a.get("undetermined")) == bool(b.get("undetermined"))
+        and bool(a.get("evaluated", True)) == bool(b.get("evaluated", True))
+    )
+
+
 def check_reachability(
     inv: Inventory, source: str, destination: str, port: int | str, protocol: str = "TCP", cli: str = "kubectl"
 ) -> dict[str, Any]:
@@ -702,6 +731,27 @@ def check_reachability(
         raise ValueError("at least one side must be a workload in the cluster")
     egress = _direction(inv, src, dst, "Egress", port, protocol, dst)
     ingress = _direction(inv, dst, src, "Ingress", port, protocol, dst)
+    # A CNI nobody documents either way leaves the admin tier in doubt, not the question. Evaluate it and withhold
+    # it, and only call the answer unknown where the two readings disagree: an unknown must not read as a pass, and
+    # it must not throw away an answer that holds under both readings either. On a Cilium cluster the first version
+    # of this made every question unanswerable as long as one AdminNetworkPolicy existed anywhere.
+    enforcement_unknown = list(inv.enforcement_unknown)
+    if enforcement_unknown:
+        bare = inv.without_admin_tier()
+        withheld = (
+            _direction(bare, src, dst, "Egress", port, protocol, dst),
+            _direction(bare, dst, src, "Ingress", port, protocol, dst),
+        )
+        agree = all(_same_answer(a, b) for a, b in zip((egress, ingress), withheld, strict=True))
+        # The withheld reading is the one reported either way: the tier may not apply, so its reason must not be
+        # the one the operator reads.
+        egress, ingress = withheld
+        if agree:
+            enforcement_unknown = []
+            inv.notes.append(
+                "Both readings of that tier -- enforced and ignored -- give the same answer here, so the verdict "
+                "stands either way."
+            )
     allowed = bool(egress["allowed"] and ingress["allowed"])
     # A direction whose deciding tier has no determinate answer is neither allowed nor denied. Calling it either
     # would be a guess, and a proposed NetworkPolicy under it would be applied and change nothing if the admin
@@ -736,14 +786,15 @@ def check_reachability(
     evaluated_answers = [r for r in (egress, ingress) if r.get("evaluated", True) and not r.get("undetermined")]
     if evaluated_deny:
         decided = "deny"
-    elif evaluated_answers:
+    elif evaluated_answers and not undetermined:
+        # Both directions must have an answer before the pair has one. With one direction allowed and the other
+        # never decided, "the NetworkPolicies would allow this traffic" is a claim about a decision nobody made.
         decided = "allow"
     else:
         decided = None
-    # A policy whose tier this CNI may or may not apply was read and then not evaluated. It is not "unreadable"
+    # A policy whose tier this CNI may or may not apply was read and then withheld. It is not "unreadable"
     # -- the document is right here -- and it is not "absent", so it gets its own reason rather than borrowing one.
-    unknown_enforcement = list(inv.unknown_enforcement)
-    overrides = bool(unevaluated_present or unreadable or unknown_enforcement)
+    overrides = bool(unevaluated_present or unreadable or enforcement_unknown)
     unknown = bool(undetermined or overrides)
     if unknown and (not evaluated_deny or overrides):
         verdict = "undetermined"
@@ -798,25 +849,39 @@ def check_reachability(
                 "rather than allowed or denied."
             )
         else:
+            # Where a direction is undetermined in its own right, its reason belongs here too: this branch used to
+            # drop it, so a hostNetwork destination behind an unread policy was reported with neither fact.
+            why = " ".join((ingress if d == "Ingress" else egress)["reason"] for d in undetermined)
             body = (
                 f"kube-noob could not determine whether {src.describe()} reaches {dst.describe()} on "
                 f"{protocol} {port}, and {detail}, so the answer is unknown rather than allowed or denied."
+                + (f" {why}" if why else "")
             )
+            if undetermined:
+                out["undetermined"] = undetermined
         out["summary"] = f"Undetermined: {body}"
-    elif unknown_enforcement:
-        out["undeterminedBy"] = unknown_enforcement
+    elif enforcement_unknown:
+        out["undeterminedBy"] = enforcement_unknown
+        if undetermined:
+            out["undetermined"] = undetermined
         if decided:
-            word = "deny" if decided == "deny" else "allow"
             tail = (
-                f"the NetworkPolicies in these manifests would {word} this traffic, but that is the answer only if "
-                "the admin tier does not decide it first"
+                f"the NetworkPolicies in these manifests would {decided} this traffic, but that is the answer only "
+                "if the admin tier does not decide it first"
             )
+        elif undetermined:
+            reasons = " ".join((ingress if d == "Ingress" else egress)["reason"] for d in undetermined)
+            tail = f"the {' and '.join(d.lower() for d in undetermined)} direction was not determined either. {reasons}"
         else:
             tail = "what the NetworkPolicies would do was not determined either"
+        plural = len(enforcement_unknown) != 1
         out["summary"] = (
-            f"Undetermined: {', '.join(unknown_enforcement)} was read and not evaluated, because whether this CNI "
-            f"enforces that tier is not documented either way, so {tail}."
-        )
+            f"Undetermined: {', '.join(enforcement_unknown)} "
+            f"{'were' if plural else 'was'} read and not evaluated, because whether this CNI enforces that tier is "
+            f"not documented either way, so {tail}"
+        ).rstrip(".") + "."
+        if plural:
+            out["summary"] = out["summary"].replace("was read and not evaluated", "were read and not evaluated")
     elif unreadable:
         out["undeterminedBy"] = unreadable
         if decided:
@@ -890,6 +955,17 @@ def check_reachability(
                 "requiresApproval": True,
             }
         )
+    if enforcement_unknown and not unevaluated_present:
+        # The withheld tier is the case where a proposed NetworkPolicy is MOST likely to change nothing, and the
+        # first version of this was the only branch that left the caveat off.
+        caveat = (
+            "kube-noob withheld " + ", ".join(enforcement_unknown[:10]) + ", because whether this CNI enforces "
+            "that tier is not documented either way. If it does and one of them denies this traffic, the "
+            "NetworkPolicy above is applied and changes nothing."
+        )
+        for change in changes:
+            if change.get("manifest"):
+                change["caveat"] = caveat
     if unevaluated_present:
         # The admin tier, and any policy in the input this evaluator did not read, can make a NetworkPolicy fix
         # a no-op. Say that on the fix. Do not call an EgressFirewall cluster-scoped: it is not.
@@ -926,6 +1002,12 @@ def check_reachability(
         checks.insert(0, anp_check)
     else:
         checks.append(anp_check)
+    if inv.inert:
+        # The tier is inert, so reading it answers nothing and its CRDs may not even be served. The kind that
+        # decides instead is the one to read, and it was missing from this list entirely.
+        replacement = {entry["replacement"] for entry in inv.inert}
+        for kind_name in sorted(replacement):
+            checks.insert(0, f"{cli} get {_RESOLVING_GET.get(kind_name, kind_name.lower())} -o yaml")
     # When a cluster-scoped kind this evaluator cannot read is what made the answer unknown, reading it is the
     # one step that resolves the verdict -- so it goes first. Printing checks that cannot settle the question,
     # and omitting the one that can, is the same failure as naming the policy in a field nobody reads.
@@ -1024,6 +1106,20 @@ def inventory_from_cluster(backend: Any, source: str, destination: str, cni: str
     # them: collecting one is what puts it in `other_policies`. Without the read, the live answer was allowed
     # in exactly the way the file answer no longer is. A 403 stays a failed read.
     unreadable: list[str] = []
+    # A tier the named CNI is documented as ignoring is not worth an API call, and a 403 on it must not withhold
+    # the verdict: the namespace-scoped RBAC that produces that 403 is the common `--live` case, so the first
+    # version of this left the flag's whole promise unapplied on the one path where the operator cannot read the
+    # policies for themselves. Skipped here rather than filtered afterwards, because the read is what fails.
+    skip: frozenset[str] = frozenset()
+    if cni:
+        from kube_noob.debug.cni import admin_tier_reason, admin_tier_support, parse_cni
+
+        cni_name, cni_version = parse_cni(cni)
+        if admin_tier_support(cni_name, cni_version) == "not-enforced":
+            skip = frozenset({ANP_KIND, BANP_KIND})
+            notes.append(
+                f"{ANP_KIND} and {BANP_KIND} were not read: {admin_tier_reason(cni_name, cni_version, 'not-enforced')}"
+            )
     for tier_plural, tier_kind in (
         ("clusternetworkpolicies", "ClusterNetworkPolicy"),
         ("ciliumclusterwidenetworkpolicies", "CiliumClusterwideNetworkPolicy"),
@@ -1031,6 +1127,8 @@ def inventory_from_cluster(backend: Any, source: str, destination: str, cni: str
         ("adminnetworkpolicies", ANP_KIND),
         ("baselineadminnetworkpolicies", BANP_KIND),
     ):
+        if tier_kind in skip:
+            continue
         try:
             items = backend.get(tier_plural, namespace=None).get("items", [])
         except ClusterAccessError as exc:

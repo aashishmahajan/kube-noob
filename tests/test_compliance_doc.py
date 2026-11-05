@@ -98,7 +98,13 @@ def test_a_renamed_heading_refuses_instead_of_reporting_the_document_current(
     tmp_path: Path, monkeypatch: object
 ) -> None:
     """The count lives in the heading. If the heading is reworded, a silent no-op would freeze the count."""
-    doc = DOC.read_text(encoding="utf-8").replace("## The 89 audit rules and their controls", "## Audit rules")
+    doc = re.sub(
+        r"^## The \d+ audit rules and their controls$",
+        "## Audit rules",
+        DOC.read_text(encoding="utf-8"),
+        count=1,
+        flags=re.M,
+    )
     renamed = _copy(tmp_path, doc)
     monkeypatch.setattr(cd, "OUT", renamed)  # type: ignore[attr-defined]
     with pytest.raises(SystemExit, match="shape changed"):

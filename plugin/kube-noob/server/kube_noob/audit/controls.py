@@ -128,6 +128,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-V010": _VALIDATION,
     "KN-V011": _VALIDATION,
     "KN-V012": _VALIDATION,
+    "KN-V023": _VALIDATION,
     "KN-V014": _VALIDATION,
     "KN-V015": ("SC-7", "CM-6"),  # an EgressFirewall not named 'default' is ignored: no egress control at all
     "KN-V016": ("SC-8", "CM-6"),

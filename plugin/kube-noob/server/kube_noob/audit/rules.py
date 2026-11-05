@@ -691,6 +691,75 @@ def _v012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 
 
 @rule(
+    "KN-V023",
+    "Service numeric targetPort is not a declared containerPort",
+    Stage.VALIDATE,
+    "wiring",
+    Severity.LOW,
+    "Point the Service at a port these containers declare, or declare the one it points at.",
+    "A numeric targetPort outside the ports the selected containers declare is usually a typo, though Kubernetes "
+    "does not require the declaration.",
+)
+def _v023(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    """The numeric half of KN-V012, and it has to be weaker.
+
+    A named targetPort must resolve or the Service gets no endpoints, which is why KN-V012 is HIGH. A numeric one
+    needs no declaration at all: ``containerPort`` is informational, so a Service pointing at 8080 works whenever
+    something listens on 8080. Reporting every undeclared numeric port would therefore fire on correct
+    repositories. The signal this rule reports is narrower: these containers DO declare ports, and the Service
+    points outside that set, so either the declaration or the Service is wrong. Where the containers declare no
+    ports, there is no signal and the rule says nothing.
+    """
+    workloads = list(ctx.workloads())
+    for svc in ctx.by_kind("Service"):
+        sel = get_path(svc.data, ("spec", "selector"))
+        if not isinstance(sel, dict) or not sel:
+            continue  # endpoints come from an EndpointSlice this bundle need not carry
+        pods = [
+            pt
+            for d, pt in workloads
+            if ctx.ns(d) == ctx.ns(svc) and selector_matches({"matchLabels": sel}, pt.labels())
+        ]
+        if not pods:
+            continue  # the claim needs the pod spec; without it there is nothing to compare
+        # Init containers are excluded deliberately: a Service never reaches one, so a port declared only there
+        # would clear a target the running containers do not serve.
+        declared = {
+            int(p["containerPort"])
+            for pt in pods
+            for c in containers(pt, include_init=False)
+            for p in (c.container.get("ports") or [])
+            if isinstance(p, dict) and isinstance(p.get("containerPort"), int)
+        }
+        if not declared:
+            continue  # the declaration is optional, so its absence is not evidence of anything
+        for i, port in enumerate(get_path(svc.data, ("spec", "ports")) or []):
+            if not isinstance(port, dict):
+                continue
+            tp = port.get("targetPort")
+            if tp is None:
+                # An absent targetPort is not an absent target: it defaults to `port`, so the same mismatch is
+                # there and reporting only the explicit case would read the default as safe.
+                target, field, prefix = port.get("port"), "port", "no targetPort, so it defaults to port "
+            elif isinstance(tp, int) or (isinstance(tp, str) and tp.isdigit()):
+                target, field, prefix = tp, "targetPort", "targetPort "
+            else:
+                continue  # a named target belongs to KN-V012, and two findings for one mistake is one too many
+            if not isinstance(target, int) and not (isinstance(target, str) and target.isdigit()):
+                continue  # a malformed port is the schema rule's to report
+            if int(target) in declared:
+                continue
+            yield r.finding(
+                svc,
+                ("spec", "ports", i, field),
+                f"{prefix}{int(target)}, which is not a declared containerPort of the selected pods "
+                f"(declared: {', '.join(str(x) for x in sorted(declared))}). Kubernetes does not require the "
+                "declaration, so the Service still works if a container listens there -- this is a likely typo, "
+                "not proof of a broken Service.",
+            )
+
+
+@rule(
     "KN-V014",
     "Duplicate object in bundle",
     Stage.VALIDATE,

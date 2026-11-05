@@ -171,3 +171,126 @@ def test_the_tool_schema_documents_the_flag() -> None:
 
     prop = NetpolCheckIn.model_json_schema()["properties"]["cni"]
     assert "3.32" in prop["description"] and "undetermined" in prop["description"]
+
+
+# -- a red team on the above found these ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("version", ["3", "v3", "03", "4", "9999"])
+def test_a_version_too_coarse_to_decide_is_unknown(version: str) -> None:
+    """`calico:3` does not distinguish 3.31 from 3.32, and the first version read it as enforcing.
+
+    The comparison truncated the TABLE's bound to the length of the INPUT, so (3,) >= (3,) answered "enforced"
+    -- an unknown read as a pass, on the very question this module exists to answer.
+    """
+    assert admin_tier_support("calico", version) == "unknown"
+
+
+def test_a_version_past_the_removal_is_not_enforced_however_far_past() -> None:
+    """Tigera's wording is "from 3.32 onward", so extrapolating forward is reading the source, not guessing."""
+    assert admin_tier_support("calico", "4.0") == "not-enforced"
+    assert admin_tier_support("calico", "3.1000") == "not-enforced"
+
+
+def test_an_implementation_upstream_lists_without_a_support_level_is_unknown() -> None:
+    """The table's own rule is to answer only where upstream does. kube-network-policies has a conformance-report
+    link and no stated support level, so claiming it enforces the tier overstated the source."""
+    assert admin_tier_support("kube-network-policies", "0.8.1") == "unknown"
+    for name in ("ovn-kubernetes", "antrea", "kube-ovn"):
+        assert admin_tier_support(name) == "enforced", name
+
+
+def test_an_unknown_cni_keeps_the_answer_when_the_doubt_cannot_change_it() -> None:
+    """An unknown must not read as a pass. It must not discard an answer that is the same either way either.
+
+    Both the ANP and the NetworkPolicy deny this. Whether the CNI enforces the tier is unknown, and the verdict is
+    `denied` under either reading -- so withholding it told the operator nothing and failed CI for nothing. On a
+    Cilium cluster one ANP anywhere made every question unanswerable.
+    """
+    out = _check(DENY_ALL_NP, _anp(10, "Deny"), cni="cilium:1.18")
+    assert out["verdict"] == "denied"
+    assert "same" in " ".join(out.get("notes", [])).lower()
+
+
+def test_an_unknown_cni_keeps_an_allow_the_tier_does_not_touch() -> None:
+    """The ANP here selects nothing, so the doubt is about a tier that was never going to decide."""
+    narrow = _anp(10, "Deny", from_ns="nowhere")
+    assert _check(ALLOW_ALL_NP, narrow, cni="cilium:1.18")["verdict"] == "allowed"
+
+
+def test_the_withheld_verdict_carries_the_caveat_on_the_fix_it_proposes() -> None:
+    """A proposed NetworkPolicy that an enforced admin tier would make a no-op must say so where it is read."""
+    out = _check(DENY_ALL_NP, _anp(10, "Allow"), cni="cilium:1.18")
+    assert out["verdict"] == "undetermined"
+    fixes = [c for c in out.get("proposedChanges", []) if c.get("manifest")]
+    assert fixes, "a NetworkPolicy fix is proposed here"
+    assert all("changes nothing" in (c.get("caveat") or "") for c in fixes)
+
+
+def test_a_direction_that_was_never_evaluated_is_not_summarised_as_allowed() -> None:
+    """`decided` came from the evaluated directions only, so one allowed and one unknown direction read as
+    "the NetworkPolicies would allow this traffic" -- a claim about a direction nobody decided."""
+    hostnet = """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostnet
+  namespace: shop
+  labels:
+    app: hostnet
+spec:
+  hostNetwork: true
+  containers:
+    - name: c
+      image: x:1
+      ports:
+        - containerPort: 8080
+"""
+    inv = Inventory.from_yaml("\n---\n".join((WORKLOADS, hostnet, ALLOW_ALL_NP, _anp(10, "Deny"))), cni="cilium:1.18")
+    out = check_reachability(inv, "monitoring/prometheus", "shop/hostnet", 8080)
+    assert out["verdict"] == "undetermined"
+    assert "would allow this traffic" not in out["summary"]
+    assert out.get("undetermined") == ["Ingress"] or "hostNetwork" in out["summary"]
+
+
+def test_the_next_steps_name_the_kind_that_decides_now() -> None:
+    """With the tier inert, `get adminnetworkpolicy` reads a kind the cluster may not even serve, and the kind
+    that replaced it was missing from the list entirely."""
+    out = _check(ALLOW_ALL_NP, _anp(10, "Deny"), cni="calico:3.32")
+    commands = [s["command"] for s in out["readOnlyNextSteps"]]
+    assert commands[0].endswith("get clusternetworkpolicy -o yaml")
+    assert any("adminnetworkpolicy" in c for c in commands)
+
+
+def test_a_tier_the_cni_ignores_is_not_read_from_the_cluster_at_all() -> None:
+    """A 403 on a tier the caller has just said is inert was making the live answer undetermined: the flag's whole
+    promise was unapplied on the one path where the operator cannot read the policies themselves."""
+    from kube_noob.debug.netpol import inventory_from_cluster
+
+    reads: list[str] = []
+
+    class Backend:
+        name = "fake"
+
+        def get(self, plural: str, name: str | None = None, namespace: str | None = None) -> Any:
+            reads.append(plural)
+            if plural in ("adminnetworkpolicies", "baselineadminnetworkpolicies"):
+                raise RuntimeError("forbidden: User cannot list adminnetworkpolicies at the cluster scope")
+            return {"items": []}
+
+    inv = inventory_from_cluster(Backend(), "monitoring/prometheus", "shop/orders", "calico:3.32")
+    assert "adminnetworkpolicies" not in reads, "a tier this CNI ignores is not worth an API call"
+    assert inv.tier_unreadable == []
+    assert any("not enforce" in n for n in inv.notes)
+
+
+def test_a_bad_cni_is_refused_even_with_nothing_in_that_tier() -> None:
+    """The early return skipped the parse, so a library caller's typo was accepted silently."""
+    with pytest.raises(ValueError):
+        Inventory.from_yaml(WORKLOADS, cni="not a cni")
+
+
+def test_the_unknown_line_agrees_with_itself_grammatically() -> None:
+    out = _check(ALLOW_ALL_NP, _anp(10, "Deny"), _anp(20, "Deny", name="second"), cni="cilium:1.18")
+    assert out["verdict"] == "undetermined"
+    assert "policies were read" in out["summary"] or "were read and not evaluated" in out["summary"]

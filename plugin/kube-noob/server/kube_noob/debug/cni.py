@@ -44,12 +44,17 @@ ADMIN_TIER_SOURCES: tuple[tuple[str, str], ...] = (
 #: The replacement Calico points at. Named on every inert finding so the fix is not left as an exercise.
 REPLACEMENT = "ClusterNetworkPolicy"
 
-#: Upstream lists these as implementing the v1alpha1 standard fields and states no version, so every version is
-#: taken as enforcing. A CNI whose support is version-dependent is in :data:`_VERSIONED` instead.
-_ENFORCING = frozenset({"ovn-kubernetes", "antrea", "kube-ovn", "kube-network-policies"})
+#: Upstream lists these with "Has implemented standard fields of the API" and states no version, so every version
+#: is taken as enforcing. A CNI whose support is version-dependent is in :data:`_VERSIONED` instead.
+#:
+#: ``kube-network-policies`` is deliberately NOT here. Upstream links a conformance report for it and states no
+#: support level, and the rule this table keeps is to answer only where upstream does -- so it is unknown, like
+#: any CNI the page does not characterise.
+_ENFORCING = frozenset({"ovn-kubernetes", "antrea", "kube-ovn"})
 
 #: name -> (first version upstream lists as implementing it, first version that dropped it). Below the first the
-#: answer is unknown rather than no: upstream simply does not say.
+#: answer is unknown rather than no: upstream simply does not say. A version with fewer components than these
+#: bounds cannot be compared against them -- see :func:`admin_tier_support`.
 _VERSIONED: dict[str, tuple[tuple[int, ...], tuple[int, ...]]] = {"calico": ((3, 29), (3, 32))}
 
 #: Listed upstream with a tracking issue and no stated support. Kept by name so the reason can say which it is.
@@ -86,7 +91,16 @@ def _tuple(version: str) -> tuple[int, ...]:
 
 
 def admin_tier_support(name: str, version: str | None = None) -> Support:
-    """Does this CNI enforce AdminNetworkPolicy and BaselineAdminNetworkPolicy?"""
+    """Does this CNI enforce AdminNetworkPolicy and BaselineAdminNetworkPolicy?
+
+    A version too coarse to decide is ``unknown``, not enforced. The first version of this function truncated the
+    TABLE's bound to the length of the INPUT, so ``calico:3`` compared (3,) against (3,) and answered "enforced" --
+    an unknown read as a pass, on the one question this module exists to answer. ``3`` does not distinguish 3.31
+    from 3.32, so it decides nothing, exactly like ``calico`` with no version at all.
+
+    Past the removal the answer IS ``not-enforced`` however far past, including an undocumented major: Tigera's
+    wording is "from 3.32 onward", so that is reading the source rather than extrapolating beyond it.
+    """
     name = name.strip().lower()
     if name in _ENFORCING:
         return "enforced"
@@ -94,10 +108,11 @@ def admin_tier_support(name: str, version: str | None = None) -> Support:
         if version is None:
             return "unknown"  # the version is what decides, so without it there is no answer
         first, dropped = _VERSIONED[name]
-        v = _tuple(version)[: len(dropped)]
-        if v >= dropped:
-            return "not-enforced"
-        return "enforced" if v >= first[: len(v)] else "unknown"
+        v = _tuple(version)
+        if len(v) < len(dropped):
+            return "unknown"  # too coarse to sit on either side of the bound
+        v = v[: len(dropped)]
+        return "not-enforced" if v >= dropped else ("enforced" if v >= first else "unknown")
     return "unknown"
 
 
@@ -117,6 +132,12 @@ def admin_tier_reason(name: str, version: str | None, support: Support) -> str:
             f"whether {shown} enforces it is unknown: the upstream network-policy-api implementations page lists "
             f"{name} with a tracking issue and no stated support, so neither evaluating nor ignoring the tier "
             "would be an answer this input supports"
+        )
+    if name in _VERSIONED and version and len(_tuple(version)) < len(_VERSIONED[name][1]):
+        bound = ".".join(str(p) for p in _VERSIONED[name][1])
+        return (
+            f"whether {shown} enforces it cannot be decided from that version: {name} stopped enforcing it in "
+            f"{bound}, and {version} does not say which side of that it is on"
         )
     return (
         f"whether {shown} enforces it is unknown: the upstream network-policy-api implementations page does not "

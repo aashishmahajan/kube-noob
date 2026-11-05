@@ -433,8 +433,11 @@ not enforce them from 3.32 onward, without reporting an error. Pass `--cni calic
 tier is reported as **NOT ENFORCED** -- read, named, and not allowed to decide -- with the replacement kind, so an
 `ANP` that looks like a guardrail is shown as the no-op it has become. The NetworkPolicies then give the answer,
 which can be the opposite of the one that tier would have given. A CNI nobody documents either way (`--cni
-cilium:1.18`) makes the verdict `undetermined` instead: evaluating the tier would assume enforcement and dropping
-it would assume the reverse. Without the flag the OVN-Kubernetes semantics above are assumed, as before.
+cilium:1.18`) is evaluated both ways -- with the tier and without it -- and the verdict is `undetermined` only
+where the two readings disagree: evaluating the tier would assume enforcement and dropping it would assume the
+reverse, but an answer that holds under both still holds. A Calico version too coarse to decide (`--cni calico:3`,
+which does not say whether the cluster is on 3.31 or 3.32) is treated the same way. Without the flag the
+OVN-Kubernetes semantics above are assumed, as before.
 
 ```bash
 kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-shop.yaml

@@ -59,7 +59,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 89 audit rules and their controls
+## The 90 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -152,6 +152,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-V020 | Container claims a resource the Pod does not declare | CM-3(2), CM-6 |
 | KN-V021 | Pod resource claim names no source, or two | CM-3(2), CM-6 |
 | KN-V022 | Resource claims set at pod level, where they are forbidden | CM-3(2), CM-6 |
+| KN-V023 | Service numeric targetPort is not a declared containerPort | CM-3(2), CM-6 |
 
 Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final)):
 
