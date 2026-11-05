@@ -378,6 +378,11 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
+    if getattr(a, "github_annotations", False):
+        # Before the report, and on stdout: Actions reads workflow commands from the step's output, and a caller
+        # parsing --format json filters the `::` lines (the test does exactly that).
+        for line in gate.github_annotations(report):
+            print(line)
     quiet_pass = getattr(a, "quiet", False) and report["passed"]
     if getattr(a, "oscal", False):
         from kube_noob.oscal import assessment_results, check_import_ap
@@ -958,6 +963,12 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--platform", choices=PLATFORMS)
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
+    gt.add_argument(
+        "--github-annotations",
+        action="store_true",
+        help="also print the findings as GitHub Actions workflow commands, so they appear on the pull request "
+        "instead of in a log. GitHub shows ten of each kind per step, so the tenth says how many are not shown",
+    )
     gt.add_argument(
         "--cni",
         default=None,
