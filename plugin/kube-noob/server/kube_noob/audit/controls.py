@@ -133,6 +133,8 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-V017": ("CM-6",),
     "KN-V018": _VALIDATION,
     "KN-V019": ("SA-22",),  # the retired ingress-nginx receives no fixes
+    "KN-V020": _VALIDATION,
+    "KN-V021": _VALIDATION,
 }
 
 

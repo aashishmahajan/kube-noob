@@ -857,6 +857,103 @@ def _v019(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 
 
 # =====================================================================================================
+# VALIDATE - Dynamic Resource Allocation (DRA)
+# =====================================================================================================
+# DRA went GA in Kubernetes 1.34 and the claim wiring is three names deep: a container names a pod-level
+# claim, which names a ResourceClaim or a template. Both checks below mirror upstream's own object validation
+# (`pkg/apis/core/validation/validation.go`: `validateResourceClaimNames`, `validatePodResourceClaim`), which
+# the bundled OpenAPI schemas cannot express -- one is a cross-field reference, the other a mutual exclusion
+# the schema declares no `oneOf` for. So the API server refuses these manifests and nothing before
+# `kubectl apply` says so. That is the whole gap these two close (G192): both are decided inside one
+# document, so neither needs the bundle and `partial_bundle` does not silence them.
+
+
+def _declared_pod_claims(pt: PodTemplate) -> list[str]:
+    """``spec.resourceClaims[].name``, in order, skipping entries that are not name-carrying mappings."""
+    claims = pt.spec.get("resourceClaims")
+    if not isinstance(claims, list):
+        return []
+    out: list[str] = []
+    for item in claims:
+        if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]:
+            out.append(str(item["name"]))
+    return out
+
+
+@rule(
+    "KN-V020",
+    "Container claims a resource the Pod does not declare",
+    Stage.VALIDATE,
+    "wiring",
+    Severity.HIGH,
+    "Name a claim the Pod declares: every resources.claims[].name has to match a spec.resourceClaims[].name.",
+    "A container's resources.claims entry refers to a pod-level claim by name, so a name the Pod never declares "
+    "resolves to nothing. The API server refuses the object, and a typo here reads at a glance as a device "
+    "request that was made.",
+)
+def _v020(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt, c in _resource_containers(ctx):
+        resources = c.container.get("resources")
+        claims = resources.get("claims") if isinstance(resources, dict) else None
+        if not isinstance(claims, list):
+            continue
+        declared = _declared_pod_claims(pt)
+        for i, item in enumerate(claims):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name or name in declared:
+                continue
+            where = f"the Pod declares {', '.join(declared)}" if declared else "the Pod declares none"
+            yield r.finding(
+                d,
+                (*c.path, "resources", "claims", i, "name"),
+                f"Container '{c.name}' claims {name!r}, which is not one of the Pod's resource claims: {where}.",
+            )
+
+
+@rule(
+    "KN-V021",
+    "Pod resource claim names no source, or two",
+    Stage.VALIDATE,
+    "wiring",
+    Severity.HIGH,
+    "Set exactly one of resourceClaimName (share a ResourceClaim that already exists) or "
+    "resourceClaimTemplateName (give this Pod its own, created from a ResourceClaimTemplate).",
+    "A spec.resourceClaims entry has to name exactly one source. With neither there is no device to allocate, "
+    "and with both which one applies is undefined; the API server refuses the object either way.",
+)
+def _v021(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt in ctx.workloads():
+        claims = pt.spec.get("resourceClaims")
+        if not isinstance(claims, list):
+            continue
+        for i, item in enumerate(claims):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            label = repr(str(name)) if isinstance(name, str) and name else f"resourceClaims[{i}]"
+            from_claim = isinstance(item.get("resourceClaimName"), str) and bool(item["resourceClaimName"])
+            from_template = isinstance(item.get("resourceClaimTemplateName"), str) and bool(
+                item["resourceClaimTemplateName"]
+            )
+            if from_claim and from_template:
+                yield r.finding(
+                    d,
+                    (*pt.path, "resourceClaims", i),
+                    f"Pod resource claim {label} sets both resourceClaimName and resourceClaimTemplateName; "
+                    "exactly one source may be named.",
+                )
+            elif not from_claim and not from_template:
+                yield r.finding(
+                    d,
+                    (*pt.path, "resourceClaims", i),
+                    f"Pod resource claim {label} names neither resourceClaimName nor resourceClaimTemplateName, "
+                    "so there is no device for it to allocate.",
+                )
+
+
+# =====================================================================================================
 # AUDIT - security
 # =====================================================================================================
 

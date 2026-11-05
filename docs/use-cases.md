@@ -73,6 +73,34 @@ this repository's `examples/` directory that is 105 findings over 19 rules, and 
 exactly. The MCP and HTTP tool takes the same thing as `compact: true`, off by default so the flat shape stays
 what it was. The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
 
+### The GPU claim that will be refused on apply
+
+Dynamic Resource Allocation is GA from Kubernetes 1.34, and its wiring is three names deep: a container names a
+pod-level claim, which in turn names a `ResourceClaim` or a `ResourceClaimTemplate`. A plural on one of those names
+reads at a glance like a device request that was made, and `kubectl apply --dry-run=client` does not catch it
+either, because a client dry run only validates against the schema and the schema cannot express the reference:
+
+```console
+$ kube-noob validate -f k8s/trainer.yaml
+kube-noob audit | platform=kubernetes k8s=1.35 | score=90.0 | high=1
+  note: No Kubernetes version given; assumed 1.35.
+[HIGH    ] KN-V020   Deployment/ml/trainer L18 spec.template.spec.containers[0].resources.claims[0].name
+           Container 'train' claims 'gpus', which is not one of the Pod's resource claims: the Pod declares gpu.
+           fix: Name a claim the Pod declares: every resources.claims[].name has to match a spec.resourceClaims[].name.
+```
+
+The path is printed by index, but the `fingerprint` the JSON report carries beside it is computed from a
+name-keyed locator (`containers[name=train]`), so inserting a sidecar ahead of this container does not rotate
+the identity a baseline matches on (G190).
+
+The same rule fires when the Pod declares no `resourceClaims` at all, which is the shape a copied container block
+produces. `KN-V021` covers the other half: a `spec.resourceClaims` entry that sets both `resourceClaimName` and
+`resourceClaimTemplateName`, or neither -- the API server refuses both, and nothing before apply says which.
+
+What neither rule claims is `cannot allocate all claims`, the scheduler event users actually report. Allocation is
+matched against the `ResourceSlice` objects a driver publishes from the hardware it found, so no manifest can
+decide it; these two rules answer the part a file proves, and say nothing about the part it does not.
+
 ## SRE or on-call: diagnose before you change anything
 
 Not sure what you have? `insight` names it first (events, logs, a denial, manifests, a ticket, a build log, a

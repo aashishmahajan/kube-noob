@@ -379,6 +379,8 @@ NOT_GENERATED: dict[str, str] = {
     "bundle",
     "KN-V012": "needs the containers the Service selects (another object); `kube-noob audit` checks the bundle",
     "KN-V014": "duplicates are a property of a bundle; admission sees one object at a time",
+    "KN-V020": "the API server refuses a claim name the Pod does not declare itself",
+    "KN-V021": "the API server refuses a claim entry with neither or both sources itself",
     "KN-V018": "duplicate YAML keys are lost when the client parses the file; kubectl's strict field validation (the "
     "default) refuses them",
     "KN-S018": "every Secret in a cluster carries its data; the rule is about Secrets committed to Git, so it belongs "

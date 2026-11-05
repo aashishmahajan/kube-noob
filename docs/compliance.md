@@ -143,6 +143,8 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-V017 | MachineConfig is not a customer lever on ROSA | CM-6 |
 | KN-V018 | Duplicate key in a YAML mapping | CM-3(2), CM-6 |
 | KN-V019 | Ingress targets the retired ingress-nginx | SA-22 |
+| KN-V020 | Container claims a resource the Pod does not declare | CM-3(2), CM-6 |
+| KN-V021 | Pod resource claim names no source, or two | CM-3(2), CM-6 |
 
 Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final)):
 
