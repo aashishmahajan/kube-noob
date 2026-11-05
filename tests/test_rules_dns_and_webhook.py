@@ -16,8 +16,11 @@ egress policy selecting the pod, not over one policy at a time.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from kube_noob.audit.engine import analyze
+
+ROOT = Path(__file__).resolve().parents[1]
 
 _APP = """
 apiVersion: apps/v1
@@ -214,6 +217,37 @@ def test_an_invalid_failure_policy_is_not_the_safe_default() -> None:
         assert "KN-S030" in found, bad
 
 
+def _rendered_webhook_name() -> str:
+    """Build the webhook's object name from the CHART and the WORKFLOW, never from memory.
+
+    The first version of this test hardcoded the name in both the exception file and the assertion, so it
+    compared one guess against itself and passed while CI failed: the real object is
+    `<fullname>-admission.<namespace>.kube-noob.io`, and `kube-noob.admissionName` names the Service. Deriving
+    it here means a change to the template's name expression, to the release name, or to the namespace CI
+    renders into fails in this suite instead of in a workflow.
+    """
+    chart = ROOT / "deploy" / "helm" / "kube-noob" / "templates"
+    tpl = chart / "admission.yaml"
+    body = tpl.read_text(encoding="utf-8")
+    # The ValidatingWebhookConfiguration's own metadata.name, not the Service's.
+    block = body[body.index("kind: ValidatingWebhookConfiguration") :]
+    expr = re.search(r"^  name: (.+)$", block, re.M)
+    assert expr, f"{tpl.name} no longer declares the webhook configuration's name where this test looks"
+    pattern = expr.group(1).strip()
+    assert pattern == "{{ $name }}.{{ $ns }}.kube-noob.io", f"the name expression changed: {pattern}"
+
+    helpers = (chart / "_helpers.tpl").read_text(encoding="utf-8")
+    assert '{{- printf "%s-admission" (include "kube-noob.fullname" .) ' in helpers, "admissionName changed"
+
+    # The release name and the namespace the admission step renders with.
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    render = re.search(r"at\(\) \{ helm template (\S+) deploy/helm/kube-noob -n (\S+) ", workflow)
+    assert render, "the admission step no longer renders with a fixed release name and namespace"
+    release, namespace = render.group(1), render.group(2)
+    fullname = release if "kube-noob" in release else f"{release}-kube-noob"
+    return f"{fullname}-admission.{namespace}.kube-noob.io"
+
+
 def test_our_own_exceptions_file_still_covers_our_own_webhook() -> None:
     """KN-S030 reports kube-noob's own chart, and the acceptance is on the record rather than the rule weakened.
 
@@ -223,19 +257,16 @@ def test_our_own_exceptions_file_still_covers_our_own_webhook() -> None:
     renamed, or the entry expires, or someone deletes it to make CI green, this fails here rather than in a
     workflow (G205).
     """
-    from pathlib import Path
+    import yaml
 
     from kube_noob.audit import exceptions as exc
 
-    path = Path(__file__).resolve().parents[1] / ".github" / "kube-noob-exceptions.yaml"
+    path = ROOT / ".github" / "kube-noob-exceptions.yaml"
     review = exc.review(path.read_text(encoding="utf-8"))
     assert review.summary()["gate"], [e.as_dict() for e in review.gate_failures]
-    hit = exc.match(review, "KN-S030", "ValidatingWebhookConfiguration/kn-kube-noob-admission")
-    assert hit is not None, "the chart's rendered webhook is no longer covered"
+    name = _rendered_webhook_name()
+    hit = exc.match(review, "KN-S030", f"ValidatingWebhookConfiguration/{name}")
+    assert hit is not None, f"the exception does not cover the webhook the chart renders: {name}"
     assert hit.owner and hit.expires, "an accepted risk names who answers for it and when it is reviewed again"
-    # `Checked.reason` is the status explanation; the author's reason lives in the file, and the reviewer
-    # already refuses one under ten characters. Assert it actually explains the trade-off.
-    import yaml
-
     entry = yaml.safe_load(path.read_text(encoding="utf-8"))["exceptions"][0]
     assert "warnings" in entry["reason"] and "SECURITY.md" in entry["reason"], entry["reason"]

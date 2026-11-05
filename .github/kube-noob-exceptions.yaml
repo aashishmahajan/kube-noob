@@ -10,7 +10,10 @@ kind: ExceptionList
 exceptions:
 - id: EXC-ADM-001
   rule: KN-S030
-  scope: {kind: ValidatingWebhookConfiguration, name: kn-kube-noob-admission}
+  # The object name is `<fullname>-admission.<namespace>.kube-noob.io` (templates/admission.yaml), so it
+  # embeds the release name and the namespace CI renders into. A cluster-scoped exception has to name it
+  # exactly -- no globs -- so your own install needs your own entry with your own release and namespace.
+  scope: {kind: ValidatingWebhookConfiguration, name: kn-kube-noob-admission.kube-noob.kube-noob.io}
   owner: kube-noob-maintainer
   reason: >-
     kube-noob's admission webhook turns findings into kubectl warnings and denies only the rules listed in
