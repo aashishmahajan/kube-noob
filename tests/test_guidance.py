@@ -148,3 +148,34 @@ def test_readme_numbers_match_the_code() -> None:
     assert f"{len(PLAYBOOKS)} offline playbooks" in readme
     assert f"{len(SCENARIOS)} red-team scenarios" in readme
     assert f"{len(tracks)} tracks, {lessons} lessons" in readme
+
+
+def test_the_website_queue_states_the_real_numbers() -> None:
+    """docs/website-updates.md is the list of what the site says differently, so its own figures must be true.
+
+    A tracker whose numbers have drifted sends someone to publish a stale count on the website -- the same defect
+    the compliance document had when it said "The 78 audit rules" with 89 in the code (G206), one step further
+    from the code and therefore harder to notice.
+    """
+    from kube_noob import __version__
+    from kube_noob.audit.controls import RULE_CONTROLS
+    from kube_noob.audit.engine import list_rules
+    from kube_noob.audit.redteam import SCENARIOS
+    from kube_noob.config import load_settings
+    from kube_noob.debug.playbooks import PLAYBOOKS
+    from kube_noob.learn.tutor import curriculum
+    from kube_noob.toolkit import Toolkit
+
+    queue = (ROOT / "docs" / "website-updates.md").read_text(encoding="utf-8")
+    tracks = curriculum()["tracks"]
+    expected = [
+        f"version {__version__}",
+        f"{len(list_rules())} rules",
+        f"{len({c for cs in RULE_CONTROLS.values() for c in cs})} NIST SP 800-53 Rev. 5 controls",
+        f"{len(PLAYBOOKS)} offline playbooks",
+        f"{len(SCENARIOS)} red-team scenarios",
+        f"{len(tracks)} tracks with {sum(len(t.get('lessons', [])) for t in tracks)} lessons",
+        f"{len(Toolkit(load_settings()).specs())} MCP tools",
+    ]
+    for fact in expected:
+        assert fact in queue, fact
