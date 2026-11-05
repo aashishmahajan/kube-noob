@@ -15,6 +15,8 @@ egress policy selecting the pod, not over one policy at a time.
 
 from __future__ import annotations
 
+import re
+
 from kube_noob.audit.engine import analyze
 
 _APP = """
@@ -122,7 +124,8 @@ def test_the_default_is_fail_so_an_absent_field_is_fine() -> None:
 def test_the_finding_names_the_webhook() -> None:
     rep = analyze(_WEBHOOK % ("ValidatingWebhookConfiguration", "Ignore"), "kubernetes", None)
     hit = [f for f in rep.findings if f.rule_id == "KN-S030"]
-    assert hit and "gate.example.com" in hit[0].message, hit
+    assert hit, "the rule did not fire"
+    assert re.findall(r"Webhook '([^']+)'", hit[0].message) == ["gate.example.com"], hit[0].message
 
 
 _OPENSHIFT_DNS = """
@@ -209,3 +212,30 @@ def test_an_invalid_failure_policy_is_not_the_safe_default() -> None:
     for bad in ("ignore", "Fial"):
         found = _ids(_WEBHOOK % ("ValidatingWebhookConfiguration", bad))
         assert "KN-S030" in found, bad
+
+
+def test_our_own_exceptions_file_still_covers_our_own_webhook() -> None:
+    """KN-S030 reports kube-noob's own chart, and the acceptance is on the record rather than the rule weakened.
+
+    The chart sets `failurePolicy: Ignore` deliberately: the webhook turns findings into kubectl warnings and
+    denies only the rules listed in `admission.enforce`, so an audit webhook that is down must not stop a
+    cluster admitting objects. This test exists so the acceptance cannot rot -- if the rendered webhook is
+    renamed, or the entry expires, or someone deletes it to make CI green, this fails here rather than in a
+    workflow (G205).
+    """
+    from pathlib import Path
+
+    from kube_noob.audit import exceptions as exc
+
+    path = Path(__file__).resolve().parents[1] / ".github" / "kube-noob-exceptions.yaml"
+    review = exc.review(path.read_text(encoding="utf-8"))
+    assert review.summary()["gate"], [e.as_dict() for e in review.gate_failures]
+    hit = exc.match(review, "KN-S030", "ValidatingWebhookConfiguration/kn-kube-noob-admission")
+    assert hit is not None, "the chart's rendered webhook is no longer covered"
+    assert hit.owner and hit.expires, "an accepted risk names who answers for it and when it is reviewed again"
+    # `Checked.reason` is the status explanation; the author's reason lives in the file, and the reviewer
+    # already refuses one under ten characters. Assert it actually explains the trade-off.
+    import yaml
+
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))["exceptions"][0]
+    assert "warnings" in entry["reason"] and "SECURITY.md" in entry["reason"], entry["reason"]

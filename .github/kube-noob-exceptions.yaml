@@ -1,0 +1,20 @@
+# kube-noob's own exceptions, for auditing its own chart in CI.
+#
+# kube-noob exceptions check .github/kube-noob-exceptions.yaml
+#
+# This file exists because a rule this project added found a real property of this project's own chart. The
+# honest options were to weaken the rule or to state the decision on the record; weakening a correct rule so
+# that our own chart passes is the failure mode this repository keeps fixing in other people's reasoning.
+apiVersion: kube-noob.io/v1
+kind: ExceptionList
+exceptions:
+- id: EXC-ADM-001
+  rule: KN-S030
+  scope: {kind: ValidatingWebhookConfiguration, name: kn-kube-noob-admission}
+  owner: kube-noob-maintainer
+  reason: >-
+    kube-noob's admission webhook turns findings into kubectl warnings and denies only the rules listed in
+    admission.enforce, so failurePolicy Ignore is deliberate: an audit webhook that is down must not stop a
+    cluster admitting objects. The finding is correct and the trade-off is accepted and documented in
+    SECURITY.md. A policy gate whose whole purpose is to deny should set Fail, which is why the rule stays HIGH.
+  expires: 2027-06-30

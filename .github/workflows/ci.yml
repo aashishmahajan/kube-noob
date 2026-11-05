@@ -579,15 +579,17 @@ jobs:
           base="--set auth.existingSecret=kn-token --set admission.enabled=true"
           at() { helm template kn deploy/helm/kube-noob -n kube-noob $base "$@"; }
           helm lint --strict deploy/helm/kube-noob $base
+          exc="--exceptions .github/kube-noob-exceptions.yaml"
+          kube-noob exceptions check .github/kube-noob-exceptions.yaml
           for v in 1.33.0 1.35.0; do
             at --kube-version "$v" --set networkPolicy.allowRouter=false \
               --set admission.certificates=secret --set admission.tls.secretName=kn-tls --set admission.tls.caBundle=Zm9v \
-              | kube-noob audit -f - --platform kubernetes --fail-on medium
+              | kube-noob audit -f - --platform kubernetes --fail-on medium $exc
           done
           for v in 4.20:1.33.0 4.22:1.35.0; do
             at --kube-version "${v#*:}" --api-versions security.openshift.io/v1 --set admission.lookups=true \
               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" --set "admission.enforce={KN-S001}" \
-              | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium
+              | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium $exc
           done
           at --kube-version 1.33.0 --api-versions security.openshift.io/v1 > /tmp/adm-sca.yaml
           at --kube-version 1.33.0 --set admission.certificates=cert-manager \
