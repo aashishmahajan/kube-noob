@@ -39,6 +39,7 @@ MAX_FIELDS = 400
 MAX_CHANGED_FIELDS = 20
 MAX_SNAPSHOT_BYTES = 200_000_000
 MAX_NOT_READ = 200  # entries kept in a snapshot; the reason strings are bounded by collect_live
+MAX_CONTROL_NAMESPACES = 20  # named on a byControl row; the count is exact, the list is a sample
 WATCHED = frozenset(
     {
         "Deployment",
@@ -282,6 +283,13 @@ def snapshot(
         "platform": platform,
         "objects": dict(sorted(items.items())),
         "findings": sorted(findings, key=lambda x: str(x["id"])),
+        # What RAN, not just what fired. Without it a control with no open finding and a control nothing ever
+        # evaluated are the same empty row, and reporting the first as satisfied is the defect G191, G202 and
+        # G210 each fixed somewhere else. Sorted, so two snapshots of the same cluster are byte-identical.
+        "coverage": {
+            "evaluatedRules": sorted(report.evaluated_rules),
+            "firedRules": sorted(report.fired_rules),
+        },
         "notRead": unread[:MAX_NOT_READ],
         "notReadKinds": sorted(_kinds_not_read(unread)),
     }
@@ -309,6 +317,64 @@ def _counts(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
         by.setdefault(str(r.get(key) or "-"), Counter())[str(r["severity"])] += 1
     out = [{key: k, "findings": sum(c.values()), **dict(sorted(c.items()))} for k, c in by.items()]
     return sorted(out, key=lambda x: (-int(x["findings"]), str(x[key])))
+
+
+def _by_control(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Open findings grouped by the controls their rules map to, most findings first.
+
+    A finding counts once for each control its rule names, so the column does not sum to the finding total -- a
+    rule that is evidence about three controls is evidence about three controls. This is a COUNT of open findings
+    and nothing more: a control with none is absent, which is why it cannot be read as a coverage claim. The
+    standing view below is where clean and never-evaluated are separated.
+    """
+    from kube_noob.audit.controls import RULE_CONTROLS, TITLES
+
+    by: dict[str, Counter[str]] = {}
+    where: dict[str, set[str]] = {}
+    for r in rows:
+        for control in RULE_CONTROLS.get(str(r.get("ruleId")), ()):
+            by.setdefault(control, Counter())[str(r["severity"])] += 1
+            where.setdefault(control, set()).add(str(r.get("namespace") or "-"))
+    out = [
+        {
+            "control": control,
+            "title": TITLES[control],
+            "findings": sum(counts.values()),
+            **dict(sorted(counts.items())),
+            "namespaces": sorted(where[control])[:MAX_CONTROL_NAMESPACES],
+        }
+        for control, counts in by.items()
+    ]
+    return sorted(out, key=lambda x: (-int(x["findings"]), str(x["control"])))
+
+
+def _standing(new: dict[str, Any], open_rows: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str]:
+    """Per-control standing from the new snapshot's coverage record, or nothing and a reason.
+
+    The record says which rules ran, which is the only way `clean` means anything. A snapshot written before the
+    record existed has none, and then this returns no standing at all rather than a list in which every control
+    with no finding looks satisfied. The OLD snapshot's record is not needed: standing describes where the cluster
+    is now, not what changed.
+    """
+    from kube_noob.audit.controls import summary as control_summary
+
+    coverage = new.get("coverage")
+    if not isinstance(coverage, dict) or not isinstance(coverage.get("evaluatedRules"), list):
+        return None, (
+            "this snapshot carries no coverage record, so the report counts open findings per control and makes "
+            "no statement about the controls without one: a control with no open finding here may simply not "
+            "have been evaluated. Take a new snapshot to get per-control standing."
+        )
+    excepted = [str(f["ruleId"]) for f in new["findings"] if f.get("excepted") and f.get("ruleId")]
+    return (
+        control_summary(
+            [str(r["ruleId"]) for r in open_rows],
+            excepted,
+            [str(x) for x in coverage.get("evaluatedRules") or ()],
+            [str(x) for x in coverage.get("firedRules") or ()],
+        ),
+        "",
+    )
 
 
 def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
@@ -342,7 +408,7 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     was_fixed = [old_f[i] for i in sorted(set(old_f) - set(new_f))]
     fixed = [brief(f) for f in was_fixed if _kind_of(str(f["resource"])) not in blind]
     undetermined_findings = [brief(f) for f in was_fixed if _kind_of(str(f["resource"])) in blind]
-    return {
+    out: dict[str, Any] = {
         "format": REPORT_FORMAT,
         "from": old["takenAt"],
         "to": new["takenAt"],
@@ -365,8 +431,15 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
             "byNamespace": _counts(open_rows, "namespace"),
             "byOwner": _counts(open_rows, "owner"),
             "byRule": _counts(open_rows, "ruleId"),
+            "byControl": _by_control(open_rows),
         },
     }
+    standing, note = _standing(new, open_rows)
+    if standing is not None:
+        out["controlStanding"] = standing
+    if note:
+        out.setdefault("notes", []).append(note)
+    return out
 
 
 def first_report(new: dict[str, Any]) -> dict[str, Any]:
@@ -440,6 +513,37 @@ def markdown(report: dict[str, Any]) -> str:
             ]
             lines += [f"| {r[key]} | {r['findings']} | {r.get('critical', 0)} | {r.get('high', 0)} |" for r in rows]
             lines.append("")
+    controls = report["violations"].get("byControl") or []
+    if controls:
+        lines += [
+            "## Open findings by control",
+            "",
+            "| Control | Title | Findings | Critical | High | Namespaces |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| {r['control']} | {r['title']} | {r['findings']} | {r.get('critical', 0)} | "
+            f"{r.get('high', 0)} | {', '.join(r['namespaces'])} |"
+            for r in controls
+        ]
+        lines.append("")
+    standing = report.get("controlStanding")
+    if standing:
+        # The point of this table is the two columns a count cannot have: a control whose rules ran and found
+        # nothing, and one nothing evaluated. Reported together so neither can be read as the other.
+        lines += [
+            "## Control standing",
+            "",
+            "| Control | Findings | Clean | Not evaluated |",
+            "| --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| {c['id']} | {c['findings']} | {c.get('clean', 0)} | {c.get('notEvaluated', 0)} |"
+            for c in standing["controls"]
+        ]
+        lines += ["", standing["note"], ""]
+    for note in report.get("notes") or []:
+        lines += [f"> {note}", ""]
     return "\n".join(lines)
 
 

@@ -108,6 +108,52 @@ EXPECTED: dict[str, Any] = {
             {"ruleId": "KN-S002", "findings": 1, "medium": 1},
             {"ruleId": "KN-S017", "findings": 1, "low": 1},
         ],
+        # Hand-derived from the byRule rows above and the published rule-to-control map, the same way the rest of
+        # this expectation was written. A finding counts once per control its rule names, so this column does not
+        # sum to five: a rule that is evidence about three controls is evidence about three controls (N4).
+        "byControl": [
+            {
+                "control": "AC-6",
+                "title": "Least Privilege",
+                "findings": 3,
+                "critical": 1,
+                "low": 1,
+                "medium": 1,
+                "namespaces": ["ops", "shop"],
+            },
+            {
+                "control": "CM-7",
+                "title": "Least Functionality",
+                "findings": 2,
+                "critical": 1,
+                "medium": 1,
+                "namespaces": ["ops"],
+            },
+            {
+                "control": "SC-5",
+                "title": "Denial-of-service Protection",
+                "findings": 2,
+                "low": 2,
+                "namespaces": ["ops", "shop"],
+            },
+            {
+                "control": "SC-6",
+                "title": "Resource Availability",
+                "findings": 2,
+                "low": 2,
+                "namespaces": ["ops", "shop"],
+            },
+            {"control": "AC-3", "title": "Access Enforcement", "findings": 1, "low": 1, "namespaces": ["shop"]},
+            {"control": "AC-5", "title": "Separation of Duties", "findings": 1, "low": 1, "namespaces": ["shop"]},
+            {
+                "control": "AC-6(10)",
+                "title": "Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions",
+                "findings": 1,
+                "medium": 1,
+                "namespaces": ["ops"],
+            },
+            {"control": "SC-39", "title": "Process Isolation", "findings": 1, "critical": 1, "namespaces": ["ops"]},
+        ],
     },
 }
 
@@ -121,7 +167,14 @@ def _snap(name: str, when: dt.datetime, **kw: Any) -> dict[str, Any]:
 
 
 def test_two_snapshots_give_the_exact_expected_report() -> None:
-    assert drift.diff(_snap("day1.yaml", T1), _snap("day2.yaml", T2)) == EXPECTED
+    report = drift.diff(_snap("day1.yaml", T1), _snap("day2.yaml", T2))
+    # `controlStanding` is `kube_noob.audit.controls.summary` over the new snapshot's coverage record: 28 rows
+    # whose buckets have their own tests (G191, G199, G202, and tests/test_control_standing.py). Pasting them
+    # into an expectation whose entire value is that it was written BY HAND from the two fixtures would be
+    # copying code output into the one test that must not contain any, so it is asserted there instead.
+    standing = report.pop("controlStanding")
+    assert standing["catalog"] == "NIST SP 800-53 Rev. 5" and standing["controls"]
+    assert report == EXPECTED
 
 
 def test_a_snapshot_holds_hashes_and_names_never_values() -> None:
@@ -200,7 +253,9 @@ def test_the_daily_report_folder_keeps_the_newest_and_is_owner_only(tmp_path: Pa
     first, paths = drift.write_report(state, _snap("day1.yaml", T1), keep=2)
     assert first["from"] is None and len(first["objects"]["added"]) == 11
     second, paths = drift.write_report(state, _snap("day2.yaml", T2), keep=2)
-    assert {k: v for k, v in second.items() if k != "from"} == {k: v for k, v in EXPECTED.items() if k != "from"}
+    assert {k: v for k, v in second.items() if k not in {"from", "controlStanding"}} == {
+        k: v for k, v in EXPECTED.items() if k != "from"
+    }
     for p in paths.values():
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
     assert stat.S_IMODE(state.stat().st_mode) == 0o700
@@ -275,9 +330,10 @@ def test_cli_snapshot_diff_and_report(tmp_path: Path, capsys: pytest.CaptureFixt
     md = tmp_path / "r.md"
     assert main(["--format", "json", "posture", "diff", str(s1), str(s2), "--markdown", str(md)]) == 0
     rep = json.loads(capsys.readouterr().out)
-    assert {k: v for k, v in rep.items() if k not in {"from", "to"}} == {
+    assert {k: v for k, v in rep.items() if k not in {"from", "to", "controlStanding"}} == {
         k: v for k, v in EXPECTED.items() if k not in {"from", "to"}
     }
+    assert rep["controlStanding"]["controls"], "the standing travels through the CLI too"
     assert md.read_text(encoding="utf-8").startswith("# Drift and policy report")
     state = tmp_path / "state"
     assert main(["posture", "report", "-f", str(FIX / "day1.yaml"), "--state-dir", str(state)]) == 0

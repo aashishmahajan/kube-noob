@@ -806,12 +806,19 @@ kube-noob policy migrate-check -f policies/ -o migration/ --fail-on blocked
 SCCs, PDBs, HPAs, ConfigMaps, StorageClasses, claims and namespaces) as a hash of its desired state plus a short hash
 per field, and today's findings with each object's owner (its `owner` or `team` label, else its namespace's). No
 values are kept. `posture diff` compares two snapshots: objects added, removed and changed with the fields that
-changed, findings new and fixed, and open findings by namespace, owner and rule. Scaling, status, server-set
+changed, findings new and fixed, and open findings by namespace, owner, rule and **NIST control**. Scaling, status, server-set
 metadata and the ReplicaSets and pods a controller makes are not drift. `posture report` does both in one step and
 keeps the newest snapshots and reports (JSON and Markdown) in a folder; `serve` with `posture.reportEnabled` (chart:
 `posture.report.enabled`) writes one a day at a random time, and the MCP tool `posture_report` returns the newest
 with an `ageSeconds`, since a failed daily run leaves the previous report as the latest one.
 Excepted findings (`--exceptions`) are not counted open.
+
+The control grouping answers a platform team's question rather than a rule author's: which controls are standing
+open, and in which namespaces. A finding counts once for every control its rule names, so that column does not sum
+to the finding total. Beside it, `controlStanding` separates the two things a count cannot: a control whose rules
+ran and found nothing (`clean`) from one nothing evaluated (`notEvaluated`). That needs the snapshot to record
+which rules ran, so a snapshot taken before that record existed gets the counts and no standing at all, and the
+report says why -- a control with no open finding is not a control that passed.
 
 A live snapshot records what it could not read, and the diff uses it. An object that was in yesterday's snapshot
 and is missing from today's is only `removed` if today's run could read its kind; if the backend refused that
