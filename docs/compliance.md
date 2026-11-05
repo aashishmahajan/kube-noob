@@ -59,7 +59,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 78 audit rules and their controls
+## The 89 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -161,23 +161,25 @@ Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/
 | AC-4 | Information Flow Enforcement |
 | AC-5 | Separation of Duties |
 | AC-6 | Least Privilege |
-| AC-6(5) | Least Privilege | Privileged Accounts |
-| AC-6(10) | Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions |
+| AC-6(5) | Least Privilege \| Privileged Accounts |
+| AC-6(10) | Least Privilege \| Prohibit Non-privileged Users from Executing Privileged Functions |
 | AC-14 | Permitted Actions Without Identification or Authentication |
 | CM-2 | Baseline Configuration |
-| CM-3(2) | Configuration Change Control | Testing, Validation, and Documentation of Changes |
+| CM-3(2) | Configuration Change Control \| Testing, Validation, and Documentation of Changes |
 | CM-6 | Configuration Settings |
 | CM-7 | Least Functionality |
 | CP-10 | System Recovery and Reconstitution |
 | IA-5 | Authenticator Management |
-| IA-5(7) | Authenticator Management | No Embedded Unencrypted Static Authenticators |
+| IA-5(7) | Authenticator Management \| No Embedded Unencrypted Static Authenticators |
 | SA-22 | Unsupported System Components |
+| SC-4 | Information in Shared System Resources |
 | SC-5 | Denial-of-service Protection |
 | SC-6 | Resource Availability |
 | SC-7 | Boundary Protection |
-| SC-7(5) | Boundary Protection | Deny by Default — Allow by Exception |
+| SC-7(5) | Boundary Protection \| Deny by Default — Allow by Exception |
 | SC-8 | Transmission Confidentiality and Integrity |
-| SC-8(1) | Transmission Confidentiality and Integrity | Cryptographic Protection |
+| SC-8(1) | Transmission Confidentiality and Integrity \| Cryptographic Protection |
+| SC-13 | Cryptographic Protection |
 | SC-28 | Protection of Information at Rest |
 | SC-36 | Distributed Processing and Storage |
 | SC-39 | Process Isolation |

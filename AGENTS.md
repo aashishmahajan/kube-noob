@@ -25,6 +25,7 @@ Do not report a change as working until that exit status is 0. "The tests I wrot
 ```bash
 python scripts/sync_plugin_server.py
 python scripts/safety_contract.py --check
+python scripts/compliance_doc.py --check
 ```
 
 `src/` is the only source of truth. `plugin/kube-noob/server/kube_noob/` is a **generated copy** — never edit it, and
@@ -35,6 +36,13 @@ always that it is meant to be missing.
 
 `scripts/safety_contract.py` regenerates `docs/safety-contract.md` from the code. If it reports a mismatch, the
 contract document is stale — regenerate it, do not edit it.
+
+`scripts/compliance_doc.py` does the same for the rule table, the control-titles table and the rule count in the
+heading of `docs/compliance.md` — run it after adding a rule or a control instead of editing those tables. It
+rewrites only those three regions and leaves the prose alone, and it REFUSES rather than half-rewriting a table
+whose shape has changed. A control the document evidences through posture rather than through a rule (`SC-13`,
+via `kube-noob doctor`) lives in `POSTURE_CONTROLS` in that script, because generating from `RULE_CONTROLS` alone
+would delete it.
 
 ## Tests first, and make them fail first
 

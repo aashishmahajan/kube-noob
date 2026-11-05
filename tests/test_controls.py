@@ -49,12 +49,6 @@ def test_findings_and_reports_carry_controls(capsys: pytest.CaptureFixture[str])
     assert "NIST SP 800-53 controls with findings: " in capsys.readouterr().out
 
 
-def test_compliance_doc_lists_every_rule_with_its_controls() -> None:
-    doc = (ROOT / "docs" / "compliance.md").read_text()
-    for r in list_rules():
-        assert f"| {r['ruleId']} | {r['title']} | {', '.join(r['controls'])} |" in doc, r["ruleId"]
-
-
 def test_crypto_is_fips_friendly_and_reported() -> None:
     weak = re.compile(r"hashlib\.(md5|sha1|new\(\s*['\"](md5|sha1)['\"])|\bfrom Crypto\b|\bimport Crypto\b")
     offenders = [
