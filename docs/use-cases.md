@@ -887,18 +887,25 @@ existing breaker admitted, and nothing blocked with the webhook scaled to zero.
 
 ```bash
 kube-noob audit -f k8s/ --platform openshift --version 4.22 --oscal > assessment-results.json
+kube-noob gate  -f k8s/ --platform openshift --version 4.22 --oscal > assessment-results.json
 ```
 
-An OSCAL 1.2.3 assessment-results document: each finding becomes an observation with method `EXAMINE`, and each
-control becomes an OSCAL finding targeting that control's objective id (`ac-6.10_obj`). A control is
-`satisfied` only where its rules actually ran and produced nothing; a control no rule evaluated is named under
-`exclude-controls` and gets no finding at all, so absence is never read as a pass. Every description ends with
-the same sentence the report carries: this is evidence about a control, not a claim of compliance.
+An OSCAL 1.2.3 assessment-results document, from either command: each finding becomes an observation with
+method `EXAMINE`, and each control becomes an OSCAL finding targeting that control's objective id
+(`ac-6.10_obj`). What it will not say is the point. A control is `satisfied` only where its rules actually ran
+and produced nothing. A control no rule evaluated is named under `exclude-controls` and gets no finding at all.
+A control whose rules ran and reported findings that a `--min-severity` filter removed is `not-satisfied` with
+reason `other`, never a pass -- so the verdict per control is the same at every filter level, and no flag turns
+a failing audit into a clean record. An accepted exception is `not-satisfied` too, with the same reason: a
+signed-off finding is a recorded decision, not a met objective. Every description ends with the sentence the
+report carries, that this is evidence about a control and not a claim of compliance.
 
-Every uuid is a v5 uuid over the input, so two runs over the same bundle produce the same document and a
-pipeline can diff it. `--oscal-import-ap https://grc.example.com/ap.json` points the required `import-ap` at
-your assessment plan; without it the document says plainly that no plan was imported rather than inventing one.
-The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
+Every uuid is a v5 uuid over the assessment -- the objects, every finding's identity, each control's coverage
+and the imported plan -- so two runs over the same bundle are byte-identical and a pipeline can diff them,
+while two runs that reach different verdicts cannot collide on one identity.
+`--oscal-import-ap https://grc.example.com/ap.json` points the required `import-ap` at your assessment plan;
+without it the document says plainly that no plan was imported rather than inventing one. The exit code is the
+audit's or the gate's either way, so the verdict is the same with the flag as without.
 
 
 ## Claude and MCP users
