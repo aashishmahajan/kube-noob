@@ -928,29 +928,52 @@ def _v021(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         claims = pt.spec.get("resourceClaims")
         if not isinstance(claims, list):
             continue
+        seen: set[str] = set()
         for i, item in enumerate(claims):
             if not isinstance(item, dict):
                 continue
             name = item.get("name")
             label = repr(str(name)) if isinstance(name, str) and name else f"resourceClaims[{i}]"
-            from_claim = isinstance(item.get("resourceClaimName"), str) and bool(item["resourceClaimName"])
-            from_template = isinstance(item.get("resourceClaimTemplateName"), str) and bool(
-                item["resourceClaimTemplateName"]
-            )
-            if from_claim and from_template:
+            path: PathT = (*pt.path, "resourceClaims", i)
+            if isinstance(name, str) and name:
+                if name in seen:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"Pod declares the resource claim {label} more than once. Claim names identify an entry "
+                        "for the containers that reference it, so they have to be unique within the Pod; the API "
+                        "server refuses this object.",
+                    )
+                    continue
+                seen.add(name)
+            # PRESENCE, not truthiness. Upstream tests whether the pointer is set, and an empty string decodes
+            # to a non-nil *string -- so `resourceClaimName: ""` beside a template name really is "both", and
+            # reading it as unset let that case through. An empty name is its own error, not a missing source.
+            sources = {k: item[k] for k in _CLAIM_SOURCE_KINDS if k in item and item[k] is not None}
+            if len(sources) == 2:
                 yield r.finding(
                     d,
-                    (*pt.path, "resourceClaims", i),
+                    path,
                     f"Pod resource claim {label} sets both resourceClaimName and resourceClaimTemplateName; "
                     "exactly one source may be named.",
                 )
-            elif not from_claim and not from_template:
+            elif not sources:
                 yield r.finding(
                     d,
-                    (*pt.path, "resourceClaims", i),
+                    path,
                     f"Pod resource claim {label} names neither resourceClaimName nor resourceClaimTemplateName, "
                     "so there is no device for it to allocate.",
                 )
+            else:
+                field_name, value = next(iter(sources.items()))
+                if isinstance(value, str) and not value:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"Pod resource claim {label} sets {field_name} to an empty name. The field is set, so "
+                        "this is not a missing source; it names an object that cannot exist, because an empty "
+                        "string is not a valid name.",
+                    )
 
 
 # A pod-level claim names its source by one of two fields, each naming a different kind.
@@ -963,6 +986,12 @@ _REQUEST_ROOTS: tuple[tuple[str, PathT], ...] = (
     ("ResourceClaim", ("spec",)),
     ("ResourceClaimTemplate", ("spec", "spec")),
 )
+# v1beta1 FLATTENS the request: adminAccess and deviceClassName sit directly on it, where v1 and v1beta2 put
+# them under `exactly`. Upstream normalises between the two shapes for exactly this reason, and the bundled
+# schemas still serve v1beta1, so reading only `exactly` missed every v1beta1 claim. The group-version gate
+# matters in the other direction too: on v1 the request has no adminAccess property at all, so a key of that
+# name there is a schema error for KN-V007 to report, not this field.
+_FLATTENED_GROUP_VERSION = "resource.k8s.io/v1beta1"
 
 
 @rule(
@@ -991,8 +1020,18 @@ def _c015(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         if not isinstance(claims, list):
             continue
         ns = ctx.ns(d)
+        names = [i["name"] for i in claims if isinstance(i, dict) and isinstance(i.get("name"), str)]
+        duplicated = {n for n in names if names.count(n) > 1}
         for i, item in enumerate(claims):
             if not isinstance(item, dict):
+                continue
+            # A duplicate claim name, and an entry naming two sources, are both refused by the API server, so
+            # the Pod never reaches Pending and "is admitted and then stays Pending" would be a false sentence.
+            # KN-V021 owns those two shapes; skipping them here also stops two findings on one entry from
+            # sharing a name-keyed identity, which a baseline would then collapse into one.
+            if isinstance(item.get("name"), str) and item["name"] in duplicated:
+                continue
+            if len([k for k in _CLAIM_SOURCE_KINDS if k in item and item[k] is not None]) == 2:
                 continue
             for field_name, kind in _CLAIM_SOURCE_KINDS.items():
                 target = item.get(field_name)
@@ -1033,6 +1072,7 @@ def _s031(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             labelled.add(name)
     for kind, base in _REQUEST_ROOTS:
         for d in ctx.by_kind(kind):
+            flattened = str(get_path(d.data, ("apiVersion",)) or "") == _FLATTENED_GROUP_VERSION
             requests = get_path(d.data, (*base, "devices", "requests"))
             if not isinstance(requests, list):
                 continue
@@ -1041,12 +1081,18 @@ def _s031(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                     continue
                 # Only ExactDeviceRequest carries adminAccess; DeviceSubRequest under firstAvailable omits it
                 # on purpose, so a key of that name there is not the API field and means nothing.
-                exactly = req.get("exactly")
-                if not isinstance(exactly, dict) or exactly.get("adminAccess") is not True:
+                if flattened:
+                    holder: dict[str, Any] | None = req
+                    tail: PathT = ()
+                else:
+                    exactly = req.get("exactly")
+                    holder = exactly if isinstance(exactly, dict) else None
+                    tail = ("exactly",)
+                if holder is None or holder.get("adminAccess") is not True:
                     continue
                 ns = ctx.ns(d)
                 where = f"request '{req.get('name')}'" if isinstance(req.get("name"), str) else f"request {i}"
-                path: PathT = (*base, "devices", "requests", i, "exactly", "adminAccess")
+                path: PathT = (*base, "devices", "requests", i, *tail, "adminAccess")
                 if ns in in_bundle and ns not in labelled:
                     yield r.finding(
                         d,

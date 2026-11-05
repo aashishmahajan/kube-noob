@@ -113,3 +113,44 @@ spec:
     base = n012("\n---\n".join((_BASE % _API, one)))
     assert base, "KN-N012 did not fire, so this proves nothing"
     assert base == n012("\n---\n".join((_BASE % _API, one, extra)))
+
+
+def test_a_name_shared_by_two_siblings_is_not_a_key() -> None:
+    """A duplicated name identifies nothing, so the locator keeps the index for those items (G195).
+
+    Two different defects on two entries that share a name used to collapse to one fingerprint, and a
+    baseline entry for either then suppressed the other.
+    """
+    from kube_noob.yamlio import locator
+
+    data = {"spec": {"resourceClaims": [{"name": "gpu"}, {"name": "gpu"}, {"name": "fpga"}]}}
+    assert locator(data, ("spec", "resourceClaims", 0)) == "spec.resourceClaims[0]"
+    assert locator(data, ("spec", "resourceClaims", 1)) == "spec.resourceClaims[1]"
+    # The unique one still gets its name: only the ambiguous entries fall back.
+    assert locator(data, ("spec", "resourceClaims", 2)) == "spec.resourceClaims[name=fpga]"
+
+
+def test_two_defects_on_a_duplicated_claim_name_keep_distinct_identities() -> None:
+    from kube_noob.audit.engine import analyze
+
+    text = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - {name: gpu, resourceClaimName: a, resourceClaimTemplateName: b}
+  - {name: gpu, resourceClaimTemplateName: t2}
+  containers: [{name: c, image: i}]
+"""
+    found = [f for f in analyze(text, "kubernetes").findings if f.rule_id == "KN-V021"]
+    assert len(found) == 2
+    assert len({f.fingerprint() for f in found}) == 2, "a baseline entry for one would suppress the other"
+
+
+def test_duplicate_container_names_also_fall_back_to_the_index() -> None:
+    """Not DRA-specific: the same ambiguity exists wherever a list is keyed on a name the author repeated."""
+    from kube_noob.yamlio import locator
+
+    data = {"spec": {"containers": [{"name": "api"}, {"name": "api"}]}}
+    assert locator(data, ("spec", "containers", 0, "securityContext")) == "spec.containers[0].securityContext"

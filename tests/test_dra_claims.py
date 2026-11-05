@@ -265,3 +265,180 @@ def test_admin_access_is_not_read_from_a_firstavailable_subrequest() -> None:
         "      - name: big\n        deviceClassName: example.com-gpu\n        adminAccess: true\n"
     )
     assert _findings(text, "KN-S031") == []
+
+
+# =====================================================================================================
+# Red team, 2026-11-05 (G195)
+# =====================================================================================================
+
+_BETA1 = """
+apiVersion: resource.k8s.io/v1beta1
+kind: ResourceClaim
+metadata: {name: gpu-pool, namespace: ml}
+spec:
+  devices:
+    requests:
+    - name: gpu
+      deviceClassName: example.com-gpu
+      allocationMode: ExactCount
+      count: 1
+      adminAccess: true
+"""
+
+
+def test_admin_access_is_found_in_the_v1beta1_flattened_shape() -> None:
+    """v1beta1 has no `exactly`: adminAccess sits directly on the request, and the bundle still serves it."""
+    found = _findings(_BETA1, "KN-S031")
+    assert len(found) == 1, found
+    assert found[0].path.endswith("spec.devices.requests[0].adminAccess"), found[0].path
+
+
+def test_the_v1beta1_template_shape_is_found_too() -> None:
+    text = _BETA1.replace("kind: ResourceClaim", "kind: ResourceClaimTemplate").replace(
+        "spec:\n  devices:", "spec:\n  spec:\n    devices:\n"
+    )
+    # Rebuild the nesting properly rather than by indentation surgery.
+    text = """
+apiVersion: resource.k8s.io/v1beta1
+kind: ResourceClaimTemplate
+metadata: {name: gpu-tpl, namespace: ml}
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        deviceClassName: example.com-gpu
+        adminAccess: true
+"""
+    found = _findings(text, "KN-S031")
+    assert len(found) == 1 and found[0].path.endswith("spec.spec.devices.requests[0].adminAccess"), found
+
+
+def test_a_flattened_admin_access_is_not_read_on_v1_where_the_field_cannot_live() -> None:
+    """On v1 the request has only exactly/firstAvailable/name, so a key there is a schema error, not the field."""
+    text = _BETA1.replace("resource.k8s.io/v1beta1", "resource.k8s.io/v1")
+    assert _findings(text, "KN-S031") == []
+
+
+def test_an_empty_source_name_counts_as_set_so_both_is_reported() -> None:
+    """Upstream tests the pointer: "" decodes to a non-nil *string, so this is "at most one of"."""
+    text = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - name: gpu
+    resourceClaimName: ""
+    resourceClaimTemplateName: gpu-tpl
+  containers:
+  - {name: c, image: i, resources: {claims: [{name: gpu}]}}
+"""
+    found = _findings(text, "KN-V021")
+    assert len(found) == 1 and "both" in found[0].message, found
+
+
+def test_an_explicit_null_source_really_is_unset() -> None:
+    text = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - name: gpu
+    resourceClaimName: null
+    resourceClaimTemplateName: gpu-tpl
+  containers:
+  - {name: c, image: i, resources: {claims: [{name: gpu}]}}
+"""
+    assert _findings(text, "KN-V021") == []
+
+
+def test_an_empty_source_name_on_its_own_is_reported_as_empty_not_as_missing() -> None:
+    text = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - name: gpu
+    resourceClaimName: ""
+  containers:
+  - {name: c, image: i, resources: {claims: [{name: gpu}]}}
+"""
+    found = _findings(text, "KN-V021")
+    assert len(found) == 1, found
+    assert "empty" in found[0].message and "neither" not in found[0].message, found[0].message
+
+
+def test_a_duplicate_pod_claim_name_is_reported() -> None:
+    """Upstream refuses it (field.Duplicate), and nothing reported it before."""
+    text = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - {name: gpu, resourceClaimTemplateName: t}
+  - {name: gpu, resourceClaimTemplateName: t2}
+  containers:
+  - {name: c, image: i}
+"""
+    found = _findings(text, "KN-V021")
+    assert len(found) == 1 and "more than once" in found[0].message, found
+    assert found[0].path.endswith("resourceClaims[1]"), found[0].path
+
+
+def test_an_object_the_api_server_refuses_is_not_also_narrated_as_admitted() -> None:
+    """KN-V021 owns a refused entry; KN-C015 must not say the Pod 'is admitted and then stays Pending'."""
+    both = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - name: gpu
+    resourceClaimName: gpu-pool
+    resourceClaimTemplateName: gpu-tpl
+  containers:
+  - {name: c, image: i, resources: {claims: [{name: gpu}]}}
+"""
+    assert len(_findings(both, "KN-V021")) == 1
+    assert _findings(both, "KN-C015") == [], "a refused object is not a Pending object"
+    duplicate = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - {name: gpu, resourceClaimTemplateName: t}
+  - {name: gpu, resourceClaimTemplateName: t2}
+  containers:
+  - {name: c, image: i}
+"""
+    assert _findings(duplicate, "KN-C015") == [], "duplicate names are refused; KN-V021 owns that"
+
+
+def test_two_absent_claims_under_distinct_names_keep_distinct_identities() -> None:
+    text = """
+apiVersion: v1
+kind: Pod
+metadata: {name: p, namespace: ml}
+spec:
+  resourceClaims:
+  - {name: a, resourceClaimTemplateName: t}
+  - {name: b, resourceClaimTemplateName: t2}
+  containers:
+  - {name: c, image: i}
+"""
+    found = _findings(text, "KN-C015")
+    assert len(found) == 2
+    assert len({f.fingerprint() for f in found}) == 2, "a baseline entry for one would suppress the other"
+
+
+def test_the_admission_webhook_does_not_run_the_cross_bundle_claim_rule() -> None:
+    """The webhook never fetches ResourceClaims, so with lookups on it used to warn on every valid DRA Pod."""
+    from kube_noob.admission import CROSS_OBJECT, SKIPPED_RULES
+
+    assert "KN-C015" in SKIPPED_RULES, "without this the webhook warns about a claim it never looked for"
+    assert "KN-C015" not in CROSS_OBJECT, "SKIPPED_RULES already stops it; listing both is a second answer"

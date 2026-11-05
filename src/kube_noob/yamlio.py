@@ -208,25 +208,37 @@ def locator(data: Any, path: PathT) -> str:
 
     Items with no natural key keep the index, and that is honest: a NetworkPolicy's ``ingress[1]`` and
     an RBAC ``rules[0]`` are identified by position in the API itself, so there is nothing better to use.
+
+    A name two siblings SHARE is not a key either, so those items keep the index as well. The API server
+    refuses most duplicates, but a rule that reports the duplicate is reading the object that still has it:
+    two different defects on two entries called `gpu` would otherwise hash to one identity, and a baseline
+    entry for either would suppress the other. Only the ambiguous entries fall back -- a unique sibling in
+    the same list keeps its name.
     """
     out = ""
     for i, seg in enumerate(path):
         if not isinstance(seg, int):
             out += f".{seg}" if out else str(seg)
             continue
-        item = get_path(data, tuple(path[: i + 1]))
-        key = ""
-        if isinstance(item, dict):
-            for field_name in ("name", "containerName"):
-                value = item.get(field_name)
-                if isinstance(value, str) and value:
-                    key = f"{field_name}={value}"
-                    break
-            else:
-                meta = item.get("metadata")
-                if isinstance(meta, dict) and isinstance(meta.get("name"), str) and meta["name"]:
-                    key = f"metadata.name={meta['name']}"
-        elif isinstance(item, str) and item:
-            key = item  # a scalar list entry identifies itself: capabilities.add[ALL]
+        key = _item_key(get_path(data, tuple(path[: i + 1])))
+        if key:
+            siblings = get_path(data, tuple(path[:i]))
+            if isinstance(siblings, list) and sum(1 for s in siblings if _item_key(s) == key) > 1:
+                key = ""
         out += f"[{key or seg}]"
     return out
+
+
+def _item_key(item: Any) -> str:
+    """The field that identifies a list item, or ``""`` when nothing in it does."""
+    if isinstance(item, dict):
+        for field_name in ("name", "containerName"):
+            value = item.get(field_name)
+            if isinstance(value, str) and value:
+                return f"{field_name}={value}"
+        meta = item.get("metadata")
+        if isinstance(meta, dict) and isinstance(meta.get("name"), str) and meta["name"]:
+            return f"metadata.name={meta['name']}"
+    elif isinstance(item, str) and item:
+        return item  # a scalar list entry identifies itself: capabilities.add[ALL]
+    return ""
