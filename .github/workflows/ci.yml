@@ -83,26 +83,42 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      # Every step here is bounded, because the job's own 30-minute budget is not a diagnosis: a run was
-      # cancelled at 30m19s with no failing step, and the whole render takes about 90 seconds on this code
-      # (measured: voiceover 7-17s, capture --check 6-9s, stills 5-7s, walkthrough and thumbnail 11s). A step
-      # that hangs now fails with its own name in ten minutes instead of eating the budget silently.
-      # DEBIAN_FRONTEND is set because `playwright install --with-deps` runs apt-get, and an apt prompt on a
-      # runner with no tty waits forever.
-      - name: kube-noob, ffmpeg and Chromium (pinned in demos/video/package-lock.json)
-        timeout-minutes: 12
+      # One command per step, each bounded, because a job timeout is not a diagnosis. The first version of this
+      # was one 12-minute install step and it died at its own limit, which said only "something in here hangs".
+      # Measured on this code: pip 20s, npm ci 3s, the whole render about 90 seconds (voiceover 7-17s per video,
+      # capture --check 6-9s, stills 5-7s, walkthrough and thumbnail 11s, 23 stills out). So the hang is in one
+      # of the two commands that cannot be measured off a runner -- apt, or the browser download -- and these
+      # steps name which.
+      - name: kube-noob and its video dependencies
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip && pip install . "numpy==2.5.3" "pytest>=8.3"
+      # DPkg::Lock::Timeout is the fix for the known runner hang: unattended-upgrades holds the dpkg lock and
+      # apt-get waits for it forever by default. DEBIAN_FRONTEND needs `sudo -E`, which plain sudo would drop.
+      - name: ffmpeg
+        timeout-minutes: 4
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip && pip install . "numpy==2.5.3" "pytest>=8.3"
-          sudo -E apt-get update -q && sudo -E apt-get install -y -q ffmpeg
-          cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
-      - name: Video tests with ffmpeg (loudness, captions, facts, brand)
+          sudo -E apt-get update -q -o DPkg::Lock::Timeout=180
+          sudo -E apt-get install -y -q -o DPkg::Lock::Timeout=180 ffmpeg
+      - name: Video node modules (pinned in demos/video/package-lock.json)
+        timeout-minutes: 4
+        run: cd demos/video && npm ci --ignore-scripts --no-audit --no-fund
+      # `--with-deps` is deliberately NOT used: it shells out to apt a second time, inside Playwright's own sudo
+      # where neither DEBIAN_FRONTEND nor the lock timeout above reaches it. The ubuntu-latest image already
+      # carries Chromium's libraries, and if one is ever missing the render step fails in seconds naming the
+      # library -- a loud failure, where an unbounded apt was a silent one.
+      - name: Chromium for Playwright (no apt)
         timeout-minutes: 6
+        run: cd demos/video && timeout 300 npx playwright install chromium
+      - name: Video tests with ffmpeg (loudness, captions, facts, brand)
+        timeout-minutes: 4
         run: python -m pytest -q tests/test_video_loudness.py tests/test_video_captions.py tests/test_video_facts.py tests/test_brand.py tests/test_video_workflows.py tests/test_video_voice.py
       - name: Video scripts, facts and layout rules on every frame, and stills (silent voice)
-        timeout-minutes: 10
+        timeout-minutes: 6
         env:
           NODE_PATH: ${{ github.workspace }}/demos/video/node_modules
           KN_SIDECAR_TRANSCRIPT: ${{ github.workspace }}/tests/fixtures/video-sidecar-transcript.txt
