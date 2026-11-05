@@ -188,6 +188,53 @@ def _print_ticket_lines(m: dict[str, Any]) -> None:
             _tprint(f"  {_REMARK_LABELS[r['kind']]} ({r.get('date') or r['from']}): {r['text']}")
 
 
+def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
+    """The KSI view as text. Every indicator keeps a row, including the ones kube-noob cannot see at all: a
+    column of zeros reads as a pass, and an indicator with no rule behind it has passed nothing (G217)."""
+    from kube_noob.audit import fedramp
+
+    d = out["dataset"]
+    lines = [
+        f"FedRAMP 20x Key Security Indicators -- {d['name']} {d['version']} (updated {d['lastUpdated']})",
+        "",
+        out["note"],
+        "",
+        out["applicability"],
+        "",
+    ]
+    if out.get("unmappedControls"):
+        lines += [
+            "Controls kube-noob maps that no indicator cites, so no finding reaches an indicator through them: "
+            + ", ".join(out["unmappedControls"]),
+            "",
+        ]
+    counted = "  findings  excepted  clean  not evaluated  withheld" if audited else ""
+    lines.append(f"{'INDICATOR':<14}{'FAM':<5}{'NAME':<36}{counted}")
+    for r in out["indicators"]:
+        name = r["name"][:34]
+        if not r["evidenced"]:
+            lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}  -- {r['why']}")
+            continue
+        if audited:
+            tail = (
+                f"  {r['findings']:>8}  {r.get('excepted', 0):>8}  {r.get('clean', 0):>5}"
+                f"  {r.get('notEvaluated', 0):>13}  {r.get('withheld', 0):>8}"
+            )
+        else:
+            tail = f"  {len(fedramp.indicator_rules(r['id']))} rule(s), controls {', '.join(r['controls'])}"
+        lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}{tail}")
+        if r["variesByClass"]:
+            lines.append(
+                f"{'':<14}{'':<5}varies by service class {', '.join(r['variesByClass'])}"
+                + (f"; optional for {', '.join(r['optionalFor'])}" if r["optionalFor"] else "")
+            )
+        ev = fedramp.EVIDENCE.get(r["id"])
+        if ev:
+            lines.append(f"{'':<19}shows: {ev['shows']}")
+            lines.append(f"{'':<19}does NOT show: {ev['doesNotShow']}")
+    return "\n".join(lines)
+
+
 def _print_known_issues(out: dict[str, Any]) -> None:
     for m in out["matches"]:
         _tprint(f"{m['id']}  {m['status']}")
@@ -1383,6 +1430,21 @@ def build_parser() -> argparse.ArgumentParser:
     kis.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
     kis.add_argument("--limit", type=int, default=3)
 
+    ksi = sub.add_parser(
+        "ksi",
+        help="FedRAMP 20x Key Security Indicators: which ones a kube-noob finding is evidence for",
+        description="Join kube-noob's findings to the FedRAMP 20x Key Security Indicators through the NIST "
+        "controls both sides name. With no input it prints the crosswalk; with -f it audits the manifests first "
+        "and reports, per indicator, what was found. A mapping is evidence, never a compliance claim. "
+        "Example: kube-noob ksi -f deploy/ --format json",
+    )
+    ksi.add_argument("-f", "--file", action="append", default=[], help="manifest, directory or '-' for stdin")
+    ksi.add_argument("--platform", choices=PLATFORMS, default=None)
+    ksi.add_argument("--version", dest="pversion", help="target OpenShift or Kubernetes version")
+    ksi.add_argument("--indicator", default=None, help="one indicator by id, e.g. KSI-IAM-ELP")
+    ksi.add_argument("--control", default=None, help="the indicators citing one NIST control, e.g. AC-6")
+    ksi.add_argument("--evidenced-only", action="store_true", help="hide indicators no kube-noob rule can see")
+
     upr = sub.add_parser(
         "upgrade-risks",
         help="Known risks for an OpenShift update, from the public update graph (offline)",
@@ -2124,6 +2186,43 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         out = kit.known_issues(tk.KnownIssuesIn(text=text, platform=a.platform, version=a.pversion, limit=a.limit))
         if a.format == "text":
             _print_known_issues(out)
+        else:
+            _emit(out, fmt)
+        return 0
+
+    if a.cmd == "ksi":
+        from kube_noob.audit import fedramp
+
+        if a.indicator and a.indicator not in fedramp.INDICATORS:
+            raise ConfigError(
+                f"no indicator {a.indicator} in {fedramp.DATASET} {fedramp.DATASET_VERSION}. "
+                f"The dataset keys indicators by mnemonic (KSI-IAM-ELP), not by number"
+            )
+        if a.control and a.control not in fedramp.BY_CONTROL:
+            raise ConfigError(f"{a.control} is not one of the controls kube-noob maps; see docs/compliance.md")
+        rule_ids: list[str] = []
+        evaluated: list[str] | None = None
+        fired: list[str] | None = None
+        if a.file:
+            from kube_noob.audit.engine import analyze
+
+            text = "\n---\n".join(_read(f) for f in a.file)
+            audited = analyze(text, platform=a.platform or s.default_platform, version=a.pversion)
+            rule_ids = [f.rule_id for f in audited.findings]
+            evaluated, fired = sorted(audited.evaluated_rules), sorted(audited.fired_rules)
+        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired)
+        rows = out["indicators"]
+        if a.indicator:
+            rows = [r for r in rows if r["id"] == a.indicator]
+        if a.control:
+            cited = set(fedramp.BY_CONTROL[a.control])
+            rows = [r for r in rows if r["id"] in cited]
+            out["forControl"] = {"id": a.control, "indicators": sorted(cited)}
+        if a.evidenced_only:
+            rows = [r for r in rows if r["evidenced"]]
+        out["indicators"] = rows
+        if a.format == "text":
+            _tprint(_ksi_markdown(out, audited=bool(a.file)))
         else:
             _emit(out, fmt)
         return 0

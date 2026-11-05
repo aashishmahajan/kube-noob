@@ -11,6 +11,7 @@ py="${PYTHON:-python}"
 "$py" scripts/safety_contract.py --check
 "$py" scripts/compliance_doc.py --check
 "$py" scripts/doc_numbers.py --check
+"$py" scripts/fedramp_ksi.py --check
 "$py" -m ruff check src tests scripts skill
 "$py" -m ruff format --check src tests scripts skill
 "$py" -m mypy src

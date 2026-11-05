@@ -660,6 +660,31 @@ kube-noob redteam -f k8s/ --platform openshift
 kube-noob explain KN-S004
 ```
 
+### Which FedRAMP 20x indicators does a finding speak to?
+
+`ksi` joins kube-noob's findings to the FedRAMP 20x Key Security Indicators through the NIST SP 800-53 controls both
+sides name: every indicator in the dataset carries `controls: [...]`, kube-noob maps every rule to the controls it
+gives evidence about, and the crosswalk is the inversion. With `-f` it audits first and reports, per indicator, the
+findings, the rules that ran and found nothing, and the rules that did not run at all -- a zero on its own cannot
+tell a clean indicator from one nothing looked at.
+
+Read the two lines under a curated indicator before quoting the first one. `KSI-CNA-RNT` (Restricting Network
+Traffic) is evidence that policies exist, not that the cluster enforces them; `KSI-SVC-VRI` (Validating Resource
+Integrity) is evidence that images are pinned by digest, not that any signature verifies; `KSI-RPL-ABO` (Aligning
+Backups with Objectives) is about surviving the loss of a pod, and says nothing about backups at all. 18 of the 46
+indicators have no kube-noob rule behind them and say so instead of showing a zero.
+
+```bash
+kube-noob ksi
+kube-noob ksi -f k8s/ --evidenced-only
+kube-noob ksi --control AC-6 --format json
+kube-noob ksi --indicator KSI-IAM-JIT
+```
+
+The dataset is vendored with its version and sha256 and the crosswalk is generated from it, because the hand-written
+version of this mapping asserted a release, a family count, an id scheme and a retirement list that were all wrong
+at once. A mapping is evidence, never a compliance claim: see [FedRAMP 20x KSI](fedramp-ksi.md).
+
 ### What does RHACS check that kube-noob does not, and the other way round?
 
 `rhacs compare` maps every RHACS policy (export them from the RHACS portal with Export policy to JSON, or

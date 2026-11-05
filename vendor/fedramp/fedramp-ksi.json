@@ -1,0 +1,1584 @@
+{
+  "KSI": {
+    "CED": {
+      "id": "KSI-CED",
+      "indicators": {
+        "KSI-CED-RAT": {
+          "controls": [
+            "at-2",
+            "at-2.2",
+            "at-2.3",
+            "at-3",
+            "at-3.5",
+            "at-4",
+            "cm-11",
+            "cp-3",
+            "cp-3.1",
+            "ir-2",
+            "ir-2.1",
+            "ir-2.2",
+            "ir-2.3",
+            "ir-9.2",
+            "ir-9.4",
+            "pl-4",
+            "pl-4.1",
+            "ps-6",
+            "sr-11.1"
+          ],
+          "name": "Reviewing All Training",
+          "statement": "The effectiveness of relevant cybersecurity education and training is persistently reviewed, including at least general training for all employees, role-specific training for employees in high risk roles, training for development and engineering staff on secure software delivery, and training for staff involved with incident response or disaster recovery.",
+          "terms": [
+            "Incident",
+            "Persistently",
+            "Vulnerability Response"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added cm-11, cp-3.1, ir-2.1, ir-2.2, ir-9.2, ir-9.4, pl-4, pl-4.1.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Cybersecurity Education",
+      "short_name": "CED",
+      "status": "stable",
+      "web_name": "cybersecurity-education"
+    },
+    "CMT": {
+      "id": "KSI-CMT",
+      "indicators": {
+        "KSI-CMT-LMC": {
+          "controls": [
+            "au-2",
+            "ca-7.4",
+            "cm-3",
+            "cm-3.1",
+            "cm-3.2",
+            "cm-3.6",
+            "cm-4.2",
+            "cm-6",
+            "cm-8.3"
+          ],
+          "name": "Logging Changes",
+          "statement": "Modifications to the cloud service offering are logged and monitored.",
+          "terms": [
+            "Cloud Service Offering"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ca-7.4, cm-3.1, cm-3.6; removed ma-2.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CMT-RMV": {
+          "controls": [
+            "cm-2",
+            "cm-3",
+            "cm-5",
+            "cm-6",
+            "cm-7",
+            "cm-8.1",
+            "si-3"
+          ],
+          "name": "Redeploying vs Modifying",
+          "statement": "Changes to machine-based information resources are executed through the redeployment of version controlled resources rather than direct modification wherever reasonable.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)"
+          ],
+          "updated": [
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CMT-RVP": {
+          "controls": [
+            "cm-3",
+            "cm-3.2",
+            "cm-3.4",
+            "cm-5",
+            "cm-7.1",
+            "cm-9"
+          ],
+          "name": "Reviewing Change Procedures",
+          "statement": "The effectiveness of documented change management procedures is persistently reviewed.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CMT-VTD": {
+          "controls": [
+            "cm-3",
+            "cm-3.2",
+            "cm-4.2",
+            "cm-6.2",
+            "ir-9.4",
+            "si-2"
+          ],
+          "name": "Validating Throughout Deployment",
+          "statement": "Persistent testing and validation of changes throughout deployment is automated.",
+          "terms": [
+            "Persistently",
+            "Validation"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added cm-6.2, ir-9.4.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Change Management",
+      "short_name": "CMT",
+      "status": "stable",
+      "web_name": "change-management"
+    },
+    "CNA": {
+      "id": "KSI-CNA",
+      "indicators": {
+        "KSI-CNA-DFP": {
+          "controls": [
+            "cm-2",
+            "cm-8.4",
+            "cp-10.4",
+            "ir-9.4",
+            "si-3"
+          ],
+          "name": "Defining Functionality and Privileges",
+          "statement": "The functionality and privileges for infrastructure and services are strictly defined.",
+          "updated": [
+            {
+              "comment": "Updated control mappings: added cm-8.4, cp-10.4, ir-9.4.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CNA-EIS": {
+          "controls": [
+            "ca-2.1",
+            "cm-11",
+            "cm-6.2",
+            "cp-10.4",
+            "ir-9.4",
+            "sc-24",
+            "sc-7.18",
+            "si-4.22",
+            "si-7",
+            "si-7.1",
+            "si-7.5",
+            "si-7.7"
+          ],
+          "name": "Enforcing Intended State",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added cm-11, cm-6.2, cp-10.4, ir-9.4, sc-24, sc-7.18, si-4.22, si-7, si-7.1, si-7.5, si-7.7; removed ca-7.1.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ],
+          "varies_by_class": {
+            "b": {
+              "statement": "**Optional:** Automated services are used to persistently assess the security of all machine-based information resources and automatically enforce their intended operational state."
+            },
+            "c": {
+              "statement": "Automated services are used to persistently assess the security of all machine-based information resources and automatically enforce their intended operational state."
+            }
+          }
+        },
+        "KSI-CNA-IBP": {
+          "controls": [
+            "ac-17.3",
+            "cm-2",
+            "pl-10",
+            "sc-7.18"
+          ],
+          "name": "Implementing Best Practices",
+          "statement": "The use and configuration of third-party machine-based information resources is persistently compared against the original provider's best practices and guidance.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added sc-7.18.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CNA-MAT": {
+          "controls": [
+            "ac-17.3",
+            "ac-18.1",
+            "ac-18.3",
+            "ac-20.1",
+            "ca-9",
+            "sc-10",
+            "sc-7.18",
+            "sc-7.3",
+            "sc-7.4",
+            "sc-7.5",
+            "sc-7.8",
+            "sc-8",
+            "si-10",
+            "si-11",
+            "si-16"
+          ],
+          "name": "Minimizing Attack Surface",
+          "statement": "Machine-based information resources are persistently reviewed to ensure they have a minimal attack surface and that lateral movement is minimized if compromised.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added sc-7.18.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CNA-OFA": {
+          "controls": [
+            "cp-2.5",
+            "sc-12.1"
+          ],
+          "name": "Optimizing for Availability",
+          "statement": "Machine-based information resources are persistently reviewed to ensure they are appropriately optimized for high availability and rapid recovery.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added cp-2.5, sc-12.1.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CNA-RNT": {
+          "controls": [
+            "ac-17.3",
+            "ca-9",
+            "cm-7.1",
+            "sc-7.10",
+            "sc-7.18",
+            "sc-7.20",
+            "sc-7.21",
+            "sc-7.5",
+            "si-10",
+            "si-4.11",
+            "si-4.18",
+            "si-4.4",
+            "si-8"
+          ],
+          "name": "Restricting Network Traffic",
+          "statement": "Machine-based information resources are persistently reviewed to ensure they are appropriately configured to limit inbound and outbound network traffic.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added sc-7.10, sc-7.18, sc-7.20, sc-7.21, si-10, si-4.11, si-4.18, si-4.4.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CNA-RVP": {
+          "controls": [
+            "ir-4.2",
+            "sc-5",
+            "sc-7.18",
+            "si-8",
+            "si-8.2"
+          ],
+          "name": "Reviewing Protections",
+          "statement": "The effectiveness of protection against denial of service attacks and other unwanted activity for machine-based information resources is persistently reviewed.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ir-4.2, sc-7.18.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-CNA-ULN": {
+          "controls": [
+            "ac-12",
+            "ac-17.3",
+            "ac-4.21",
+            "ca-9",
+            "cm-11",
+            "sc-10",
+            "sc-4",
+            "sc-7",
+            "sc-7.20",
+            "sc-7.21",
+            "sc-7.7",
+            "sc-8"
+          ],
+          "name": "Using Logical Networking",
+          "statement": "Logical networking and related capabilities are used and persistently reviewed to enforce traffic flow controls.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-4.21, cm-11, sc-7.20, sc-7.21.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Cloud Native Architecture",
+      "short_name": "CNA",
+      "status": "stable",
+      "web_name": "cloud-native-architecture"
+    },
+    "IAM": {
+      "id": "KSI-IAM",
+      "indicators": {
+        "KSI-IAM-AAM": {
+          "controls": [
+            "ac-2.13",
+            "ac-2.2",
+            "ac-2.3",
+            "ac-6.7",
+            "ia-12",
+            "ia-12.2",
+            "ia-12.3",
+            "ia-12.5",
+            "ia-4.4",
+            "ia-8.4"
+          ],
+          "name": "Automating Account Management",
+          "statement": "The lifecycle and privileges of all accounts, roles, and groups are securely managed using automation.",
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ia-8.4.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-IAM-APM": {
+          "controls": [
+            "ac-2",
+            "ac-3",
+            "ia-2",
+            "ia-2.1",
+            "ia-2.2",
+            "ia-2.6",
+            "ia-2.8",
+            "ia-5",
+            "ia-5.1",
+            "ia-5.2",
+            "ia-5.6",
+            "ia-5.8",
+            "ia-6",
+            "ia-8",
+            "ia-8.2",
+            "ia-8.4",
+            "sc-23"
+          ],
+          "name": "Adopting Passwordless Methods",
+          "statement": "Secure passwordless methods are used for user authentication and authorization when feasible, otherwise strong passwords with phishing-resistant MFA is used.",
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ia-2.6, ia-5.8, ia-8.2, ia-8.4.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-IAM-ELP": {
+          "controls": [
+            "ac-12",
+            "ac-14",
+            "ac-17",
+            "ac-17.1",
+            "ac-17.2",
+            "ac-17.3",
+            "ac-18.4",
+            "ac-2.11",
+            "ac-2.5",
+            "ac-2.6",
+            "ac-2.7",
+            "ac-2.9",
+            "ac-20",
+            "ac-20.1",
+            "ac-21",
+            "ac-3",
+            "ac-4",
+            "ac-6",
+            "ac-6.3",
+            "ac-6.8",
+            "au-12.3",
+            "au-6.7",
+            "cm-2.7",
+            "cm-5.1",
+            "cm-5.5",
+            "cm-7.2",
+            "cm-9",
+            "ia-11",
+            "ia-2",
+            "ia-3",
+            "ia-4",
+            "ia-4.4",
+            "ia-5.2",
+            "ia-5.6",
+            "ir-4.6",
+            "ir-9.4",
+            "ps-2",
+            "ps-3",
+            "ps-4",
+            "ps-5",
+            "ps-6",
+            "ra-5.5",
+            "sc-2",
+            "sc-20",
+            "sc-21",
+            "sc-22",
+            "sc-23",
+            "sc-3",
+            "sc-39",
+            "sc-4",
+            "si-3",
+            "si-4.19"
+          ],
+          "name": "Ensuring Least Privilege",
+          "statement": "Identity and access management measures are used and persistently reviewed to ensure each user or device can only access the resources they need.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-18.4, ac-2.11, ac-2.7, ac-2.9, ac-21, ac-6.3, ac-6.8, au-12.3, au-6.7, cm-5.1, cm-5.5, cm-7.2, ir-4.6, ir-9.4, ra-5.5, sc-2, sc-3, si-4.19.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-IAM-JIT": {
+          "controls": [
+            "ac-17",
+            "ac-17.4",
+            "ac-2",
+            "ac-2.1",
+            "ac-2.11",
+            "ac-2.2",
+            "ac-2.3",
+            "ac-2.4",
+            "ac-2.6",
+            "ac-2.7",
+            "ac-20.1",
+            "ac-21",
+            "ac-3",
+            "ac-4",
+            "ac-5",
+            "ac-6",
+            "ac-6.1",
+            "ac-6.10",
+            "ac-6.2",
+            "ac-6.3",
+            "ac-6.5",
+            "ac-6.7",
+            "ac-6.8",
+            "ac-6.9",
+            "ac-7",
+            "au-10",
+            "au-12.3",
+            "au-9.4",
+            "ca-3.6",
+            "cm-5",
+            "cm-5.1",
+            "cm-5.5",
+            "cm-7",
+            "cm-7.2",
+            "cm-7.5",
+            "cm-9",
+            "ia-4",
+            "ia-4.4",
+            "ia-7",
+            "ir-4.6",
+            "ps-2",
+            "ps-3",
+            "ps-4",
+            "ps-5",
+            "ps-6",
+            "ps-9",
+            "ra-5.5",
+            "sc-2",
+            "sc-23",
+            "sc-3",
+            "sc-39"
+          ],
+          "name": "Authorizing Just-in-Time",
+          "statement": "A least-privileged, role and attribute-based, and just-in-time security authorization model is used and persistently reviewed for all user and non-user accounts and services.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-17.4, ac-2.11, ac-2.7, ac-21, ac-6.3, ac-6.8, au-10, au-12.3, ca-3.6, cm-5.1, cm-5.5, ir-4.6, sc-3.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-IAM-SNU": {
+          "controls": [
+            "ac-2",
+            "ac-2.2",
+            "ac-2.9",
+            "ac-4",
+            "ac-6.5",
+            "au-10",
+            "ia-2.5",
+            "ia-3",
+            "ia-5.2",
+            "ra-5.5"
+          ],
+          "name": "Securing Non-User Authentication",
+          "statement": "Appropriately secure authentication methods are used and persistently reviewed for non-user accounts and services.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-2.9, au-10, ia-2.5.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-IAM-SUS": {
+          "controls": [
+            "ac-2",
+            "ac-2.1",
+            "ac-2.11",
+            "ac-2.12",
+            "ac-2.13",
+            "ac-2.3",
+            "ac-7",
+            "au-6.5",
+            "cm-5.1",
+            "cm-6.2",
+            "ir-4.2",
+            "ir-4.6",
+            "ps-4",
+            "ps-8",
+            "si-4",
+            "si-4.1",
+            "si-4.19",
+            "si-4.20",
+            "si-4.22",
+            "si-4.4"
+          ],
+          "name": "Responding to Suspicious Activity",
+          "statement": "Accounts with privileged access are disabled or otherwise secured in response to suspicious activity.",
+          "terms": [
+            "Vulnerability Response"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-2.11, ac-2.12, au-6.5, cm-5.1, cm-6.2, ir-4.2, ir-4.6, si-4, si-4.1, si-4.19, si-4.20, si-4.22, si-4.4.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Identity and Access Management",
+      "short_name": "IAM",
+      "status": "stable",
+      "web_name": "identity-and-access-management"
+    },
+    "INR": {
+      "id": "KSI-INR",
+      "indicators": {
+        "KSI-INR-AAR": {
+          "controls": [
+            "ir-3",
+            "ir-4",
+            "ir-4.1",
+            "ir-5.1",
+            "ir-8",
+            "ir-9.3"
+          ],
+          "name": "Generating After Action Reports",
+          "statement": "Incident after action reports are generated and lessons learned are persistently incorporated.",
+          "terms": [
+            "Incident",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ir-5.1, ir-9.3.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-INR-RIR": {
+          "controls": [
+            "ir-4",
+            "ir-4.1",
+            "ir-4.11",
+            "ir-6",
+            "ir-6.1",
+            "ir-6.3",
+            "ir-7",
+            "ir-7.1",
+            "ir-8",
+            "ir-8.1",
+            "ir-9.3",
+            "si-4.5"
+          ],
+          "name": "Reviewing Incident Response Procedures",
+          "statement": "The effectiveness of documented incident response procedures is persistently reviewed.",
+          "terms": [
+            "Incident",
+            "Persistently",
+            "Vulnerability Response"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ir-4.11, ir-9.3.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-INR-RPI": {
+          "controls": [
+            "ir-3",
+            "ir-4",
+            "ir-4.1",
+            "ir-4.11",
+            "ir-4.4",
+            "ir-5",
+            "ir-5.1",
+            "ir-8",
+            "ra-5.8"
+          ],
+          "name": "Reviewing Past Incidents",
+          "statement": "Past incidents are persistently reviewed for patterns or vulnerabilities that were not previously apparent or identified.",
+          "terms": [
+            "Incident",
+            "Persistently",
+            "Vulnerability"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ir-4.11, ir-4.4, ir-5.1, ra-5.8.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Incident Response",
+      "short_name": "INR",
+      "status": "stable",
+      "web_name": "incident-response"
+    },
+    "MLA": {
+      "id": "KSI-MLA",
+      "indicators": {
+        "KSI-MLA-ALA": {
+          "controls": [
+            "au-12.3",
+            "au-6.7",
+            "si-11"
+          ],
+          "name": "Authorizing Log Access",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added au-12.3, au-6.7.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ],
+          "varies_by_class": {
+            "b": {
+              "statement": "**Optional:** A least-privileged, role and attribute-based, and just-in-time access authorization model is used and persistently reviewed for access to log data based on organizationally defined data sensitivity."
+            },
+            "c": {
+              "statement": "A least-privileged, role and attribute-based, and just-in-time access authorization model is used and persistently reviewed for access to log data based on organizationally defined data sensitivity."
+            }
+          }
+        },
+        "KSI-MLA-EVC": {
+          "controls": [
+            "ac-19",
+            "ca-7",
+            "cm-2",
+            "cm-6",
+            "cm-6.1",
+            "ra-3",
+            "si-7.7"
+          ],
+          "name": "Evaluating Configurations",
+          "statement": "The configuration of machine-based information resources, especially infrastructure as code, is persistently evaluated and tested.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-19, cm-6.1, ra-3.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-MLA-LET": {
+          "controls": [
+            "ac-17.1",
+            "ac-2.4",
+            "ac-20.1",
+            "ac-6.9",
+            "au-10",
+            "au-12",
+            "au-2",
+            "au-7",
+            "au-7.1",
+            "cm-5.1",
+            "ir-9.4",
+            "si-4.19",
+            "si-4.20",
+            "si-4.4",
+            "si-4.5",
+            "si-7.7"
+          ],
+          "name": "Logging Event Types",
+          "statement": "A list of information resources and event types that will be logged, monitored, and audited is maintained and persistently reviewed to ensure these activities occur.",
+          "terms": [
+            "Information Resource",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added au-10, au-7, cm-5.1, ir-9.4, si-4.19, si-4.20.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-MLA-OSM": {
+          "controls": [
+            "ac-17.1",
+            "ac-20.1",
+            "au-11",
+            "au-12.1",
+            "au-2",
+            "au-3",
+            "au-3.1",
+            "au-4",
+            "au-5",
+            "au-5.1",
+            "au-6.1",
+            "au-6.3",
+            "au-6.4",
+            "au-6.5",
+            "au-7",
+            "au-7.1",
+            "au-8",
+            "au-9",
+            "ir-4.1",
+            "si-4.16",
+            "si-4.2",
+            "si-4.4"
+          ],
+          "name": "Operating SIEM Capability",
+          "statement": "A Security Information and Event Management (SIEM) or similar system(s) is used and persistently reviewed for centralized, tamper-resistant logging of events, activities, and changes.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added au-12.1, au-5.1, au-6.4, au-6.5, si-4.16; removed si-7.7.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-MLA-RVL": {
+          "controls": [
+            "ac-2.4",
+            "ac-6.9",
+            "au-2",
+            "au-6",
+            "au-6.1",
+            "au-7",
+            "ra-5.8",
+            "si-4",
+            "si-4.19",
+            "si-4.4"
+          ],
+          "name": "Reviewing Logs",
+          "statement": "Logs are persistently reviewed and audited.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added au-7, ra-5.8, si-4.19.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Monitoring, Logging, and Auditing",
+      "short_name": "MLA",
+      "status": "stable",
+      "web_name": "monitoring-logging-and-auditing"
+    },
+    "PIY": {
+      "id": "KSI-PIY",
+      "indicators": {
+        "KSI-PIY-GIV": {
+          "controls": [
+            "cm-12",
+            "cm-12.1",
+            "cm-2.2",
+            "cm-7.5",
+            "cm-8",
+            "cm-8.1",
+            "cm-8.2",
+            "cm-8.4",
+            "cp-2.8"
+          ],
+          "name": "Generating Inventories",
+          "statement": "Authoritative sources are used to automatically generate real-time inventories of all information resources when needed.",
+          "terms": [
+            "Information Resource"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added cm-8.2, cm-8.4.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-PIY-RES": {
+          "controls": [],
+          "name": "Reviewing Executive Support",
+          "statement": "Executive support for achieving the provider's security goals is persistently reviewed and demonstrated.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-PIY-RIS": {
+          "controls": [
+            "ac-5",
+            "ca-2",
+            "ca-2.2",
+            "cp-2.1",
+            "cp-4.1",
+            "ir-3.2",
+            "ir-4.11",
+            "pm-3",
+            "sa-2",
+            "sa-3",
+            "sr-2.1"
+          ],
+          "name": "Reviewing Investments in Security",
+          "statement": "The effectiveness of the provider's investments in achieving security goals is persistently reviewed.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ca-2.2, ir-4.11.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-PIY-RSD": {
+          "controls": [
+            "ac-5",
+            "au-3.3",
+            "cm-3.4",
+            "ia-5.7",
+            "pl-8",
+            "pm-7",
+            "ra-9",
+            "sa-3",
+            "sa-8",
+            "sc-18",
+            "sc-4",
+            "si-10",
+            "si-11",
+            "si-16"
+          ],
+          "name": "Reviewing Security in the SDLC",
+          "statement": "The effectiveness of building security and privacy considerations into the Software Development Lifecycle and aligning with CISA Secure By Design principles is persistently reviewed.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ia-5.7, ra-9.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-PIY-RVD": {
+          "controls": [
+            "ra-5.11"
+          ],
+          "name": "Reviewing Vulnerability Disclosures",
+          "statement": "The effectiveness of the provider's vulnerability disclosure program is persistently reviewed.",
+          "terms": [
+            "Persistently",
+            "Vulnerability"
+          ],
+          "updated": [
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Policy and Inventory",
+      "short_name": "PIY",
+      "status": "stable",
+      "web_name": "policy-and-inventory"
+    },
+    "RPL": {
+      "id": "KSI-RPL",
+      "indicators": {
+        "KSI-RPL-ABO": {
+          "controls": [
+            "cm-2.3",
+            "cp-6",
+            "cp-9",
+            "cp-10",
+            "cp-10.2"
+          ],
+          "name": "Aligning Backups with Objectives",
+          "statement": "The alignment of machine-based information resource backups with defined recovery objectives is persistently reviewed.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: removed si-12.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-RPL-ARP": {
+          "controls": [
+            "cp-2",
+            "cp-2.1",
+            "cp-2.3",
+            "cp-4.1",
+            "cp-6",
+            "cp-6.1",
+            "cp-6.3",
+            "cp-7",
+            "cp-7.1",
+            "cp-7.2",
+            "cp-7.3",
+            "cp-8",
+            "cp-8.1",
+            "cp-8.2",
+            "cp-10",
+            "cp-10.2"
+          ],
+          "name": "Aligning Recovery Plan",
+          "statement": "The alignment of recovery plans with defined recovery objectives is persistently reviewed.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-RPL-RRO": {
+          "controls": [
+            "cp-2.3",
+            "cp-10"
+          ],
+          "name": "Reviewing Recovery Objectives",
+          "statement": "The desired Recovery Time Objectives (RTO) and Recovery Point Objectives (RPO) are defined and persistently reviewed for alignment with the provider's business needs and capabilities.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-RPL-TRC": {
+          "controls": [
+            "cp-10",
+            "cp-2.1",
+            "cp-2.3",
+            "cp-4",
+            "cp-4.1",
+            "cp-6",
+            "cp-6.1",
+            "cp-9.1",
+            "ir-3",
+            "ir-3.2",
+            "ir-9.3",
+            "sc-12.1"
+          ],
+          "name": "Testing Recovery Capabilities",
+          "statement": "The capability to recover from incidents and contingencies aligned with defined recovery objectives is persistently tested.",
+          "terms": [
+            "Incident",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ir-9.3, sc-12.1.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Recovery Planning",
+      "short_name": "RPL",
+      "status": "stable",
+      "web_name": "recovery-planning"
+    },
+    "SCR": {
+      "id": "KSI-SCR",
+      "indicators": {
+        "KSI-SCR-MIT": {
+          "controls": [
+            "ac-19",
+            "ac-20",
+            "ca-7.4",
+            "ra-3",
+            "ra-3.1",
+            "sa-10",
+            "sa-11",
+            "sa-11.1",
+            "sa-11.2",
+            "sa-15",
+            "sa-15.3",
+            "sa-16",
+            "sa-17",
+            "sa-21",
+            "sa-22",
+            "sa-4",
+            "sa-4.1",
+            "sa-4.2",
+            "sa-4.5",
+            "sa-4.9",
+            "sa-9",
+            "sa-9.1",
+            "sa-9.2",
+            "sa-9.5",
+            "sc-18",
+            "si-7.1",
+            "si-7.15",
+            "sr-2",
+            "sr-3",
+            "sr-5",
+            "sr-6"
+          ],
+          "name": "Mitigating Supply Chain Risk",
+          "statement": "Potential supply chain risks are persistently identified, reviewed, and mitigated.",
+          "terms": [
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Changed wording order without any material impact to align with KSI standard language. Was: Persistently identify, review, and mitigate potential supply chain risks.",
+              "date": "2026-10-31",
+              "issue": "https://github.com/FedRAMP/rules/issues/42"
+            },
+            {
+              "comment": "Updated control mappings: added ac-19, ra-3, sa-11.1, sa-11.2, sa-15, sa-16, sa-17, sa-21, sa-4, sa-4.1, sa-4.2, sa-4.5, sa-4.9, sa-9.1, sa-9.2, sa-9.5, si-7.15, sr-2, sr-3.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-SCR-MON": {
+          "controls": [
+            "ac-19",
+            "ac-20",
+            "ca-2.3",
+            "ca-3",
+            "ir-6.3",
+            "ps-7",
+            "ra-3",
+            "ra-5",
+            "sa-9",
+            "si-5",
+            "sr-3",
+            "sr-5",
+            "sr-6",
+            "sr-8"
+          ],
+          "name": "Monitoring Supply Chain Risk",
+          "statement": "Third party software information resources are automatically monitored for upstream vulnerabilities using mechanisms that may include contractual notification requirements or active monitoring services.",
+          "terms": [
+            "Information Resource",
+            "Vulnerability"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-19, ca-2.3, ra-3, sr-3.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Supply Chain Risk",
+      "short_name": "SCR",
+      "status": "stable",
+      "web_name": "supply-chain-risk"
+    },
+    "SVC": {
+      "id": "KSI-SVC",
+      "indicators": {
+        "KSI-SVC-ACM": {
+          "controls": [
+            "ac-2.4",
+            "ac-6.8",
+            "cm-2",
+            "cm-2.2",
+            "cm-2.3",
+            "cm-6",
+            "cm-7.1",
+            "pl-10",
+            "pl-9",
+            "sa-5",
+            "sc-45",
+            "sc-45.1",
+            "sc-7.18",
+            "si-5",
+            "sr-10"
+          ],
+          "name": "Automating Configuration Management",
+          "statement": "The configuration of machine-based information resources is managed using automation and persistently reviewed for drift.",
+          "terms": [
+            "Drift",
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-6.8, sc-45, sc-45.1, sc-7.18.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-SVC-ASM": {
+          "controls": [
+            "ac-17.2",
+            "ia-5.2",
+            "ia-5.6",
+            "sc-12",
+            "sc-12.1",
+            "sc-17"
+          ],
+          "name": "Automating Secret Management",
+          "statement": "Management, protection, and regular rotation of digital keys, certificates, and other secrets is automated and persistently reviewed.",
+          "terms": [
+            "Persistently",
+            "Regularly"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added sc-12.1.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-SVC-EIS": {
+          "controls": [
+            "ca-7.4",
+            "cm-12.1",
+            "cm-5.5",
+            "cm-7.1",
+            "ir-9.4",
+            "pl-8",
+            "ra-3",
+            "sc-39",
+            "sc-7",
+            "si-2.2",
+            "si-4",
+            "sr-10"
+          ],
+          "name": "Evaluating and Improving Security",
+          "statement": "Information resources are persistently evaluated for opportunities to improve security and those improvements are persistently made.",
+          "terms": [
+            "Information Resource",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ca-7.4, cm-5.5, ir-9.4, ra-3; removed ma-2.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-SVC-PRR": {
+          "controls": [
+            "ac-19",
+            "ir-9.4",
+            "sc-12.1",
+            "sc-4",
+            "sc-7.18"
+          ],
+          "name": "Preventing Residual Risk",
+          "terms": [
+            "Federal Customer Data",
+            "Information Resource",
+            "Likely",
+            "Persistently"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-19, ir-9.4, sc-12.1, sc-7.18.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ],
+          "varies_by_class": {
+            "b": {
+              "statement": "**Optional:** Plans, procedures, and the state of information resources are persistently reviewed after making changes to limit and remove unwanted residual elements that would likely negatively affect the confidentiality, integrity, or availability of federal customer data."
+            },
+            "c": {
+              "statement": "Plans, procedures, and the state of information resources are persistently reviewed after making changes to limit and remove unwanted residual elements that would likely negatively affect the confidentiality, integrity, or availability of federal customer data."
+            }
+          }
+        },
+        "KSI-SVC-RUD": {
+          "controls": [
+            "ir-9",
+            "si-12.3",
+            "si-18.4",
+            "si-8",
+            "si-8.2"
+          ],
+          "name": "Removing Unwanted Data",
+          "terms": [
+            "Federal Customer Data",
+            "Promptly"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ir-9, si-8, si-8.2.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ],
+          "varies_by_class": {
+            "b": {
+              "statement": "**Optional:** Unwanted federal customer data is removed promptly when requested by an agency in alignment with customer agreements, including from backups if appropriate; this typically applies when a customer spills information or when a customer seeks to remove information from a service due to a change in usage."
+            },
+            "c": {
+              "statement": "Unwanted federal customer data is removed promptly when requested by an agency in alignment with customer agreements, including from backups if appropriate; this typically applies when a customer spills information or when a customer seeks to remove information from a service due to a change in usage."
+            }
+          }
+        },
+        "KSI-SVC-SIN": {
+          "controls": [
+            "ac-11",
+            "ac-11.1",
+            "ac-17.2",
+            "ac-19.5",
+            "ac-21",
+            "cp-9.8",
+            "ir-9.4",
+            "sc-13",
+            "sc-20",
+            "sc-21",
+            "sc-22",
+            "sc-23",
+            "sc-28",
+            "sc-28.1",
+            "sc-4",
+            "sc-7.18",
+            "sc-8",
+            "sc-8.1",
+            "si-4.18"
+          ],
+          "name": "Securing Information",
+          "statement": "Information is encrypted or otherwise secured from unwanted access or modification.",
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-11, ac-11.1, ac-19.5, ac-21, ir-9.4, sc-4, sc-7.18, si-4.18; removed ac-1.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        },
+        "KSI-SVC-VCM": {
+          "controls": [
+            "ac-10",
+            "ac-17.4",
+            "ac-18",
+            "ac-19",
+            "sc-23",
+            "si-4.22",
+            "si-7.1"
+          ],
+          "name": "Validating Communications",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Persistently",
+            "Validation"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-10, ac-17.4, ac-18, ac-19, si-4.22.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ],
+          "varies_by_class": {
+            "b": {
+              "statement": "**Optional:** The authenticity and integrity of communications between machine-based information resources is persistently validated using automation."
+            },
+            "c": {
+              "statement": "The authenticity and integrity of communications between machine-based information resources is persistently validated using automation."
+            }
+          }
+        },
+        "KSI-SVC-VRI": {
+          "controls": [
+            "ac-17.4",
+            "ac-18",
+            "ac-19",
+            "au-9.3",
+            "cm-14",
+            "cm-2.2",
+            "cm-8.3",
+            "sc-13",
+            "sc-23",
+            "si-7",
+            "si-7.1",
+            "si-7.15",
+            "sr-10",
+            "sr-11"
+          ],
+          "name": "Validating Resource Integrity",
+          "statement": "Use cryptographic methods to validate the integrity of machine-based information resources.",
+          "terms": [
+            "Information Resource",
+            "Machine-Based (Information Resources)",
+            "Validation"
+          ],
+          "updated": [
+            {
+              "comment": "Updated control mappings: added ac-17.4, ac-18, ac-19, au-9.3, cm-14, si-7.15, sr-11.",
+              "date": "2026-10-13"
+            },
+            {
+              "comment": "Official launch of the FedRAMP Consolidated Rules for 2026.",
+              "date": "2026-06-24"
+            }
+          ]
+        }
+      },
+      "name": "Service Configuration",
+      "short_name": "SVC",
+      "status": "stable",
+      "web_name": "service-configuration"
+    }
+  },
+  "source": {
+    "bytes": 588800,
+    "extract": "the KSI section only, verbatim; FRD, FRR, CTL and info are not vendored",
+    "extract_sha256": "d9988ec9120659811af4941f9ed5523a6a4b7c786d1fa9b40a6492993485c9f4",
+    "last_updated": "2026-11-02",
+    "name": "FedRAMP Consolidated Rules for 2026",
+    "repository": "https://github.com/FedRAMP/rules",
+    "retrieved": "2026-11-05",
+    "sha256": "782faecae3eee4aa2aa9d32cdb0de4c929524f2e41dc1f3d143a94a9ca64c4e3",
+    "url": "https://raw.githubusercontent.com/FedRAMP/rules/main/fedramp-consolidated-rules.json",
+    "version": "2026.11.02.01"
+  }
+}

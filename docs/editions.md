@@ -20,7 +20,7 @@ to draw the free/paid line is the last place to promise something unbuilt, and
 | Capability | Why it is an enterprise need |
 |---|---|
 | Single sign-on for the HTTP service; answers read as the caller | Multi-tenant clusters where one ServiceAccount must not see every namespace |
-| Caller identity in every audit record, and the FedRAMP 20x KSI mapping | Auditors need who asked what, in their formats. OSCAL `assessment-results` was on this row and shipped free instead (`audit --oscal`, `gate --oscal`): a format assessors read is not where to put a paywall |
+| Caller identity in every audit record | Auditors need who asked what. Two things left this row and shipped free: OSCAL `assessment-results` (`audit --oscal`, `gate --oscal`) and the FedRAMP 20x KSI crosswalk (`kube-noob ksi`). A format assessors read is not where to put a paywall, and a mapping onto a public register is not a product |
 | Memory across many clusters and teams, with retention policies | Fleet operators, not one team |
 | Online ITSM connectors (ServiceNow, Jira Service Management) | Ticket history and evidence attachments without exports |
 | Gate approvals, roles and the tamper-evident audit log | Change control for agents that act on clusters |
