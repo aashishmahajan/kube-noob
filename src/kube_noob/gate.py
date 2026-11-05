@@ -28,6 +28,10 @@ from kube_noob.audit.model import Severity
 MAX_FILES = 2_000
 MAX_TOTAL = 5_000_000
 SEVERITIES = ("info", "low", "medium", "high", "critical")
+#: GitHub displays "10 warning annotations, 10 error annotations, and 10 notice annotations per step" and
+#: "50 annotations per job" (actions/toolkit, docs/problem-matchers.md, retrieved 2026-11-05). The eleventh
+#: of a kind is dropped without a word, so the tenth is spent saying how many are not shown.
+MAX_ANNOTATIONS_PER_TYPE = 10
 _SOURCE = re.compile(r"^# Source: ([\w.-]{1,200})/(.{1,400})$")
 _KIND = re.compile(r"^kind:\s{0,5}([A-Z][A-Za-z0-9]{1,62})\s*$", re.M)
 # Kinds whose names are distinctive enough to search release notes for (Route, Service or Pod are everyday words).
@@ -713,6 +717,87 @@ def _cell(text: Any, limit: int = 300) -> str:
     a different verdict, an image or a link in the job summary (red team, VUL1)."""
     flat = _CONTROL.sub(" ", str(text))[:limit]
     return "".join(_MD_ESCAPE.get(c, c) for c in flat)
+
+
+def _annotation(level: str, finding: dict[str, Any]) -> str:
+    """One GitHub workflow command. `file`, `line`, `title` and the message are escaped per the toolkit's rules."""
+
+    def esc(text: str, *, prop: bool = False) -> str:
+        # A raw newline ends the command and an unescaped % corrupts the next escape. In a property, a comma or a
+        # colon ends the property list, so those go too.
+        out = str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        return out.replace(",", "%2C").replace("::", "%3A%3A") if prop else out
+
+    rule = str(finding.get("ruleId") or "kube-noob")
+    heading = f"{rule} {finding.get('title') or ''}".strip()
+    props = [f"title={esc(heading, prop=True)}"]
+    uri = finding.get("uri")
+    if uri:
+        props.insert(0, f"file={esc(str(uri), prop=True)}")
+        line = finding.get("line")
+        if isinstance(line, int) and line > 0:
+            props.insert(1, f"line={line}")
+    resource = str(finding.get("resource") or "")
+    message = " ".join(
+        part
+        for part in (
+            f"[{rule}]",
+            resource,
+            str(finding.get("message") or ""),
+            f"Fix: {finding['remediation']}" if finding.get("remediation") else "",
+        )
+        if part
+    )
+    return f"::{level} {','.join(props)}::{esc(message)}"
+
+
+def github_annotations(report: dict[str, Any]) -> list[str]:
+    """Gate findings as GitHub workflow commands, so they appear on the pull request rather than in a log.
+
+    Not named `annotations`: this module starts with `from __future__ import annotations`, so that name is
+    already bound and a function with it shadows the feature flag -- mypy refuses it, and rightly.
+
+    Findings at or above `failOn` are errors and the rest are warnings, which matches what the gate did with the
+    exit code -- with `--fail-on never` nothing fails, so nothing is an error here either.
+
+    GitHub's caps decide the shape: 10 of each type per step and 50 per job (actions/toolkit,
+    docs/problem-matchers.md). The eleventh annotation of a kind is dropped with no message, so a developer who
+    saw ten would reasonably believe there were ten. The last slot of each kind therefore carries the count that
+    was not shown and points at the SARIF and the job summary, which have all of them.
+    """
+    from kube_noob.audit.model import Severity
+
+    rows = [f for f in report.get("findings") or () if isinstance(f, dict)]
+    if not rows:
+        return []
+    fail_on = str(report.get("failOn") or "high")
+    floor = None if fail_on == "never" else Severity.parse(fail_on)
+
+    def rank(f: dict[str, Any]) -> tuple[int, str, str]:
+        sev = str(f.get("severity") or "info")
+        order = SEVERITIES.index(sev) if sev in SEVERITIES else 0
+        return (-order, str(f.get("ruleId") or ""), str(f.get("resource") or ""))
+
+    buckets: dict[str, list[dict[str, Any]]] = {"error": [], "warning": []}
+    for f in sorted(rows, key=rank):
+        above = floor is not None and Severity.parse(str(f.get("severity") or "info")) >= floor
+        buckets["error" if above else "warning"].append(f)
+    out: list[str] = []
+    for level in ("error", "warning"):
+        found = buckets[level]
+        if not found:
+            continue
+        if len(found) <= MAX_ANNOTATIONS_PER_TYPE:
+            out += [_annotation(level, f) for f in found]
+            continue
+        shown = found[: MAX_ANNOTATIONS_PER_TYPE - 1]
+        out += [_annotation(level, f) for f in shown]
+        hidden = len(found) - len(shown)
+        out.append(
+            f"::{level} title=kube-noob::{hidden} more {level}-level finding(s) are not annotated: GitHub shows "
+            f"{MAX_ANNOTATIONS_PER_TYPE} of each kind per step. All of them are in the SARIF file and the job summary."
+        )
+    return out
 
 
 def markdown(report: dict[str, Any], top: int = 25) -> str:

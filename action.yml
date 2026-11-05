@@ -75,6 +75,13 @@ inputs:
     description: Where to write the SARIF file (upload it with github/codeql-action/upload-sarif).
     required: false
     default: kube-noob.sarif
+  annotations:
+    description: >-
+      "true" (the default) also prints the findings as workflow commands, so they appear as annotations on the
+      pull request instead of only in the log. GitHub shows ten of each kind per step, so the tenth annotation
+      says how many are not shown; the SARIF file and the job summary carry all of them.
+    required: false
+    default: "true"
 outputs:
   result:
     description: passed or failed.
@@ -119,6 +126,7 @@ runs:
         KN_EXCEPTIONS: ${{ inputs.exceptions }}
         KN_FAIL_ON: ${{ inputs.fail-on }}
         KN_SARIF: ${{ inputs.sarif }}
+        KN_ANNOTATIONS: ${{ inputs.annotations }}
       run: |
         set -euo pipefail
         args=(--platform "$KN_PLATFORM" --fail-on "$KN_FAIL_ON" --namespace "$KN_NAMESPACE")
@@ -133,9 +141,16 @@ runs:
         for s in $KN_SARIF_REPORTS; do args+=(--sarif-report "$s"); done
         if [ -n "$KN_VERSION" ]; then args+=(--version "$KN_VERSION"); fi
         if [ -n "$KN_EXCEPTIONS" ]; then args+=(--exceptions "$KN_EXCEPTIONS"); fi
+        if [ "$KN_ANNOTATIONS" != "false" ]; then args+=(--github-annotations); fi
         rc=0
+        # Workflow commands and the JSON report both come out on stdout, so the stream is captured once and split:
+        # the `::` lines are echoed to the log, where Actions turns them into annotations, and the rest is the
+        # report. Leaving them in the .json file would hand the next person a file that does not parse.
+        raw="$RUNNER_TEMP/kube-noob-gate.out"
         kube-noob gate "${args[@]}" --sarif "$KN_SARIF" --summary "$RUNNER_TEMP/kube-noob-summary.md" \
-          --format json > "$RUNNER_TEMP/kube-noob-gate.json" || rc=$?
+          --format json > "$raw" || rc=$?
+        grep '^::' "$raw" || true
+        grep -v '^::' "$raw" > "$RUNNER_TEMP/kube-noob-gate.json"
         if [ -f "$RUNNER_TEMP/kube-noob-summary.md" ]; then cat "$RUNNER_TEMP/kube-noob-summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
         if [ "$rc" = 0 ]; then echo "result=passed" >> "$GITHUB_OUTPUT"; elif [ "$rc" = 1 ]; then echo "result=failed" >> "$GITHUB_OUTPUT"; fi
         exit "$rc"

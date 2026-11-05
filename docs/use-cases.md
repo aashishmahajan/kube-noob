@@ -612,6 +612,12 @@ GitHub Actions (add `github/codeql-action/upload-sarif` after it to see findings
     version: "4.20"
 ```
 
+The action also prints the findings as annotations, so they appear on the pull request instead of only in the log
+(`--github-annotations` does the same from the CLI; `annotations: "false"` turns it off). Findings at or above
+`--fail-on` are errors and the rest are warnings. GitHub displays ten annotations of each kind per step, so the
+tenth says how many are not shown rather than letting the eleventh disappear: the SARIF file and the job summary
+carry every one.
+
 With the images' scanner output (`--scanner-report`, plus `--vex` and `--kev`), the gate also lists their
 vulnerabilities after Red Hat VEX, ranked against the manifests; a fixable or known-exploited one at `--fail-on`
 fails it, an unfixable one is reported without blocking.
