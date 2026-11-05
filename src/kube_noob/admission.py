@@ -59,6 +59,7 @@ SKIPPED_RULES = frozenset(
         "KN-N012",  # needs pods that are created after the NetworkPolicy
         "KN-V012",
         "KN-V023",  # same: the containerPorts the Service's pods declare are in other objects
+        "KN-N014",  # needs the cluster's CNI and version, which no admitted object carries
         "KN-V014",  # bundle properties
         "KN-V018",
         "KN-S018",  # every Secret in a cluster holds data: the rule is about Git

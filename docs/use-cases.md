@@ -439,6 +439,12 @@ reverse, but an answer that holds under both still holds. A Calico version too c
 which does not say whether the cluster is on 3.31 or 3.32) is treated the same way. Without the flag the
 OVN-Kubernetes semantics above are assumed, as before.
 
+`kube-noob audit --cni calico:3.32` turns the same fact into a finding a CI gate fails on: **KN-N014** reports an
+`AdminNetworkPolicy` or `BaselineAdminNetworkPolicy` that this CNI no longer enforces, at HIGH, because a policy
+gate that silently stopped applying is worse than one that was never there. `gate --cni` takes it too. Without the
+flag the rule is reported as NOT EVALUATED rather than clean: no manifest states which CNI runs the cluster, and
+"nobody told me" is not "the policy is enforced".
+
 ```bash
 kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-shop.yaml
 kube-noob policy reach --from shop/orders-api --to shop/payments --port 9090 -f examples/netpol-shop.yaml

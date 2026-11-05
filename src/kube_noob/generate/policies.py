@@ -379,6 +379,8 @@ NOT_GENERATED: dict[str, str] = {
     "bundle",
     "KN-V012": "needs the containers the Service selects (another object); `kube-noob audit` checks the bundle",
     "KN-V014": "duplicates are a property of a bundle; admission sees one object at a time",
+    "KN-N014": "needs the cluster's CNI and its version, which no admitted object carries; `kube-noob audit --cni` "
+    "decides it",
     "KN-V023": "needs the containerPorts the Service's selected pods declare (other objects), and the mismatch is "
     "advisory rather than a refusal; `kube-noob audit` checks the bundle",
     "KN-V020": "the API server refuses a claim name the Pod does not declare itself",

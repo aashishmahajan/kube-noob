@@ -373,6 +373,7 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             trust_report_vex=a.trust_report_vex,
             sarif_reports=[(p, _read(p)) for p in a.sarif_report],
             source_roots=[str(Path.cwd().resolve()), *(r.rstrip("/") for r in a.source_root if r.startswith("/"))],
+            cni=a.cni,
         )
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
@@ -890,6 +891,14 @@ def build_parser() -> argparse.ArgumentParser:
         "finding: the same report, losslessly, about a third smaller where a rule fires more than once. The exit "
         "code is unchanged, so a gate reads the same verdict either way",
     )
+    a.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest "
+        "states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, "
+        "which Calico did in 3.32 without reporting an error -- is reported as NOT EVALUATED until you name it, "
+        "rather than counted clean",
+    )
     a.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     a.add_argument(
         "--exceptions",
@@ -949,6 +958,14 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--platform", choices=PLATFORMS)
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
+    gt.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest "
+        "states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, "
+        "which Calico did in 3.32 without reporting an error -- is reported as NOT EVALUATED until you name it, "
+        "rather than counted clean",
+    )
     gt.add_argument(
         "--oscal",
         action="store_true",
@@ -1921,6 +1938,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                         min_severity=a.min_severity,
                         exceptions=exceptions,
                         partial_bundle=_partial_input(a),
+                        cni=a.cni,
                     )
                 )
             except ExceptionsError as exc:

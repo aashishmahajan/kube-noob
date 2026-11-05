@@ -94,6 +94,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-N011": ("SI-2", "SI-10", "CM-7"),
     "KN-N012": ("SC-7", "SC-7(5)", "AC-4"),  # a policy that selects no pod enforces nothing
     "KN-N013": ("SC-7", "CP-10"),  # egress denied without DNS: the workload cannot resolve and stops serving
+    "KN-N014": ("SC-7", "SC-7(5)", "AC-4"),
     # Storage
     "KN-ST001": ("CM-6",),
     "KN-ST002": ("CM-6", "CP-10"),

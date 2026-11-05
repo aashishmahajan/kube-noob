@@ -59,7 +59,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 90 audit rules and their controls
+## The 91 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -92,6 +92,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-N011 | Ingress path type ImplementationSpecific on ingress-nginx | SI-2, SI-10, CM-7 |
 | KN-N012 | NetworkPolicy selects no pod in this bundle | SC-7, SC-7(5), AC-4 |
 | KN-N013 | Egress is denied without allowing cluster DNS | SC-7, CP-10 |
+| KN-N014 | Admin network policy the cluster's CNI does not enforce | SC-7, SC-7(5), AC-4 |
 | KN-S001 | Privileged container | AC-6, CM-7, SC-39 |
 | KN-S002 | Privilege escalation not disabled | AC-6, AC-6(10), CM-7 |
 | KN-S003 | Container may run as root | AC-6, CM-6 |

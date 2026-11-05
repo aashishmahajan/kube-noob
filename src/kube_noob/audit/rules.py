@@ -41,8 +41,12 @@ from kube_noob.catalog import (
     parse_minor,
     removed_api,
 )
-from kube_noob.debug.netpol import policy_types
+from kube_noob.debug.netpol import ANP_KIND, BANP_KIND, policy_types
 from kube_noob.yamlio import Document, PathT, fmt_path, get_path, locator
+
+#: The two cluster-scoped tiers `kube_noob.debug.anp` evaluates, and the kinds KN-N014 reports when the CNI
+#: named on the command line does not enforce them.
+ADMIN_TIER_KINDS = (ANP_KIND, BANP_KIND)
 
 
 @dataclass
@@ -57,6 +61,9 @@ class AuditContext:
     # reporting a finding the reader cannot act on. Never inferred from len(docs): the admission webhook
     # audits a one-document bundle on purpose and needs those rules to fire (tests/test_admission.py).
     partial_bundle: bool = False
+    # The cluster's CNI, as NAME or NAME:VERSION, when the caller knows it. No manifest states it, so a rule that
+    # depends on it (KN-N014) declines to decide without it rather than reporting the policy as fine.
+    cni: str | None = None
     # Rules that declined to DECIDE on this input: the partial-bundle guard returned before they could
     # evaluate anything. `run_rules` keeps them out of the evaluated list, because "it skipped" and "it ran
     # and found nothing" are the two states a compliance record must never merge -- G186 made these rules
@@ -3106,6 +3113,55 @@ def _n013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                     f"Egress is restricted for {len(stranded)} pod template(s) in namespace {ns} and no policy "
                     "selecting them allows UDP to port 53 or 5353, so they cannot resolve any name.",
                 )
+
+
+@rule(
+    "KN-N014",
+    "Admin network policy the cluster's CNI does not enforce",
+    Stage.AUDIT,
+    "network",
+    Severity.HIGH,
+    "Replace it with the kind this CNI does enforce (ClusterNetworkPolicy for Calico 3.32+), or remove it and move "
+    "the rules into NetworkPolicies.",
+    "An AdminNetworkPolicy or BaselineAdminNetworkPolicy a CNI stopped enforcing is in the cluster and decides "
+    "nothing: Calico removed support in 3.32 without reporting an error.",
+)
+def _n014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    """The inert-policy case as a finding a gate can fail on.
+
+    No manifest states which CNI runs the cluster, so without ``--cni`` this rule cannot decide and says so --
+    "nobody told me the CNI" is not "the policy is enforced", and a coverage record that counted it clean would be
+    reporting a check that never ran (G202). The same holds for a CNI upstream does not characterise, and for a
+    version too coarse to sit on either side of the removal. HIGH for the same reason KN-S030 is: a policy gate
+    that silently stopped applying is worse than one that was never there, because somebody is relying on it.
+    """
+    from kube_noob.debug.cni import REPLACEMENT, admin_tier_reason, admin_tier_support, parse_cni
+
+    docs = ctx.by_kind(ADMIN_TIER_KINDS[0], ADMIN_TIER_KINDS[1])
+    if not ctx.cni:
+        if docs:
+            ctx.cannot_decide(r.rule_id)
+        return  # nothing of this kind is nothing to decide, whatever the CNI
+    try:
+        name, version = parse_cni(ctx.cni)
+    except ValueError:
+        if docs:
+            ctx.cannot_decide(r.rule_id)
+        return
+    support = admin_tier_support(name, version)
+    if support == "enforced" or not docs:
+        return
+    if support == "unknown":
+        ctx.cannot_decide(r.rule_id)
+        return
+    reason = admin_tier_reason(name, version, support)
+    for d in docs:
+        yield r.finding(
+            d,
+            ("kind",),
+            f"{d.kind} is evaluated by kube-noob and by nothing on this cluster: {reason}. "
+            f"Move its rules into a {REPLACEMENT} or into NetworkPolicies.",
+        )
 
 
 @rule(

@@ -14,7 +14,11 @@ ALL_STAGES = frozenset(Stage)
 
 
 def build_context(
-    docs: list[Document], platform: str, version: str | None, partial_bundle: bool = False
+    docs: list[Document],
+    platform: str,
+    version: str | None,
+    partial_bundle: bool = False,
+    cni: str | None = None,
 ) -> AuditContext:
     if platform not in PLATFORMS:
         raise ValueError(f"Unknown platform {platform!r}; use one of {', '.join(PLATFORMS)}")
@@ -26,6 +30,7 @@ def build_context(
         k8s_version=k8s,
         platform_version=platform_version,
         partial_bundle=partial_bundle,
+        cni=cni,
     )
 
 
@@ -37,9 +42,10 @@ def analyze(
     min_severity: Severity = Severity.INFO,
     schema: bool = True,
     partial_bundle: bool = False,
+    cni: str | None = None,
 ) -> Report:
     docs = load_documents(manifests) if isinstance(manifests, str) else manifests
-    ctx = build_context(docs, platform, version, partial_bundle)
+    ctx = build_context(docs, platform, version, partial_bundle, cni)
     report = Report(
         platform=platform,
         kubernetes_version=ctx.k8s_version,

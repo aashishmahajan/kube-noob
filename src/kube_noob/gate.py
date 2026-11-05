@@ -252,6 +252,7 @@ def run(
     code_builds: list[Any] | None = None,
     unknown_builds: list[str] | None = None,
     repo: Path | None = None,
+    cni: str | None = None,
 ) -> dict[str, Any]:
     """``code_builds``: Containerfiles read with their context (``kube_noob.code.builds``); without them each
     Containerfile's directory is its context. ``unknown_builds``: Containerfiles given but not readable as builds
@@ -294,7 +295,7 @@ def run(
     # compliance document built from the gate could therefore only ever say not-satisfied (G201).
     coverage: dict[str, Any] = {}
     if sources:
-        report = analyze(combined, platform, version)
+        report = analyze(combined, platform, version, cni=cni)
         kept_rules: list[str] = []
         excepted_rules: list[str] = []
         kinds = set(_KIND.findall(combined))

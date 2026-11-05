@@ -81,6 +81,16 @@ class _In(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
 
 
+def _normalised_cni(value: str | None) -> str | None:
+    """Refuse an unparseable CNI at the boundary rather than ignoring it later, and store one spelling."""
+    if value is None:
+        return None
+    from kube_noob.debug.cni import parse_cni
+
+    name, version = parse_cni(value)
+    return f"{name}:{version}" if version else name
+
+
 class ManifestsIn(_In):
     manifests: str = Field(
         ...,
@@ -111,6 +121,20 @@ class AuditIn(ManifestsIn):
         "PodDisruptionBudget, a StorageClass not declared here -- are then not evaluated, because from a partial "
         "bundle they cannot tell a real gap from an object you did not pass. The report says so in its assumptions.",
     )
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No "
+        "manifest states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped "
+        "enforcing, which Calico did in 3.32 without reporting an error -- is NOT EVALUATED unless you name it, "
+        "rather than counted clean.",
+    )
+
+    @field_validator("cni")
+    @classmethod
+    def _audit_cni(cls, v: str | None) -> str | None:
+        return _normalised_cni(v)
+
     compact: bool = Field(
         False,
         description="Return the same report with each rule's constant fields (title, severity, stage, category, "
@@ -434,12 +458,7 @@ class TrafficIn(_In):
     @field_validator("cni")
     @classmethod
     def _cni(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        from kube_noob.debug.cni import parse_cni
-
-        name, version = parse_cni(v)  # refuse an unparseable value here rather than ignoring it later
-        return f"{name}:{version}" if version else name
+        return _normalised_cni(v)
 
     @field_validator("port")
     @classmethod
@@ -864,6 +883,7 @@ class Toolkit:
             stages=stages,
             min_severity=Severity.parse(p.min_severity),
             partial_bundle=p.partial_bundle,
+            cni=p.cni,
         )
         excepted: list[dict[str, Any]] = []
         review = exc.review(p.exceptions) if p.exceptions else None
