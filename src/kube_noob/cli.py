@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from kube_noob import __version__, sanitize
+from kube_noob import __version__, completion, sanitize
 from kube_noob.config import Settings, load_settings
 from kube_noob.errors import ClarificationNeeded, ConfigError, KubeNoobError
 
@@ -72,6 +72,17 @@ def _manifest_input(a: argparse.Namespace) -> tuple[str, list[dict[str, str]]]:
             f"{a.file}: no readable manifest here" + (f" ({named})" if named else " (no .yaml or .yml files)")
         )
     return "\n---\n".join(text for _, text in ok), bad
+
+
+def _partial_input(a: argparse.Namespace) -> bool:
+    """True when the caller named one file or stdin rather than a directory.
+
+    A directory is taken to be the whole namespace, so rules that fire on an absent object are evaluated.
+    One file is not: `audit -f deployment.yaml` cannot tell "this namespace has no NetworkPolicy" from
+    "you did not pass it", and reporting the first would be a finding on every correct repository.
+    """
+    f = getattr(a, "file", None)
+    return not (isinstance(f, str) and f != "-" and Path(f).is_dir())
 
 
 def _refuse_unreadable(bad: list[dict[str, str]], flag: str = "--skip-unreadable") -> None:
@@ -366,9 +377,11 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
+    quiet_pass = getattr(a, "quiet", False) and report["passed"]
     if a.format == "text":
-        _tprint(gate.markdown(report, top=50))
-    else:
+        if not quiet_pass:
+            _tprint(gate.markdown(report, top=50))
+    elif not quiet_pass:
         _emit(report, fmt)
     if report.get("unreadable") and not a.skip_unreadable:
         _refuse_unreadable([{"path": u["file"], "why": u["why"]} for u in report["unreadable"]])
@@ -913,6 +926,12 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
     gt.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
+    gt.add_argument(
+        "--quiet",
+        action="store_true",
+        help="print nothing when the gate passes (a failing gate still reports in full). For pre-commit hooks and "
+        "other places where a silent success is the point; the exit code carries the verdict either way",
+    )
     gt.add_argument(
         "--skip-unreadable",
         action="store_true",
@@ -1764,6 +1783,15 @@ def build_parser() -> argparse.ArgumentParser:
     tsub.add_parser("tasks", help="List benchmark tasks")
 
     sub.add_parser("config", help="Show the effective configuration")
+    cmp_p = sub.add_parser(
+        "completion",
+        help="Print a shell completion script (bash, zsh or fish), generated from this CLI",
+        description="Print a completion script for your shell. It is walked off the parser at the moment you run "
+        "it, so it lists the commands this build actually has. bash: source <(kube-noob completion bash). "
+        'zsh: kube-noob completion zsh > "${fpath[1]}/_kube-noob". fish: kube-noob completion fish > '
+        "~/.config/fish/completions/kube-noob.fish",
+    )
+    cmp_p.add_argument("shell", choices=list(completion.SHELLS))
     sub.add_parser("doctor", help="Show what kube-noob can reach (network, cluster, model); exit 1 on conflicts")
     st = sub.add_parser("selftest", help="Answer a battery of real questions offline and score the results")
     st.add_argument("--category", choices=["kubernetes", "helm", "openshift", "rosa-hcp", "rhacs", "everyday"])
@@ -1823,6 +1851,9 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     fmt = "yaml" if a.format == "text" else a.format
     platform = getattr(a, "platform", None) or s.default_platform
 
+    if a.cmd == "completion":
+        print(completion.script(a.shell, build_parser()), end="")
+        return 0
     if a.cmd in {"audit", "validate", "redteam", "fix"}:
         text, unreadable = _manifest_input(a)
         if unreadable and not getattr(a, "skip_unreadable", False):
@@ -1844,6 +1875,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                         version=a.pversion,
                         min_severity=a.min_severity,
                         exceptions=exceptions,
+                        partial_bundle=_partial_input(a),
                     )
                 )
             except ExceptionsError as exc:

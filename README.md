@@ -89,9 +89,10 @@ generated [safety contract](https://github.com/aashishmahajan/kube-noob/blob/mai
 ## Docs
 
 Everything is at **[kube-noob.com](https://kube-noob.com)**, and in [docs/](https://github.com/aashishmahajan/kube-noob/blob/main/docs/): [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md),
-[architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md), [measured accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md),
+[architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md), [accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md),
 [guidance](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md), [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md), [privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md),
-[contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md).
+[contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md), [limits](https://github.com/aashishmahajan/kube-noob/blob/main/docs/limits.md), [maintenance](https://github.com/aashishmahajan/kube-noob/blob/main/MAINTENANCE.md), [governance](https://github.com/aashishmahajan/kube-noob/blob/main/GOVERNANCE.md).
+
 
 ## Credits
 

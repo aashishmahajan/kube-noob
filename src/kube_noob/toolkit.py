@@ -104,6 +104,13 @@ class AuditIn(ManifestsIn):
         "low", description="Hide findings below this severity."
     )
     stages: list[StageName] = Field(default_factory=lambda: list(ALL_STAGE_NAMES))
+    partial_bundle: bool = Field(
+        False,
+        description="Set when these documents are only part of a namespace (one file, a diff, staged changes). "
+        "Rules that fire because another object is absent -- no NetworkPolicy selects this workload, no "
+        "PodDisruptionBudget, a StorageClass not declared here -- are then not evaluated, because from a partial "
+        "bundle they cannot tell a real gap from an object you did not pass. The report says so in its assumptions.",
+    )
     compact: bool = Field(
         False,
         description="Return the same report with each rule's constant fields (title, severity, stage, category, "
@@ -832,7 +839,14 @@ class Toolkit:
         # Before anything is scored: a score on a file the rules never saw is a wrong answer, not a thin one.
         refuse_if_not_manifests(p.manifests)
         stages = {Stage(s) for s in p.stages}
-        r = analyze(p.manifests, p.platform, p.version, stages=stages, min_severity=Severity.parse(p.min_severity))
+        r = analyze(
+            p.manifests,
+            p.platform,
+            p.version,
+            stages=stages,
+            min_severity=Severity.parse(p.min_severity),
+            partial_bundle=p.partial_bundle,
+        )
         excepted: list[dict[str, Any]] = []
         review = exc.review(p.exceptions) if p.exceptions else None
         if review is not None:

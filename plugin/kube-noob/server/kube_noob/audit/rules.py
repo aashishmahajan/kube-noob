@@ -50,6 +50,12 @@ class AuditContext:
     platform: str
     k8s_version: str
     platform_version: str | None = None
+    # True when the caller knows these documents are only part of the namespace: `audit -f one.yaml`, a
+    # pre-commit hook over staged files. A rule that fires because another object was ABSENT cannot tell
+    # "there is no NetworkPolicy" from "you did not pass it", so those rules say nothing here instead of
+    # reporting a finding the reader cannot act on. Never inferred from len(docs): the admission webhook
+    # audits a one-document bundle on purpose and needs those rules to fire (tests/test_admission.py).
+    partial_bundle: bool = False
 
     @property
     def is_openshift(self) -> bool:
@@ -1974,6 +1980,8 @@ def _s028(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("Deployments should have at least one ingress Network Policy",),
 )
 def _n001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        return  # the namespace's NetworkPolicies were not passed, so their absence here means nothing
     netpol_ns = {ctx.ns(d) for d in ctx.by_kind("NetworkPolicy")}
     flagged: set[str] = set()
     for d, _pt in ctx.workloads():
@@ -2478,7 +2486,9 @@ def _st001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                         "default StorageClass supports ReadWriteMany (most block classes do not).",
                         severity=Severity.MEDIUM,
                     )
-            elif sc != "":  # "" = static binding to a pre-created PV, no provisioner involved
+            elif sc != "" and not ctx.partial_bundle:
+                # "" = static binding to a pre-created PV, no provisioner involved. Only this branch of the rule
+                # reads another object; the rest decide from the claim alone and still fire on a partial bundle.
                 yield r.finding(
                     d,
                     (*path, "storageClassName"),
@@ -2846,6 +2856,8 @@ def _pdbs_for(ctx: AuditContext, d: Document, labels: dict[str, str]) -> list[Do
     ("k8s-pdb",),
 )
 def _c008(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        return  # the namespace's PodDisruptionBudgets were not passed, so no match here means nothing
     for d, pt in ctx.workloads():
         if d.kind in REPLICATED_KINDS and (replicas(d) or 1) >= 2 and not _pdbs_for(ctx, d, pt.labels()):
             yield r.finding(d, ("spec",), "No PodDisruptionBudget selects this workload.")

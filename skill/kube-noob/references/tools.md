@@ -19,6 +19,7 @@ Audit manifests. Full deterministic audit: security, network exposure, storage a
 - `exceptions` (null/string): An exception list (YAML, apiVersion kube-noob.io/v1, kind ExceptionList): each entry names a rule, a scope, an owner, a reason and an expiry date. Active entries hide the findings they cover; expired and refused entries are reported and fail the gate.
 - `manifests`* (string): One or more YAML documents (Kubernetes/OpenShift objects).
 - `min_severity` (string): Hide findings below this severity.
+- `partial_bundle` (boolean): Set when these documents are only part of a namespace (one file, a diff, staged changes). Rules that fire because another object is absent -- no NetworkPolicy selects this workload, no PodDisruptionBudget, a StorageClass not declared here -- are then not evaluated, because from a partial bundle they cannot tell a real gap from an object you did not pass. The report says so in its assumptions.
 - `platform` (string): Target platform.
 - `stages` (array)
 - `version` (null/string): Platform version, e.g. '4.22' (OCP) or '1.35'.
