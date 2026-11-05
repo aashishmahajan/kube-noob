@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from kube_noob.admission import SYSTEM_NAMESPACES
 from kube_noob.audit.controls import controls_for
 from kube_noob.audit.model import Finding, Severity, Stage
 from kube_noob.audit.podspec import (
@@ -1142,6 +1143,61 @@ def _v022(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 # =====================================================================================================
 # AUDIT - security
 # =====================================================================================================
+
+# Pod Security admission reads three labels per mode off the NAMESPACE, not off the workload. The constants are
+# upstream's (`staging/src/k8s.io/pod-security-admission/api/constants.go`): the prefix, and the three levels.
+PSA_ENFORCE_LABEL = "pod-security.kubernetes.io/enforce"
+PSA_LEVELS = ("privileged", "baseline", "restricted")
+
+
+@rule(
+    "KN-S032",
+    "Namespace does not enforce a pod security level",
+    Stage.AUDIT,
+    "security",
+    Severity.MEDIUM,
+    "Set pod-security.kubernetes.io/enforce: restricted on the Namespace (baseline where a workload genuinely "
+    "needs more), and pin pod-security.kubernetes.io/enforce-version so a cluster upgrade cannot change what "
+    "the label means.",
+    "Pod Security admission is configured per namespace by a label. Without it the namespace runs at whatever "
+    "the cluster's AdmissionConfiguration default is, which is privileged on a default install -- so the "
+    "namespace enforces nothing, and no manifest in it will say so.",
+)
+def _s032(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Namespace"):
+        name = get_path(d.data, ("metadata", "name"))
+        name = name if isinstance(name, str) else ""
+        if name in SYSTEM_NAMESPACES or name.startswith("openshift-") or name == "default":
+            continue  # the platform owns these, and Pod Security sync is permanently off for them
+        labels = get_path(d.data, ("metadata", "labels"))
+        level = labels.get(PSA_ENFORCE_LABEL) if isinstance(labels, dict) else None
+        if level == "privileged":
+            yield r.finding(
+                d,
+                ("metadata", "labels", PSA_ENFORCE_LABEL),
+                f"Namespace {name} sets {PSA_ENFORCE_LABEL}: privileged, which is Pod Security's "
+                "no-restrictions level: every pod in it may run as root, share host namespaces and mount host "
+                "paths, whatever its own securityContext says.",
+                severity=Severity.HIGH,
+            )
+            continue
+        if level is not None:
+            continue  # baseline or restricted is a judgement about the workload, not a defect
+        if ctx.is_openshift:
+            # OpenShift's label syncer sets `warn` and `audit` from the SCCs the namespace's service accounts
+            # can use, and deliberately NOT `enforce`: the platform enforces the privileged profile globally
+            # and leaves real enforcement to SCCs. Reporting the absent label here would report the platform's
+            # own design as a defect, which is absence read as a defect (G193).
+            continue
+        yield r.finding(
+            d,
+            ("metadata",),
+            f"Namespace {name} sets no {PSA_ENFORCE_LABEL} label, so the level enforced for it is the "
+            "cluster's AdmissionConfiguration default -- privileged on a default install, and not something "
+            "these manifests show. Set the label to say what this namespace enforces rather than inheriting "
+            "an answer the repository cannot see.",
+        )
+
 
 DANGEROUS_CAPS = frozenset(
     {

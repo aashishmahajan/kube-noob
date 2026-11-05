@@ -122,6 +122,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S029 | Probe or lifecycle handler with a host | SC-7, CM-7 |
 | KN-S030 | Admission webhook fails open | CM-7, SI-7 |
 | KN-S031 | Device claim requests administrative access | AC-6, SC-4 |
+| KN-S032 | Namespace does not enforce a pod security level | AC-6, CM-6 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |

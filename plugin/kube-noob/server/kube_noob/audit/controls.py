@@ -139,6 +139,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-V022": _VALIDATION,
     "KN-C015": ("CM-6",),  # a claim that does not exist: the workload never schedules
     "KN-S031": ("AC-6", "SC-4"),  # device access across tenants, and the device keeps prior state
+    "KN-S032": ("AC-6", "CM-6"),  # the pod security level the namespace enforces
 }
 
 
