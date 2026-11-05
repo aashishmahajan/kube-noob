@@ -72,6 +72,8 @@ def analyze(
         # Red team always reasons over the complete finding set, even if the caller filters the output.
         all_findings = findings if rule_stages >= {Stage.AUDIT, Stage.CALIBRATE} else run_rules(ctx, None)
         report.scenarios = red_team(ctx, all_findings)
+    # Recorded BEFORE the filter: a rule that fired must not look clean because this view hides its finding.
+    report.fired_rules = sorted({f.rule_id for f in findings})
     report.findings = [f for f in findings if f.severity >= min_severity]
     return report
 

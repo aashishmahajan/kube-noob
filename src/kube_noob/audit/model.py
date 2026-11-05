@@ -129,6 +129,10 @@ class Report:
     # Every rule that actually ran. Empty means the caller did not record it, and the control summary
     # then omits its coverage columns rather than claiming a coverage it cannot support.
     evaluated_rules: list[str] = field(default_factory=list)
+    # Every rule that produced a finding BEFORE `min_severity` filtered the report. Without it a rule whose
+    # finding this view withheld was counted clean, so `--min-severity high` could turn a bundle with a
+    # privileged container into a clean compliance record (G199).
+    fired_rules: list[str] = field(default_factory=list)
 
     def max_severity(self) -> Severity | None:
         return max((f.severity for f in self.findings), default=None)
@@ -162,6 +166,7 @@ class Report:
                 [f.rule_id for f in self.findings],
                 None,
                 self.evaluated_rules or None,
+                self.fired_rules or None,
             ),
             "redTeam": [s.as_dict() for s in self.scenarios],
             # Only when the target is past the minor the removal table was read at, so every result that was

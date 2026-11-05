@@ -251,10 +251,174 @@ def test_the_document_validates_against_nists_published_schema(tmp_path: Path) -
     assert "VALID" in done.stdout
 
 
-def test_python_jsonschema_is_not_used_for_this() -> None:
-    """OSCAL's TokenDatatype uses \\p{L}, which Python's re cannot compile -- so jsonschema skips it."""
+def test_python_jsonschema_cannot_validate_this_schema_at_all() -> None:
+    """Why ajv. OSCAL's TokenDatatype uses \\p{L}, which Python's `re` cannot compile.
+
+    An earlier note claimed jsonschema SKIPS the pattern and would call an invalid document valid. It does
+    not: it raises on every document, valid or not. The conclusion (use ajv) stands; the mechanism was wrong,
+    and this test pins the real one so the claim cannot drift back.
+    """
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     token = schema["definitions"]["TokenDatatype"]["pattern"]
     assert "\\p{L}" in token
     with pytest.raises(re.error):
         re.compile(token)
+    jsonschema = pytest.importorskip("jsonschema")
+    validator = jsonschema.Draft7Validator(schema)
+    # A document complete enough to be worth checking reaches a token and blows up.
+    with pytest.raises(Exception, match="bad escape"):
+        list(validator.iter_errors(oscal.assessment_results(_report(), timestamp=WHEN)))
+    # So does one whose only fault is an illegal token -- the very thing the pattern exists to catch.
+    bad = oscal.assessment_results(_report(), timestamp=WHEN)
+    bad["assessment-results"]["results"][0]["findings"][0]["target"]["target-id"] = "ac-6(10)_obj"
+    with pytest.raises(Exception, match="bad escape"):
+        list(validator.iter_errors(bad))
+    # Only a document that fails earlier never reaches the pattern, which is no use as a check.
+    assert len(list(validator.iter_errors({"assessment-results": "nonsense"}))) == 1
+
+
+# -- red team, 2026-11-05 (G200) -----------------------------------------------------------------------
+
+
+def _ajv_ok(tmp_path: Path, doc: dict[str, Any], name: str = "d.json") -> None:
+    node = _ajv()
+    if node is None:
+        pytest.skip("ajv is not installed: npm install --no-save ajv@8.17.1 ajv-formats@3.0.1")
+    out = tmp_path / name
+    out.write_text(json.dumps(doc), encoding="utf-8")
+    done = subprocess.run(
+        [node, str(ROOT / "scripts" / "oscal_validate.mjs"), str(SCHEMA), str(out)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=ROOT,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_a_name_with_whitespace_does_not_break_the_property_pattern(tmp_path: Path) -> None:
+    """A YAML folded scalar yields `Deployment/shop/orders-api\\n`, which StringDatatype refuses."""
+    text = (
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: >\n    orders-api\n  namespace: shop\n"
+        "spec:\n  replicas: 1\n  selector: {matchLabels: {app: o}}\n"
+        "  template:\n    metadata: {labels: {app: o}}\n    spec:\n      containers: [{name: c, image: i}]\n"
+    )
+    doc = oscal.assessment_results(analyze(text, "kubernetes").as_dict(), timestamp=WHEN)
+    for o in doc["assessment-results"]["results"][0]["observations"]:
+        for prop in o["props"]:
+            assert prop["value"] == prop["value"].strip() and "\n" not in prop["value"]
+            assert prop["value"], prop
+    _ajv_ok(tmp_path, doc, "folded.json")
+
+
+def test_a_field_path_with_a_trailing_space_does_not_break_it_either(tmp_path: Path) -> None:
+    """The typo KN-V007 exists to report produced the path `spec.bad field `, which the schema refuses."""
+    text = (
+        'apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web, namespace: shop}\nspec:\n  "bad field ": y\n'
+        "  replicas: 1\n  selector: {matchLabels: {app: w}}\n"
+        "  template:\n    metadata: {labels: {app: w}}\n    spec:\n      containers: [{name: c, image: i}]\n"
+    )
+    doc = oscal.assessment_results(analyze(text, "kubernetes").as_dict(), timestamp=WHEN)
+    _ajv_ok(tmp_path, doc, "badfield.json")
+
+
+def test_two_containers_failing_one_pod_level_check_get_two_observation_uuids() -> None:
+    """The finding fingerprint excludes the message by design, so it alone is not an observation identity."""
+    text = (
+        "apiVersion: v1\nkind: Pod\nmetadata: {name: p, namespace: n}\nspec:\n  containers:\n"
+        "  - {name: alpha, image: i}\n  - {name: beta, image: i}\n"
+    )
+    obs = oscal.assessment_results(analyze(text, "kubernetes").as_dict(), timestamp=WHEN)["assessment-results"][
+        "results"
+    ][0]["observations"]
+    uuids = [o["uuid"] for o in obs]
+    assert len(uuids) == len(set(uuids)), "a consumer resolving related-observations would miss one container"
+
+
+def test_the_uuid_changes_when_the_verdict_changes() -> None:
+    """Keying on the objects alone gave a clean run and a failing run the same uuid."""
+    from kube_noob.audit.model import Severity
+
+    def ids(**kw: Any) -> tuple[str, str]:
+        rep = analyze(
+            (ROOT / "examples" / "insecure-deployment.yaml").read_text(encoding="utf-8"), "openshift", "4.22", **kw
+        ).as_dict()
+        ar = oscal.assessment_results(rep, timestamp=WHEN)["assessment-results"]
+        return ar["uuid"], ar["results"][0]["uuid"]
+
+    default, filtered = ids(), ids(min_severity=Severity.CRITICAL)
+    assert default != filtered, "two opposite verdicts shared one identity"
+    assert ids() == default, "and the same input still produces the same identity"
+
+
+def test_the_import_ap_is_part_of_the_identity() -> None:
+    a = oscal.assessment_results(_report(), timestamp=WHEN)["assessment-results"]["uuid"]
+    b = oscal.assessment_results(_report(), timestamp=WHEN, import_ap="./ap.json")["assessment-results"]["uuid"]
+    assert a != b
+
+
+def test_the_document_does_not_depend_on_the_order_the_documents_arrived_in() -> None:
+    dep = (
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: d, namespace: n}\nspec:\n  replicas: 1\n"
+        "  selector: {matchLabels: {a: b}}\n  template:\n    metadata: {labels: {a: b}}\n"
+        "    spec:\n      containers: [{name: c, image: i}]\n"
+    )
+    svc = (
+        "apiVersion: v1\nkind: Service\nmetadata: {name: s, namespace: n}\n"
+        "spec:\n  selector: {a: b}\n  ports: [{port: 80, targetPort: 8080}]\n"
+    )
+    one = oscal.assessment_results(analyze(dep + "---\n" + svc, "kubernetes").as_dict(), timestamp=WHEN)
+    two = oscal.assessment_results(analyze(svc + "---\n" + dep, "kubernetes").as_dict(), timestamp=WHEN)
+    assert json.dumps(one, sort_keys=True) == json.dumps(two, sort_keys=True)
+
+
+@pytest.mark.parametrize("href", ["ap plan.json", "C:\\plans\\ap.json", "  https://x/y  ", ""])
+def test_an_import_ap_that_is_not_a_uri_reference_is_refused(href: str) -> None:
+    from kube_noob.errors import ConfigError
+
+    with pytest.raises(ConfigError, match="not a URI reference"):
+        oscal.check_import_ap(href)
+
+
+@pytest.mark.parametrize("href", ["./ap.json", "https://grc.example.com/ap.json", "#no-assessment-plan", None])
+def test_a_real_uri_reference_is_accepted(href: str | None) -> None:
+    oscal.check_import_ap(href)
+
+
+def test_skipped_files_are_named_in_the_document_not_only_on_stderr() -> None:
+    """--oscal replaces the report, so the partial-audit warning has to be inside the document."""
+    report = _report()
+    report["unreadable"] = [{"path": "broken.yaml", "why": "not readable as UTF-8 text"}]
+    remarks = oscal.assessment_results(report, timestamp=WHEN)["assessment-results"]["results"][0]["remarks"]
+    assert "broken.yaml" in remarks and "could not be read" in remarks
+    assert "covers only the files that were read" in remarks
+
+
+def test_a_check_that_maps_to_no_control_is_declared_rather_than_silently_dropped() -> None:
+    """Schema-validation observations belong to no control, so no control's verdict reflects them."""
+    text = "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web, namespace: shop}\nspec: {imagePullPolice: x}\n"
+    report = analyze(text, "kubernetes").as_dict()
+    assert any(not f.get("controls") for f in report["findings"]), "this input has an uncontrolled finding"
+    remarks = oscal.assessment_results(report, timestamp=WHEN)["assessment-results"]["results"][0]["remarks"]
+    assert "map to no control" in remarks
+
+
+def test_a_control_is_never_both_given_a_finding_and_excluded() -> None:
+    """The include/exclude lists and the findings all read one predicate, so they cannot disagree."""
+    report = _report()
+    for c in report["controlSummary"]["controls"]:
+        c.pop("clean", None)
+        c.pop("notEvaluated", None)
+        c.pop("withheld", None)
+        if c["id"] == "CM-2":
+            c["findings"], c["excepted"] = 0, 2
+    doc = oscal.assessment_results(report, timestamp=WHEN)
+    result = doc["assessment-results"]["results"][0]
+    sel = result["reviewed-controls"]["control-selections"][0]
+    included = {e["control-id"] for e in sel.get("include-controls", [])}
+    excluded = {e["control-id"] for e in sel.get("exclude-controls", [])}
+    assert not (included & excluded)
+    for f in result.get("findings", []):
+        cid = f["target"]["target-id"].removesuffix("_obj")
+        assert cid not in excluded, f"{cid} has a finding and is excluded"
+        assert cid in included, f"{cid} has a finding and is not included"

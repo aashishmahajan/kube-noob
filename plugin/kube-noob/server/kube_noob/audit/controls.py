@@ -155,6 +155,7 @@ def summary(
     rule_ids: list[str],
     excepted_rule_ids: list[str] | None = None,
     evaluated_rule_ids: list[str] | None = None,
+    fired_rule_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Controls touched by a set of findings, most findings first: for an audit report.
 
@@ -169,6 +170,12 @@ def summary(
     rules did not run at all is reported with ``notEvaluated``, instead of both being absent from the list.
     Without it the older shape is kept, so a caller that cannot say what ran does not get a coverage claim it
     has not earned.
+
+    ``fired_rule_ids`` is every rule that produced a finding BEFORE the caller's severity filter. Without it,
+    `--min-severity high` moved every rule whose finding was withheld into ``clean``: CP-10 went from "3
+    findings, 6 clean" to "0 findings, 9 clean", and the record then said nine rules ran and found nothing when
+    three of them had found something. Those rules are counted as ``withheld`` instead -- not a finding in this
+    view, and emphatically not clean (G199).
     """
     counts: dict[str, int] = {}
     excepted: dict[str, int] = {}
@@ -180,17 +187,22 @@ def summary(
             excepted[c] = excepted.get(c, 0) + 1
     clean: dict[str, int] = {}
     unevaluated: dict[str, int] = {}
+    withheld: dict[str, int] = {}
     if evaluated_rule_ids is not None:
         ran = set(evaluated_rule_ids)
         with_findings = set(rule_ids) | set(excepted_rule_ids or ())
+        hidden = set(fired_rule_ids or ()) - with_findings
         for rid, cs in RULE_CONTROLS.items():
-            bucket = clean if rid in ran else unevaluated
             if rid in with_findings:
                 continue  # already counted as a finding or an accepted exception
+            if rid in hidden:
+                bucket = withheld  # it ran and it DID find something; this view just does not show it
+            else:
+                bucket = clean if rid in ran else unevaluated
             for c in cs:
                 bucket[c] = bucket.get(c, 0) + 1
     ordered = sorted(
-        set(counts) | set(excepted) | set(clean) | set(unevaluated),
+        set(counts) | set(excepted) | set(clean) | set(unevaluated) | set(withheld),
         key=lambda c: (-counts.get(c, 0), -excepted.get(c, 0), c),
     )
     controls: list[dict[str, Any]] = []
@@ -201,6 +213,8 @@ def summary(
         if evaluated_rule_ids is not None:
             entry["clean"] = clean.get(c, 0)
             entry["notEvaluated"] = unevaluated.get(c, 0)
+            if fired_rule_ids is not None:
+                entry["withheld"] = withheld.get(c, 0)
         controls.append(entry)
     out: dict[str, Any] = {"catalog": CATALOG, "controls": controls}
     note = "Findings are evidence about these controls; an assessment decides whether a control is met."
@@ -208,6 +222,11 @@ def summary(
         note += (
             " A control with `excepted` had findings an exceptions file accepted: the decision is recorded, not"
             " that the control is clean."
+        )
+    if withheld:
+        note += (
+            " A control with `withheld` had findings from rules that ran and reported, which this view's"
+            " severity filter removed: those rules are not clean."
         )
     out["note"] = note
     return out

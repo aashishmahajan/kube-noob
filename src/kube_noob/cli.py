@@ -1898,12 +1898,17 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                 raise ConfigError(f"{a.exceptions}: {exc}") from exc
             rep["unreadable"] = unreadable
             if a.oscal:
-                from kube_noob.oscal import assessment_results
+                from kube_noob.oscal import assessment_results, check_import_ap
 
                 # The flag REPLACES the report: a caller asking for OSCAL wants a document it can hand to a
                 # tool, not a document with a human report printed above it. The exit code is unchanged, so a
                 # gate reads the same verdict with the flag as without.
+                check_import_ap(a.oscal_import_ap)
                 _emit(assessment_results(rep, import_ap=a.oscal_import_ap), "json" if a.format == "text" else fmt)
+                # The document names the skipped files in its remarks, and the operator still gets the notice
+                # on stderr: a partial audit must not look clean on either channel.
+                for b in unreadable:
+                    print(f"not read: {b['path']} ({b['why']})", file=sys.stderr)
             elif a.format == "text":
                 _print_report(rep)
                 _print_exceptions(rep)

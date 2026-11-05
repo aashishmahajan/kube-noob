@@ -877,6 +877,9 @@ class Toolkit:
                 # The coverage record has to survive the rebuild too, or filing an exception would drop
                 # every checked-and-clean control from the report and make the two states one again.
                 r.evaluated_rules or None,
+                # And the fired set, or a withheld finding would become clean again on any report that
+                # applies an exception list (G199).
+                r.fired_rules or None,
             )
         self._observe(
             [f"platform:{out.get('platform')}"]

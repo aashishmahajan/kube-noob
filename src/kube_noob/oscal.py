@@ -1,8 +1,9 @@
 """OSCAL assessment-results for an audit report (roadmap P3).
 
 Pure serialisation of what the audit already computed. It reads the report's public dict -- the same shape
-`kube-noob audit --format json` prints -- so `audit` and `gate` emit from one code path, and an exceptions file
-that rebuilds the control summary is reflected without this module knowing about exceptions at all.
+`kube-noob audit --format json` prints -- so an exceptions file that rebuilds the control summary is reflected
+without this module knowing about exceptions at all. Only `audit` is wired to it; `gate` has no `--oscal` flag,
+because the gate report carries findings but no coverage record (roadmap P3).
 
 The coverage record is what makes this honest. `controlSummary` reports `findings`, `clean` and `notEvaluated`
 per control (G191), so a control whose rules ran and found nothing is `satisfied`, a control with findings is
@@ -23,8 +24,12 @@ Every field was written against NIST's published schema and catalogue, not from 
   legal in OSCAL's `TokenDatatype` (``^(\\p{L}|_)(\\p{L}|\\p{N}|[.\\-_])*$``), so emitting the label would
   produce a document that cannot validate. All 28 of kube-noob's controls and their `_obj` ids resolve in
   `NIST_SP-800-53_rev5_catalog.json`, and a test holds that mapping.
-* That same ``\\p{L}`` is why CI validates with ajv rather than Python's `jsonschema`: Python's `re` cannot
-  compile a Unicode property escape, so `jsonschema` skips the pattern instead of enforcing it.
+* That same ``\\p{L}`` is why CI validates with ajv rather than Python's `jsonschema`: Python's `re`
+  cannot compile a Unicode property escape, so `jsonschema` raises `PatternError` the moment validation
+  reaches a token -- which any document complete enough to be worth checking does, including one whose
+  only fault is an illegal control id. It cannot check this schema at all. (An earlier note here said it
+  SKIPS the pattern and would call an invalid document valid. That was wrong: it fails loudly rather than
+  quietly. The conclusion stands, the stated mechanism did not, and the test now pins the real behaviour.)
 
 `import-ap` is required by the schema and kube-noob has no assessment plan, so it defaults to a local fragment
 whose remarks say plainly that no plan was imported and that this is evidence about controls rather than an
@@ -42,6 +47,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from kube_noob import __version__
+from kube_noob.errors import ConfigError
 
 # A fixed namespace for this project's v5 uuids, itself derived (a uuid5 of the project homepage in the DNS
 # namespace) rather than invented, so anyone can recompute it.
@@ -71,6 +77,79 @@ def _uuid(*parts: str) -> str:
     return str(uuid.uuid5(NAMESPACE, "\x1f".join(parts)))
 
 
+def _scope(report: dict[str, Any], import_ap: str | None) -> str:
+    """A stable identity for this ASSESSMENT, not merely for the objects it looked at.
+
+    Keying on platform, version and resource names alone meant `--min-severity critical` and a default run --
+    one reporting every control satisfied, the other fifteen not-satisfied -- produced the same
+    `assessment-results` uuid, the same `result` uuid, and fifteen `finding` uuids that flipped verdict without
+    changing identity. Any store keyed on the uuid, which is what a uuid is for, would treat those as one
+    record. So the verdict-bearing content is in the key: every finding's identity, every control's buckets,
+    and the imported plan.
+    """
+    controls = report.get("controlSummary", {}).get("controls") or []
+    parts = [
+        str(report.get("platform") or "kubernetes"),
+        str(report.get("kubernetesVersion") or ""),
+        *sorted(str(r) for r in report.get("resources") or []),
+        *sorted(
+            str(f.get("fingerprint") or f.get("ruleId", ""))
+            for f in report.get("findings") or []
+            if isinstance(f, dict)
+        ),
+        *sorted(
+            "{}={},{},{},{},{}".format(
+                c.get("id"),
+                c.get("findings"),
+                c.get("excepted"),
+                c.get("clean"),
+                c.get("withheld"),
+                c.get("notEvaluated"),
+            )
+            for c in controls
+            if isinstance(c, dict)
+        ),
+        import_ap or NO_PLAN,
+    ]
+    return "\x1f".join(parts)
+
+
+def check_import_ap(href: str | None) -> None:
+    """Refuse an `import-ap` href that is not a URI reference, before a document is built around it.
+
+    `import-ap.href` is OSCAL's ``URIReferenceDatatype``, which a validator enforces as `format:
+    uri-reference`. Taking the value verbatim meant an ordinary mistake -- a path with a space, a Windows
+    path, a value with stray surrounding whitespace -- produced a document that validates nowhere, while the
+    exit code stayed the audit's and the pipeline read it as a success.
+    """
+    if href is None:
+        return
+    if not href or href != href.strip() or any(ch.isspace() for ch in href):
+        raise ConfigError(
+            f"--oscal-import-ap {href!r} is not a URI reference: it must not be empty or contain whitespace. "
+            "Use a URL (https://grc.example.com/ap.json), a relative path (./ap.json) or a fragment (#id)."
+        )
+    if "\\" in href:
+        raise ConfigError(
+            f"--oscal-import-ap {href!r} is not a URI reference: a backslash is not a path separator in a URI. "
+            "Use forward slashes, or a file:// URL."
+        )
+
+
+def _prop(name: str, value: object) -> dict[str, str] | None:
+    """A property whose value satisfies OSCAL's ``StringDatatype``, or None when nothing is left of it.
+
+    The pattern is ``^\\S(.*\\S)?$``: no leading or trailing whitespace, not empty, and in ECMAScript ``.``
+    does not match a newline, so an interior newline is invalid too. A Kubernetes name can carry all three --
+    a YAML folded scalar yields ``Deployment/shop/orders-api\\n``, and an unknown field whose key has a
+    trailing space (exactly the typo KN-V007 exists to report) yields the path ``spec.bad field ``. Emitting
+    those verbatim produced a document no OSCAL tool will ingest, so every run of whitespace collapses to one
+    space and the result is stripped.
+    """
+    text = " ".join(str(value).split())
+    return {"name": name, "ns": PROP_NS, "value": text} if text else None
+
+
 def _stamp(when: datetime) -> str:
     """RFC 3339 with a timezone, which the schema's ``DateTimeWithTimezoneDatatype`` requires."""
     return when.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -83,21 +162,30 @@ def _has_coverage(controls: list[dict[str, Any]]) -> bool:
 
 def _reviewed(c: dict[str, Any]) -> bool:
     """A control at least one rule actually looked at."""
-    return bool(c.get("findings") or c.get("excepted") or c.get("clean"))
+    return bool(c.get("findings") or c.get("excepted") or c.get("clean") or c.get("withheld"))
 
 
 def _observations(findings: list[dict[str, Any]], collected: str, scope: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for i, f in enumerate(findings):
         props = [
-            {"name": "rule-id", "ns": PROP_NS, "value": str(f.get("ruleId", ""))},
-            {"name": "severity", "ns": PROP_NS, "value": str(f.get("severity", ""))},
-            {"name": "resource", "ns": PROP_NS, "value": str(f.get("resource", ""))},
+            p
+            for p in (
+                _prop("rule-id", f.get("ruleId", "")),
+                _prop("severity", f.get("severity", "")),
+                _prop("resource", f.get("resource", "")),
+                _prop("path", f["path"]) if f.get("path") else None,
+            )
+            if p is not None
         ]
-        if f.get("path"):
-            props.append({"name": "path", "ns": PROP_NS, "value": str(f["path"])})
-        # The fingerprint is the finding's stable identity (G190); without one, the index is all there is.
-        key = str(f.get("fingerprint") or f"{f.get('ruleId', '')}:{i}")
+        # The finding's fingerprint is its cross-run identity (G190) and deliberately excludes the message, so
+        # two containers failing one pod-level check share it. An OBSERVATION is a thing that was seen, and two
+        # different observations may not share a uuid -- a consumer resolving `related-observations` would reach
+        # one of them and never the other -- so the message joins the key here. It is stable for a given input,
+        # which is what reproducibility needs.
+        key = "\x1f".join(
+            [str(f.get("fingerprint") or f"{f.get('ruleId', '')}:{i}"), str(f.get("message", "")), str(i)]
+        )
         entry: dict[str, Any] = {
             "uuid": _uuid("observation", scope, key),
             "title": f"{f.get('ruleId', '')} {f.get('title', '')}".strip(),
@@ -114,6 +202,19 @@ def _observations(findings: list[dict[str, Any]], collected: str, scope: str) ->
     return out
 
 
+def _is_reviewed(c: dict[str, Any], coverage: bool) -> bool:
+    """The ONE predicate for whether this document reviews a control.
+
+    `include-controls`, `exclude-controls` and whether a finding is emitted all have to agree. When they did
+    not, a control could be given a `not-satisfied` finding and named under `exclude-controls` in the same
+    document, beside a description saying no control was reviewed.
+    """
+    if coverage:
+        return _reviewed(c)
+    # Without a coverage record, "no findings" is not evidence of anything, so only findings count.
+    return bool(c.get("findings") or c.get("excepted"))
+
+
 def _findings(
     controls: list[dict[str, Any]], scope: str, obs_by_control: dict[str, list[str]], coverage: bool
 ) -> list[dict[str, Any]]:
@@ -121,13 +222,22 @@ def _findings(
     for c in controls:
         cid, title = str(c["id"]), str(c.get("title", ""))
         n, excepted = int(c.get("findings") or 0), int(c.get("excepted") or 0)
-        if not _reviewed(c):
-            continue  # no rule looked at it: it gets no finding, only an exclusion
-        if not coverage and not (n or excepted):
-            continue  # no coverage record, so "no findings" is not evidence of anything
+        if not _is_reviewed(c, coverage):
+            continue  # not reviewed: it gets an exclusion, never a finding
+        withheld = int(c.get("withheld") or 0)
         if n:
             state, reason = "not-satisfied", "fail"
             description = f"{n} finding(s) bear on {cid} {title}."
+        elif withheld:
+            # The rules ran and reported; this report's severity filter removed their findings. Emitting
+            # `satisfied` here is how `--min-severity critical` turned a privileged container into a clean
+            # compliance record (G199).
+            state, reason = "not-satisfied", "other"
+            description = (
+                f"{withheld} rule(s) giving evidence about {cid} {title} ran and reported findings that this "
+                "report's severity filter withheld. The objective is not satisfied; re-run without the filter "
+                "to see what they found."
+            )
         elif excepted:
             # An exception is a reviewed, owned, expiring decision about a control. It is not a pass.
             state, reason = "not-satisfied", "other"
@@ -172,7 +282,7 @@ def assessment_results(
     resources = [str(r) for r in report.get("resources") or []]
     platform = str(report.get("platform") or "kubernetes")
     k8s = str(report.get("kubernetesVersion") or "")
-    scope = "\x1f".join([platform, k8s, *sorted(resources)])
+    scope = _scope(report, import_ap)
 
     findings_in = [f for f in report.get("findings") or [] if isinstance(f, dict)]
     summary = report.get("controlSummary") or {}
@@ -185,8 +295,8 @@ def assessment_results(
         for cid in f.get("controls") or []:
             obs_by_control.setdefault(str(cid), []).append(o["uuid"])
 
-    reviewed = [c for c in controls if _reviewed(c)] if coverage else [c for c in controls if c.get("findings")]
-    excluded = [c for c in controls if c not in reviewed]
+    reviewed = [c for c in controls if _is_reviewed(c, coverage)]
+    excluded = [c for c in controls if not _is_reviewed(c, coverage)]
     selection: dict[str, Any] = {
         "description": (
             f"Controls for which at least one kube-noob rule ran over this input. {_NOT_A_COMPLIANCE_CLAIM}"
@@ -227,11 +337,30 @@ def assessment_results(
         "reviewed-controls": {"control-selections": [selection]},
     }
     if observations:
-        result["observations"] = observations
+        # Sorted by uuid, which is a digest of the finding rather than of its position. `report["findings"]` is
+        # ordered by (severity, docIndex, line), so listing the same two files in the other order produced the
+        # same uuids and different bytes -- an identity that says "unchanged" over a document that is not.
+        result["observations"] = sorted(observations, key=lambda o: o["uuid"])
     oscal_findings = _findings(controls, scope, obs_by_control, coverage)
     if oscal_findings:
         result["findings"] = oscal_findings
     remarks = [str(a) for a in report.get("assumptions") or []]
+    unreadable = [u for u in report.get("unreadable") or [] if isinstance(u, dict)]
+    if unreadable:
+        # `--skip-unreadable` promises the skipped files are listed "so a gate never reads a partial audit as a
+        # clean one". With --oscal the document IS the whole report, so the list has to be in it.
+        names = ", ".join(sorted(str(u.get("path") or "?") for u in unreadable))
+        remarks.append(
+            f"{len(unreadable)} input file(s) could not be read and were skipped: {names}. This assessment "
+            "covers only the files that were read."
+        )
+    orphans = sum(1 for f in findings_in if not (f.get("controls") or []))
+    if orphans:
+        remarks.append(
+            f"{orphans} observation(s) come from checks that map to no control in this catalogue (schema "
+            "validation among them), so they are recorded as observations and no control's verdict reflects "
+            "them."
+        )
     if summary.get("note"):
         remarks.append(str(summary["note"]))
     if remarks:
