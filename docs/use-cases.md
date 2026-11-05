@@ -427,10 +427,20 @@ policies, both admin tiers, namespace labels and workloads from the cluster (rea
 `network-policy-api` CRDs is a note, not a failure. EgressFirewall and CNI-specific policies are listed as not
 evaluated.
 
+Those two cluster-scoped tiers only decide on a cluster whose CNI enforces them, and Calico stopped: it removed
+`AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` support in 3.32 in favour of `ClusterNetworkPolicy` and does
+not enforce them from 3.32 onward, without reporting an error. Pass `--cni calico:3.32` and every policy in that
+tier is reported as **NOT ENFORCED** -- read, named, and not allowed to decide -- with the replacement kind, so an
+`ANP` that looks like a guardrail is shown as the no-op it has become. The NetworkPolicies then give the answer,
+which can be the opposite of the one that tier would have given. A CNI nobody documents either way (`--cni
+cilium:1.18`) makes the verdict `undetermined` instead: evaluating the tier would assume enforcement and dropping
+it would assume the reverse. Without the flag the OVN-Kubernetes semantics above are assumed, as before.
+
 ```bash
 kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-shop.yaml
 kube-noob policy reach --from shop/orders-api --to shop/payments --port 9090 -f examples/netpol-shop.yaml
 kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-admin-tiers.yaml
+kube-noob policy reach --from web/frontend --to shop/orders-api --port 8080 -f examples/netpol-admin-tiers.yaml --cni calico:3.32
 kube-noob policy reach --from shop/orders-api --to shop/payments --port grpc --live --cluster-enabled
 ```
 

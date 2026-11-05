@@ -1422,6 +1422,13 @@ def build_parser() -> argparse.ArgumentParser:
     prc.add_argument("--namespace", dest="default_namespace", default="default", help="for objects without one")
     prc.add_argument("--live", action="store_true", help="read the policies from the cluster (read-only)")
     prc.add_argument("--platform", choices=PLATFORMS)
+    prc.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Calico ignores "
+        "AdminNetworkPolicy and BaselineAdminNetworkPolicy from 3.32 onward, so with it those policies are reported "
+        "as inert instead of deciding; an undocumented CNI makes the verdict undetermined",
+    )
     pgen = psub.add_parser(
         "generate",
         help="Turn kube-noob's audit rules into ValidatingAdmissionPolicy and Kyverno ValidatingPolicy YAML",
@@ -2563,6 +2570,11 @@ def _print_reach(out: dict[str, Any]) -> None:
         # terminal shows a conclusion with no reason while the JSON carries both `undeterminedBy` and `summary`.
         # A caveat belongs in the surface that is read, not only in the one that is parsed.
         _tprint(f"  unknown because: {', '.join(out['undeterminedBy'])} is not evaluated here")
+    for entry in out.get("inertPolicies", []):
+        # The verdict can read ALLOWED while the operator believes an AdminNetworkPolicy is denying it. That gap
+        # is the whole finding, so it goes on the line below the verdict, not into the JSON alone.
+        _tprint(f"  NOT ENFORCED  {entry['policy']}: {entry['reason']}")
+        _tprint(f"                replace it with an equivalent {entry['replacement']}, or remove it")
     for note in out.get("notes") or []:
         _tprint(f"  note: {note}")
     if out.get("summary") and out["verdict"] == "undetermined":
@@ -2607,7 +2619,14 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
         if not s.cluster.enabled:
             raise ConfigError("--live needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
         out = kit.cluster_check_traffic(
-            tk.TrafficIn(source=a.source, destination=a.destination, port=port, protocol=a.protocol, platform=platform)
+            tk.TrafficIn(
+                source=a.source,
+                destination=a.destination,
+                port=port,
+                protocol=a.protocol,
+                platform=platform,
+                cni=a.cni,
+            )
         )
     else:
         if not a.file:
@@ -2622,6 +2641,7 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
                 protocol=a.protocol,
                 platform=platform,
                 default_namespace=a.default_namespace,
+                cni=a.cni,
             )
         )
     _print_reach(out) if a.format == "text" else _emit(out, fmt)

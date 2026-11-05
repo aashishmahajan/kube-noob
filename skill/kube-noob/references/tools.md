@@ -36,6 +36,7 @@ Diagnose a failed build log. Read a failed GitHub Actions, Jenkins, Tekton or Op
 
 Would this traffic be allowed?. Evaluate NetworkPolicies offline: can the source reach the destination on this port? Checks egress from the source and ingress to the destination, names the policy and rule that decide each, says why the other rules did not match, and proposes the smallest NetworkPolicy that would allow it.
 
+- `cni` (null/string): The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Given, it decides whether AdminNetworkPolicy and BaselineAdminNetworkPolicy are enforced at all: Calico ignores both from 3.32 onward, so policies in that tier are reported as inert instead of deciding the answer, and a CNI whose enforcement is undocumented makes the verdict undetermined rather than guessing either way.
 - `default_namespace` (string): For objects without one.
 - `destination`* (string): Where it goes: namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod labels, or an IP address / CIDR outside the cluster.
 - `manifests`* (string): The NetworkPolicies and the workloads they apply to (Deployments, Pods ...); add Namespace objects when policies select namespaces by label.

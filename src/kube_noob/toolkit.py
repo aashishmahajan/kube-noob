@@ -422,6 +422,24 @@ class TrafficIn(_In):
     port: int | str = Field(..., description="Destination port number (1-65535) or a named container port.")
     protocol: Literal["TCP", "UDP", "SCTP"] = "TCP"
     platform: PlatformT | None = None
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Given, "
+        "it decides whether AdminNetworkPolicy and BaselineAdminNetworkPolicy are enforced at all: Calico ignores "
+        "both from 3.32 onward, so policies in that tier are reported as inert instead of deciding the answer, and "
+        "a CNI whose enforcement is undocumented makes the verdict undetermined rather than guessing either way.",
+    )
+
+    @field_validator("cni")
+    @classmethod
+    def _cni(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        from kube_noob.debug.cni import parse_cni
+
+        name, version = parse_cni(v)  # refuse an unparseable value here rather than ignoring it later
+        return f"{name}:{version}" if version else name
 
     @field_validator("port")
     @classmethod
@@ -1486,7 +1504,7 @@ class Toolkit:
         return out
 
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
-        inv = Inventory.from_yaml(p.manifests, p.default_namespace)
+        inv = Inventory.from_yaml(p.manifests, p.default_namespace, p.cni)
         cli = "oc" if p.platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
         out = check_reachability(inv, p.source, p.destination, p.port, p.protocol, cli)
         self._observe([f"netpol:{out['verdict']}"])
@@ -1494,7 +1512,7 @@ class Toolkit:
 
     def cluster_check_traffic(self, p: TrafficIn) -> dict[str, Any]:
         backend = get_backend(self.settings)
-        inv = inventory_from_cluster(backend, p.source, p.destination)
+        inv = inventory_from_cluster(backend, p.source, p.destination, p.cni)
         platform = p.platform
         if platform is None:
             with contextlib.suppress(Exception):  # the platform only picks oc or kubectl in the commands

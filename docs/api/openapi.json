@@ -432,6 +432,20 @@
       "default": null,
       "title": "Platform"
      },
+     "cni": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Given, it decides whether AdminNetworkPolicy and BaselineAdminNetworkPolicy are enforced at all: Calico ignores both from 3.32 onward, so policies in that tier are reported as inert instead of deciding the answer, and a CNI whose enforcement is undocumented makes the verdict undetermined rather than guessing either way.",
+      "title": "Cni"
+     },
      "manifests": {
       "description": "The NetworkPolicies and the workloads they apply to (Deployments, Pods ...); add Namespace objects when policies select namespaces by label.",
       "maxLength": 1000000,
