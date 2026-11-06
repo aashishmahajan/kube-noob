@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`KN-S017` tells a `list` on Secrets apart from a `get`, and stops flagging the least-privilege pattern (G240).** `list` and `watch` return the Secrets' contents, so one namespaced grant hands over every value in that namespace; it was reported at LOW, identically to a `get`. It is MEDIUM namespaced and HIGH cluster-wide now, with a message that says what it hands over. And a `get` narrowed by `resourceNames` -- the pattern upstream RBAC guidance recommends -- is no longer reported as a privilege-escalation path.
+
 - **A Grafana dashboard for the new metrics (U2, G239).** `deploy/grafana/kube-noob.json`: version, uptime, calls per second by outcome, the failure ratio drawn with the same expression the alert fires on, which tools are used, and duration percentiles. A datasource variable rather than a hard-coded id, every panel scoped to a job you pick, and every metric any panel queries is checked against what the code emits -- a panel pointing at a metric that does not exist shows "No data" for ever, which is indistinguishable from a quiet system.
 
 - **`fix` hardens the pod specs inside operator CRDs too (G238).** The audit reported findings in a KServe predictor or a Ray worker group and `fix` left them there, because it still read one template per object. It reads every template now -- and the reason it had to be more than a one-line change is worth knowing: a `model:` container was being yielded as a copy, so the hardening wrote into a dictionary the document had never seen and reported success without changing anything. A mutable image tag in an embedded component is listed as manual work now, and a probe on a Ray head counts as a probe.

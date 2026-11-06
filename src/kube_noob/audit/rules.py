@@ -2066,8 +2066,35 @@ def _s017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             if verbs & ESCALATION_VERBS:
                 yield r.finding(d, ("rules", i, "verbs"), f"Grants {sorted(verbs & ESCALATION_VERBS)}.")
             if "secrets" in resources and verbs & {"get", "list", "watch", "*"}:
-                sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.LOW
-                yield r.finding(d, ("rules", i, "resources"), f"{d.kind} can read Secrets.", severity=sev)
+                # `list` and `watch` return the Secrets' CONTENTS, so one grant hands over every value in scope;
+                # a `get` hands over the ones whose names the holder already knows. All three external reviews
+                # of this catalogue asked for that distinction and it was not being made: a namespaced `list`
+                # was reported at LOW, the same as a `get` (G240).
+                #
+                # The severity does NOT depend on `resourceNames` for `list` and `watch`, deliberately. Whether
+                # `resourceNames` narrows a list request is a question about the authorizer that this project
+                # has not verified against the published reference, so the rule takes the conservative reading
+                # in which it does not -- which is right whichever way that falls, instead of resting on it.
+                values = bool(verbs & {"list", "watch", "*"})
+                names = [str(n) for n in (rr.get("resourceNames") or [])]
+                if not values and names:
+                    # `get` restricted to named Secrets is the least-privilege pattern the upstream RBAC guidance
+                    # recommends. Reporting it as an escalation path told people their correct configuration was
+                    # a defect, which is the one thing a security rule must not do.
+                    continue
+                if values:
+                    sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.MEDIUM
+                    scope = (
+                        "every Secret in the cluster" if d.kind == "ClusterRole" else "every Secret in the namespace"
+                    )
+                    message = (
+                        f"{d.kind} grants {sorted(verbs & {'list', 'watch', '*'})} on Secrets, which returns their "
+                        f"contents: this hands over the values of {scope}, not only the names."
+                    )
+                else:
+                    sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.LOW
+                    message = f"{d.kind} can read Secrets."
+                yield r.finding(d, ("rules", i, "resources"), message, severity=sev)
             if resources & {"pods/exec", "pods/attach"} and verbs & {"create", "*"}:
                 yield r.finding(d, ("rules", i, "resources"), "Grants exec/attach into pods.", severity=Severity.MEDIUM)
             if "nodes/proxy" in resources:
