@@ -31,6 +31,9 @@ EXPECTED: dict[str, Any] = {
     # What was snapshotted. A folder holding both a `-f` run and a `--live` run holds two populations, and the
     # trend has to be able to refuse to draw one line across them.
     "source": "manifests",
+    # Carried from the audit, because `notRead` is only what the CLUSTER refused: an assumption is what
+    # kube-noob itself could not read, and it bounds every count in the report the same way.
+    "assumptions": ["No Kubernetes version given; assumed 1.35."],
     # Manifests are all read, so there is nothing undetermined. A live snapshot that was refused a resource puts
     # the reason here and the objects behind it under `undetermined` rather than `removed`.
     "notRead": [],
@@ -469,3 +472,34 @@ def test_one_report_larger_than_the_per_file_limit_is_not_parsed(tmp_path: Path)
     big.write_text(" " * (drift.MAX_REPORT_BYTES + 1), encoding="utf-8")
     series = drift.history(state)
     assert series["points"] == [] and series["unplaced"] == [big.name]
+
+
+def test_a_snapshot_keeps_what_the_audit_had_to_assume(tmp_path: Path) -> None:
+    """U4. `notRead` is only what the CLUSTER refused. An assumption is what kube-noob itself could not read
+    -- above all a pod spec inside a kind it has no reader for -- and dropping it let a folder of snapshots
+    report a complete read every day while a whole class of workload was never looked at."""
+    rollout = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Rollout",
+        "metadata": {"name": "web", "namespace": "shop"},
+        "spec": {"template": {"spec": {"containers": [{"name": "web", "image": "nginx:1.27"}]}}},
+    }
+    snap = drift.snapshot([rollout], source="manifests", taken_at=T1)
+    assert any("no reader for" in a for a in snap["assumptions"]), snap["assumptions"]
+
+    report = drift.first_report(snap)
+    assert report["assumptions"] == snap["assumptions"], "a report carries them forward for the reviewer"
+    assert any("no reader for" in line for line in drift.markdown(report).splitlines())
+
+
+def test_the_assumptions_a_snapshot_keeps_are_bounded(tmp_path: Path) -> None:
+    many = [
+        {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Rollout",
+            "metadata": {"name": f"w{i}", "namespace": "shop"},
+            "spec": {"template": {"spec": {"containers": [{"name": "c", "image": "nginx:1.27"}]}}},
+        }
+        for i in range(drift.MAX_ASSUMPTIONS + 40)
+    ]
+    assert len(drift.snapshot(many, source="manifests", taken_at=T1)["assumptions"]) <= drift.MAX_ASSUMPTIONS

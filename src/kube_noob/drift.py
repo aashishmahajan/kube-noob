@@ -45,6 +45,7 @@ MAX_CONTROL_NAMESPACES = 20  # named on a byControl row; the count is exact, the
 MAX_HISTORY = 60  # points in a trend; `keep` is normally smaller, and the oldest go first
 MAX_REPORT_BYTES = 50_000_000  # a retained report read back for the trend
 MAX_HISTORY_BYTES = 200_000_000  # read across the whole series, so a large folder is bounded too
+MAX_ASSUMPTIONS = 60  # carried from the audit into the snapshot; the engine writes a handful
 WATCHED = frozenset(
     {
         "Deployment",
@@ -323,6 +324,12 @@ def snapshot(
         },
         "notRead": unread[:MAX_NOT_READ],
         "notReadKinds": sorted(_kinds_not_read(unread)),
+        # What the audit had to ASSUME, kept because `notRead` is only half the story of what this snapshot
+        # could not see. `notRead` is what the cluster refused; assumptions are what kube-noob itself could
+        # not read -- above all "N pod spec(s) are in kinds kube-noob has no reader for, NOT audited" (G232).
+        # Dropping them left a folder of Argo Rollout snapshots reporting a complete read every day while a
+        # whole class of workload was never looked at, which is this project's own defect in a fifth place.
+        "assumptions": list(report.assumptions[:MAX_ASSUMPTIONS]),
     }
 
 
@@ -466,6 +473,9 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
         # compared, so the series needs to be able to see the difference.
         "source": new.get("source"),
         "notRead": list(new.get("notRead") or ()),
+        # Forward from the snapshot unchanged: a report is what a reviewer opens, and the HTML page renders
+        # `assumptions` as caveats above the findings the moment they are there.
+        "assumptions": list(new.get("assumptions") or ()),
         "objects": {
             "added": sorted(set(b) - set(a)),
             "removed": removed,
@@ -533,6 +543,19 @@ def markdown(report: dict[str, Any]) -> str:
         ]
         if len(not_read) > 20:
             lines += [f"...and {len(not_read) - 20} more.", ""]
+    # Beside `notRead`, and for the same reason: these are the things kube-noob itself could not read, so they
+    # bound every count below exactly as a refused resource does.
+    assumed = [str(x) for x in report.get("assumptions") or ()]
+    if assumed:
+        lines += [
+            f"**The audit behind this report made {len(assumed)} assumption(s).** Each one bounds what the "
+            "counts below cover.",
+            "",
+            *[f"- {entry}" for entry in assumed[:20]],
+            "",
+        ]
+        if len(assumed) > 20:
+            lines += [f"...and {len(assumed) - 20} more.", ""]
     if o["changed"]:
         lines += ["## Changed", "", "| Object | Owner | Fields |", "| --- | --- | --- |"]
         for c in o["changed"]:

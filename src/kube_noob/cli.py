@@ -3226,6 +3226,8 @@ def _posture(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             _tprint("    fix: " + "; or ".join(path["fix"]))
         if out["notRead"]:
             _tprint("\nnot read: " + "; ".join(out["notRead"][:10]))
+        for note in (out.get("assumptions") or [])[:10]:
+            _tprint(f"assumed: {note}")
         if out["secretsIgnored"]:
             _tprint(f"{out['secretsIgnored']} Secret object(s) in the input were ignored, unread.")
         # The input-specific limitations only. The three standing ones are documented; these name objects in THIS

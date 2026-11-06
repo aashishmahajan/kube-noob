@@ -357,3 +357,23 @@ def test_the_charts_fetch_nothing_either(tmp_path: Path) -> None:
         assert "<svg" in page, "the page under test has to actually carry a chart"
         sinks = _parsed(page)
         assert (sinks.scripts, sinks.events, sinks.loads) == (0, [], [])
+
+
+def test_a_posture_page_says_what_the_audit_had_to_assume(tmp_path: Path) -> None:
+    """U4, on the page a reviewer actually opens: a cluster of kinds kube-noob has no reader for must not
+    render as a clean one. The caveat block already existed; what was missing was the snapshot keeping the
+    assumptions long enough to reach it."""
+    rollout = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Rollout",
+        "metadata": {"name": "web", "namespace": "shop"},
+        "spec": {"template": {"spec": {"containers": [{"name": "web", "image": "nginx:1.27"}]}}},
+    }
+    report, _ = drift.write_report(
+        tmp_path / "rollouts",
+        drift.snapshot([rollout], source="live", taken_at=dt.datetime(2026, 10, 1, tzinfo=dt.UTC)),
+        keep=14,
+    )
+    page = report_html.render(report)
+    assert "no reader for" in page
+    assert "caveat" in page, "it is rendered as a caveat above the findings, not buried"
