@@ -787,18 +787,32 @@ kube-noob --cluster-enabled posture scan --live -n shop -n payments
 ### AI and GPU workloads: the pods an operator runs for you
 
 A KServe `InferenceService` or a KubeRay `RayCluster`, `RayService` or `RayJob` does not keep its pod spec at
-`spec.template.spec`. It carries one per component -- `spec.predictor`, `spec.transformer` and `spec.explainer` for
-KServe; `headGroupSpec.template` and every entry of `workerGroupSpecs` for Ray, under `rayClusterConfig` in a
-RayService and `rayClusterSpec` in a RayJob -- and those are the pods that actually run. Every pod-level rule in
+`spec.template.spec`. It carries one per component -- `spec.predictor` (and its `workerSpec` for multi-node
+inference), `spec.transformer`, `spec.explainer` and `spec.canary[].predictor` for KServe; `headGroupSpec.template`
+and every entry of `workerGroupSpecs` for Ray, under `rayClusterConfig` in a RayService and `rayClusterSpec` in a
+RayJob, plus that job's `submitterPodTemplate` -- and those are the pods that actually run. Every pod-level rule in
 the catalogue reads them: a privileged predictor, a Ray worker running as root, a `hostPath` mount, a mutable
 image tag, a mounted ServiceAccount token, a missing memory limit on something holding a model in RAM. Findings
 name the component, so `spec.workerGroupSpecs.0.template.spec.containers.0` tells you which group to change.
 
+A predictor written the usual way is read the usual way. `model: {modelFormat: {name: sklearn}, storageUri: ...}`
+is a container, not a settings block -- as are the ten framework shorthands it replaced (`sklearn`, `xgboost`,
+`tensorflow`, `pytorch`, `triton`, `onnx`, `huggingface`, `pmml`, `lightgbm`, `paddle`) and the explainer's `art`
+-- so a privileged `model:` scores exactly what the same container in a `containers:` list would. KubeRay's
+`autoscalerOptions` is read as what it is too: a container the operator injects into the head pod.
+
+Two things these objects cannot tell you from a manifest, and both are said rather than assumed. An operator
+merges extra labels onto the pods and creates the Services they are served through, so where no exposure edge can
+be proven `posture scan` names the component and lists what it can do instead of leaving it looking unexposed; and
+a Service or NetworkPolicy selector that does not match the labels the manifest shows makes the wiring rules
+decline, because the label it asks for may be one the operator adds -- telling you a working NetworkPolicy
+protects nothing would be worse than saying nothing.
+
 Two things it will not do. It reads these four kinds only, each at paths taken from the published CRD schema, and
-it checks the API group before reading: a CRD of the same name from somewhere else is left alone rather than
-guessed at. And a kind that is not in that list is not quietly treated as having no pods -- if you run a workload
-operator kube-noob does not know, say so and it can be added with its schema, because a guessed path produces a
-confident wrong finding.
+it checks the API group before reading: a CRD of the same name from somewhere else is left alone, and the report
+says which group it declared and that its pods were not audited, rather than going quiet. And a kind that is not
+in that list is not quietly treated as having no pods -- if you run a workload operator kube-noob does not know,
+say so and it can be added with its schema, because a guessed path produces a confident wrong finding.
 
 ```bash
 kube-noob audit -f serving/            # the same 92 rules, now reaching the components

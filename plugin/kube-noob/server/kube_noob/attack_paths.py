@@ -30,12 +30,29 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_PATHS, pod_templates, selector_matches
+from kube_noob.audit.podspec import (
+    EMBEDDED_CONTAINER_KEYS,
+    EMBEDDED_POD_SPEC_PATHS,
+    INJECTED_CONTAINERS,
+    PodTemplate,
+    pod_templates,
+    selector_decides,
+    selector_matches,
+)
 from kube_noob.audit.rules import (
     ESCALATION_VERBS,
     INTERNAL_LB_ANNOTATIONS,
     RUNTIME_SOCKETS,
     WORKLOAD_RESOURCES,
+)
+from kube_noob.yamlio import PathT
+
+#: True of every scan, whatever the input. Named so a renderer can tell them from the per-scan ones that follow
+#: and print those, which is the half a text reader needs and was not getting (G231, after G221).
+STANDING_LIMITATIONS: tuple[str, ...] = (
+    "NetworkPolicies on the entry edge are not applied: check a path with `kube-noob policy reach`.",
+    "Cloud IAM, admission-time mutation and tokens mounted through projected volumes are not modelled.",
+    "Roles that are not in the input are reported in notRead; cluster-admin, admin, edit and view are known.",
 )
 
 MAX_OBJECTS = 50_000
@@ -262,25 +279,40 @@ class _Site:
     plus one per worker group, an InferenceService predictor/transformer/explainer -- each with its own
     containers, its own service account and its own labels, so each is scored on its own and named by its
     component. Before this the scan read only ``spec.template.spec``, found nothing in these kinds, and reported
-    zero paths through them (G229)."""
+    zero paths through them (G229).
+
+    It wraps the audit's own `PodTemplate` rather than re-deriving the spec, the path and the labels, so the scan
+    and the audit cannot disagree about where a pod spec is or what labels it carries (G231).
+    """
 
     obj: dict[str, Any]
-    spec: dict[str, Any]
     ref: str
-    labels: dict[str, str]
+    template: PodTemplate
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return self.template.spec
+
+    @property
+    def path(self) -> PathT:
+        return self.template.path
+
+    @property
+    def labels(self) -> dict[str, str]:
+        return self.template.labels()
+
+    @property
+    def embedded(self) -> bool:
+        """True for a kind whose pod labels an operator merges from objects outside this input."""
+        return not self.template.labels_complete
 
 
 def _sites_of(obj: dict[str, Any]) -> list[_Site]:
     from kube_noob.yamlio import Document
 
     base = _ref(obj)
-    if str(obj.get("kind")) not in EMBEDDED_POD_SPEC_PATHS:
-        spec = _pod_spec(obj)
-        return [] if spec is None else [_Site(obj, spec, base, _template_labels(obj))]
-    out: list[_Site] = []
-    for pt in pod_templates(Document(index=0, data=obj)):
-        out.append(_Site(obj, pt.spec, f"{base}[{pt.component}]", pt.labels()))
-    return out
+    doc = Document(index=0, data=obj)
+    return [_Site(obj, base if not pt.component else f"{base}[{pt.component}]", pt) for pt in pod_templates(doc)]
 
 
 def _sites(inv: Inventory, *, owned: bool = True) -> list[_Site]:
@@ -295,11 +327,29 @@ def _owned(obj: dict[str, Any]) -> bool:
     )
 
 
-def _containers(spec: dict[str, Any]) -> Iterator[dict[str, Any]]:
+def _containers(spec: dict[str, Any], site: _Site | None = None) -> Iterator[dict[str, Any]]:
+    """Every container of this pod spec, including the ones that are a field rather than a list entry.
+
+    `site` carries the path and the object, which is what says whether a field like `model:` is a container here
+    (a KServe predictor) or an ordinary mapping. Without it only the three list keys are read, which is how a
+    privileged `model:` container scored no node capability at all while the audit reported it (G231).
+    """
     for key in ("initContainers", "containers", "ephemeralContainers"):
         for c in _list(spec.get(key)):
             if isinstance(c, dict):
                 yield c
+    if site is None:
+        return
+    for key in EMBEDDED_CONTAINER_KEYS.get(site.path, ()):
+        c = spec.get(key)
+        if isinstance(c, dict):
+            yield c
+    for where, joins in INJECTED_CONTAINERS.get(str(site.obj.get("kind")), ()):
+        if joins != site.path:
+            continue
+        c = _get(site.obj, *(str(k) for k in where))
+        if isinstance(c, dict) and ("image" in c or "securityContext" in c):
+            yield c
 
 
 # --- exposure ----------------------------------------------------------------------------------------------------
@@ -406,9 +456,9 @@ def _entries(inv: Inventory) -> list[Entry]:
 # --- what a pod can do -------------------------------------------------------------------------------------------
 
 
-def _node_capabilities(w: dict[str, Any], spec: dict[str, Any]) -> list[Capability]:
+def _node_capabilities(w: dict[str, Any], spec: dict[str, Any], site: _Site | None = None) -> list[Capability]:
     out: list[Capability] = []
-    for c in _containers(spec):
+    for c in _containers(spec, site):
         name = c.get("name")
         raw_sc = c.get("securityContext")
         sc: dict[str, Any] = raw_sc if isinstance(raw_sc, dict) else {}
@@ -656,6 +706,13 @@ class Reach:
     node: list[Capability]
     api: list[tuple[Capability, list[Step]]]  # capability and the steps from the workload to it
     token: tuple[str, str] | None = None  # (ServiceAccount ref, evidence) when the pods mount its token
+    #: The carrying object's own `Kind/ns/name`. For an embedded component `ref` is `Kind/ns/name[component]`,
+    #: so a consumer that looks an object up by the reach key finds nothing -- which is how `vuln threat` came
+    #: to report zero applications for a Ray head the scan had just called internet-reachable. Carried as a
+    #: field rather than left to `ref.split("[")` so the next consumer cannot get the parsing wrong (G231).
+    object: str = ""
+    #: True when an operator merges in this pod's labels, so a non-match proves nothing about its exposure.
+    embedded: bool = False
 
     def paths_from(self, index: int) -> list[AttackPath]:
         out: list[AttackPath] = []
@@ -716,7 +773,9 @@ class _Index:
                 continue
             candidates = min((by_label.get((e.namespace, str(k), str(v)), []) for k, v in selector.items()), key=len)
             for n in candidates:
-                if selector_matches({"matchLabels": selector}, sites[n].labels):
+                # True only. A None ("the operator merges in labels this input does not show") must not become
+                # an edge the report presents as proven; it becomes a named limitation instead (G231).
+                if selector_decides({"matchLabels": selector}, sites[n].template) is True:
                     selects.setdefault(id(sites[n]), []).append((i, e, selector))
         no_automount = {
             (_ns(sa), _name(sa)) for sa in inv.of("ServiceAccount") if sa.get("automountServiceAccountToken") is False
@@ -759,9 +818,21 @@ def _reach(
                     ],
                 )
             )
-    images = [str(c.get("image")) for c in _containers(spec) if isinstance(c.get("image"), str) and c.get("image")]
+    images = [
+        str(c.get("image")) for c in _containers(spec, site) if isinstance(c.get("image"), str) and c.get("image")
+    ]
     token = (f"ServiceAccount/{_ns(w)}/{tok[0]}", tok[1]) if tok else None
-    return Reach(ref, _ns(w), images, reach_entries, _node_capabilities(w, spec), api, token)
+    return Reach(
+        ref,
+        _ns(w),
+        images,
+        reach_entries,
+        _node_capabilities(w, spec, site),
+        api,
+        token,
+        object=_ref(w),
+        embedded=site.embedded,
+    )
 
 
 def workload_reach(inv: Inventory) -> dict[str, Reach]:
@@ -791,23 +862,30 @@ def scan(inv: Inventory, *, top: int = DEFAULT_TOP) -> dict[str, Any]:
     paths.sort(key=lambda p: (-p.score, len(p.steps), p.as_dict(0)["summary"]))
     out_paths = [p.as_dict(i + 1) for i, p in enumerate(paths[:top])]
     head = out_paths[0]["summary"] if out_paths else "no path from an exposure to a node or to API rights"
-    limitations = [
-        "NetworkPolicies on the entry edge are not applied: check a path with `kube-noob policy reach`.",
-        "Cloud IAM, admission-time mutation and tokens mounted through projected volumes are not modelled.",
-        "Roles that are not in the input are reported in notRead; cluster-admin, admin, edit and view are known.",
-    ]
-    # A component whose pod labels the operator generates (a KServe predictor is a bare PodSpec with no pod
-    # metadata) cannot be matched to a Service selector from the manifest. Its node and API capabilities are
-    # scored, but the entry edge is UNDETERMINED, not absent -- saying nothing would read as "not exposed",
-    # which is the defect this whole change exists to remove (G229).
-    unlabelled = sorted({site.ref for site in sites if not site.labels and not index.selects.get(id(site))})
-    if unlabelled:
+    limitations = list(STANDING_LIMITATIONS)
+    # A component of an operator CRD has its pod labels merged by that operator from objects outside this input,
+    # and the Services it is reached through are created by the operator too. Where no edge was PROVEN, the entry
+    # is UNDETERMINED, not absent -- saying nothing would read as "not exposed", the same failure one level up
+    # from the one this work started with.
+    #
+    # Keyed on the kind, not on the labels being empty, because both of the obvious predicates are wrong: a Ray
+    # head template with `labels: {app: ray}` is labelled and still unreachable from the manifest (Ray's own head
+    # Service selects `ray.io/node-type`, which the operator sets), and a plain label-less Pod would otherwise be
+    # told its labels are "set by the operator", which is simply false (G231).
+    undetermined = sorted(
+        (r.ref, [c.name for c in r.capabilities]) for r in reach if r.embedded and not r.entries and r.capabilities
+    )
+    if undetermined:
+        # Name what each one can do. "Its capabilities are scored above" was the first wording and it was false:
+        # with no entry there is no path, so nothing about it is printed above at all, and the reader is told to
+        # look for something that is not there.
+        shown = "; ".join(f"{ref} ({', '.join(caps[:4])})" for ref, caps in undetermined[:5])
+        more = f" and {len(undetermined) - 5} more" if len(undetermined) > 5 else ""
         limitations.append(
-            "Pod labels are set by the operator, not the manifest, for "
-            + ", ".join(unlabelled[:10])
-            + f"{f' and {len(unlabelled) - 10} more' if len(unlabelled) > 10 else ''}"
-            + ": their node and API capabilities are scored, but no exposure edge can be traced to them from this"
-            " input. Scan the Deployments and Services the operator creates, or use --live."
+            f"No exposure edge could be traced to {shown}{more}. An operator merges in these pods' labels and "
+            "creates the Services they are reached through, so this input cannot show the edge -- what they can "
+            "do IS listed here, but no path is scored for them. Scan the Deployments and Services the operator "
+            "created alongside them to complete the picture."
         )
     return {
         "paths": out_paths,

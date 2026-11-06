@@ -16,6 +16,7 @@ from typing import Any
 from kube_noob.audit.controls import controls_for
 from kube_noob.audit.model import Finding, Severity, Stage
 from kube_noob.audit.podspec import (
+    LONG_RUNNING_EMBEDDED_KINDS,
     LONG_RUNNING_KINDS,
     REPLICATED_KINDS,
     ContainerRef,
@@ -26,6 +27,7 @@ from kube_noob.audit.podspec import (
     pod_template,
     pod_templates,
     replicas,
+    selector_decides,
     selector_matches,
 )
 from kube_noob.audit.quantity import parse_quantity
@@ -654,12 +656,20 @@ def _v011(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         same_ns = [pt for d, pt in workloads if ctx.ns(d) == ns]
         if not same_ns:
             continue
-        if not any(selector_matches({"matchLabels": sel}, pt.labels()) for pt in same_ns):
-            yield r.finding(
-                svc,
-                ("spec", "selector"),
-                f"Selector {sel} matches no pod template in namespace {ns}; the Service will have no endpoints.",
-            )
+        verdicts = [selector_decides({"matchLabels": sel}, pt) for pt in same_ns]
+        if any(v is True for v in verdicts):
+            continue
+        if any(v is None for v in verdicts):
+            # A component whose pod labels an operator merges in from outside this input might well be selected
+            # by this Service. Reporting "no endpoints" there told the reader their working Service was broken
+            # (G231), so the rule declines instead.
+            ctx.cannot_decide(r.rule_id)
+            continue
+        yield r.finding(
+            svc,
+            ("spec", "selector"),
+            f"Selector {sel} matches no pod template in namespace {ns}; the Service will have no endpoints.",
+        )
 
 
 @rule(
@@ -2576,7 +2586,8 @@ def _n001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     flagged: set[str] = set()
     for d, _pt in ctx.workloads():
         ns = ctx.ns(d)
-        if d.kind in LONG_RUNNING_KINDS | {"Pod"} and ns not in netpol_ns and ns not in flagged:
+        long_running = LONG_RUNNING_KINDS | LONG_RUNNING_EMBEDDED_KINDS | {"Pod"}
+        if d.kind in long_running and ns not in netpol_ns and ns not in flagged:
             flagged.add(ns)
             yield r.finding(d, ("metadata",), f"No NetworkPolicy for namespace {ns} in this bundle.")
 
@@ -2995,21 +3006,28 @@ def _selects_something(selector: dict[str, Any]) -> bool:
     ("k8s-networkpolicy",),
 )
 def _n012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    by_ns: dict[str, list[dict[str, str]]] = {}
+    by_ns: dict[str, list[PodTemplate]] = {}
     for d, pt in ctx.workloads():
-        by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
+        by_ns.setdefault(ctx.ns(d), []).append(pt)
     for d in ctx.by_kind("NetworkPolicy"):
         sel = get_path(d.data, ("spec", "podSelector"))
         pods = by_ns.get(ctx.ns(d))
         if not isinstance(sel, dict) or not _selects_something(sel) or not pods:
             continue
-        if not any(selector_matches(sel, labels) for labels in pods):
-            yield r.finding(
-                d,
-                ("spec", "podSelector"),
-                f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
-                f"namespace {ctx.ns(d)}: this policy protects nothing.",
-            )
+        verdicts = [selector_decides(sel, pt) for pt in pods]
+        if any(v is True for v in verdicts):
+            continue
+        if any(v is None for v in verdicts):
+            # Same reason as KN-V011: an operator-merged label could be exactly the one this selector asks for,
+            # and "this policy protects nothing" is the most alarming thing this rule can say (G231).
+            ctx.cannot_decide(r.rule_id)
+            continue
+        yield r.finding(
+            d,
+            ("spec", "podSelector"),
+            f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
+            f"namespace {ctx.ns(d)}: this policy protects nothing.",
+        )
 
 
 _DNS_PORTS = frozenset({53, 5353})  # 53 is the Service port; OpenShift CoreDNS pods listen on 5353

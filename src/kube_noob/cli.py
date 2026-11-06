@@ -3163,6 +3163,11 @@ def _posture(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             _tprint("\nnot read: " + "; ".join(out["notRead"][:10]))
         if out["secretsIgnored"]:
             _tprint(f"{out['secretsIgnored']} Secret object(s) in the input were ignored, unread.")
+        # The input-specific limitations only. The three standing ones are documented; these name objects in THIS
+        # scan whose exposure edge could not be traced, and a caveat that lives only in the JSON renderer is the
+        # defect G221 was about -- the text reader is the one most likely to act on the number above.
+        for line in out["limitations"][len(ap.STANDING_LIMITATIONS) :]:
+            _tprint("\nnote: " + line)
     else:
         _emit(out, fmt)
     top_score = out["paths"][0]["score"] if out["paths"] else 0

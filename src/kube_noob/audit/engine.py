@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from kube_noob.audit.model import Report, Severity, Stage
+from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_GROUPS, refused_group
 from kube_noob.audit.redteam import red_team
 from kube_noob.audit.rules import RULES, AuditContext, run_rules
 from kube_noob.catalog import OPENSHIFT_FAMILY, PLATFORMS, k8s_version_for
@@ -64,6 +65,17 @@ def analyze(
             "did not pass. Pass the whole namespace to evaluate them: a directory on the command line, or "
             "partial_bundle=false with every object of the namespace in one call."
         )
+    for d in docs:
+        group = refused_group(d)
+        if group is not None:
+            # The object names a kind this reader knows pod specs for, in a group it does not. Not reading it is
+            # right -- another project's CRD of the same name has another schema -- but saying nothing about it
+            # leaves a privileged container in a document that reported clean (G231).
+            report.assumptions.append(
+                f"{d.ref()} declares API group {group}, which is not where kube-noob knows this kind's pod specs "
+                f"to be ({', '.join(sorted(EMBEDDED_POD_SPEC_GROUPS[d.kind]))}); the pods it may carry were not "
+                "audited."
+            )
     if not docs:
         report.assumptions.append("Input contained no YAML documents.")
         return report

@@ -31,6 +31,7 @@ from typing import Any
 import yaml
 
 from kube_noob.attack_paths import LIVE_RESOURCES
+from kube_noob.audit.podspec import LONG_RUNNING_EMBEDDED_KINDS
 
 FORMAT = "kube-noob-snapshot/1"
 REPORT_FORMAT = "kube-noob-drift/1"
@@ -66,6 +67,11 @@ WATCHED = frozenset(
         "PersistentVolumeClaim",
         "Namespace",
     }
+    # Workload CRDs whose pod specs are embedded rather than at `spec.template.spec`. They are collected live
+    # (LIVE_RESOURCES) and audited, so leaving them out of this set meant their findings landed in a snapshot
+    # with no namespace and no owner, while the same finding on a Deployment beside them carried both (G231).
+    | LONG_RUNNING_EMBEDDED_KINDS
+    | {"RayJob"}
 )
 EXTRA_LIVE: dict[str, str] = {
     "networkpolicies": "NetworkPolicy",

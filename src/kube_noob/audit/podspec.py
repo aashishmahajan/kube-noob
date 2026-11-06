@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from kube_noob.yamlio import Document, PathT, get_path
@@ -39,7 +39,13 @@ POD_SPEC_PATHS: dict[str, PathT] = {
 #: KServe predictor running privileged, as root, with `hostPath: /` and a mutable tag produced **14 findings
 #: as a Deployment and zero as an InferenceService** -- not "not evaluated", clean (G229).
 EMBEDDED_POD_SPEC_PATHS: dict[str, tuple[PathT, ...]] = {
-    "InferenceService": (("spec", "predictor"), ("spec", "transformer"), ("spec", "explainer")),
+    "InferenceService": (
+        ("spec", "predictor"),
+        ("spec", "predictor", "workerSpec"),
+        ("spec", "transformer"),
+        ("spec", "explainer"),
+        ("spec", "canary", "*", "predictor"),
+    ),
     "RayCluster": (
         ("spec", "headGroupSpec", "template", "spec"),
         ("spec", "workerGroupSpecs", "*", "template", "spec"),
@@ -51,7 +57,70 @@ EMBEDDED_POD_SPEC_PATHS: dict[str, tuple[PathT, ...]] = {
     "RayJob": (
         ("spec", "rayClusterSpec", "headGroupSpec", "template", "spec"),
         ("spec", "rayClusterSpec", "workerGroupSpecs", "*", "template", "spec"),
+        ("spec", "submitterPodTemplate", "spec"),
     ),
+}
+
+#: Containers that are a FIELD of a component rather than an entry in its `containers` list, by the pod spec path
+#: that holds them. This is the form almost every KServe manifest in the wild uses -- a predictor is written as
+#: `model: {modelFormat: ..., storageUri: ...}`, never as `containers: [...]` -- and reading only `containers`
+#: left a privileged `model:` container producing 2 findings where the same spec as `containers` produced 11,
+#: with every container rule recorded as evaluated-clean on it. Each key below is a full `v1.Container` in the
+#: published schema (`image` and `securityContext` among 30+ properties), read from
+#: config/crd/full/serving.kserve.io_inferenceservices.yaml on 2026-11-06:
+#:
+#: * `predictor`: `model`, and the ten framework shorthands it replaced, all still served;
+#: * `explainer`: `art`;
+#: * `transformer`: none -- it has `containers` only, which is why this registry is keyed by path, not by kind.
+#:
+#: KubeRay's `autoscalerOptions` is the same shape: a container injected into the head pod.
+EMBEDDED_CONTAINER_KEYS: dict[PathT, tuple[str, ...]] = {
+    ("spec", "predictor"): (
+        "model",
+        "huggingface",
+        "lightgbm",
+        "onnx",
+        "paddle",
+        "pmml",
+        "pytorch",
+        "sklearn",
+        "tensorflow",
+        "triton",
+        "xgboost",
+    ),
+    ("spec", "explainer"): ("art",),
+}
+
+#: Containers that live beside a pod spec rather than inside it, as (where the container is, which pod spec it
+#: joins). KubeRay injects the autoscaler into the head pod, so a privileged `autoscalerOptions` is a privileged
+#: container in that pod and has to be audited as one. Paths from ray.io_ray{clusters,services,jobs}.yaml, v1 and
+#: v1alpha1, on 2026-11-06.
+INJECTED_CONTAINERS: dict[str, tuple[tuple[PathT, PathT], ...]] = {
+    "RayCluster": ((("spec", "autoscalerOptions"), ("spec", "headGroupSpec", "template", "spec")),),
+    "RayService": (
+        (
+            ("spec", "rayClusterConfig", "autoscalerOptions"),
+            ("spec", "rayClusterConfig", "headGroupSpec", "template", "spec"),
+        ),
+    ),
+    "RayJob": (
+        (
+            ("spec", "rayClusterSpec", "autoscalerOptions"),
+            ("spec", "rayClusterSpec", "headGroupSpec", "template", "spec"),
+        ),
+    ),
+}
+
+#: Labels the operator puts on the pod, by pod spec path, as a function of the object. These are not a guess: they
+#: are written by the controller unconditionally, so they are as true of the running pod as anything in the
+#: manifest. KServe's `buildObjectMeta` (pkg/controller/v1beta1/inferenceservice/components/predictor.go, read
+#: 2026-11-06) sets the pod's labels to the union of the ServingRuntime's labels, the object's own labels, the
+#: component's `labels`, and these two.
+KSERVE_COMPONENT_OF: dict[PathT, str] = {
+    ("spec", "predictor"): "predictor",
+    ("spec", "predictor", "workerSpec"): "predictor",
+    ("spec", "transformer"): "transformer",
+    ("spec", "explainer"): "explainer",
 }
 
 #: The API groups each embedded kind belongs to. A `RayCluster` from some other group is a different object
@@ -67,6 +136,13 @@ EMBEDDED_POD_SPEC_GROUPS: dict[str, frozenset[str]] = {
 }
 
 LONG_RUNNING_KINDS = frozenset({"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "DeploymentConfig"})
+
+#: Embedded-pod-spec kinds that run a long-lived server, for the rules that ask "is this thing left running and
+#: reachable". Deliberately NOT folded into `LONG_RUNNING_KINDS`: the probe and replica rules there would then
+#: fire on every InferenceService, and both operators inject their own probes and manage their own replica
+#: counts, so those would be false positives. A namespace whose only workloads are these had no NetworkPolicy
+#: finding at all, and the rule was recorded as evaluated-clean on it (G231). A RayJob is a job and is excluded.
+LONG_RUNNING_EMBEDDED_KINDS = frozenset({"InferenceService", "RayCluster", "RayService"})
 REPLICATED_KINDS = frozenset({"Deployment", "StatefulSet", "ReplicaSet", "DeploymentConfig"})
 
 
@@ -75,10 +151,19 @@ class PodTemplate:
     doc: Document
     spec: dict[str, Any]
     path: PathT
-    #: Where this template's own metadata lives, when it has any. `None` means it has none of its own -- a
-    #: KServe component is a bare PodSpec with no PodTemplateSpec around it -- and `labels()` then returns
-    #: nothing rather than borrowing the object's labels, which are not what lands on the pod.
+    #: Where this template's own metadata lives, when it has any. `None` means it has none of its own: a KServe
+    #: component is a bare PodSpec with no PodTemplateSpec around it, and its labels come from the object plus
+    #: what the controller adds (`extra_labels`).
     meta_path: PathT | None = None
+    #: Labels the operator puts on this pod on top of whatever the manifest shows (G231).
+    extra_labels: dict[str, str] = field(default_factory=dict)
+    #: False when `labels()` is a KNOWN SUBSET of the pod's real labels rather than all of them -- an operator
+    #: merges in labels from objects that are not in the bundle (a KServe ServingRuntime, KubeRay's own
+    #: `ray.io/*` set). The distinction matters in both directions and is why `selector_decides` exists: a
+    #: selector satisfied by the subset is satisfied by the whole, so a match is real; a selector the subset
+    #: fails might be satisfied by a label we cannot see, so a NON-match proves nothing and must not become a
+    #: finding that tells someone their NetworkPolicy protects nothing (G231).
+    labels_complete: bool = True
 
     @property
     def component(self) -> str:
@@ -96,15 +181,16 @@ class PodTemplate:
         return self.path[:-1] + ("metadata",)
 
     def labels(self) -> dict[str, str]:
+        """The labels this pod is known to carry. A subset of the real set when `labels_complete` is False."""
         path = self.template_metadata_path
-        if path is None:
-            return {}
-        meta = get_path(self.doc.data, path)
-        if self.doc.kind == "Pod":
-            meta = get_path(self.doc.data, ("metadata",))
-        if isinstance(meta, dict) and isinstance(meta.get("labels"), dict):
-            return {str(k): str(v) for k, v in meta["labels"].items()}
-        return {}
+        out: dict[str, str] = {}
+        if path is not None:
+            meta = get_path(self.doc.data, path)
+            if self.doc.kind == "Pod":
+                meta = get_path(self.doc.data, ("metadata",))
+            if isinstance(meta, dict) and isinstance(meta.get("labels"), dict):
+                out = {str(k): str(v) for k, v in meta["labels"].items()}
+        return {**out, **self.extra_labels}
 
 
 @dataclass
@@ -141,11 +227,32 @@ def _expand(data: Any, path: PathT) -> Iterator[PathT]:
     if isinstance(node, list):
         keys: list[Any] = list(range(len(node)))
     elif isinstance(node, dict):
-        keys = sorted(node)
+        # `key=str` because a YAML mapping can hold keys of several types (`1:` is an int, `~:` is None) and
+        # `sorted` then raises TypeError, which travelled out of the audit, the scan and the admission webhook
+        # as a crash rather than a verdict. The keys themselves are kept; only the ORDER is by their text.
+        keys = sorted(node, key=str)
     else:
         return
     for k in keys:
         yield from _expand(data, (*head, k, *tail))
+
+
+def refused_group(doc: Document) -> str | None:
+    """The API group this object declares when that group is not one this reader knows for its kind.
+
+    `None` means the object is read: either the group is right, or there is no group at all (both live
+    collectors set only `kind`, and API list items carry no apiVersion, so an absent group is an unknown and not
+    a contradiction -- refusing it would restore the G229 blind spot for every `--live` scan).
+
+    Returning the group rather than a bool is what lets the caller SAY so. A `RayCluster` in someone else's group
+    produced no findings and no word about why, while a `Deployment` with a made-up group gets KN-V002: the
+    refusal was right and refusing in silence is the absence-read-as-pass this work is about (G231).
+    """
+    groups = EMBEDDED_POD_SPEC_GROUPS.get(doc.kind)
+    if groups is None:
+        return None
+    group = doc.api_version.split("/", 1)[0]
+    return group if group and group not in groups else None
 
 
 def pod_templates(doc: Document) -> list[PodTemplate]:
@@ -162,9 +269,7 @@ def pod_templates(doc: Document) -> list[PodTemplate]:
     paths = EMBEDDED_POD_SPEC_PATHS.get(doc.kind)
     if paths is None or not isinstance(doc.data, dict):
         return []
-    groups = EMBEDDED_POD_SPEC_GROUPS.get(doc.kind)
-    group = doc.api_version.split("/", 1)[0]
-    if groups is not None and group and group not in groups:
+    if refused_group(doc) is not None:
         return []  # same kind name, a different API group: a different object (G227)
     out: list[PodTemplate] = []
     for template in paths:
@@ -172,11 +277,39 @@ def pod_templates(doc: Document) -> list[PodTemplate]:
             spec = get_path(doc.data, path)
             if not isinstance(spec, dict):
                 continue
-            # A PodTemplateSpec ends in `spec` and has `metadata` beside it; a bare inline PodSpec (KServe's
-            # components) has no metadata of its own, and claiming the object's labels are the pod's would be
-            # an invention that the selector-matching rules would then act on.
+            # A PodTemplateSpec ends in `spec` and has `metadata` beside it. A bare inline PodSpec (a KServe
+            # component) has none, and its pod's labels come from the object plus what the controller merges in.
             meta: PathT | None = path[:-1] + ("metadata",) if path[-1] == "spec" else None
-            out.append(PodTemplate(doc=doc, spec=spec, path=path, meta_path=meta))
+            out.append(
+                PodTemplate(
+                    doc=doc,
+                    spec=spec,
+                    path=path,
+                    meta_path=meta if meta is not None else ("metadata",),
+                    extra_labels=_operator_labels(doc, path),
+                    # Every one of these kinds has its labels merged by an operator from objects that are not in
+                    # the bundle, so what the manifest shows is a subset in all of them (G231).
+                    labels_complete=False,
+                )
+            )
+    return out
+
+
+def _operator_labels(doc: Document, path: PathT) -> dict[str, str]:
+    """Labels the controller puts on this pod regardless of the manifest.
+
+    Only the deterministic ones: KServe names the object and the component on every pod it creates, and the
+    component's own `labels` block is merged in as well. KubeRay's `ray.io/*` labels are deliberately NOT here --
+    their values depend on the group name and the node type in ways the published CRD does not pin down, and a
+    guessed label value would be worse than the known subset this returns.
+    """
+    component = KSERVE_COMPONENT_OF.get(path)
+    if component is None or doc.kind != "InferenceService":
+        return {}
+    out = {"serving.kserve.io/inferenceservice": doc.name, "component": component}
+    own = get_path(doc.data, ("spec", component, "labels"))
+    if isinstance(own, dict):
+        out.update({str(k): str(v) for k, v in own.items()})
     return out
 
 
@@ -192,6 +325,19 @@ def containers(pod: PodTemplate, include_init: bool = True, *, ephemeral: bool =
         for i, c in enumerate(items):
             if isinstance(c, dict):
                 yield ContainerRef(pod=pod, container=c, path=(*pod.path, key, i), init=key != "containers")
+    # Containers that are a field of the component rather than an entry in a list. `model:` is how a KServe
+    # predictor is almost always written, and reading only `containers` passed every container rule on it.
+    for key in EMBEDDED_CONTAINER_KEYS.get(pod.path, ()):
+        c = pod.spec.get(key)
+        if isinstance(c, dict):
+            yield ContainerRef(pod=pod, container={"name": key, **c}, path=(*pod.path, key), init=False)
+    # Containers the operator injects into this pod from elsewhere in the object (KubeRay's autoscaler).
+    for where, joins in INJECTED_CONTAINERS.get(pod.doc.kind, ()):
+        if joins != pod.path:
+            continue
+        c = get_path(pod.doc.data, where)
+        if isinstance(c, dict) and ("image" in c or "securityContext" in c):
+            yield ContainerRef(pod=pod, container={"name": where[-1], **c}, path=where, init=False)
 
 
 def replicas(doc: Document) -> int | None:
@@ -240,6 +386,52 @@ def selector_matches(selector: dict[str, Any] | None, labels: dict[str, str]) ->
         if op == "DoesNotExist" and key in labels:
             return False
     return True
+
+
+def selector_decides(selector: dict[str, Any] | None, pod: PodTemplate) -> bool | None:
+    """Whether this selector selects this pod: True, False, or None for "cannot tell from this input".
+
+    `selector_matches` answers True or False against a label set taken as complete. For a pod whose labels an
+    operator merges from objects outside the bundle, the known set is a subset, and the two answers are not
+    equally safe:
+
+    * A positive match on a subset stays a match on the whole, because `matchLabels`, `In` and `Exists` only ever
+      require a label to be present -- adding labels cannot break them. So True is returned as True.
+    * A `DoesNotExist` or `NotIn` term requires a label to be ABSENT, which an unseen label can falsify. A match
+      that depends on one of those is therefore undecided.
+    * A non-match is undecided too, unless the contradiction is in a label we can actually see: a selector asking
+      for `app=web` fails on the subset and might still match once the operator's labels arrive, but a selector
+      asking for `app=web` against a KNOWN `app=api` is a real non-match whatever else is added.
+
+    Returning None rather than False is the whole point. A False here becomes "this policy protects nothing" or
+    "this Service has no endpoints" in front of a reader, and saying that about a correct NetworkPolicy because
+    an operator sets the label is worse than saying nothing (G231).
+    """
+    if selector is None:
+        return False
+    labels = pod.labels()
+    matched = selector_matches(selector, labels)
+    if pod.labels_complete:
+        return matched
+    exprs = [e for e in (selector.get("matchExpressions") or []) if isinstance(e, dict)]
+    negative = [e for e in exprs if e.get("operator") in {"NotIn", "DoesNotExist"}]
+    if matched:
+        # A match that rests on a label being absent can be undone by a label we cannot see.
+        return None if negative else True
+    # A non-match is only certain when a label we can see contradicts the selector.
+    for key, value in (selector.get("matchLabels") or {}).items():
+        if str(key) in labels and labels[str(key)] != str(value):
+            return False
+    for e in exprs:
+        key, op = str(e.get("key")), e.get("operator")
+        values = [str(x) for x in e.get("values") or []]
+        if key not in labels:
+            continue
+        if op == "In" and labels[key] not in values:
+            return False
+        if op in {"NotIn", "DoesNotExist"}:
+            return False  # the key is present, which is what these two forbid
+    return None
 
 
 def _scaled(value: Any, total: int) -> int | None:
