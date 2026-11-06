@@ -86,6 +86,18 @@ Extract signals. Read the canonical names in an error: Alertmanager alert names 
 
 - `text`* (string): An Alertmanager payload, events, a ClusterOperator, pod status, logs or an error in words.
 
+## fedramp_ksi
+
+FedRAMP 20x KSI evidence. Which FedRAMP 20x Key Security Indicators an audit's findings are evidence for, by inverting the NIST control list each indicator carries in FedRAMP's own consolidated dataset (vendored with its version and hash). Without manifests it returns the crosswalk itself. Every indicator is listed: the ones no kube-noob rule can see carry evidenced=false and no counts, and two carry a warning because their rules reach them only through a shared control and not a shared subject. A mapping is evidence, never a claim of compliance -- an assessment decides whether an indicator is met.
+
+- `control` (null/string): Only the indicators citing this NIST control, in kube-noob's spelling: 'AC-6', 'AC-6(10)'.
+- `evidenced_only` (boolean): Hide the indicators no kube-noob rule can evidence. The reply says how many were hidden.
+- `indicator` (null/string): One indicator by id, e.g. 'KSI-IAM-ELP'. Ids are mnemonics, not numbers.
+- `manifests` (null/string): One or more YAML documents to audit first. Omit to get the crosswalk with no findings.
+- `partial_bundle` (boolean): These documents are only part of a namespace. Default true here, unlike audit_manifests: a pasted manifest is usually a fragment, and a rule that fires because another object is absent cannot tell a real gap from an object the caller did not paste. Set false only for a whole namespace.
+- `platform` (string): Target platform.
+- `version` (null/string): Platform version, e.g. '4.22' (OCP) or '1.35'.
+
 ## fix_manifests
 
 Apply safe mechanical fixes. Migrates removed APIs, fixes wrong API groups, hardens securityContext, adds Route TLS, unblocks PDBs, reorders EgressFirewall rules, swaps RWO-only classes for RWX claims. Returns the diff log and manual follow-ups. Does not touch any cluster.

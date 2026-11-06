@@ -39,7 +39,7 @@ from kube_noob.debug.cluster import cluster_info, get_backend, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
 from kube_noob.debug.netpol import Inventory, check_reachability, inventory_from_cluster
 from kube_noob.debug.policy import explain as explain_denials
-from kube_noob.errors import ClarificationNeeded, WebContentRejectedError
+from kube_noob.errors import ClarificationNeeded, ConfigError, WebContentRejectedError
 from kube_noob.evals.reward import benchmark, grade
 from kube_noob.generate.blueprint import Blueprint, clarify
 from kube_noob.generate.helm import generate_chart
@@ -100,6 +100,36 @@ class ManifestsIn(_In):
     )
     platform: PlatformT = Field("kubernetes", description="Target platform.")
     version: str | None = Field(None, max_length=16, description="Platform version, e.g. '4.22' (OCP) or '1.35'.")
+
+
+class KsiIn(_In):
+    """The FedRAMP 20x KSI view. ``manifests`` is optional: without it this is the crosswalk itself."""
+
+    manifests: str | None = Field(
+        None,
+        max_length=MAX_MANIFEST_CHARS,
+        description="One or more YAML documents to audit first. Omit to get the crosswalk with no findings.",
+    )
+    platform: PlatformT = Field("kubernetes", description="Target platform.")
+    version: str | None = Field(None, max_length=16, description="Platform version, e.g. '4.22' (OCP) or '1.35'.")
+    partial_bundle: bool = Field(
+        True,
+        description="These documents are only part of a namespace. Default true here, unlike audit_manifests: a "
+        "pasted manifest is usually a fragment, and a rule that fires because another object is absent cannot "
+        "tell a real gap from an object the caller did not paste. Set false only for a whole namespace.",
+    )
+    indicator: str | None = Field(
+        None, max_length=20, description="One indicator by id, e.g. 'KSI-IAM-ELP'. Ids are mnemonics, not numbers."
+    )
+    control: str | None = Field(
+        None,
+        max_length=20,
+        description="Only the indicators citing this NIST control, in kube-noob's spelling: 'AC-6', 'AC-6(10)'.",
+    )
+    evidenced_only: bool = Field(
+        False,
+        description="Hide the indicators no kube-noob rule can evidence. The reply says how many were hidden.",
+    )
 
 
 class AuditIn(ManifestsIn):
@@ -868,6 +898,62 @@ class Toolkit:
     def validate(self, p: ManifestsIn) -> dict[str, Any]:
         r = analyze(p.manifests, p.platform, p.version, stages={Stage.VALIDATE})
         return r.as_dict()
+
+    def fedramp_ksi(self, p: KsiIn) -> dict[str, Any]:
+        """Which FedRAMP 20x Key Security Indicators the findings are evidence for.
+
+        The same crosswalk the `ksi` command prints, through the same input pipeline: a bundle that is not
+        manifests is refused rather than scored, the audit's assumptions are carried, and a finding whose rule
+        reaches no indicator is counted rather than dropped. A mapping is evidence, never a compliance claim.
+        """
+        from kube_noob.audit import fedramp
+        from kube_noob.audit.engine import refuse_if_not_manifests
+
+        if p.indicator and p.indicator not in fedramp.INDICATORS:
+            raise ConfigError(
+                f"no indicator {p.indicator} in {fedramp.DATASET} {fedramp.DATASET_VERSION}; ids are mnemonics "
+                f"such as KSI-IAM-ELP, not numbers"
+            )
+        if p.control and p.control not in fedramp.BY_CONTROL:
+            raise ConfigError(
+                f"{p.control} is not one of the controls kube-noob maps; they are spelled as NIST prints them, "
+                f"AC-6(10) rather than ac-6.10"
+            )
+        rule_ids: list[str] = []
+        evaluated: list[str] | None = None
+        fired: list[str] | None = None
+        assumptions: list[str] = []
+        if p.manifests:
+            refuse_if_not_manifests(p.manifests)
+            r = analyze(p.manifests, p.platform, p.version, partial_bundle=p.partial_bundle)
+            rule_ids = [f.rule_id for f in r.findings]
+            evaluated, fired = sorted(r.evaluated_rules), sorted(r.fired_rules)
+            assumptions = list(r.assumptions)
+        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired)
+        if assumptions:
+            out["assumptions"] = assumptions
+        rows = out["indicators"]
+        total = len(rows)
+        hidden: dict[str, Any] = {}
+        if p.indicator:
+            rows = [r for r in rows if r["id"] == p.indicator]
+            hidden["indicator"] = p.indicator
+        if p.control:
+            cited = set(fedramp.indicators_for(p.control))
+            rows = [r for r in rows if r["id"] in cited]
+            out["forControl"] = {"id": p.control, "indicators": sorted(cited)}
+        if p.evidenced_only:
+            before = len(rows)
+            rows = [r for r in rows if r["evidenced"]]
+            hidden["evidencedOnly"] = before - len(rows)
+        out["indicators"] = rows
+        if len(rows) != total:
+            hidden["shown"] = len(rows)
+            hidden["of"] = total
+            if not rows:
+                hidden["why"] = "no indicator matches these filters"
+            out["filtered"] = hidden
+        return out
 
     def audit(self, p: AuditIn) -> dict[str, Any]:
         from kube_noob.audit import exceptions as exc
@@ -1787,6 +1873,18 @@ class Toolkit:
                 "about a third smaller.",
                 AuditIn,
                 self.audit,
+            ),
+            ToolSpec(
+                "fedramp_ksi",
+                "FedRAMP 20x KSI evidence",
+                "Which FedRAMP 20x Key Security Indicators an audit's findings are evidence for, by inverting the "
+                "NIST control list each indicator carries in FedRAMP's own consolidated dataset (vendored with its "
+                "version and hash). Without manifests it returns the crosswalk itself. Every indicator is listed: "
+                "the ones no kube-noob rule can see carry evidenced=false and no counts, and two carry a warning "
+                "because their rules reach them only through a shared control and not a shared subject. A mapping "
+                "is evidence, never a claim of compliance -- an assessment decides whether an indicator is met.",
+                KsiIn,
+                self.fedramp_ksi,
             ),
             ToolSpec(
                 "red_team",

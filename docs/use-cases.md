@@ -694,6 +694,12 @@ kube-noob ksi --control AC-6 --format json
 kube-noob ksi --indicator KSI-IAM-JIT
 ```
 
+The MCP server and the skill expose the same crosswalk as `fedramp_ksi`, with `manifests` optional. One difference
+from `audit_manifests`, and it is deliberate: `partial_bundle` defaults to **true** there, because a manifest pasted
+into a conversation is usually a fragment and a rule that fires on an absent object cannot tell a real gap from an
+object the caller did not paste. Set it false for a whole namespace. A test holds the two front doors to the same
+answer on the same input.
+
 The dataset is vendored with its version and sha256 and the crosswalk is generated from it, because the hand-written
 version of this mapping asserted a release, a family count, an id scheme and a retirement list that were all wrong
 at once. A mapping is evidence, never a compliance claim: see [FedRAMP 20x KSI](fedramp-ksi.md).

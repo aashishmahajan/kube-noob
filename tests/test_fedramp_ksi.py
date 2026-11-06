@@ -549,3 +549,84 @@ def test_a_refresh_notices_an_edited_extract_even_when_upstream_has_not_moved(tm
         assert gen.refresh() == 0
     restored = json.loads(copy.read_text())
     assert restored["KSI"][fam]["indicators"][ind]["controls"] != ["ac-6"], "the edit survived a refresh"
+
+
+# ---------------------------------------------------------------------------
+# The MCP tool. The CLI was the whole of N3 as first shipped, which left the crosswalk unreachable from the
+# interface this project is mostly used through. (G220)
+# ---------------------------------------------------------------------------
+
+
+def _kit() -> Any:
+    from kube_noob.config import Settings
+    from kube_noob.toolkit import Toolkit
+
+    return Toolkit(Settings())
+
+
+def test_the_crosswalk_is_a_tool_and_is_read_only() -> None:
+    specs = {s.name: s for s in _kit().specs()}
+    spec = specs["fedramp_ksi"]
+    assert spec.read_only is True
+    assert "compliance" in spec.description.lower(), "the tool's own description must carry the caveat"
+
+
+def test_the_tool_answers_without_manifests() -> None:
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    out = spec.fn(spec.model())
+    assert len(out["indicators"]) == len(fedramp.INDICATORS)
+    assert out["note"] == fedramp.NOT_A_COMPLIANCE_CLAIM
+
+
+def test_the_tool_refuses_what_the_audit_tool_refuses() -> None:
+    from kube_noob.errors import ConfigError
+
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    with pytest.raises(ConfigError, match="Kubernetes manifest"):
+        spec.fn(spec.model(manifests=VALUES))
+
+
+def test_the_tool_agrees_with_the_command_on_the_same_input() -> None:
+    """One crosswalk, two front doors. If they disagree, one of them is wrong and a reader cannot tell which."""
+    manifests = (ROOT / "examples/insecure-deployment.yaml").read_text()
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    tool = spec.fn(spec.model(manifests=manifests, partial_bundle=True))
+    code, out = _cli("ksi", "-f", "examples/insecure-deployment.yaml", "--format", "json")
+    assert code == 0, out
+    cli = json.loads(out)
+    assert {r["id"]: r.get("findings") for r in tool["indicators"]} == {
+        r["id"]: r.get("findings") for r in cli["indicators"]
+    }
+    assert tool["assumptions"] == cli["assumptions"]
+
+
+def test_the_tool_carries_the_partial_bundle_question_to_the_caller() -> None:
+    """A tool given a pasted manifest cannot know whether it is the whole namespace, so the flag is the caller's
+    to set and the default is the safe one: absences are not evaluated rather than reported as gaps."""
+    manifests = (ROOT / "examples/insecure-deployment.yaml").read_text()
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    assert spec.model(manifests=manifests).partial_bundle is True
+    whole = spec.fn(spec.model(manifests=manifests, partial_bundle=False))
+    part = spec.fn(spec.model(manifests=manifests, partial_bundle=True))
+    rows = {r["id"]: r for r in part["indicators"]}
+    full = {r["id"]: r for r in whole["indicators"]}
+    assert rows["KSI-RPL-ABO"]["notEvaluated"] > full["KSI-RPL-ABO"]["notEvaluated"]
+
+
+def test_the_tool_rejects_an_id_that_does_not_exist() -> None:
+    """Ruff found this before a test did: both branches raised an undefined name, so a caller passing a numeric
+    id -- the shape the previous dataset used -- would have got an unhandled NameError instead of an answer."""
+    from kube_noob.errors import ConfigError
+
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    with pytest.raises(ConfigError, match="mnemonics"):
+        spec.fn(spec.model(indicator="KSI-CMT-05"))
+    with pytest.raises(ConfigError, match=re.escape("ac-6.10")):
+        spec.fn(spec.model(control="ac-6"))
+    out = spec.fn(spec.model(control="SC-6"))
+    assert out["indicators"] == [] and out["filtered"]["why"]
