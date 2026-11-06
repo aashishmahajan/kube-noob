@@ -116,6 +116,47 @@ def admin_tier_support(name: str, version: str | None = None) -> Support:
     return "unknown"
 
 
+#: Which CNIs enforce v1alpha2 ``ClusterNetworkPolicy``, by the same rule as the table above: answer only where
+#: upstream does. Calico is the one version boundary that is documented -- Tigera's own upgrade note says "You
+#: must migrate to ClusterNetworkPolicy before upgrading to v3.32", which states both halves: from 3.32 it
+#: enforces the kind, and before 3.32 the CRD is not there to enforce. Every other CNI is ``unknown``, which
+#: evaluates the tier and withholds it where it changes the answer, rather than guessing in either direction.
+_CNP_VERSIONED: dict[str, tuple[int, ...]] = {"calico": (3, 32)}
+
+
+def cnp_support(name: str, version: str | None = None) -> Support:
+    """Does this CNI enforce ClusterNetworkPolicy v1alpha2?
+
+    The mirror of :func:`admin_tier_support`, and deliberately not its inverse: "does not enforce ANP" is not
+    the same claim as "enforces CNP", and a CNI that does neither would be read as doing the second.
+    """
+    name = name.strip().lower()
+    if name not in _CNP_VERSIONED:
+        return "unknown"
+    if version is None:
+        return "unknown"
+    bound = _CNP_VERSIONED[name]
+    v = _tuple(version)
+    if len(v) < len(bound):
+        return "unknown"  # too coarse to sit on either side of the bound
+    return "enforced" if v[: len(bound)] >= bound else "not-enforced"
+
+
+def cnp_reason(name: str, version: str | None, support: Support) -> str:
+    """One sentence for the note or the finding, naming the version that decided it."""
+    shown = f"{name} {version}" if version else name
+    if support == "not-enforced":
+        where = ".".join(str(p) for p in _CNP_VERSIONED[name])
+        return (
+            f"{shown} does not enforce it: {name} added ClusterNetworkPolicy in {where}, so on this version "
+            "the CRD is not applied and this policy is in the cluster deciding nothing"
+        )
+    return (
+        f"whether {shown} enforces ClusterNetworkPolicy is not something upstream states, so kube-noob does "
+        "not assume it either way"
+    )
+
+
 def admin_tier_reason(name: str, version: str | None, support: Support) -> str:
     """One sentence for the finding or the note, naming the version that decided it."""
     shown = f"{name} {version}" if version else name

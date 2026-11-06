@@ -3,13 +3,18 @@
 `policy.networking.k8s.io/v1alpha1` AdminNetworkPolicy and BaselineAdminNetworkPolicy are listed by
 kubernetes-sigs/network-policy-api as "Previous (APIs that have evolved to the next stage and are no longer actively
 developed)". The API under active development is `ClusterNetworkPolicy` v1alpha2, one cluster-scoped CRD carrying
-both tiers in `spec.tier`. Calico 3.32, Cilium 1.20, Kube-OVN and kube-network-policies enforce it.
+both tiers in `spec.tier`. Calico enforces it from 3.32; what other
+CNIs do is not something upstream states, and `cni.py` says so rather than guessing.
 
 kube-noob did not know the kind at all, so a cluster-scoped Admin-tier Deny written in the current API was dropped
 in silence: the verdict was attributed to the NetworkPolicy tier, and the proposed fix was a NetworkPolicy that the
 Admin tier would override -- applied, changing nothing. A tool whose pitch is that it says what it could not
-determine cannot do that. Until the evaluator reads v1alpha2, the kind is named and every namespace-scoped fix
-carries the caveat.
+determine cannot do that.
+
+Since P4 the kind is EVALUATED, so these tests assert the stronger thing: the policy decides, by name and by
+rule, and the fix proposed is one that would actually work. The caveat they were written for is gone, and what
+replaces it has to be checked just as hard -- an answer that is confidently right is one defect away from an
+answer that is confidently wrong.
 """
 
 from __future__ import annotations
@@ -60,47 +65,39 @@ def _reach(yaml_text: str) -> dict[str, Any]:
     return check_reachability(inv, "web/frontend", "shop/payments", "9090", "TCP")
 
 
-def test_a_clusternetworkpolicy_is_named_not_dropped() -> None:
+def test_a_clusternetworkpolicy_decides_the_answer() -> None:
+    """What the guard was holding the place for: the Admin-tier Deny is read, and it is what the verdict says."""
     out = _reach(_without_admin_tier() + _CNP)
-    listed = " ".join(out.get("notEvaluated", []))
-    assert "ClusterNetworkPolicy" in listed, (
-        "a cluster-scoped policy of the current API was in the input and the answer never mentioned it; "
-        f"notEvaluated was {out.get('notEvaluated')}"
+    assert out["verdict"] == "denied"
+    ingress = out["ingress"]
+    assert ingress["tier"] == "ClusterNetworkPolicy"
+    assert ingress["policy"] == "ClusterNetworkPolicy/no-cross-team-payments"
+    assert ingress["rule"] == "only-shop-reaches-payments"
+    assert "Admin tier, priority 10" in ingress["reason"]
+    assert "ClusterNetworkPolicy" not in " ".join(out.get("notEvaluated", [])), (
+        "a kind that is evaluated must not also be listed as one that was not"
     )
 
 
-def test_a_namespace_scoped_fix_is_caveated_when_a_cluster_scoped_policy_was_not_evaluated() -> None:
-    """The fix kube-noob proposes here is a NetworkPolicy. If an Admin-tier ClusterNetworkPolicy denies the same
-    traffic, that NetworkPolicy is applied and changes nothing. The caveat is what keeps the next verdict credible.
-    """
+def test_the_fix_for_a_cluster_scoped_deny_is_not_a_networkpolicy() -> None:
+    """The defect the old caveat existed to prevent, now that there is no caveat. A NetworkPolicy cannot
+    override an Admin-tier Deny: proposing one gets it applied, changes nothing, and costs the next verdict its
+    credibility. Evaluating the kind removed the warning, so the proposal itself has to be right."""
     out = _reach(_without_admin_tier() + _CNP)
-    proposed = out.get("proposedChanges") or []
-    with_manifest = [c for c in proposed if c.get("manifest")]
-    assert with_manifest, "expected a proposed NetworkPolicy to caveat"
-    for change in with_manifest:
-        assert change.get("caveat"), f"a namespace-scoped fix went out with no caveat: {change['change']!r}"
-        assert "ClusterNetworkPolicy" in change["caveat"]
+    changes = out.get("proposedChanges") or []
+    assert changes, "a denied answer still owes the reader a way forward"
+    for change in changes:
+        assert not change.get("manifest"), f"a namespace-scoped manifest cannot fix this: {change}"
+        assert change.get("ownedBy") == "cluster administrator"
+        assert "no NetworkPolicy in shop can override it" in change["change"]
+        # v1alpha2 renamed the action, and a fix telling an administrator to add an "Allow" rule names an
+        # action the API server rejects.
+        assert "an Accept or Pass rule" in change["change"], change["change"]
+        assert "LOWER priority number" in change["change"], "lower priority is ambiguous when lower wins"
 
 
-def test_no_caveat_when_nothing_cluster_scoped_is_in_the_input() -> None:
-    """The caveat has to be noise-free or it stops being read."""
-    out = _reach(_without_admin_tier())
-    for change in out.get("proposedChanges") or []:
-        assert not change.get("caveat"), f"caveat added with no cluster-scoped policy present: {change}"
-    assert "ClusterNetworkPolicy" not in " ".join(out.get("notEvaluated", []))
-
-
-def test_the_evaluated_v1alpha1_tier_is_not_listed_as_unevaluated() -> None:
-    """AdminNetworkPolicy IS evaluated, so it must not appear in the not-evaluated list alongside the new kind."""
-    text = (ROOT / "examples" / "netpol-admin-tiers.yaml").read_text(encoding="utf-8")
-    out = _reach(text)
-    listed = " ".join(out.get("notEvaluated", []))
-    assert "AdminNetworkPolicy" not in listed
-    assert out["ingress"]["tier"] == "AdminNetworkPolicy"
-
-
-def test_the_caveat_is_printed_where_the_fix_is_read(tmp_path: Path, capsys: Any) -> None:
-    """A caveat only in the JSON is a caveat nobody sees: `policy reach` prints text by default."""
+def test_the_answer_is_printed_where_the_reader_reads_it(tmp_path: Path, capsys: Any) -> None:
+    """A verdict only in the JSON is a verdict nobody sees: `policy reach` prints text by default."""
     from kube_noob.cli import main
 
     manifest = tmp_path / "cnp.yaml"
@@ -123,16 +120,33 @@ def test_the_caveat_is_printed_where_the_fix_is_read(tmp_path: Path, capsys: Any
     )
     text = capsys.readouterr().out
     assert code == 1, f"a denied reachability check must exit 1; got {code}"
-    assert "caveat:" in text, f"the caveat never reached the text output:\n{text}"
-    assert "ClusterNetworkPolicy" in text.split("caveat:", 1)[1]
+    assert "ClusterNetworkPolicy/no-cross-team-payments" in text
+    assert "caveat:" not in text, "the kind is evaluated now, so there is nothing left to caveat"
+
+
+def test_no_caveat_when_nothing_cluster_scoped_is_in_the_input() -> None:
+    """The caveat machinery survives for the next unread kind, so it still has to be noise-free."""
+    out = _reach(_without_admin_tier())
+    for change in out.get("proposedChanges") or []:
+        assert not change.get("caveat"), f"caveat added with no cluster-scoped policy present: {change}"
+    assert "ClusterNetworkPolicy" not in " ".join(out.get("notEvaluated", []))
+
+
+def test_the_evaluated_v1alpha1_tier_is_not_listed_as_unevaluated() -> None:
+    """AdminNetworkPolicy IS evaluated, so it must not appear in the not-evaluated list alongside the new kind."""
+    text = (ROOT / "examples" / "netpol-admin-tiers.yaml").read_text(encoding="utf-8")
+    out = _reach(text)
+    listed = " ".join(out.get("notEvaluated", []))
+    assert "AdminNetworkPolicy" not in listed
+    assert out["ingress"]["tier"] == "AdminNetworkPolicy"
 
 
 def test_the_live_cluster_check_reads_clusternetworkpolicies_too() -> None:
-    """The guard above covered pasted manifests only. `inventory_from_cluster` read the two v1alpha1 tiers and not
-    `clusternetworkpolicies`, so on a cluster running the current API the live answer -- the one an operator
-    trusts more, because it came from their cluster -- went back to being confidently wrong with no caveat and no
-    mention under "not evaluated". The evaluator still does not understand v1alpha2; reading the kind is what puts
-    it in `other_policies`, which is what makes the answer honest.
+    """The guard above covered pasted manifests only. `inventory_from_cluster` read the two v1alpha1 tiers and
+    not `clusternetworkpolicies`, so on a cluster running the current API the live answer -- the one an operator
+    trusts more, because it came from their cluster -- went back to being confidently wrong. Now the kind is
+    read AND evaluated, so what this checks is that the live path collects it into the tier rather than into
+    the list of policies nobody read.
     """
     from kube_noob.debug.cluster import ALLOWED_RESOURCES as RESOURCES
     from kube_noob.debug.netpol import inventory_from_cluster
@@ -164,8 +178,9 @@ def test_the_live_cluster_check_reads_clusternetworkpolicies_too() -> None:
 
     inv = inventory_from_cluster(Backend(), "web/frontend", "shop/payments")
     assert reads.count("clusternetworkpolicies") == 1, "read once, cluster-scoped, not per namespace"
-    assert any(ref.startswith("ClusterNetworkPolicy/") for ref in inv.other_policies), (
-        f"the kind was read but never recorded as unevaluated: {inv.other_policies}"
+    assert inv.cnp_admin.policies, f"the kind was read but never reached the Admin tier: {inv.other_policies}"
+    assert not any(ref.startswith("ClusterNetworkPolicy/") for ref in inv.other_policies), (
+        f"an evaluated kind must not also be listed as unevaluated: {inv.other_policies}"
     )
 
 
@@ -195,13 +210,10 @@ def test_a_cluster_without_the_current_api_is_not_an_error() -> None:
     assert inv.other_policies == []
 
 
-def test_the_caveat_names_the_cluster_s_own_command() -> None:
-    """On OpenShift the whole answer is written in `oc`; a lone `kubectl` in the caveat is a command the reader
-    may not have."""
+def test_the_read_only_steps_name_the_cluster_s_own_command() -> None:
+    """On OpenShift the whole answer is written in `oc`; a lone `kubectl` is a command the reader may not have."""
     inv = Inventory.from_yaml(_without_admin_tier() + _CNP)
     out = check_reachability(inv, "web/frontend", "shop/payments", "9090", "TCP", cli="oc")
-    caveats = [c["caveat"] for c in out.get("proposedChanges", []) if c.get("caveat")]
-    assert caveats, "expected a caveated fix"
-    for c in caveats:
-        assert "oc get clusternetworkpolicy" in c, c
-        assert "kubectl" not in c, c
+    steps = [s["command"] for s in out.get("readOnlyNextSteps", [])]
+    assert any("oc get adminnetworkpolicy,baselineadminnetworkpolicy,clusternetworkpolicy" in s for s in steps)
+    assert not any("kubectl" in s for s in steps)
