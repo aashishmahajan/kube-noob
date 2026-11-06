@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Pod specs embedded in operator CRDs are audited instead of passing silently (G229).** A KServe `InferenceService` or a KubeRay `RayCluster` carries its pod spec somewhere other than `spec.template.spec`, so every pod-level rule and the whole attack-path scan used to find nothing in them and report them clean: the same privileged, root, `hostPath: /` pod spec gave 14 findings as a Deployment and zero as an InferenceService. Each component is now read and scored on its own -- a Ray head and every worker group, a KServe predictor, transformer and explainer -- with every path taken from the published CRD schema and the kind's API group pinned so a same-named CRD from elsewhere is left alone. A KServe component has no pod labels of its own, so the attack-path scan names it in `limitations` as a component whose exposure edge it cannot trace, rather than leaving it looking unexposed. The four kinds are read live too, through the read-only allowlist and the chart's RBAC.
+
 - **The release workflow installs the runtime dependencies before the steps that import the package (G228).** v0.8.0's release failed at `krew_manifest.py --check` with `No module named 'yaml'`, having published nothing. `build-dist` switches interpreter a second time to match the publish action, and the krew check began importing the rule catalogue in 0.8.0, so it ran on a Python with no dependencies. It now installs the same hash-locked file the action uses, and a test holds the ordering.
 
 - **KN-S035 matches the API group exactly rather than by prefix (G227).** A CodeQL alert on the original `startswith` was wrong about the category and right about the code: a prefix match is the wrong tool for a group/version field. Behaviour is unchanged for every real input.

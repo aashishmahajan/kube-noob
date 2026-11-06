@@ -21,6 +21,51 @@ POD_SPEC_PATHS: dict[str, PathT] = {
     "DeploymentConfig": ("spec", "template", "spec"),
 }
 
+#: Kinds that carry one or more pod specs somewhere other than the nine places above, with ``*`` standing for
+#: every element of a list (or every value of a mapping). Every path here was read out of the published CRD
+#: schema on 2026-11-06, not inferred from a tutorial:
+#:
+#: * ``serving.kserve.io/v1beta1`` InferenceService -- `predictor`, `transformer` and `explainer` are each a
+#:   full PodSpec inline (all of `containers`, `volumes`, `serviceAccountName`, `nodeSelector`, `tolerations`,
+#:   `initContainers`, `securityContext`, `hostNetwork`, `hostPID`, `hostIPC`,
+#:   `automountServiceAccountToken` appear in the schema), from
+#:   config/crd/full/serving.kserve.io_inferenceservices.yaml.
+#: * ``ray.io/v1`` and ``v1alpha1`` RayCluster -- `headGroupSpec.template` and each `workerGroupSpecs[].template`
+#:   are ordinary PodTemplateSpecs (`metadata` + `spec`), from
+#:   helm-chart/kuberay-operator/crds/ray.io_rayclusters.yaml.
+#: * RayService wraps the same cluster under `rayClusterConfig`, RayJob under `rayClusterSpec`.
+#:
+#: Why this exists: without it every pod-level rule in the catalogue returns nothing for these objects. A
+#: KServe predictor running privileged, as root, with `hostPath: /` and a mutable tag produced **14 findings
+#: as a Deployment and zero as an InferenceService** -- not "not evaluated", clean (G229).
+EMBEDDED_POD_SPEC_PATHS: dict[str, tuple[PathT, ...]] = {
+    "InferenceService": (("spec", "predictor"), ("spec", "transformer"), ("spec", "explainer")),
+    "RayCluster": (
+        ("spec", "headGroupSpec", "template", "spec"),
+        ("spec", "workerGroupSpecs", "*", "template", "spec"),
+    ),
+    "RayService": (
+        ("spec", "rayClusterConfig", "headGroupSpec", "template", "spec"),
+        ("spec", "rayClusterConfig", "workerGroupSpecs", "*", "template", "spec"),
+    ),
+    "RayJob": (
+        ("spec", "rayClusterSpec", "headGroupSpec", "template", "spec"),
+        ("spec", "rayClusterSpec", "workerGroupSpecs", "*", "template", "spec"),
+    ),
+}
+
+#: The API groups each embedded kind belongs to. A `RayCluster` from some other group is a different object
+#: that happens to share a name, and is not read (G227). An object with *no* `apiVersion` is a different case:
+#: the live collectors set `kind` from the resource they listed and API list items carry no apiVersion of their
+#: own, so a missing group is an unknown, not a contradiction, and the pod specs are read. Refusing it would put
+#: the G229 blind spot straight back for every `--live` scan, which is the mistake this registry exists to fix.
+EMBEDDED_POD_SPEC_GROUPS: dict[str, frozenset[str]] = {
+    "InferenceService": frozenset({"serving.kserve.io"}),
+    "RayCluster": frozenset({"ray.io"}),
+    "RayService": frozenset({"ray.io"}),
+    "RayJob": frozenset({"ray.io"}),
+}
+
 LONG_RUNNING_KINDS = frozenset({"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "DeploymentConfig"})
 REPLICATED_KINDS = frozenset({"Deployment", "StatefulSet", "ReplicaSet", "DeploymentConfig"})
 
@@ -30,13 +75,31 @@ class PodTemplate:
     doc: Document
     spec: dict[str, Any]
     path: PathT
+    #: Where this template's own metadata lives, when it has any. `None` means it has none of its own -- a
+    #: KServe component is a bare PodSpec with no PodTemplateSpec around it -- and `labels()` then returns
+    #: nothing rather than borrowing the object's labels, which are not what lands on the pod.
+    meta_path: PathT | None = None
 
     @property
-    def template_metadata_path(self) -> PathT:
+    def component(self) -> str:
+        """Which pod spec this is, for the kinds that carry several: `predictor`, `headGroupSpec`,
+        `workerGroupSpecs/0`. Empty for an ordinary workload, which has exactly one and needs no name."""
+        if self.doc.kind not in EMBEDDED_POD_SPEC_PATHS:
+            return ""
+        parts = [str(p) for p in self.path[1:] if p not in ("template", "spec")]
+        return "/".join(parts)
+
+    @property
+    def template_metadata_path(self) -> PathT | None:
+        if self.meta_path is not None:
+            return self.meta_path
         return self.path[:-1] + ("metadata",)
 
     def labels(self) -> dict[str, str]:
-        meta = get_path(self.doc.data, self.template_metadata_path)
+        path = self.template_metadata_path
+        if path is None:
+            return {}
+        meta = get_path(self.doc.data, path)
         if self.doc.kind == "Pod":
             meta = get_path(self.doc.data, ("metadata",))
         if isinstance(meta, dict) and isinstance(meta.get("labels"), dict):
@@ -57,6 +120,7 @@ class ContainerRef:
 
 
 def pod_template(doc: Document) -> PodTemplate | None:
+    """The one pod spec of an ordinary workload kind. Kinds that carry several have `pod_templates`."""
     path = POD_SPEC_PATHS.get(doc.kind)
     if path is None:
         return None
@@ -64,6 +128,56 @@ def pod_template(doc: Document) -> PodTemplate | None:
     if not isinstance(spec, dict):
         return None
     return PodTemplate(doc=doc, spec=spec, path=path)
+
+
+def _expand(data: Any, path: PathT) -> Iterator[PathT]:
+    """Every concrete path `path` names, with `*` standing for each index of a list or each key of a mapping."""
+    if "*" not in path:
+        yield path
+        return
+    i = path.index("*")
+    head, tail = path[:i], path[i + 1 :]
+    node = get_path(data, head)
+    if isinstance(node, list):
+        keys: list[Any] = list(range(len(node)))
+    elif isinstance(node, dict):
+        keys = sorted(node)
+    else:
+        return
+    for k in keys:
+        yield from _expand(data, (*head, k, *tail))
+
+
+def pod_templates(doc: Document) -> list[PodTemplate]:
+    """Every pod spec in this object, wherever it lives.
+
+    One for an ordinary workload, several for the kinds in `EMBEDDED_POD_SPEC_PATHS` -- a RayCluster has a head
+    and one per worker group, an InferenceService up to three components. Returning a list rather than an
+    Optional is the whole point: the previous single-template reader silently found nothing in these kinds, so
+    every pod-level rule passed them (G229).
+    """
+    one = pod_template(doc)
+    if one is not None:
+        return [one]
+    paths = EMBEDDED_POD_SPEC_PATHS.get(doc.kind)
+    if paths is None or not isinstance(doc.data, dict):
+        return []
+    groups = EMBEDDED_POD_SPEC_GROUPS.get(doc.kind)
+    group = doc.api_version.split("/", 1)[0]
+    if groups is not None and group and group not in groups:
+        return []  # same kind name, a different API group: a different object (G227)
+    out: list[PodTemplate] = []
+    for template in paths:
+        for path in _expand(doc.data, template):
+            spec = get_path(doc.data, path)
+            if not isinstance(spec, dict):
+                continue
+            # A PodTemplateSpec ends in `spec` and has `metadata` beside it; a bare inline PodSpec (KServe's
+            # components) has no metadata of its own, and claiming the object's labels are the pod's would be
+            # an invention that the selector-matching rules would then act on.
+            meta: PathT | None = path[:-1] + ("metadata",) if path[-1] == "spec" else None
+            out.append(PodTemplate(doc=doc, spec=spec, path=path, meta_path=meta))
+    return out
 
 
 def containers(pod: PodTemplate, include_init: bool = True, *, ephemeral: bool = True) -> Iterator[ContainerRef]:

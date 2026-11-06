@@ -24,6 +24,7 @@ from kube_noob.audit.podspec import (
     effective_security,
     pdb_allows_no_disruption,
     pod_template,
+    pod_templates,
     replicas,
     selector_matches,
 )
@@ -86,10 +87,14 @@ class AuditContext:
         return [d for d in self.docs if d.kind in kinds]
 
     def workloads(self) -> Iterator[tuple[Document, PodTemplate]]:
+        """Every pod spec in the bundle, including the ones embedded in an operator's own kind.
+
+        One object can yield several: a RayCluster has a head and a template per worker group, an
+        InferenceService up to three components. Before this read them, every pod-level rule returned nothing
+        for those kinds and the bundle came back clean (G229).
+        """
         for d in self.docs:
-            pt = pod_template(d)
-            if pt is not None:
-                yield d, pt
+            yield from ((d, pt) for pt in pod_templates(d))
 
     def ns(self, doc: Document) -> str:
         return doc.namespace or "<default>"

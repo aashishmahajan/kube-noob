@@ -83,6 +83,16 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     # per-group list evaluated top to bottom whose first match TAKES PRECEDENCE over the top-level profile.
     # Settings only -- no audit event, no log content, nothing about a person.
     "apiservers": ResourceDef("config.openshift.io/v1", "apiservers", False),
+    # Workload CRDs whose pod specs are embedded rather than in `spec.template.spec`. Group, version, plural and
+    # scope are from the published CRDs (retrieved 2026-11-06): KServe
+    # config/crd/full/serving.kserve.io_inferenceservices.yaml (serving.kserve.io, v1beta1, Namespaced) and
+    # KubeRay helm-chart/kuberay-operator/crds/ray.io_ray{clusters,services,jobs}.yaml (ray.io, v1, Namespaced).
+    # Read so that the audit and the attack-path scan score the pods these objects really run; a cluster without
+    # the operator answers 404, which both report as not read rather than as clean (G229).
+    "inferenceservices": ResourceDef("serving.kserve.io/v1beta1", "inferenceservices", True),
+    "rayclusters": ResourceDef("ray.io/v1", "rayclusters", True),
+    "rayservices": ResourceDef("ray.io/v1", "rayservices", True),
+    "rayjobs": ResourceDef("ray.io/v1", "rayjobs", True),
     "securitycontextconstraints": ResourceDef("security.openshift.io/v1", "securitycontextconstraints", False),
     "deploymentconfigs": ResourceDef("apps.openshift.io/v1", "deploymentconfigs", True),
     # RBAC objects (who may do what; no credentials): read by the attack-path scan (kube_noob.attack_paths)

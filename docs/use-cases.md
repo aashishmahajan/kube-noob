@@ -772,10 +772,38 @@ above one namespace), lists every step with the field that proves it, and ends w
 Secrets (Secret objects in a bundle are dropped unread). `--fail-above` makes it a CI gate. NetworkPolicies on the
 entry edge are not applied: check a path with `policy reach`.
 
+A workload whose pod spec is embedded in a CRD is scored per component, named `Kind/namespace/name[component]`: a
+Ray head and each worker group separately, a KServe predictor, transformer and explainer separately. Where the
+operator generates the pod's labels rather than the manifest carrying them, the scan says so in `limitations`
+naming that component -- its node and API capabilities are scored, but no exposure edge can be traced to it from
+that input, which is not the same as it being unexposed.
+
 ```bash
 kube-noob posture scan -f k8s/
 kube-noob posture scan -f k8s/ --fail-above 17
 kube-noob --cluster-enabled posture scan --live -n shop -n payments
+```
+
+### AI and GPU workloads: the pods an operator runs for you
+
+A KServe `InferenceService` or a KubeRay `RayCluster`, `RayService` or `RayJob` does not keep its pod spec at
+`spec.template.spec`. It carries one per component -- `spec.predictor`, `spec.transformer` and `spec.explainer` for
+KServe; `headGroupSpec.template` and every entry of `workerGroupSpecs` for Ray, under `rayClusterConfig` in a
+RayService and `rayClusterSpec` in a RayJob -- and those are the pods that actually run. Every pod-level rule in
+the catalogue reads them: a privileged predictor, a Ray worker running as root, a `hostPath` mount, a mutable
+image tag, a mounted ServiceAccount token, a missing memory limit on something holding a model in RAM. Findings
+name the component, so `spec.workerGroupSpecs.0.template.spec.containers.0` tells you which group to change.
+
+Two things it will not do. It reads these four kinds only, each at paths taken from the published CRD schema, and
+it checks the API group before reading: a CRD of the same name from somewhere else is left alone rather than
+guessed at. And a kind that is not in that list is not quietly treated as having no pods -- if you run a workload
+operator kube-noob does not know, say so and it can be added with its schema, because a guessed path produces a
+confident wrong finding.
+
+```bash
+kube-noob audit -f serving/            # the same 92 rules, now reaching the components
+kube-noob posture scan -f serving/     # per-component attack paths
+kube-noob --cluster-enabled posture scan --live -n model-serving
 ```
 
 ### Which vulnerabilities matter here? Scanner output, VEX and reachability

@@ -30,7 +30,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from kube_noob.audit.podspec import selector_matches
+from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_PATHS, pod_templates, selector_matches
 from kube_noob.audit.rules import (
     ESCALATION_VERBS,
     INTERNAL_LB_ANNOTATIONS,
@@ -55,6 +55,12 @@ LIVE_RESOURCES: dict[str, str] = {
     "jobs": "Job",
     "cronjobs": "CronJob",
     "deploymentconfigs": "DeploymentConfig",
+    # Workload CRDs that carry pod specs of their own. A cluster without the operator answers 404, which lands in
+    # `notRead` rather than counting as "no such workloads" (G229).
+    "inferenceservices": "InferenceService",
+    "rayclusters": "RayCluster",
+    "rayservices": "RayService",
+    "rayjobs": "RayJob",
     "serviceaccounts": "ServiceAccount",
     "roles": "Role",
     "rolebindings": "RoleBinding",
@@ -70,7 +76,7 @@ _POD_PATHS: dict[str, tuple[str, ...]] = {
 }
 _WORKLOAD_KINDS = frozenset(
     {"Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "DeploymentConfig"}
-)
+) | frozenset(EMBEDDED_POD_SPEC_PATHS)
 _NODE_CAPS = frozenset({"SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "DAC_READ_SEARCH", "BPF", "NET_ADMIN", "ALL"})
 _SYSTEM_PATHS = frozenset({"/", "/etc", "/var/lib/kubelet", "/proc", "/root", "/var/run", "/run"})
 PRIVILEGED_SCCS = frozenset(
@@ -246,6 +252,41 @@ def _template_labels(obj: dict[str, Any]) -> dict[str, str]:
     else:
         labels = _get(obj, "spec", "template", "metadata", "labels")
     return {str(k): str(v) for k, v in labels.items()} if isinstance(labels, dict) else {}
+
+
+@dataclass
+class _Site:
+    """One pod spec to score, and the object it came from.
+
+    An ordinary workload is one site. The kinds in ``EMBEDDED_POD_SPEC_PATHS`` are several -- a RayCluster head
+    plus one per worker group, an InferenceService predictor/transformer/explainer -- each with its own
+    containers, its own service account and its own labels, so each is scored on its own and named by its
+    component. Before this the scan read only ``spec.template.spec``, found nothing in these kinds, and reported
+    zero paths through them (G229)."""
+
+    obj: dict[str, Any]
+    spec: dict[str, Any]
+    ref: str
+    labels: dict[str, str]
+
+
+def _sites_of(obj: dict[str, Any]) -> list[_Site]:
+    from kube_noob.yamlio import Document
+
+    base = _ref(obj)
+    if str(obj.get("kind")) not in EMBEDDED_POD_SPEC_PATHS:
+        spec = _pod_spec(obj)
+        return [] if spec is None else [_Site(obj, spec, base, _template_labels(obj))]
+    out: list[_Site] = []
+    for pt in pod_templates(Document(index=0, data=obj)):
+        out.append(_Site(obj, pt.spec, f"{base}[{pt.component}]", pt.labels()))
+    return out
+
+
+def _sites(inv: Inventory, *, owned: bool = True) -> list[_Site]:
+    """Every pod spec in the inventory's workloads, in workload order. ``owned=False`` drops the workloads another
+    controller owns, as the scan does so that a Deployment's ReplicaSets and Pods are not counted three times."""
+    return [site for obj in inv.of(*_WORKLOAD_KINDS) if owned or not _owned(obj) for site in _sites_of(obj)]
 
 
 def _owned(obj: dict[str, Any]) -> bool:
@@ -655,20 +696,18 @@ class _Index:
     entry against every workload) and which ServiceAccounts turn token automount off. Looking these up per
     workload made the scan cubic in the size of the input (red team, VUL1)."""
 
-    selects: dict[int, list[tuple[int, Entry, dict[str, Any]]]]  # id(workload) -> (entry index, entry, selector)
+    selects: dict[int, list[tuple[int, Entry, dict[str, Any]]]]  # id(site) -> (entry index, entry, selector)
     no_automount: set[tuple[str, str]]
 
     @classmethod
-    def build(cls, inv: Inventory, entries: list[Entry]) -> _Index:
+    def build(cls, inv: Inventory, entries: list[Entry], sites: list[_Site]) -> _Index:
         services: dict[tuple[str, str], dict[str, Any]] = {}
         for s in inv.of("Service"):
             services.setdefault((_ns(s), _name(s)), s)  # the first of a duplicated name, as kubectl apply would keep
-        workloads = inv.of(*_WORKLOAD_KINDS)
-        labels = [_template_labels(w) for w in workloads]
         by_label: dict[tuple[str, str, str], list[int]] = {}
-        for n, w in enumerate(workloads):
-            for k, v in labels[n].items():
-                by_label.setdefault((_ns(w), k, v), []).append(n)
+        for n, site in enumerate(sites):
+            for k, v in site.labels.items():
+                by_label.setdefault((_ns(site.obj), k, v), []).append(n)
         selects: dict[int, list[tuple[int, Entry, dict[str, Any]]]] = {}
         for i, e in enumerate(entries):
             svc = services.get((e.namespace, e.service))
@@ -677,8 +716,8 @@ class _Index:
                 continue
             candidates = min((by_label.get((e.namespace, str(k), str(v)), []) for k, v in selector.items()), key=len)
             for n in candidates:
-                if selector_matches({"matchLabels": selector}, labels[n]):
-                    selects.setdefault(id(workloads[n]), []).append((i, e, selector))
+                if selector_matches({"matchLabels": selector}, sites[n].labels):
+                    selects.setdefault(id(sites[n]), []).append((i, e, selector))
         no_automount = {
             (_ns(sa), _name(sa)) for sa in inv.of("ServiceAccount") if sa.get("automountServiceAccountToken") is False
         }
@@ -687,14 +726,13 @@ class _Index:
 
 def _reach(
     inv: Inventory,
-    w: dict[str, Any],
-    spec: dict[str, Any],
+    site: _Site,
     index: _Index,
     sa_caps: dict[tuple[str, str], list[Capability]],
 ) -> Reach:
-    ref = _ref(w)
+    w, spec, ref = site.obj, site.spec, site.ref
     reach_entries: list[tuple[int, Entry, list[Step]]] = []
-    for i, entry, selector in index.selects.get(id(w), []):
+    for i, entry, selector in index.selects.get(id(site), []):
         to_w = Step(
             f"Service/{entry.namespace}/{entry.service}",
             ref,
@@ -728,30 +766,23 @@ def _reach(
 
 def workload_reach(inv: Inventory) -> dict[str, Reach]:
     """Every workload (not owned by another) with its exposures, node and API capabilities, keyed by Kind/ns/name."""
-    index = _Index.build(inv, _entries(inv))
+    sites = _sites(inv, owned=False)
+    index = _Index.build(inv, _entries(inv), sites)
     sa_caps: dict[tuple[str, str], list[Capability]] = {}
     out: dict[str, Reach] = {}
-    for w in inv.of(*_WORKLOAD_KINDS):
-        if _owned(w):
-            continue
-        spec = _pod_spec(w)
-        if spec is not None:
-            out[_ref(w)] = _reach(inv, w, spec, index, sa_caps)
+    for site in sites:
+        out[site.ref] = _reach(inv, site, index, sa_caps)
     return out
 
 
 def scan(inv: Inventory, *, top: int = DEFAULT_TOP) -> dict[str, Any]:
     if not 1 <= top <= MAX_PATHS:
         raise ScanError(f"top must be 1-{MAX_PATHS}")
-    workloads = [w for w in inv.of(*_WORKLOAD_KINDS) if not _owned(w)]
+    sites = _sites(inv, owned=False)
     entries = _entries(inv)
-    index = _Index.build(inv, entries)
+    index = _Index.build(inv, entries, sites)
     sa_caps: dict[tuple[str, str], list[Capability]] = {}
-    reach: list[Reach] = []
-    for w in workloads:
-        spec = _pod_spec(w)
-        if spec is not None:
-            reach.append(_reach(inv, w, spec, index, sa_caps))
+    reach: list[Reach] = [_reach(inv, site, index, sa_caps) for site in sites]
     by_entry: dict[int, list[AttackPath]] = {}
     for r in reach:  # each workload's paths, grouped by entry in workload order, as the scan always listed them
         for i in dict.fromkeys(i for i, _, _ in r.entries):
@@ -760,19 +791,35 @@ def scan(inv: Inventory, *, top: int = DEFAULT_TOP) -> dict[str, Any]:
     paths.sort(key=lambda p: (-p.score, len(p.steps), p.as_dict(0)["summary"]))
     out_paths = [p.as_dict(i + 1) for i, p in enumerate(paths[:top])]
     head = out_paths[0]["summary"] if out_paths else "no path from an exposure to a node or to API rights"
+    limitations = [
+        "NetworkPolicies on the entry edge are not applied: check a path with `kube-noob policy reach`.",
+        "Cloud IAM, admission-time mutation and tokens mounted through projected volumes are not modelled.",
+        "Roles that are not in the input are reported in notRead; cluster-admin, admin, edit and view are known.",
+    ]
+    # A component whose pod labels the operator generates (a KServe predictor is a bare PodSpec with no pod
+    # metadata) cannot be matched to a Service selector from the manifest. Its node and API capabilities are
+    # scored, but the entry edge is UNDETERMINED, not absent -- saying nothing would read as "not exposed",
+    # which is the defect this whole change exists to remove (G229).
+    unlabelled = sorted({site.ref for site in sites if not site.labels and not index.selects.get(id(site))})
+    if unlabelled:
+        limitations.append(
+            "Pod labels are set by the operator, not the manifest, for "
+            + ", ".join(unlabelled[:10])
+            + f"{f' and {len(unlabelled) - 10} more' if len(unlabelled) > 10 else ''}"
+            + ": their node and API capabilities are scored, but no exposure edge can be traced to them from this"
+            " input. Scan the Deployments and Services the operator creates, or use --live."
+        )
     return {
         "paths": out_paths,
         "total": len(paths),
         "entries": len(entries),
-        "workloads": len(workloads),
+        # Workload objects scored, not pod specs: one RayCluster with three worker groups is one workload here
+        # and four pod specs in the paths (G229).
+        "workloads": len({id(site.obj) for site in sites}),
         "summary": f"{len(paths)} attack paths from {len(entries)} exposures; top: {head}",
         "notRead": sorted(set(inv.not_read))[:50],
         "secretsIgnored": inv.dropped_secrets,
-        "limitations": [
-            "NetworkPolicies on the entry edge are not applied: check a path with `kube-noob policy reach`.",
-            "Cloud IAM, admission-time mutation and tokens mounted through projected volumes are not modelled.",
-            "Roles that are not in the input are reported in notRead; cluster-admin, admin, edit and view are known.",
-        ],
+        "limitations": limitations,
     }
 
 
