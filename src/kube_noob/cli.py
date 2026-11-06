@@ -188,6 +188,15 @@ def _print_ticket_lines(m: dict[str, Any]) -> None:
             _tprint(f"  {_REMARK_LABELS[r['kind']]} ({r.get('date') or r['from']}): {r['text']}")
 
 
+def _write_html(path: str | None, report: dict[str, Any]) -> None:
+    """Write the self-contained HTML report, when one was asked for (U1)."""
+    if not path:
+        return
+    from kube_noob import report_html
+
+    Path(path).write_text(report_html.render(report), encoding="utf-8", errors="replace")
+
+
 def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
     """The KSI view as text. Every indicator keeps a row, including the ones kube-noob cannot see at all: a
     column of zeros reads as a pass, and an indicator with no rule behind it has passed nothing (G217)."""
@@ -459,6 +468,7 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
+    _write_html(a.html, report)
     if getattr(a, "github_annotations", False):
         # Before the report, and on stdout: Actions reads workflow commands from the step's output, and a caller
         # parsing --format json filters the `::` lines (the test does exactly that).
@@ -1089,6 +1099,12 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--chart-path", default=None, help="the chart in the repository: findings point at its templates")
     gt.add_argument("--sarif", default=None, help="write SARIF 2.1.0 here (GitHub code scanning)")
     gt.add_argument("--summary", default=None, help="write the Markdown summary here ($GITHUB_STEP_SUMMARY)")
+    gt.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     gt.add_argument("--codequality", default=None, help="write GitLab code quality JSON here")
     gt.add_argument(
         "--scanner-report",
@@ -1489,6 +1505,12 @@ def build_parser() -> argparse.ArgumentParser:
     ksi.add_argument("--indicator", default=None, help="one indicator by id, e.g. KSI-IAM-ELP")
     ksi.add_argument("--control", default=None, help="the indicators citing one NIST control, e.g. AC-6")
     ksi.add_argument("--evidenced-only", action="store_true", help="hide indicators no kube-noob rule can see")
+    ksi.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
 
     upr = sub.add_parser(
         "upgrade-risks",
@@ -1659,6 +1681,12 @@ def build_parser() -> argparse.ArgumentParser:
     pdf.add_argument("old", help="the earlier snapshot")
     pdf.add_argument("new", help="the later snapshot")
     pdf.add_argument("--markdown", default=None, help="also write the report as Markdown here")
+    pdf.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     prp = posub.add_parser(
         "report",
         help="Snapshot now, compare with the newest snapshot kept, write the report (the daily job)",
@@ -1666,6 +1694,12 @@ def build_parser() -> argparse.ArgumentParser:
         "them. Example: kube-noob --cluster-enabled posture report --live",
     )
     snap_source(prp)
+    prp.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     prp.add_argument("--state-dir", default=None, help="where snapshots and reports are kept")
     prp.add_argument("--keep", type=int, default=None, help="snapshots to keep (default posture.keep, 14)")
 
@@ -2310,6 +2344,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                     + (", with --evidenced-only" if a.evidenced_only else "")
                 )
             out["filtered"] = hidden
+        _write_html(a.html, out)
         if a.format == "text":
             _tprint(_ksi_markdown(out, audited=bool(a.file)))
         else:
@@ -3061,6 +3096,7 @@ def _posture_drift(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             rep = drift.diff(drift.load(Path(a.old)), drift.load(Path(a.new)))
             if a.markdown:
                 Path(a.markdown).write_text(drift.markdown(rep), encoding="utf-8")
+            _write_html(a.html, rep)
             _print_drift(rep) if a.format == "text" else _emit(rep, fmt)
             return 0
         snap = _snapshot_from_args(a, s)
@@ -3077,6 +3113,7 @@ def _posture_drift(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             return 0
         state = Path(a.state_dir) if a.state_dir else s.data_dir / "posture"
         rep, paths = drift.write_report(state, snap, a.keep or s.posture.keep)
+        _write_html(a.html, rep)
         if a.format == "text":
             _print_drift(rep)
             _tprint(f"\nwrote {paths['report']} and {paths['markdown']}")

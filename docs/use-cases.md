@@ -660,6 +660,30 @@ kube-noob redteam -f k8s/ --platform openshift
 kube-noob explain KN-S004
 ```
 
+### Something a reviewer will actually open
+
+`--html` writes one self-contained page: `gate --html report.html`, `posture report --html`, `posture diff --html`,
+`ksi --html`. One file, inline styling, no script, no stylesheet, no font, no image -- nothing the browser fetches,
+so it opens from an email attachment on a laptop with no network, which is the situation this tool is used in.
+Verified that way rather than asserted: a test parses the page and fails on any `src`, `href` on a `<link>`, inline
+handler or `<script>`, and the page is rendered in a real browser with the request log checked.
+
+The caveats come first and the findings after, because a reader who meets an empty findings table first has already
+drawn their conclusion. `audited: false`, `assumed`, `not checked that far`, a file that could not be read, a
+withheld control standing, and the shows/does-not-show pair all survive into the page -- an HTML report that drops
+them would be the same defect in a third format.
+
+Everything from a manifest is escaped before it is written. Resource names, messages and paths come from someone
+else's cluster, and this is the one place in the product where that text becomes a document another person opens:
+a Deployment named `<script>alert(1)</script>` appears as text, and a test asserts both that it is shown and that
+it is inert.
+
+```bash
+kube-noob gate -f deploy/ --fail-on high --html gate-report.html
+kube-noob posture report --live --html posture.html
+kube-noob ksi -f deploy/ --html ksi.html
+```
+
 ### Which FedRAMP 20x indicators does a finding speak to?
 
 `ksi` joins kube-noob's findings to the FedRAMP 20x Key Security Indicators through the NIST SP 800-53 controls both
