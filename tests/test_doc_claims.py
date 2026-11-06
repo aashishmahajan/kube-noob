@@ -136,3 +136,29 @@ def test_the_scc_claim_says_what_ci_actually_proves() -> None:
         assert "runs under `restricted-v2`" not in text, path.name
         assert "run under `restricted-v2`" not in text, path.name
         assert "written for `restricted-v2`" in text, path.name
+
+
+def test_the_release_cadence_claim_counts_the_tags_that_exist() -> None:
+    """MAINTENANCE.md states a release count and a span of days. Both are claims about a thing the repository
+    knows -- its own tags -- and both went stale the moment a release was cut, which is G212's shape applied to
+    the document that tells a reader how fast the contract is moving."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    git = shutil.which("git")
+    root = Path(__file__).resolve().parents[1]
+    if not git or not (root / ".git").exists():
+        pytest.skip("not a git checkout")
+    tags = subprocess.run(
+        [git, "tag", "--list", "v*.*.*"], capture_output=True, text=True, cwd=root, check=False
+    ).stdout.split()
+    if not tags:
+        pytest.skip("no tags in this checkout")
+    text = (root / "MAINTENANCE.md").read_text()
+    stated = re.search(r"(\d+) releases in", text)
+    assert stated, "MAINTENANCE.md no longer states a release count"
+    # The tag for the release being prepared does not exist until the maintainer cuts it, so the document is
+    # allowed to be exactly one ahead of the tags -- and no more.
+    assert int(stated.group(1)) - len(tags) in (0, 1), f"{stated.group(1)} claimed, {len(tags)} tags"

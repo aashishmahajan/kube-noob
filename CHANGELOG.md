@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-11-06
 
 - **`--html`: a self-contained report a reviewer will open (U1, G222).** `gate`, `posture report`, `posture diff` and `ksi` all take `--html PATH` and write one file with inline styling and nothing the browser fetches -- no script, stylesheet, font or image -- so it opens from an email attachment on a machine with no network. The caveats are rendered above the findings, every value from a manifest is escaped, and both are held by tests rather than intentions: the page is parsed for every loading attribute and rendered in a real browser with the request log checked.
 
