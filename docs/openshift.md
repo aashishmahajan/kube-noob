@@ -139,6 +139,16 @@ Three alerts, and what each one really means:
 | `KubeNoobKnowledgeStale` | `kube_noob_knowledge_age_seconds` over `monitoring.prometheusRule.knowledgeMaxAgeDays` | the age of the knowledge in the **image**, fixed when it was built -- not a failed refresh. Update the image, or turn the alert off if you pin the version deliberately |
 | `KubeNoobToolErrorRatio` | crash + error over total above `toolErrorRatio` for 15m | `invalid-arguments` is deliberately excluded: a caller sending bad input is not this pod failing, and paging someone for somebody else's typo teaches them to mute the alert |
 
+### The dashboard
+
+`deploy/grafana/kube-noob.json` is a Grafana dashboard for exactly these metrics: version and uptime, calls per
+second by outcome, the failure ratio drawn with the same expression the alert uses, which tools are being used,
+and the duration percentiles. Import it and pick the Prometheus that scrapes the pod; there is no hard-coded
+datasource id and every panel is scoped to a `$job` you choose.
+
+Every metric it queries is one the code emits, checked by a test rather than assumed -- a panel pointing at a
+metric that does not exist shows "No data" for ever, and nobody can tell that from a quiet system.
+
 ### Alertmanager can post straight to it
 
 `POST /v1/alerts` takes an Alertmanager webhook payload as it is -- `{"receiver": ..., "status": ..., "alerts":

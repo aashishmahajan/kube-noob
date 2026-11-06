@@ -1,0 +1,195 @@
+{
+  "__comment": "A platform team's interface to a running sidecar is a dashboard, not a scrape endpoint (U2, G239). Import this into Grafana and pick the Prometheus that scrapes kube-noob's /metrics; every query below names only a metric src/kube_noob/server/metrics.py actually emits, and a test asserts that, because a panel referencing a metric that does not exist is the same class of claim as a document quoting a count that stopped being true. Counters are per process and the chart runs one pod, so these are that pod's numbers.",
+  "title": "kube-noob",
+  "uid": "kube-noob",
+  "tags": ["kube-noob", "mcp"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "job",
+        "label": "Job",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "query": "label_values(kube_noob_build_info, job)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Is it up, and what is it",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Version",
+      "description": "From kube_noob_build_info. The label, not a guess: this is the build that is answering.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 4, "w": 5, "x": 0, "y": 1},
+      "options": {"textMode": "name", "colorMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_noob_build_info{job=\"$job\"}",
+          "legendFormat": "{{version}} ({{platform}})",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Seconds since this process started serving. A reset means the pod restarted, which also resets every counter on this dashboard.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 4, "w": 5, "x": 5, "y": 1},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"refId": "A", "expr": "kube_noob_uptime_seconds{job=\"$job\"}", "legendFormat": "uptime"}]
+    },
+    {
+      "type": "stat",
+      "title": "Age of the built-in knowledge",
+      "description": "kube_noob_knowledge_age_seconds. This is the age of the knowledge in the IMAGE, fixed when it was built -- not a failed refresh. Answers about releases newer than that come only from web lookups you enable. Update the image, or ignore this if the version is pinned deliberately.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 4, "w": 7, "x": 10, "y": 1},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 3888000},
+              {"color": "orange", "value": 7776000}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"refId": "A", "expr": "kube_noob_knowledge_age_seconds{job=\"$job\"}", "legendFormat": "age"}]
+    },
+    {
+      "type": "stat",
+      "title": "Calls in the window",
+      "description": "Every tool call this process served, by outcome. A pod restart resets it.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 4, "w": 7, "x": 17, "y": 1},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(kube_noob_tool_calls_total{job=\"$job\"}[$__range]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "What is being asked, and how it is going",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Calls per second, by outcome",
+      "description": "invalid-arguments is a caller sending bad input, which is not this pod failing: it is shown separately for that reason, and the KubeNoobToolErrorRatio alert excludes it.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"fillOpacity": 20, "stacking": {"mode": "normal"}}}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(kube_noob_tool_calls_total{job=\"$job\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Failure ratio",
+      "description": "crash + error over all calls, the same expression the KubeNoobToolErrorRatio alert uses, so what pages you is what you see here.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(kube_noob_tool_calls_total{job=\"$job\",outcome=~\"crash|error\"}[15m])) / clamp_min(sum(rate(kube_noob_tool_calls_total{job=\"$job\"}[15m])), 1e-9)",
+          "legendFormat": "crash + error"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Which tools are used",
+      "description": "By tool over the dashboard's window. Tool names come from a fixed set; an unexpected one is reported as `other` rather than growing the label space.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 14},
+      "options": {"orientation": "horizontal", "xTickLabelRotation": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(15, sum by (tool) (increase(kube_noob_tool_calls_total{job=\"$job\"}[$__range])))",
+          "legendFormat": "{{tool}}",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Duration, 50th and 95th percentile",
+      "description": "From kube_noob_tool_duration_seconds. Histogram buckets are coarse on purpose (10 of them), so read these as the shape of the latency rather than an exact figure.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 14},
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(kube_noob_tool_duration_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(kube_noob_tool_duration_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Slowest tools, 95th percentile",
+      "description": "Which tool is costing the time. A corpus search is hundreds of milliseconds by nature; an audit that moves into seconds is worth looking at.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 23},
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(8, histogram_quantile(0.95, sum by (tool, le) (rate(kube_noob_tool_duration_seconds_bucket{job=\"$job\"}[10m]))))",
+          "legendFormat": "{{tool}}"
+        }
+      ]
+    }
+  ]
+}

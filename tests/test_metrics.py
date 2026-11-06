@@ -330,3 +330,69 @@ def test_the_receiver_accepts_alertmanagers_own_payload_shape() -> None:
     out = spec.fn(spec.model(text=json.dumps(payload)))
     result = out if isinstance(out, dict) else out.model_dump()
     assert result, "the payload carried a signal and the tool found nothing"
+
+
+# --- the dashboard (U2, G239) ------------------------------------------------------------------------------------
+
+
+DASHBOARD = ROOT / "deploy" / "grafana" / "kube-noob.json"
+
+
+def _dashboard() -> dict[str, Any]:
+    return json.loads(DASHBOARD.read_text(encoding="utf-8"))
+
+
+def _queries(panels: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for panel in panels:
+        for target in panel.get("targets") or []:
+            if target.get("expr"):
+                out.append((str(panel.get("title")), str(target["expr"])))
+        out += _queries(panel.get("panels") or [])
+    return out
+
+
+def test_every_dashboard_query_names_a_metric_this_code_emits() -> None:
+    """The rule that kept U2 closed until N11 shipped: a panel referencing a metric that does not exist is the
+    same class of claim as a document quoting a count that stopped being true. It shows "No data" for ever, and
+    nobody can tell that from a quiet system."""
+    import re
+
+    emitted = {
+        line.split()[2] for line in m.render(load_settings(), _fresh()).splitlines() if line.startswith("# TYPE ")
+    }
+    histograms = {f"{name}_{suffix}" for name in emitted for suffix in ("bucket", "sum", "count")}
+    known = emitted | histograms
+    queries = _queries(_dashboard()["panels"])
+    assert queries, "the dashboard has panels with queries"
+    for title, expr in queries:
+        for metric in re.findall(r"\bkube_noob_[a-z_]+\b", expr):
+            assert metric in known, f"panel {title!r} queries {metric}, which nothing emits"
+
+
+def test_every_dashboard_query_is_scoped_to_the_selected_job() -> None:
+    """Without it, a Grafana with several Prometheus sources sums somebody else's pod into these numbers."""
+    for title, expr in _queries(_dashboard()["panels"]):
+        assert 'job="$job"' in expr, f"panel {title!r} is not scoped to $job"
+
+
+def test_the_failure_ratio_panel_matches_the_alert() -> None:
+    """What pages you and what you look at have to be the same expression, or the dashboard disagrees with the
+    page that woke you."""
+    panel = next(e for t, e in _queries(_dashboard()["panels"]) if t == "Failure ratio")
+    rule = (CHART / "templates" / "monitoring.yaml").read_text(encoding="utf-8")
+    assert 'outcome=~"crash|error"' in panel and 'outcome=~"crash|error"' in rule
+    assert "clamp_min" in panel and "clamp_min" in rule
+    assert "invalid-arguments" not in panel
+
+
+def test_the_dashboard_says_the_counters_are_per_process() -> None:
+    """One pod in the chart, so these are that pod's numbers; a dashboard that implies a fleet is lying."""
+    assert "per process" in _dashboard()["__comment"]
+
+
+def test_the_dashboard_has_a_datasource_variable_rather_than_a_hard_coded_uid() -> None:
+    """A dashboard with somebody else's datasource uid in it imports and shows nothing."""
+    names = {v["name"] for v in _dashboard()["templating"]["list"]}
+    assert {"datasource", "job"} <= names
+    assert "${datasource}" in DASHBOARD.read_text(encoding="utf-8")
