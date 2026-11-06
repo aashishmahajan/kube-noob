@@ -144,6 +144,32 @@ and needs an OVN cluster to validate. M7 verifier hardening, M8 integrations, M9
 layer, M11 `kube-noob gate` and M12 governance keep their meaning; identity in audit records and the signed air-gap
 pack remain enterprise candidates in [editions.md](editions.md).
 
+## The surfaces: what is code and what a person actually looks at
+
+Measured 2026-11-06, not estimated. The engine is 58,808 lines across 144 modules with 35,188 lines of tests,
+91 rules, 48 MCP tools, 105 commands and 13 chart templates. The part a human looks at is three things, and only
+one of them is in this repository:
+
+| Surface | State | Who renders it |
+|---|---|---|
+| The terminal | The real interface. Every command has a text view, and the text view is where the caveats live — `not checked:`, `assumed:`, `not evaluated:`, the shows/does-not-show pair | kube-noob |
+| An assistant | The MCP tools and the skill. There is no layout to design: the JSON is the interface, which is why a caveat that lives only in the text renderer is a defect and not a cosmetic gap (G221) | Claude, or any MCP client |
+| Borrowed UI | SARIF into GitHub code scanning, the job summary, pull-request annotations (G215), OSCAL for an assessor's own tooling | GitHub, or the assessor's tool |
+| The website | A separate repository that cannot be edited from a session attached to this one. [website-updates.md](website-updates.md) is the queue; it currently holds 10 rows and does not know the date of the last site update | the owner |
+
+There is no graphical interface and no HTML output anywhere in the product: `--format` is text, json or yaml, and
+the only HTML the code touches is web content it *reads*. That is a deliberate position for a tool that runs
+offline in someone else's cluster, but it leaves two real gaps, both of which are UI work rather than engine work:
+
+| # | Item | Why, and what would be true when it is done |
+|---|---|---|
+| U1 | **A self-contained HTML report for `posture report` and `gate`** | The audience for per-control standing and the KSI crosswalk is a compliance reviewer, and what they get today is terminal text or JSON. One file, no network, no JavaScript dependency, openable from an email attachment, carrying the same caveats the text view carries — including `audited: false`, `notCheckedBeyond` and the shows/does-not-show pair, because an HTML report that drops them is the G221 defect in a third format. Testable the way the videos are: render it, parse it, assert the caveats are present |
+| U2 | **A Grafana dashboard JSON beside N11's `/metrics`** | A platform team's interface to a running sidecar is a dashboard, not a scrape endpoint. Blocked on N11, and worth nothing before it: a dashboard panel referencing a metric that does not exist is the same class of claim as a document quoting a count that stopped being true |
+
+Deliberately not on this list: a web application, a hosted console, an authentication interface, anything with a
+server-side session. There is no legal entity behind this project ([editions.md](editions.md)), so there is nothing
+to host it on and nobody to be accountable for the data it would hold.
+
 ## What this refuses to be
 
 Encompassing more means reading more artifacts, emitting more formats and reaching more places. It does not mean

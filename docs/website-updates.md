@@ -6,6 +6,8 @@ in the table below when it is merged, and comes out when the site is updated. Nu
 so every number below names the command that prints the true value rather than repeating it in a second place.
 
 Last site update: unknown to this file — record the date and the commit here when the next one happens.
+That gap is itself a defect of the same kind this file is about: a queue that cannot say when it was last
+drained cannot tell you whether 10 rows is a backlog or a morning's work.
 
 ## The numbers the site quotes
 
