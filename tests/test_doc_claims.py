@@ -162,3 +162,19 @@ def test_the_release_cadence_claim_counts_the_tags_that_exist() -> None:
     # The tag for the release being prepared does not exist until the maintainer cuts it, so the document is
     # allowed to be exactly one ahead of the tags -- and no more.
     assert int(stated.group(1)) - len(tags) in (0, 1), f"{stated.group(1)} claimed, {len(tags)} tags"
+
+
+def test_an_openshift_version_on_the_kubernetes_platform_is_refused() -> None:
+    """`--platform kubernetes --version 4.22` was taken at face value as Kubernetes minor "4.22", which does not
+    exist. Every version-gated rule then answered about a fictional release, and only the beyond-the-table
+    caveat kept that from being a silent wrong answer. Guessing which half the caller meant would silently
+    change which rules apply, since some exist only on OpenShift, so it is refused (G225)."""
+    import pytest
+
+    from kube_noob.catalog import k8s_version_for
+
+    assert k8s_version_for("kubernetes", "1.33") == "1.33"
+    assert k8s_version_for("openshift", "4.22") == "1.35"
+    assert k8s_version_for("openshift", "1.33") == "1.33", "the reverse is still accepted, as it always was"
+    with pytest.raises(ValueError, match="not a Kubernetes version"):
+        k8s_version_for("kubernetes", "4.22")

@@ -835,6 +835,16 @@ def k8s_version_for(platform: str, version: str | None) -> str:
     if version is None:
         return DEFAULT_K8S_VERSION
     major, minor = parse_minor(version)
+    if major != 1:
+        # Kubernetes minors are 1.x. `--platform kubernetes --version 4.22` was taken at face value as a
+        # Kubernetes 1-like minor "4.22", which does not exist: every version-gated rule then answered about a
+        # fictional release, and only the beyond-the-table caveat kept it from being a silent wrong answer.
+        # Refuse rather than guess which half the caller meant -- mapping it through the OpenShift table would
+        # also silently change which rules apply, since some of them exist only on OpenShift.
+        raise ValueError(
+            f"{version!r} is not a Kubernetes version: Kubernetes minors are 1.x. For OpenShift {major}.{minor} "
+            f"pass --platform openshift (or rosa-classic, rosa-hcp) with --version {major}.{minor}"
+        )
     return f"{major}.{minor}"
 
 
