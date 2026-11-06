@@ -346,7 +346,9 @@ def _masthead_of(report: dict[str, Any]) -> Masthead | None:
         has_have = "has" if hit == 1 else "have"
         head = f"{hit} {_plural(hit, 'indicator')} {has_have} findings against {'it' if hit == 1 else 'them'}"
         if bare:
-            head += f", and {bare} {_plural(bare, 'indicator')} no kube-noob rule behind "
+            # "and 15 indicators no kube-noob rule behind them" elides the verb and reads as a typo in the
+            # largest type on the page. The unit is already stated by the clause it hangs off.
+            head += f", and {bare} {'has' if bare == 1 else 'have'} no kube-noob rule behind "
             head += "it at all." if bare == 1 else "them at all."
         else:
             head += ", and every indicator has at least one rule behind it."

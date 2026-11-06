@@ -496,7 +496,7 @@ def test_the_ksi_masthead_counts_indicators_and_claims_no_section_it_lacks() -> 
     verdict = re.search(r'class="verdict">([^<]+)', page)
     assert verdict, "a crosswalk with indicators states a verdict"
     said = verdict.group(1)
-    assert said == ("1 indicator has findings against it, and 2 indicators no kube-noob rule behind them at all."), said
+    assert said == "1 indicator has findings against it, and 2 have no kube-noob rule behind them at all.", said
     assert "finding are open" not in said and "rules reached no verdict" not in said
     assert "section 1" not in page, "the crosswalk has no limits section to send the reader to"
     assert "not a zero and not a pass" in page
