@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -178,13 +180,23 @@ def test_the_document_names_the_version_and_the_unmapped_controls() -> None:
         assert control in text
 
 
+#: A HOME outside the repository, because HOME=ROOT makes the CLI write its learning state into the working tree
+#: -- an untracked `.local/share/kube-noob/` that a later `git add -A` picks up and commits.
+_HOME = tempfile.mkdtemp(prefix="kube-noob-ksi-home-")
+
+
 def _cli(*args: str) -> tuple[int, str]:
     r = subprocess.run(
         [sys.executable, "-m", "kube_noob.cli", *args],
         capture_output=True,
         text=True,
         cwd=ROOT,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(ROOT / "src"), "HOME": str(ROOT)},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(ROOT / "src"),
+            "HOME": _HOME,
+            "KUBE_NOOB_DATA_DIR": str(pathlib.Path(_HOME) / "data"),
+        },
         check=False,
     )
     return r.returncode, r.stdout + r.stderr
