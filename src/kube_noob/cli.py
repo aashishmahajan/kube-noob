@@ -147,6 +147,11 @@ def _print_insight(res: dict[str, Any]) -> None:
             _tprint(f"  {'':15} escalate: {f['escalate'][:400]}")
         for c in f.get("diagnosticCommands", [])[:2]:
             _tprint(f"  {'':15} in the toolbox (needs approval): {c['command']}")
+    if res.get("answeredBy"):
+        _tprint("kube-noob answers this directly:")
+        for st in res["answeredBy"]:
+            _tprint(f"  {st['command']}")
+            _tprint(f"      {st['why']}")
     if res.get("readOnlyNextSteps"):
         _tprint("read-only next steps:")
         for st in res["readOnlyNextSteps"]:

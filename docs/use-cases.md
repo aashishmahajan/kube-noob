@@ -188,6 +188,22 @@ oc describe pod web-7d9c6b9f5-x2k8p -n shop | kube-noob diagnose --platform open
 `bundle` writes a redacted, read-only evidence pack (`bundle.md` and `bundle.json`) that you can attach to a ticket.
 Once a fix is confirmed, save it with `kube-noob learning note`. The team finds it next time as `[kn:local-N#0]`.
 
+### Ask in words, and it names the command
+
+`insight` recognises what you paste. Ask it a question instead and it says which command answers it, because the
+answer to "which of our exposed services could reach a node?" is `posture scan`, not a list of `kubectl describe`
+steps. The mapping is keyword-matched and deterministic -- there is no model making the choice -- and it covers
+attack paths, pod-to-pod reachability, upgrade risks, Kyverno migration, FedRAMP indicators, exceptions, rule
+explanations, the RHACS comparison, CVE ranking, the CI gate, drift, Helm failures, builds, must-gathers, threat
+models, the learning tracks, policy generation, fixes and the audit itself. A pasted error or manifest gets none
+of it: those are diagnosed, not routed.
+
+```bash
+kube-noob insight 'which of our exposed services could reach a node?'
+kube-noob insight 'what could break if I upgrade OpenShift from 4.16 to 4.18?'
+kube-noob insight 'how do I suppress KN-S010 for one namespace until next quarter?'
+```
+
 ### Does it answer our problems? Test it on them
 
 `kube-noob selftest --cases` runs your own problems through the same diagnosis, search, known-issue and audit paths

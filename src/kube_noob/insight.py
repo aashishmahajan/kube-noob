@@ -432,6 +432,198 @@ _CONCEPTUAL = re.compile(
 )
 _ERRORISH = re.compile(r"(?i)\b(?:error|failed|failure|denied|forbidden|refused|timeout|cannot|can't)\b|\w+: \w+")
 WEAK_PLAYBOOK = 0.4  # a playbook below this confidence matched on a word or two, not on an error
+#: What answers a typed question that names a job this product does. Each row is (what the question is asking,
+#: the command that answers it, what to give it).
+#:
+#: Why this exists: asked "which of our exposed services could reach a node?" the router ran the generic
+#: evidence-gathering steps -- `get pods`, `describe pod`, `get events` -- and returned no findings. Those steps
+#: answer "something is broken, what is it", which is a different question, and `posture scan` answers the one
+#: that was asked. Eight of eighteen realistic questions came back with nothing at all and no next step, in a
+#: product whose adoption story is "paste anything" (G235).
+#:
+#: Deterministic, keyword-matched and capped at two suggestions. Each pattern must be specific enough that it
+#: fires on the question it is for and not on a pasted log that happens to share a word, so each one requires at
+#: least two of the asking words rather than any one of them. A test holds every command here to being a command
+#: that exists.
+CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:exposed?|exposure|internet|public|route|ingress|loadbalancer|nodeport|lateral|"
+            r"blast ?radius|attack ?paths?|reach(?:es|able)?|takeover|escape)\b)"
+            # "pods" is NOT enough on its own here: "can a pod in shop reach a pod in payments" is a
+            # NetworkPolicy question, and this route was answering it before `policy reach` did.
+            r"(?=.*\b(?:node|nodes|secrets?|cluster-admin|escalat\w*|takeover|blast ?radius|attack ?paths?)\b)"
+        ),
+        "kube-noob posture scan -f <dir>",
+        "ranks every path from a Route, Ingress, LoadBalancer or NodePort to what the pods it reaches can do",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:reach|talk to|connect to|allowed|denied|blocked)\b)(?=.*\bnetwork ?polic\w+|"
+            r"\bfrom\b.*\bto\b.*\bnamespace\b|\bpod\b.*\bpod\b)"
+        ),
+        "kube-noob policy reach --from <ns>/<pod> --to <ns>/<pod>",
+        "names the deciding tier, policy and rule, and why every other rule did not match",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*(?:\b(?:upgrade|upgrading|update|migrat\w+|moving|move)\b|\bgoing from\b))"
+            r"(?=.*\b(?:4\.\d+|1\.\d+|version|release|break|breaks|risky|risks?|watch out)\b)"
+        ),
+        "kube-noob upgrade-risks --from <x.y.z> --to <x.y.z>",
+        "the known risks between two releases, from the bundled corpus",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\bkyverno\b)(?=.*\b(?:1\.\d+|migrat\w+|drop\w*|remov\w*|deprecat\w*|"
+            r"affected|still work)\b)"
+        ),
+        "kube-noob policy migrate-check -f <dir>",
+        "which of your Kyverno policies use types the next release removes",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:fedramp|ksi|20x|nist|800-53|control|controls|compliance|evidence|auditor)\b)"
+            r"(?=.*\b(?:which|what|indicators?|speak|map|maps|cover\w*|show|report|evidence)\b)"
+        ),
+        "kube-noob ksi -f <dir>",
+        "the FedRAMP 20x indicators your findings are evidence about, and the ones nothing here evidences",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:suppress|waive|waiver|exception|exempt|ignore|silence|accept)\b)"
+            r"(?=.*\b(?:rule|finding|kn-[a-z]?\d+|namespace|until|quarter|temporarily)\b)"
+        ),
+        "kube-noob exceptions check <file>",
+        "an exception needs an owner, a reason, a scope no wider than a namespace and an expiry; this refuses "
+        "the ones that do not",
+    ),
+    (
+        re.compile(r"(?i)\bKN-[A-Z]{0,2}\d{3}\b"),
+        "kube-noob explain <rule-id>",
+        "what the rule checks, why it matters, the NIST controls it is evidence about and how to fix it",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:rhacs|stackrox|acs)\b)(?=.*\b(?:compare|overlap|gap|gaps|differ\w*|instead|"
+            r"gives|cover\w*|what does)\b)"
+        ),
+        "kube-noob rhacs compare",
+        "the overlap, the related policies, the gaps each tool leaves and what is outside kube-noob's scope",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:cve|cves|vulnerabilit\w+|vulns?)\b)"
+            r"(?=.*\b(?:matter|priorit\w+|which|reachable|exploitable|rank|first|actually|real)\b)"
+        ),
+        "kube-noob vuln rank -f <scanner-output>",
+        "normalises the scanner's output, applies Red Hat VEX and ranks by whether the pods that run the image "
+        "are reachable",
+    ),
+    (
+        # The first group deliberately excludes "fail": a Helm render error says "fail" twice and is not a CI
+        # question, and it was being answered with `gate` before `helm-audit`.
+        re.compile(
+            r"(?i)(?=.*\b(?:ci|pipeline|pull request|github action|merge|gate|gating|before deploy)\b)"
+            r"(?=.*\b(?:fail|block|gate|critical|threshold|annotat\w*|stop)\b)"
+        ),
+        "kube-noob gate -f <dir> --fail-on high",
+        "one command for CI: audit, admission policy and Containerfiles, with SARIF and pull-request annotations",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:changed|change|drift|since|yesterday|last week|regress\w*|new)\b)"
+            r"(?=.*\b(?:cluster|namespace|posture|findings?|control|snapshot)\b)"
+        ),
+        "kube-noob posture snapshot --live && kube-noob posture diff",
+        "what is open per NIST control and per namespace, and which controls had nothing evaluated at all",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\bhelm\b)(?=.*\b(?:fail\w*|error|render\w*|upgrade|install|template|values|"
+            r"chart)\b)"
+        ),
+        "kube-noob helm-audit -f <chart>",
+        "renders the chart and audits what it produces, and decodes the common Helm failures",
+    ),
+    (
+        # Not bare "image": `ImagePullBackOff: ... failed to pull and unpack image` is a runtime pull failure and
+        # was being answered with the build analyser.
+        re.compile(
+            r"(?i)(?=.*\b(?:build|builds|building|buildconfig|containerfile|dockerfile|buildah)\b)"
+            r"(?=.*\b(?:fail\w*|error|broke|why|debug)\b)"
+        ),
+        "kube-noob build -f <log>",
+        "why the build failed, plus an audit of the Containerfile and the image it would produce",
+    ),
+    (
+        re.compile(r"(?i)(?=.*\bmust-?gather\b)"),
+        "kube-noob must-gather <path>",
+        "opens the bundle safely and routes what it finds to the analysers, without reading Secrets",
+    ),
+    (
+        re.compile(r"(?i)(?=.*\b(?:threat ?model|threats|stride|what could go wrong)\b)"),
+        "kube-noob vuln threat -f <dir>",
+        "the threats for each application, with the finding that is evidence for each one",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:teach|learn|lesson|tutorial|exercise|practi[cs]e|study|beginner|"
+            r"explain how to)\b)(?=.*\b(?:me|about|kubernetes|openshift|networkpolicy|rbac|track)\b)"
+        ),
+        "kube-noob learn tracks",
+        "five tracks with graded exercises, offline, with the answers checked rather than described",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:generate|write|give me|create)\b)"
+            r"(?=.*\b(?:polic\w+|kyverno|gatekeeper|vap|validatingadmissionpolicy|admission)\b)"
+        ),
+        "kube-noob generate policies -f <dir>",
+        "Kyverno, Gatekeeper and ValidatingAdmissionPolicy for the rules that can be enforced at admission",
+    ),
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:fix|harden|correct|repair)\b)(?=.*\b(?:manifest|yaml|deployment|chart|"
+            r"for me|automatically)\b)"
+        ),
+        "kube-noob fix -f <dir>",
+        "the manifest change for each finding it can fix, re-audited afterwards so what is left is visible",
+    ),
+    # Last, because almost any of the above is a better answer when it matches. This one catches the broadest
+    # ask there is -- "is this all right to ship" -- which was getting the generic pod-triage steps.
+    (
+        re.compile(
+            r"(?i)(?=.*\b(?:safe|ok|okay|all right|alright|wrong|review|check|problems?|issues?|"
+            r"production[- ]ready|good)\b)"
+            r"(?=.*\b(?:manifest|manifests|yaml|deployment|deployments|statefulset|daemonset|chart|"
+            r"helm|pod|workload|this|ship|deploy|apply)\b)"
+        ),
+        "kube-noob audit -f <dir>",
+        "every rule in the catalogue over your manifests -- schema, removed APIs, security, RBAC, network, "
+        "storage, reliability -- each finding naming the field that proves it",
+    ),
+)
+MAX_ROUTES = 2
+
+
+def capability_routes(text: str) -> list[dict[str, str]]:
+    """The kube-noob commands that answer this question, most specific first, at most `MAX_ROUTES`.
+
+    Only for short typed text. A pasted log or manifest is not a question, and matching one would put advice
+    about `upgrade-risks` under somebody's stack trace.
+    """
+    if len(text) > 600 or "\n" in text.strip():
+        return []
+    out: list[dict[str, str]] = []
+    for pattern, command, why in CAPABILITY_ROUTES:
+        if pattern.search(text):
+            out.append({"command": command, "why": why})
+        if len(out) == MAX_ROUTES:
+            break
+    return out
+
+
 NOT_YET: dict[str, str] = {}
 
 
@@ -1210,6 +1402,7 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         steps = gather_steps(platform, ns if isinstance(ns, str) else None)
         ran.append("gather")
     _engine_playbook_first(findings, text)
+    answered_by = capability_routes(text)
     findings.sort(key=lambda f: (f["rank"], str(f.get("id"))))
     for f in findings:
         f.pop("rank", None)
@@ -1219,10 +1412,16 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         "findings": findings,
         "signals": signals,
         "readOnlyNextSteps": steps[:8],
+        # What in kube-noob answers the question, when the question names a job it does. Separate from
+        # readOnlyNextSteps, which are commands against the CLUSTER to collect evidence: those answer "something
+        # is broken, what is it", and a question like "which exposed services could reach a node" is not that
+        # (G235).
+        "answeredBy": answered_by,
         "context": context,
         "skipped": skipped,
         "approach": "Read-only first: every step listed here only reads; changes come from the playbook or rule "
         "with a person's approval."
         + (GATHER_NOTE if "gather" in ran else "")
-        + ("" if about_a_cluster or findings else NO_CLUSTER_NOTE),
+        + (" What this product can answer directly is under answeredBy." if answered_by and not findings else "")
+        + ("" if about_a_cluster or findings or answered_by else NO_CLUSTER_NOTE),
     }
