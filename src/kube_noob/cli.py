@@ -2218,6 +2218,16 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _emit(kit.red_team(tk.ManifestsIn(manifests=text, platform=platform, version=a.pversion)), fmt)
             return 0
         res = kit.fix(tk.FixIn(manifests=text, platform=platform, version=a.pversion, harden=not a.no_harden))
+        if len(sources) > 1:
+            # One stream out of several files in, and the file boundaries are gone: a caller who redirected
+            # this over their directory would have one file where they had five. Said on stderr, where the
+            # summary already goes, rather than refused -- the output is still correct YAML (G251).
+            print(
+                f"note: {len(sources)} files were read and one stream was written, so the file boundaries are "
+                f"not preserved ({', '.join(p for p, _ in sources[:3])}"
+                f"{' and more' if len(sources) > 3 else ''}). Run `fix` per file to keep them.",
+                file=sys.stderr,
+            )
         if a.output:
             Path(a.output).write_text(res["manifests"], encoding="utf-8")
         else:

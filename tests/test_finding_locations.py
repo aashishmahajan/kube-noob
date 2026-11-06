@@ -141,3 +141,18 @@ def test_an_excepted_finding_is_located_too(tmp_path: Path) -> None:
     report = _audit(d, "--exceptions", str(exceptions))
     excepted = next(f for f in report["excepted"] if f["ruleId"] == "KN-S001")
     assert excepted["file"] == "b.yaml" and excepted["line"] == 11
+
+
+def test_fix_says_it_merged_a_directory(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`fix -f dir/ -o one.yaml` writes one stream: a caller would have one file where they had three.
+
+    Not refused -- the output is correct YAML and somebody may want exactly that -- but said on stderr, where
+    the change summary already goes (G251).
+    """
+    d = _bundle(tmp_path)
+    main(["fix", "-f", str(d), "--platform", "kubernetes"])
+    err = capsys.readouterr().err
+    assert "3 files were read and one stream was written" in err
+    assert "a.yaml, b.yaml, c.yml" in err
+    main(["fix", "-f", str(d / "b.yaml"), "--platform", "kubernetes"])
+    assert "one stream was written" not in capsys.readouterr().err
