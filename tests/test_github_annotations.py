@@ -209,3 +209,26 @@ def test_a_property_value_ending_in_a_colon_does_not_eat_the_separator() -> None
     line = gate.github_annotations(_report([f]))[0]
     props = line.partition("::")[2].partition("::")[0]
     assert ":" not in props and "%3A" in props
+
+
+def test_an_annotation_is_not_anchored_to_a_path_no_checkout_has() -> None:
+    """Reading from stdin gives every finding the uri "-", and `file=-` asks GitHub to anchor the annotation to
+    a file named "-". The runner drops it from the diff or puts it somewhere meaningless, which is worse than a
+    repository-level annotation: the finding looks reported and is not. Recorded by a red team on 2026-11-05 as
+    unverified, reproduced on 2026-11-06 while cutting 0.8.0 (G224)."""
+    from pathlib import Path
+
+    from kube_noob import gate
+
+    root = Path(__file__).resolve().parents[1]
+    report = gate.run([gate.Source("-", (root / "examples/insecure-deployment.yaml").read_text())], fail_on="high")
+    lines = gate.github_annotations(report)
+    assert lines, "the findings still produce annotations"
+    assert not [line for line in lines if "file=-" in line]
+    reported = {f["ruleId"] for f in report["findings"] if any(f["ruleId"] in line for line in lines)}
+    assert reported, "the findings are still reported, just not anchored"
+    real = gate.run(
+        [gate.Source("deploy/web.yaml", (root / "examples/insecure-deployment.yaml").read_text())],
+        fail_on="high",
+    )
+    assert any("file=deploy/web.yaml" in line for line in gate.github_annotations(real))

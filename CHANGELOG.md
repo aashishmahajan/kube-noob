@@ -2,6 +2,8 @@
 
 ## 0.8.0 - 2026-11-06
 
+- **A gate annotation is no longer anchored to a path the checkout does not have (G224).** Reading manifests from stdin gave every finding the uri `-`, so `--github-annotations` asked GitHub to anchor 11 annotations to a file named `-`; the runner drops those from the diff, and the pull request then showed fewer findings than the gate found while the step looked like it had reported them. Such findings are annotated at repository level instead.
+
 - **`--html`: a self-contained report a reviewer will open (U1, G222).** `gate`, `posture report`, `posture diff` and `ksi` all take `--html PATH` and write one file with inline styling and nothing the browser fetches -- no script, stylesheet, font or image -- so it opens from an email attachment on a machine with no network. The caveats are rendered above the findings, every value from a manifest is escaped, and both are held by tests rather than intentions: the page is parsed for every loading attribute and rendered in a real browser with the request log checked.
 
 - **The surfaces are written down, with the two UI gaps named (U1, U2).** `docs/roadmap.md` now measures what is engine and what a person looks at: 58,808 lines across 144 modules behind a terminal view, an MCP tool surface where the JSON *is* the interface, borrowed UI in GitHub code scanning and pull-request annotations, and a website in a separate repository whose queue holds 10 rows. There is no HTML output anywhere in the product, which is deliberate for a tool that runs in someone else's cluster but leaves two gaps: U1, a self-contained HTML report for `posture report` and `gate` carrying the same caveats the text view carries; and U2, a Grafana dashboard beside N11's `/metrics`, worth nothing before N11 exists.
