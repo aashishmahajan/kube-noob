@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-11-06
+
+- **An OpenShift version on the Kubernetes platform is refused rather than answered (G225).** `--platform kubernetes --version 4.22` was read as Kubernetes minor 4.22, which does not exist, so every version-gated rule answered about a fictional release. The message names both readings; an OpenShift target given a 1.x version is still accepted, as before.
+
+- **A gate annotation is no longer anchored to a path the checkout does not have (G224).** Reading manifests from stdin gave every finding the uri `-`, so `--github-annotations` asked GitHub to anchor 11 annotations to a file named `-`; the runner drops those from the diff, and the pull request then showed fewer findings than the gate found while the step looked like it had reported them. Such findings are annotated at repository level instead.
 
 - **`--html`: a self-contained report a reviewer will open (U1, G222).** `gate`, `posture report`, `posture diff` and `ksi` all take `--html PATH` and write one file with inline styling and nothing the browser fetches -- no script, stylesheet, font or image -- so it opens from an email attachment on a machine with no network. The caveats are rendered above the findings, every value from a manifest is escaped, and both are held by tests rather than intentions: the page is parsed for every loading attribute and rendered in a real browser with the request log checked.
 

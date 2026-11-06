@@ -144,6 +144,16 @@ and needs an OVN cluster to validate. M7 verifier hardening, M8 integrations, M9
 layer, M11 `kube-noob gate` and M12 governance keep their meaning; identity in audit records and the signed air-gap
 pack remain enterprise candidates in [editions.md](editions.md).
 
+## One open item from the red teams
+
+Four adversarial passes produced 49 defects between 2026-11-05 and 2026-11-06 and all of them are fixed, with
+one exception that is a consistency question rather than a wrong answer, kept here so it is tracked and not
+remembered:
+
+| # | Item | What is wrong, and why it was not fixed with the rest |
+|---|---|---|
+| N14 | **Two tools, one bundle, different numbers for the same control** | Neither `ksi` nor `fedramp_ksi` takes an exception list, so `excepted` is always absent and a KSI page cannot be reconciled with `audit_manifests`' excepted counts; and `ksi` counts INFO findings that `audit_manifests` withholds at its default `low`, so the same bundle gives two different figures depending on which tool asked. Each is internally honest -- one says `findings`, the other says `withheld` -- which is exactly why it is not a defect with an obvious fix: making them agree means deciding whether the KSI view is an audit in its own right or a projection of one, and that decision changes what `excepted` means on a compliance page. Worth deciding deliberately rather than patching |
+
 ## The surfaces: what is code and what a person actually looks at
 
 Measured 2026-11-06, not estimated. The engine is 58,808 lines across 144 modules with 35,188 lines of tests,

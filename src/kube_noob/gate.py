@@ -741,9 +741,13 @@ def _annotation(level: str, finding: dict[str, Any]) -> str:
     rule = str(finding.get("ruleId") or "kube-noob")
     heading = f"{rule} {finding.get('title') or ''}".strip()
     props = [f"title={esc(heading, prop=True)}"]
-    uri = finding.get("uri")
-    if uri:
-        props.insert(0, f"file={esc(str(uri), prop=True)}")
+    uri = str(finding.get("uri") or "")
+    # Only anchor the annotation to a path a checkout could actually have. Reading from stdin gives every
+    # finding the uri "-", and `file=-` asks GitHub to anchor 11 annotations to a file named "-": the runner
+    # either drops them from the diff or puts them somewhere meaningless, which is worse than a repository-level
+    # annotation, because the finding looks reported and is not.
+    if uri and uri not in {"-", "<stdin>", "(stdin)"} and not uri.startswith("<"):
+        props.insert(0, f"file={esc(uri, prop=True)}")
         line = finding.get("line")
         if isinstance(line, int) and line > 0:
             props.insert(1, f"line={line}")
