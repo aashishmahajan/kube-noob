@@ -1019,11 +1019,16 @@ activity on Event objects -- and which they do not.
 Every row is read from the manifests `cluster-kube-apiserver-operator` generates the real policy from
 (openshift/library-go), not from the API type's summary comment, and the block names that source so a reader
 can check it. The difference matters: the comment says events are never logged, and the rule that dropped them
-was removed in OpenShift 4.18, so that row is decided by `--version` and reported as undecidable without one --
-telling a reader that a deleted Event left no trace on a 4.20 cluster whose audit log has it would be the worst
-kind of wrong here. Two other rows the comment does not mention: no profile records the body of a Secret, a
-ServiceAccount token, a Route, a token review, an OAuthClient or a MachineConfig, and nothing is recorded for
-the discovery and health endpoints. A `customRules` entry is reported per group with its precedence, and the
+was removed in OpenShift 4.18 -- and one release later on a hosted control plane, because HyperShift generates
+that policy from its own vendored copy, so ROSA HCP records Event activity from 4.19 and not from 4.18. That
+row is therefore decided by `--platform` and `--version` together, and reported as undecidable without a
+version; telling a reader that a deleted Event left no trace on a cluster whose audit log has it would be the
+worst kind of wrong here. Two other rows the comment does not mention: no profile records the body of a Secret, a
+ServiceAccount token, a Route, a token review or an OAuthClient, and nothing is recorded for the discovery and
+health endpoints. A third is version-dependent in the other direction: the `machineconfiguration.openshift.io`
+group's bodies ARE recorded under the body profiles before 4.18 and not from 4.18, and because the manifest
+spells that rule's key `resource` rather than `resources` -- which the loader drops -- it covers every resource
+of the group rather than the two it names. A `customRules` entry is reported per group with its precedence, and the
 cluster-wide sentence says which groups it does not describe, because the first matching entry wins.
 
 It also lists what no reading of that object can establish -- whether the records leave the cluster, how long

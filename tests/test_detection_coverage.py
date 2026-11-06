@@ -36,13 +36,22 @@ EXPECTED: dict[tuple[str, str], set[str]] = {
     ("None", "4.20"): set(),
     ("Default", "4.17"): {"request-metadata", "oauth-token-bodies"},
     ("Default", "4.20"): {"request-metadata", "oauth-token-bodies", "events"},
-    ("WriteRequestBodies", "4.17"): {"request-metadata", "oauth-token-bodies", "write-bodies"},
+    # `machine-config-bodies` is the mirror case: the machineconfiguration.openshift.io group joined the
+    # security-sensitive exclusion in release-4.18, so a WRITE body IS recorded for it at 4.17 and is not
+    # at 4.20. A row that could only say "from this release" would have had to be wrong one way or the other.
+    ("WriteRequestBodies", "4.17"): {
+        "request-metadata",
+        "oauth-token-bodies",
+        "write-bodies",
+        "machine-config-bodies",
+    },
     ("WriteRequestBodies", "4.20"): {"request-metadata", "oauth-token-bodies", "write-bodies", "events"},
     ("AllRequestBodies", "4.17"): {
         "request-metadata",
         "oauth-token-bodies",
         "write-bodies",
         "read-bodies",
+        "machine-config-bodies",
     },
     ("AllRequestBodies", "4.20"): {
         "request-metadata",
@@ -81,7 +90,9 @@ def test_each_profile_records_what_the_generated_policy_records(profile: str, ve
 def test_core_events_changed_in_4_18_and_the_row_follows_the_version() -> None:
     """The defect G249 fixed: the row said "never, under any profile", which is false from 4.18 (G249)."""
     assert detection.EVENTS_RECORDED_FROM == (4, 18)
-    for version, recorded in (("4.14", "no"), ("4.17", "no"), ("4.18", "yes"), ("4.20", "yes"), ("5.1", "yes")):
+    # A major this build has never seen is undecidable rather than "later than 4.18": there is no OpenShift 5,
+    # and if there were, nothing here would know what its policy drops (G252).
+    for version, recorded in (("4.14", "no"), ("4.17", "no"), ("4.18", "yes"), ("4.20", "yes"), ("5.1", "unknown")):
         row = next(r for r in _coverage({"profile": "Default"}, version)["records"] if r["id"] == "events")
         assert row["recorded"] == recorded, version
     # Without a version the row cannot be decided, and the block says so rather than picking an answer.
@@ -251,8 +262,74 @@ def test_the_category_table_cannot_name_a_profile_that_does_not_exist() -> None:
     for cat in detection.CATEGORIES:
         assert set(cat.yes_for) <= set(detection.PROFILES), cat.id
         assert cat.because and not cat.because.endswith("."), cat.id
-        assert cat.from_minor is None or cat.from_minor in ((4, 18),), cat.id
+        assert not (cat.from_minor and cat.until_minor), f"{cat.id}: one boundary or the other"
+        assert cat.from_minor in (None, (4, 18)), cat.id
+        assert cat.until_minor in (None, (4, 18)), cat.id
     assert detection.DEFAULT_PROFILE in detection.PROFILES
     assert {p for p, _ in EXPECTED} == set(detection.PROFILES)
     ids = [c.id for c in detection.CATEGORIES]
     assert len(ids) == len(set(ids))
+
+
+def test_a_hosted_control_plane_keeps_dropping_events_one_release_longer() -> None:
+    """HyperShift generates the hosted kube-apiserver's policy from its OWN vendored library-go (G252).
+
+    The events rule is in that vendored `base-policy.yaml` at release-4.18 and gone at release-4.19, so a
+    ROSA HCP cluster at 4.18 records no Event activity while a standalone 4.18 cluster does. Same object, same
+    profile, different answer -- which is the kind of fact a coverage statement exists to get right.
+    """
+    assert detection.EVENTS_RECORDED_FROM_HOSTED == (4, 19)
+    assert "rosa-hcp" in detection.HOSTED_PLATFORMS
+    for platform, version, recorded in (
+        ("openshift", "4.18", "yes"),
+        ("rosa-classic", "4.18", "yes"),
+        ("rosa-hcp", "4.17", "no"),
+        ("rosa-hcp", "4.18", "no"),
+        ("rosa-hcp", "4.19", "yes"),
+        ("rosa-hcp", "4.20", "yes"),
+    ):
+        cov = detection.coverage(load_documents(_apiserver({"profile": "Default"})), version, platform)
+        assert cov is not None
+        row = next(r for r in cov["records"] if r["id"] == "events")
+        assert row["recorded"] == recorded, (platform, version)
+        assert cov["hostedControlPlane"] is (platform == "rosa-hcp")
+    hosted = detection.coverage(load_documents(_apiserver({"profile": "Default"})), "4.18", "rosa-hcp")
+    assert hosted is not None and "hosted control plane" in hosted["statement"]
+
+
+def test_a_kubernetes_version_is_mapped_rather_than_compared() -> None:
+    """`--version 1.33` is a documented input for an OpenShift target, and 1.33 < 4.18 decided a row (G252)."""
+    for version, minor, events in (
+        ("1.33", "4.20", "yes"),
+        ("1.31", "4.18", "yes"),
+        ("1.30", "4.17", "no"),
+        ("4.18", "4.18", "yes"),
+        ("v4.18.3", "4.18", "yes"),
+        ("1.24", None, "unknown"),
+        ("3.11", None, "unknown"),
+        ("latest", None, "unknown"),
+        ("", None, "unknown"),
+    ):
+        cov = detection.coverage(load_documents(_apiserver({"profile": "Default"})), version, "openshift")
+        assert cov is not None
+        assert cov["openshiftMinor"] == minor, version
+        row = next(r for r in cov["records"] if r["id"] == "events")
+        assert row["recorded"] == events, version
+    unknown = detection.coverage(load_documents(_apiserver({"profile": "Default"})), "latest", "openshift")
+    assert unknown is not None
+    assert any("names no OpenShift minor" in w for w in unknown["cannotSay"])
+
+
+def test_a_metadata_that_is_not_a_mapping_does_not_crash_the_audit() -> None:
+    """`metadata: hello` is truthy, so `(d.data.get("metadata") or {}).get(...)` raised AttributeError and
+    `kube-noob audit` exited 1 with a traceback -- and exit 1 means "findings at or above --fail-on" (G252)."""
+    pair = (
+        "apiVersion: config.openshift.io/v1\nkind: APIServer\nmetadata: hello\nspec: {audit: {profile: None}}\n"
+        "---\napiVersion: config.openshift.io/v1\nkind: APIServer\nmetadata: {name: cluster}\nspec: {}\n"
+    )
+    cov = detection.coverage(load_documents(pair), "4.20")
+    assert cov is not None and cov["profile"] == "Default" and cov["from"] == "APIServer/cluster"
+    for meta in ("hello", ["a"], 7):
+        text = yaml.safe_dump({"apiVersion": "config.openshift.io/v1", "kind": "APIServer", "metadata": meta})
+        two = text + "---\n" + _apiserver({"profile": "None"}, name="other")
+        assert detection.coverage(load_documents(two), "4.20") is not None

@@ -439,6 +439,12 @@ WEAK_PLAYBOOK = 0.4  # a playbook below this confidence matched on a word or two
 _NAME_SAFE_BOUNDARY = r"(?:(?<![\w/.:-])(?=\w)|(?<=\w)(?![\w/.:-]))"
 
 
+def _jira_projects() -> tuple[str, ...]:
+    from kube_noob.jira_catalog import DEFAULT_PROJECTS
+
+    return tuple(k for k in DEFAULT_PROJECTS if k.isalpha())
+
+
 def _route(source: str) -> re.Pattern[str]:
     """Compile a route pattern: name-safe boundaries, and anchored so the cost is linear.
 
@@ -476,32 +482,88 @@ def _refuse_a_word_in_two_groups(source: str) -> None:
     groups = re.findall(r"\(\?=(.*?)\)(?=\(\?=|\Z)", source.replace("\n", ""), re.S)
     if len(groups) < 2:
         return
-    seen: dict[str, int] = {}
-    for i, group in enumerate(groups):
-        for word in _literal_words(group):
-            if seen.get(word) not in (None, i):
-                raise ValueError(f"{word!r} is in two lookahead groups of a route, so one word matches both")
-            seen[word] = i
+    words = [_literal_words(group) for group in groups]
+    for i, mine in enumerate(words):
+        for j, theirs in enumerate(words):
+            if i == j:
+                continue
+            for word in mine:
+                # Equal, or CONTAINED as a whole word in a phrase of the other group. The containment half is
+                # the generalisation: the catalogue route required `rules?` in one group and the phrase
+                # `every rule` in another, and "every rule" on its own satisfied both -- a word in two groups
+                # by another spelling, which is the same defect this guard exists for (G252).
+                hit = next((t for t in theirs if t == word or re.search(rf"\b{re.escape(word)}\b", t)), None)
+                if hit is not None:
+                    raise ValueError(
+                        f"{word!r} is in two lookahead groups of a route (as {hit!r}), so one phrase matches both"
+                    )
+
+
+#: How many expansions one lookahead group may produce. A nested alternation multiplies, and a guard that can
+#: be made to hang on a pathological pattern is a guard somebody removes.
+_MAX_EXPANSIONS = 400
+
+
+def _expand(source: str) -> set[str]:
+    """Every literal string a (simple) regex alternative can match, as words.
+
+    Hand-stripping the syntax was not enough. `rules?` came out as "rules" and never as "rule", and
+    `reach(?:es|ed|able)?` came out as "reach es" -- so the guard could not see that the catalogue route's
+    group of phrases contained the very word its other group required, and `every rule` alone satisfied both
+    halves of a route that was written to need two things (G252). This expands the two constructs the table
+    actually uses: a nested `(?:a|b)` alternation, and a `?` that makes the preceding character or group
+    optional.
+    """
+    out = {source}
+    for _ in range(12):  # each pass resolves the leftmost construct; the table nests two deep at most
+        grown: set[str] = set()
+        changed = False
+        for item in out:
+            m = re.search(r"\((?:\?:)?([^()]*)\)(\?)?", item)
+            if m is None:
+                grown.add(item)
+                continue
+            changed = True
+            head, tail = item[: m.start()], item[m.end() :]
+            options = m.group(1).split("|")
+            if m.group(2):  # the whole group is optional
+                options = [*options, ""]
+            grown.update(head + opt + tail for opt in options)
+        out = grown
+        if not changed or len(out) > _MAX_EXPANSIONS:
+            break
+    # A `?` on a bare character: both spellings, so `rules?` is `rule` and `rules`.
+    for _ in range(6):
+        grown = set()
+        changed = False
+        for item in out:
+            m = re.search(r"(?<!\\)(.)\?", item)
+            if m is None:
+                grown.add(item)
+                continue
+            changed = True
+            head, tail = item[: m.start()], item[m.end() :]
+            grown.update((head + m.group(1) + tail, head + tail))
+        out = grown
+        if not changed or len(out) > _MAX_EXPANSIONS:
+            break
+    return out
 
 
 def _literal_words(group: str) -> set[str]:
-    """The literal words a lookahead group matches on.
-
-    The regex syntax has to come out first, and the first version of this did not do it properly: it read
-    `\bfail\b` as the word "bfail", so the two groups of a route never appeared to share anything and the guard
-    only fired where the tokens happened to line up. It still caught three real defects, which is how a guard
-    that is right by accident stays unnoticed.
-    """
-    cleaned = group.replace(r"\b", " ")
-    cleaned = re.sub(r"\\[a-zA-Z]|\(\?:|\(\?=|\(|\)|[*+?.\[\]{}^$]|\d", " ", cleaned)
-    out: set[str] = set()
-    for part in cleaned.split("|"):
-        word = " ".join(part.split())
-        # Two letters is enough to be a word here (`ci`, `pr`), and a two-letter word in both
-        # groups would make the route fire on it alone just as surely as a long one.
-        if len(word) >= 2 and all(c.isalpha() or c in " -" for c in word):
-            out.add(word.lower())
-    return out
+    """The literal words a lookahead group matches on, with its alternations and optionals expanded."""
+    words: set[str] = set()
+    for item in _expand(group.replace(r"\b", " ")):
+        # What is left of the syntax: character classes, escapes and quantifiers become a space, which keeps
+        # `fine-?tun\w*` from reading as one word with the quantifier inside it.
+        cleaned = re.sub(r"\\[a-zA-Z]|[*+?.\[\]{}^$]|\d", " ", item)
+        for part in cleaned.split("|"):
+            word = " ".join(part.split())
+            # Two letters is enough to be a word here (`ci`, `pr`), and a two-letter word in both groups would
+            # make the route fire on it alone just as surely as a long one.
+            if len(word) >= 2 and all(c.isalpha() or c in " -" for c in word):
+                words.add(word.lower())
+    return words
 
 
 #: What answers a typed question that names a job this product does. Each row is (what the question is asking,
@@ -517,6 +579,12 @@ def _literal_words(group: str) -> set[str]:
 #: fires on the question it is for and not on a pasted log that happens to share a word, so each one requires at
 #: least two of the asking words rather than any one of them. A test holds every command here to being a command
 #: that exists.
+#: The Jira projects the local corpus actually syncs, as an alternation. Derived, not retyped: `STOR-1234`
+#: and `SPLAT-1234` look exactly like a key and are in no synced project, so routing them to `kube-noob
+#: ticket` promised an answer the command cannot give (G252).
+_JIRA_PROJECTS = "|".join(sorted(_jira_projects(), key=len, reverse=True))
+
+
 CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     # First, and above the exposure route on purpose: a secret in a repository is a question about files, and
     # the attack-path scan reads a cluster. Asked "which secrets are exposed in the public repo?" the router
@@ -534,12 +602,14 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     ),
     (
         _route(
-            # Not a question about a repository. "which secrets are exposed in the public repo?" is about Git
-            # and this command reads a cluster, so it was answering with an attack-path scan of manifests: a
-            # different question, and a wrong answer. The route above this one answers that question (G247).
-            r"(?i)(?!.*\b(?:repo|repos|repositor\w+|git|github|gitlab|commit\w*|source ?control|"
-            r"version ?control)\b)"
-            r"(?=.*\b(?:exposed?|exposure|route|ingress|loadbalancer|nodeport|lateral|"
+            # G247 put a negative lookahead for repository words here, to keep "which secrets are exposed in
+            # the public repo?" off this route. It silenced real questions instead -- "are the github actions
+            # runner pods exposed to the internet?", "which exposed services in the gitops repo could reach a
+            # node?", and anything with the word "committed" in it -- and the justification was wrong anyway:
+            # this command reads a DIRECTORY, which is usually a repository checkout. The secrets route above
+            # comes first in the table, so the repository question gets the right answer first and this one
+            # second, which is what the cap of two is for (G252).
+            r"(?i)(?=.*\b(?:exposed?|exposure|route|ingress|loadbalancer|nodeport|lateral|"
             r"blast ?radius|attack ?paths?|reach(?:es|ed|able)?|takeover|escape)\b)"
             # "pods" is NOT enough on its own here: "can a pod in shop reach a pod in payments" is a
             # NetworkPolicy question, and this route was answering it before `policy reach` did. The
@@ -558,14 +628,19 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
         _route(
             # Not an admission denial: "my pod is being denied by pod security admission" has `pod` twice --
             # once in `pod security` -- so `\bpod\b.*\bpod\b` matched and the reachability checker answered a
-            # question `policy explain` answers (G247).
-            r"(?i)(?!.*\b(?:scc|podsecurity|pod ?security|psa|kyverno|gatekeeper|admission|webhook|quota|"
-            r"limitrange|forbidden)\b)"
+            # question `policy explain` answers (G247). The guard is the DENIAL PHRASE, not the bare nouns:
+            # naming a webhook, a quota or Kyverno is ordinary in a reachability question ("can a pod in shop
+            # reach the kyverno webhook pod?"), and those nouns silenced it (G252).
+            r"(?i)(?!.*\b(?:denied|refused|rejected|blocked|forbidden) by\b.{0,40}"
+            r"\b(?:scc|podsecurity|pod ?security|psa|kyverno|gatekeeper|admission|webhook|quota|limitrange)\b)"
             r"(?=.*\b(?:reach|talk to|connect to|allowed|denied|blocked)\b)"
             # ONE lookahead over the whole alternation. Flat it parsed as `(?=(.*A)|(B)|(C))`, where only the
             # first branch had `.*` and the other two worked only because `search` scanned the string; anchored,
             # they would silently never match (G237).
-            r"(?=.*(?:\bnetwork ?polic\w+|\bfrom\b.*\bto\b.*\bnamespace\b|\bpod\b.*\bpod\b))"
+            # The gaps are bounded. Unbounded, `\bfrom\b.*\bto\b.*\bnamespace\b` cost 32 ms on a 600-character
+            # line of "from to from to", paid on every one-line paste: three nested `.*` over one string is
+            # the cost the anchoring was meant to remove, and a real question keeps its clauses short (G252).
+            r"(?=.*(?:\bnetwork ?polic\w+|\bfrom\b.{0,60}\bto\b.{0,60}\bnamespace\b|\bpod\b.{0,80}\bpod\b))"
         ),
         "kube-noob policy reach --from <ns>/<pod> --to <ns>/<pod> --port <port> -f <dir>",
         "names the deciding tier, policy and rule, and why every other rule did not match",
@@ -767,16 +842,20 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     # Added after a third sweep of realistic questions (G247). Each of these had an exact command answer and
     # no route at all, which on a product whose pitch is "paste anything" reads as "it cannot do that".
     (
-        # An OCPBUGS/OCPNODE key is an anchor the way a KN- rule id is: nothing else looks like it.
-        _route(r"(?i).*?\b(?:OCPBUGS|OCPNODE|RFE|SPLAT|STOR|NETOBSERV|CNV)-\d{3,7}\b"),
+        # A ticket key is an anchor the way a KN- rule id is: nothing else looks like it. The projects come
+        # from `jira_catalog.DEFAULT_PROJECTS` rather than a list retyped here, because a key the corpus does
+        # not sync would route to a command that answers "not in the local copy" (G252).
+        _route(rf"(?i).*?\b(?:{_JIRA_PROJECTS})-\d{{3,7}}\b"),
         "kube-noob ticket <KEY>",
         "what became of that ticket in the local copy of Red Hat's public Jira: status, fix versions, workaround",
     ),
     (
         _route(
-            r"(?i)(?=.*\b(?:audit ?log\w*|audit ?logging|api ?requests?|log ?requests?|recorded?|"
+            # Not bare "recorded": "events in the cluster are recorded in etcd" and "the request was recorded
+            # by the apiserver" are statements about storage, not questions about the audit policy (G252).
+            r"(?i)(?=.*\b(?:audit ?log\w*|audit ?polic\w+|audit ?profile|api ?requests?|log ?requests?|"
             r"detection ?coverage)\b)"
-            r"(?=.*\b(?:cluster|apiserver|api ?server|turned ?on|enabled|disabled|off|profile|who|events?)\b)"
+            r"(?=.*\b(?:cluster|apiserver|api ?server|turned ?on|enabled|disabled|off|who|events?)\b)"
         ),
         "kube-noob audit -f apiserver.yaml --platform openshift",
         "auditing turned off, for everyone or for one group, is KN-S035, and the report states which categories "
@@ -786,8 +865,8 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
         _route(
             # Not a pull failure: "image pull failed from quay" is a malfunction with a cause, and the
             # diagnosis answers it. This route is about which registries are approved (G247).
-            r"(?i)(?!.*\b(?:failed|failing|backoff|unauthoriz\w*|denied|forbidden|not found|timeout|"
-            r"refused|error)\b)"
+            r"(?i)(?!.*\b(?:fail\w*|backoff|unauthoriz\w*|denied|forbidden|not found|timeout|"
+            r"refused|err\w*)\b)"
             r"(?=.*\b(?:registry|registries|quay|dockerhub|docker ?hub|unapproved|approved|allowlist|"
             r"whitelist|digest|pinned|mutable)\b)"
             r"(?=.*\b(?:images?|pull\w*|tags?|where ?from|provenance)\b)"
@@ -810,8 +889,11 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     (
         _route(
             # `watch` needs an object, not the bare verb: "the namespace has a watch annotation" matched it.
-            r"(?i)(?=.*(?:\b(?:incidents?|overnight|last ?night|while I was|happened|watching)\b"
-            r"|\bwatch (?:a|the|my|this|for)\b|\bkeep an eye\b))"
+            # Not bare "happened": "what happened to my pods?" is a diagnosis question, and the playbooks
+            # answer it. A time word or the word `incident` is what makes it a question about the watch (G252).
+            r"(?i)(?=.*(?:\b(?:incidents?|overnight|last ?night|while I was|watching)\b"
+            r"|\bhappened (?:in|overnight|last|while|yesterday)\b|\bwatch (?:a|the|my|this|for)\b"
+            r"|\bkeep an eye\b))"
             r"(?=.*\b(?:namespace|namespaces|cluster|pods?|workload|remember|record|ledger)\b)"
         ),
         "kube-noob watch -n <namespace> --once",
@@ -823,22 +905,25 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
             # The second group is PHRASES, not the words `every`, `all`, `which` and `what`: with those,
             # "check all pods", "which checks failed in CI" and "liveness check failed on all replicas" all
             # asked for the rule catalogue. A question about the catalogue says so (G247).
+            # One group names the thing, the other asks for it, and NEITHER contains the other's words --
+            # which the import guard now enforces by containment, because "every rule" alone used to satisfy
+            # both halves of this route (G252).
             r"(?i)(?=.*\b(?:rules?|checks?|catalogue|catalog)\b)"
-            # Written out flat rather than as `(?:rule|check)` inside each phrase: a nested alternation makes
-            # the import guard read a bare `checks` as a word of this group, and it is right to refuse that --
-            # a word in both groups fires on one word. Flat phrases say what is meant and pass (G247).
-            r"(?=.*(?:\bdo you have\b|\bdo you check\b|\bdo you support\b|\bdoes kube-?noob\b"
-            r"|\bevery rule\b|\bevery check\b|\bhow many rules\b|\bhow many checks\b|\brule ids?\b"
-            r"|\bfull catalogue\b|\blist the rules\b|\blist all rules\b|\blist every rule\b"
-            r"|\blist the checks\b|\blist all checks\b))"
+            r"(?=.*(?:\bdo you have\b|\bdo you support\b|\bdoes kube-?noob\b|\bhow many\b"
+            r"|\blist the\b|\blist all\b|\blist every\b|\bsee every\b|\bshow me\b|\bwhat are\b"
+            r"|\bare there\b))"
         ),
         "kube-noob rules",
         "every rule with its stage, severity, family and the NIST controls it is evidence about",
     ),
     (
         _route(
-            r"(?i)(?=.*\b(?:train|training|fine-?tun\w*|reward|rl|grade|grading|bench|benchmark)\b)"
-            r"(?=.*\b(?:model|models|agent|llm|dataset|tasks?|deterministic|score)\b)"
+            # Not the bare words `train` and `grade`: "train the agent on namespaces" and "deploy a production
+            # grade model" are not questions about the training bench (G252).
+            r"(?i)(?=.*(?:\b(?:fine-?tun\w*|reward|rewards|benchmark|bench)\b"
+            # Not bare `grade`: "deploy a production grade model" is not a question about grading (G252).
+            r"|\breinforcement learning\b|\bgrade (?:the|its|an|my) \w+\b|\bgrading\b))"
+            r"(?=.*\b(?:model|models|llm|agent|dataset|tasks?|deterministic|score)\b)"
         ),
         "kube-noob train bench --tasks all",
         "the deterministic tasks and their scoring, so a model's answer is graded against the rules rather than "
@@ -868,8 +953,11 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
 #: "why did my helm upgrade fail" are exactly the questions two routes exist for (G237).
 _A_MALFUNCTION = re.compile(
     r"(?i)\b(?:crashloopbackoff|imagepull\w*|oomkilled|evicted|unschedulable|terminating|crash(?:es|ing|ed)?|"
-    r"restarting|stuck|pending|not ready|unready|failing readiness|degraded|flapping|hung|hanging|"
-    r"losing|lose|goes down|went down|outage|unavailable|stack ?trace|traceback)\b"
+    r"restart(?:s|ed|ing)?|stuck|pending|not ready|unready|failing readiness|degraded|flapping|hung|hanging|"
+    r"losing|lose|goes down|went down|outage|unavailable|stack ?trace|traceback|"
+    # A pasted connection failure, which shares every word with the exposure and reachability routes: "Failed
+    # to reach the node ... no route to host" was answered with an attack-path scan (G252).
+    r"failed to reach|unable to reach|no route to host|i/o timeout|connection refused)\b"
 )
 
 MAX_ROUTES = 2
@@ -887,9 +975,15 @@ def capability_routes(text: str) -> list[dict[str, str]]:
     if _A_MALFUNCTION.search(text):
         return []
     out: list[dict[str, str]] = []
+    seen: set[str] = set()
     for pattern, command, why in CAPABILITY_ROUTES:
-        if pattern.search(text):
-            out.append({"command": command, "why": why})
+        # One command, once. Four routes answer with `kube-noob audit -f <dir>` now, and a question that hit
+        # two of them printed the same command twice with two explanations -- which reads as two suggestions
+        # and is one (G252).
+        if command in seen or not pattern.search(text):
+            continue
+        seen.add(command)
+        out.append({"command": command, "why": why})
         if len(out) == MAX_ROUTES:
             break
     return out

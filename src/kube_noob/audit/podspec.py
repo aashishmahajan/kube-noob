@@ -210,6 +210,26 @@ class ContainerRef:
         return self.label or str(self.container.get("name", "<unnamed>"))
 
 
+def operator_supplied_images(doc: Document) -> list[PathT]:
+    """The field-shaped containers in this document whose image an operator supplies, not the manifest.
+
+    A KServe predictor written as `model: {modelFormat: {name: sklearn}, storageUri: ...}` -- the canonical
+    form, and the one in KServe's own sample -- carries no `image`: the ServingRuntime for that model format
+    provides it. KubeRay's `autoscalerOptions` is the same shape. Reporting "this container has no image" on
+    those was a HIGH finding on correct manifests, and on the upstream sample (G252), so the rule skips them
+    and the report says instead that the image was not read.
+    """
+    out: list[PathT] = []
+    for pt in pod_templates(doc):
+        for c in containers(pt):
+            if not c.label:
+                continue  # an entry in a `containers:` list must carry its own image
+            image = c.container.get("image")
+            if not isinstance(image, str) or not image.strip():
+                out.append(c.path)
+    return out
+
+
 def pod_template(doc: Document) -> PodTemplate | None:
     """The one pod spec of an ordinary workload kind. Kinds that carry several have `pod_templates`."""
     path = POD_SPEC_PATHS.get(doc.kind)

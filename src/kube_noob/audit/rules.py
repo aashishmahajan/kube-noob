@@ -1972,6 +1972,12 @@ def _s012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, _pt, c in _containers(ctx):
         image = c.container.get("image")
         if not isinstance(image, str) or not image:
+            if c.label:
+                # A field-shaped container -- a KServe `model:`, one of its framework shorthands, KubeRay's
+                # injected autoscaler -- gets its image from the ServingRuntime or the operator, so an absent
+                # one is the canonical form rather than a defect. The report says the image was not read
+                # instead of calling the upstream sample a HIGH finding (G252).
+                continue
             yield r.finding(d, c.path, f"Container '{c.name}' has no image.", severity=Severity.HIGH)
             continue
         tag, digest = image_tag(image)

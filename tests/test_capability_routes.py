@@ -258,6 +258,20 @@ def test_a_pasted_denial_is_left_to_the_explainer_that_already_ran() -> None:
         "train the team on namespaces",
         "the model deployment in namespace ml",
         "list all namespaces",
+        # G252: the third red team's over-matches, each on a route the second pass added.
+        "train the agent on namespaces",
+        "deploy a production grade model",
+        "the training job pod in namespace ml needs a model volume",
+        "image pull errored from quay",
+        "why did the pod restart overnight?",
+        "what happened to my pods?",
+        "events in the cluster are recorded in etcd",
+        "the request was recorded by the apiserver",
+        "see STOR-1234 for details",
+        "every rule",
+        "rule ids",
+        "do you check",
+        'Failed to reach the node node="worker-1": no route to host',
     ],
 )
 def test_nothing_is_routed_for_text_that_only_shares_words(text: str) -> None:
@@ -283,6 +297,30 @@ def test_every_route_is_anchored_so_the_cost_stays_linear() -> None:
     ms per call on a 600-character line that matches nothing, paid on every one-line paste, on every surface."""
     for pattern, command, _why in CAPABILITY_ROUTES:
         assert pattern.pattern.startswith("(?i)\\A"), command
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "zzz " * 150,
+        ("reach " + "from to " * 74)[:600],  # three nested `.*` on one line: 32 ms before G252
+        ("reach " + "pod " * 140)[:600],
+        ("exposed to the " + "to the " * 80)[:600],
+        ("ci check " * 66)[:600],
+        ("OCPBUGS-" * 70)[:600],
+    ],
+)
+def test_no_crafted_line_costs_more_than_a_few_milliseconds(text: str) -> None:
+    """The anchoring made the table linear in the line; a nested unbounded gap made one route quadratic in it
+    again, and `test_a_long_non_matching_line_is_cheap` only ever tried one input (G252)."""
+    import time
+
+    capability_routes(text)  # compile
+    start = time.perf_counter()
+    for _ in range(5):
+        capability_routes(text)
+    per_call = (time.perf_counter() - start) / 5
+    assert per_call < 0.015, f"{per_call * 1000:.1f} ms on {text[:40]!r}"
 
 
 def test_a_long_non_matching_line_is_cheap() -> None:
@@ -351,12 +389,14 @@ def test_a_question_with_a_direct_answer_is_not_also_given_pod_triage_steps() ->
     assert "gather" not in out["ran"]
 
 
-def test_a_question_about_a_repository_is_not_answered_with_a_cluster_scan() -> None:
-    """S6 from the second red team: "which secrets are exposed in the public repo?" got `posture scan`.
+def test_a_question_about_a_repository_is_answered_by_the_audit_first() -> None:
+    """S6 from the second red team: "which secrets are exposed in the public repo?" got `posture scan` ONLY.
 
-    It is a question about files in Git, and that command walks Routes, ServiceAccounts and RBAC in a cluster.
-    The negative lookahead is the fix, and it is asserted here as well as by the route order, because the two
-    routes would otherwise both match and the cap of two would simply hide the wrong one behind the right one.
+    G247 fixed that with a negative lookahead for repository words on the exposure route, and G252 took it
+    back out: it silenced real questions ("are the github actions runner pods exposed to the internet?") and
+    its justification was wrong -- `posture scan -f <dir>` reads a directory, which is usually a repository
+    checkout. Table order does the work instead, so the question gets the right answer FIRST and the
+    attack-path scan second, which is what two slots are for.
     """
     for question in (
         "which secrets are exposed in the public repo?",
@@ -365,7 +405,58 @@ def test_a_question_about_a_repository_is_not_answered_with_a_cluster_scan() -> 
     ):
         routes = [r["command"] for r in capability_routes(question)]
         assert routes and "audit" in routes[0], f"{question!r} -> {routes}"
-        assert not any("posture scan" in r for r in routes), f"{question!r} -> {routes}"
+
+
+def test_a_repository_word_does_not_silence_a_real_exposure_question() -> None:
+    """The negative lookahead G247 added took these away, which is the defect it was fixing, reversed (G252)."""
+    for question in (
+        "are the github actions runner pods exposed to the internet, and what can they reach?",
+        "which exposed services in the gitops repo could reach a node?",
+        "we are committed to keeping the ingress internet-facing, what can it reach?",
+    ):
+        routes = [r["command"] for r in capability_routes(question)]
+        assert any("posture scan" in r for r in routes), f"{question!r} -> {routes}"
+
+
+def test_a_reachability_question_may_name_a_webhook_or_a_quota() -> None:
+    """G247's admission guard was the bare nouns, so naming Kyverno or a namespace called quota silenced the
+    reachability checker entirely. The guard is the denial PHRASE now (G252)."""
+    for question in (
+        "can a pod in shop reach the kyverno webhook pod?",
+        "can a pod in namespace quota reach a pod in namespace billing?",
+        "is traffic from the webhook namespace to the apiserver namespace allowed by network policy?",
+    ):
+        routes = [r["command"] for r in capability_routes(question)]
+        assert any("policy reach" in r for r in routes), f"{question!r} -> {routes}"
+    # And the denial it was written for still goes to the explainer.
+    denial = capability_routes("my pod is being denied by pod security admission, what now")
+    assert denial and "policy explain" in denial[0]["command"]
+
+
+def test_one_command_is_suggested_once() -> None:
+    """Four routes answer with `kube-noob audit -f <dir>`, and a question hitting two of them printed it
+    twice with two explanations -- which reads as two suggestions and is one (G252)."""
+    for question in (
+        "is it ok to deploy an image tagged latest from dockerhub?",
+        "is this RayCluster manifest safe to ship? it has a privileged container",
+        "does the audit check the KServe InferenceService yaml before we deploy?",
+    ):
+        commands = [r["command"] for r in capability_routes(question)]
+        assert len(commands) == len(set(commands)), f"{question!r} -> {commands}"
+
+
+def test_the_guard_refuses_a_phrase_that_contains_the_other_groups_word() -> None:
+    """The generalisation (G252): `rules?` in one group and the phrase `every rule` in another meant "every
+    rule" alone satisfied a route written to need two things, and the old word-level guard could not see it."""
+    from kube_noob import insight
+
+    with pytest.raises(ValueError, match="two lookahead groups"):
+        insight._route(r"(?i)(?=.*\b(?:rules?|checks?)\b)(?=.*\bevery rule\b)")
+    with pytest.raises(ValueError, match="two lookahead groups"):
+        insight._route(r"(?i)(?=.*\breach(?:es|ed|able)?\b)(?=.*\breach\b)")
+    # And the expansion it rests on: `rules?` is `rule` as well as `rules`.
+    assert {"rule", "rules"} <= insight._literal_words(r".*\b(?:rules?)\b")
+    assert {"reach", "reached", "reachable"} <= insight._literal_words(r".*\breach(?:es|ed|able)?\b")
 
 
 def test_a_negative_lookahead_may_lead_a_route_and_is_still_anchored() -> None:

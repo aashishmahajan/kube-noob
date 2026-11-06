@@ -866,3 +866,61 @@ def test_a_probe_on_an_embedded_template_counts_as_a_probe() -> None:
         "containers": [{"name": "h", "image": "ray:2", "readinessProbe": {"httpGet": {"port": 8265, "path": "/"}}}]
     }
     assert manifests_have_probes(yaml.safe_dump(ray))
+
+
+def test_a_container_whose_image_an_operator_supplies_is_not_a_finding() -> None:
+    """KServe's own sample has no `image` on the predictor, and the catalogue called that a HIGH (G252).
+
+    `model: {modelFormat: {name: sklearn}, storageUri: ...}` is the canonical form: the ServingRuntime for
+    that model format supplies the image. `KN-S012` reported "Container 'model' has no image" at HIGH, and
+    since G248 the webhook denied the upstream sample under `enforce: [KN-S012]`. The report records that the
+    image was not read instead, because the container IS audited for everything else.
+    """
+    import yaml
+
+    from kube_noob.audit.engine import analyze
+    from kube_noob.audit.podspec import operator_supplied_images
+    from kube_noob.yamlio import load_documents
+
+    isvc = yaml.safe_dump(
+        {
+            "apiVersion": "serving.kserve.io/v1beta1",
+            "kind": "InferenceService",
+            "metadata": {"name": "sklearn-iris", "namespace": "shop"},
+            "spec": {
+                "predictor": {
+                    "model": {
+                        "modelFormat": {"name": "sklearn"},
+                        "storageUri": "gs://kfserving-examples/models/sklearn/1.0/model",
+                    }
+                }
+            },
+        }
+    )
+    report = analyze(isvc, platform="kubernetes")
+    assert "KN-S012" not in {f.rule_id for f in report.findings}
+    assert any("take their image from an operator" in a for a in report.assumptions), report.assumptions
+    assert [tuple(p) for p in operator_supplied_images(load_documents(isvc)[0])] == [("spec", "predictor", "model")]
+    # A container in a `containers:` list must still carry its own image: that is a real HIGH.
+    pod = yaml.safe_dump(
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {"name": "p", "namespace": "shop"},
+            "spec": {"containers": [{"name": "c"}]},
+        }
+    )
+    plain = analyze(pod, platform="kubernetes")
+    assert "KN-S012" in {f.rule_id for f in plain.findings}
+    assert not [a for a in plain.assumptions if "take their image from an operator" in a]
+    # And one that DOES name an image is measured as any other container is.
+    with_image = yaml.safe_dump(
+        {
+            "apiVersion": "serving.kserve.io/v1beta1",
+            "kind": "InferenceService",
+            "metadata": {"name": "m", "namespace": "shop"},
+            "spec": {"predictor": {"model": {"image": "quay.io/o/m:latest"}}},
+        }
+    )
+    tagged = analyze(with_image, platform="kubernetes")
+    assert "KN-S012" in {f.rule_id for f in tagged.findings}

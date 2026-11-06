@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from kube_noob.audit import detection
 from kube_noob.audit.model import Report, Severity, Stage
-from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_GROUPS, refused_group, unread_pod_specs
+from kube_noob.audit.podspec import (
+    EMBEDDED_POD_SPEC_GROUPS,
+    operator_supplied_images,
+    refused_group,
+    unread_pod_specs,
+)
 from kube_noob.audit.redteam import red_team
 from kube_noob.audit.rules import RULES, AuditContext, run_rules
 from kube_noob.catalog import OPENSHIFT_FAMILY, PLATFORMS, k8s_version_for
@@ -86,6 +91,20 @@ def analyze(
             f"{f' and {len(unread) - 5} more' if len(unread) > 5 else ''}. Audit the Deployments the operator "
             "creates from them, or ask for the kind to be added with its published schema."
         )
+    supplied: list[str] = []
+    for d in docs:
+        for path in operator_supplied_images(d):
+            supplied.append(f"{d.ref()} at {'.'.join(str(x) for x in path)}")
+    if supplied:
+        # Said, not assumed silently: the container is audited for everything else, and its image -- the one
+        # thing a registry allowlist, a digest pin and a scanner all work from -- is in a ServingRuntime this
+        # bundle does not carry (G252).
+        report.assumptions.append(
+            f"{len(supplied)} container(s) take their image from an operator rather than from this manifest, "
+            f"so no image rule was evaluated for them: {', '.join(supplied[:5])}"
+            f"{f' and {len(supplied) - 5} more' if len(supplied) > 5 else ''}. The ServingRuntime or operator "
+            "that supplies the image decides what actually runs."
+        )
     for d in docs:
         group = refused_group(d)
         if group is not None:
@@ -110,7 +129,7 @@ def analyze(
     # ignores the object (the rule returns early) while drawing an AU-2 conclusion from it says two things at
     # once; `kube-noob validate` is a schema command and has no business carrying a coverage statement (G249).
     if platform in OPENSHIFT_FAMILY and Stage.AUDIT in stages:
-        report.detection_coverage = detection.coverage(docs, version)
+        report.detection_coverage = detection.coverage(docs, version, platform)
     if schema and Stage.VALIDATE in stages:
         schema_findings, notes = validate_documents(docs)
         findings.extend(schema_findings)
