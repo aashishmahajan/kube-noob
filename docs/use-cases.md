@@ -808,11 +808,16 @@ a Service or NetworkPolicy selector that does not match the labels the manifest 
 decline, because the label it asks for may be one the operator adds -- telling you a working NetworkPolicy
 protects nothing would be worse than saying nothing.
 
-Two things it will not do. It reads these four kinds only, each at paths taken from the published CRD schema, and
-it checks the API group before reading: a CRD of the same name from somewhere else is left alone, and the report
-says which group it declared and that its pods were not audited, rather than going quiet. And a kind that is not
-in that list is not quietly treated as having no pods -- if you run a workload operator kube-noob does not know,
-say so and it can be added with its schema, because a guessed path produces a confident wrong finding.
+It reads these four kinds in full, each at paths taken from the published CRD schema, and it checks the API group
+before reading: a CRD of the same name from somewhere else is left alone, and the report says which group it
+declared and that its pods were not audited rather than going quiet.
+
+**Any other workload CRD is named, not passed.** There are far more of them than four -- Argo Rollouts, Knative
+Services, Kubeflow Notebooks, the training-operator jobs, Seldon, Volcano, JobSet, Flink, ECK -- and a guessed
+path would produce a confident wrong finding, so kube-noob does not guess. It recognises the shape instead: an
+object of a kind it has no reader for that contains a pod spec is reported as one it did not audit, with the
+object and the path, and `posture scan` records the same in `notRead`. You get a gap you can see rather than a
+clean report you cannot trust, and a kind worth reading properly can be added with its published schema.
 
 ```bash
 kube-noob audit -f serving/            # the same 92 rules, now reaching the components

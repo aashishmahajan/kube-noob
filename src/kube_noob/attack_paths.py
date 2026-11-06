@@ -235,6 +235,14 @@ class Inventory:
             self.dropped_secrets += 1  # never analysed, never echoed
             return
         if k not in KINDS:
+            # An object of a kind this scan does not model is normally nothing to say: a ConfigMap is not a path.
+            # One that carries a pod spec is different -- those pods can hold every capability this scan ranks,
+            # and dropping them unmentioned reported "0 workloads" for a file full of Argo Rollouts (G232).
+            from kube_noob.audit.podspec import unread_pod_specs
+            from kube_noob.yamlio import Document
+
+            if unread_pod_specs(Document(index=0, data=obj)):
+                self.not_read.append(f"{_ref(obj)}: carries a pod spec kube-noob has no reader for, so not ranked")
             return
         if sum(len(v) for v in self.objects.values()) >= MAX_OBJECTS:
             raise ScanError(f"more than {MAX_OBJECTS} objects; scan fewer namespaces")

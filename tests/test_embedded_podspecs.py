@@ -491,3 +491,150 @@ def test_the_drift_snapshot_watches_the_embedded_kinds() -> None:
     from kube_noob.drift import WATCHED
 
     assert {"InferenceService", "RayCluster", "RayService", "RayJob"} <= WATCHED
+
+
+# --- the kinds with no reader at all (G232) ----------------------------------------------------------------------
+
+
+UNREAD_POD = {"containers": [{"name": "c", "image": "x:latest", "securityContext": {"privileged": True}}]}
+
+
+@pytest.mark.parametrize(
+    ("label", "doc"),
+    [
+        (
+            "Argo Rollout",
+            {
+                "apiVersion": "argoproj.io/v1alpha1",
+                "kind": "Rollout",
+                "metadata": {"name": "r", "namespace": "ns"},
+                "spec": {"template": {"metadata": {"labels": {"a": "b"}}, "spec": UNREAD_POD}},
+            },
+        ),
+        (
+            "Knative Service",
+            {
+                "apiVersion": "serving.knative.dev/v1",
+                "kind": "Service",
+                "metadata": {"name": "k", "namespace": "ns"},
+                "spec": {"template": {"spec": UNREAD_POD}},
+            },
+        ),
+        (
+            "Kubeflow Notebook",
+            {
+                "apiVersion": "kubeflow.org/v1",
+                "kind": "Notebook",
+                "metadata": {"name": "n", "namespace": "ns"},
+                "spec": {"template": {"spec": UNREAD_POD}},
+            },
+        ),
+        (
+            "Seldon",
+            {
+                "apiVersion": "machinelearning.seldon.io/v1",
+                "kind": "SeldonDeployment",
+                "metadata": {"name": "s", "namespace": "ns"},
+                "spec": {"predictors": [{"componentSpecs": [{"spec": UNREAD_POD}]}]},
+            },
+        ),
+    ],
+)
+def test_a_pod_spec_in_a_kind_with_no_reader_is_reported_not_passed(label: str, doc: dict[str, Any]) -> None:
+    """There are far more workload CRDs than four, and a pod spec inside one with no reader produced no finding,
+    no declined rule and no word of any kind -- a privileged container in a document that reported clean. The
+    path cannot be guessed, but the shape can be seen, so the gap is named (G232)."""
+    report = analyze(json.dumps(doc))
+    assert any("no reader" in a for a in report.assumptions), f"{label}: {report.assumptions}"
+
+
+def test_a_training_job_reports_every_replica_spec_it_could_not_read() -> None:
+    doc = {
+        "apiVersion": "kubeflow.org/v1",
+        "kind": "PyTorchJob",
+        "metadata": {"name": "t", "namespace": "ns"},
+        "spec": {
+            "pytorchReplicaSpecs": {
+                "Master": {"template": {"spec": UNREAD_POD}},
+                "Worker": {"template": {"spec": UNREAD_POD}},
+            }
+        },
+    }
+    note = next(a for a in analyze(json.dumps(doc)).assumptions if "no reader" in a)
+    assert note.startswith("2 pod spec(s)"), note
+
+
+def test_an_object_that_merely_mentions_containers_is_not_accused() -> None:
+    """The detector has to be narrow, or it accuses every CRD of hiding pods. A `containers` list whose entries
+    have no `image` is not a pod spec, and a ConfigMap whose VALUE is the word is certainly not."""
+    for doc in (
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": "c", "namespace": "ns"},
+            "data": {"x": "containers: lots of them"},
+        },
+        {
+            "apiVersion": "example.com/v1",
+            "kind": "Widget",
+            "metadata": {"name": "w", "namespace": "ns"},
+            "spec": {"containers": ["red", "blue"]},
+        },
+        {
+            "apiVersion": "example.com/v1",
+            "kind": "Widget",
+            "metadata": {"name": "w", "namespace": "ns"},
+            "spec": {"containers": [{"name": "no-image", "size": 3}]},
+        },
+    ):
+        assert not any("no reader" in a for a in analyze(json.dumps(doc)).assumptions), doc
+
+
+def test_a_kind_the_registries_do_read_is_not_also_flagged() -> None:
+    """For the kinds with a reader the registry IS the claim; a second message would say the opposite of it."""
+    for doc in (_deployment(), _isvc(), _raycluster()):
+        assert not any("no reader" in a for a in analyze(json.dumps(doc)).assumptions), doc["kind"]
+
+
+def test_the_scan_says_it_dropped_a_workload_crd_rather_than_reporting_none() -> None:
+    """`posture scan` filters by kind before anything else, so a file of Argo Rollouts reported 0 workloads and
+    0 paths with nothing in notRead -- indistinguishable from a clean cluster."""
+    rollout = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Rollout",
+        "metadata": {"name": "r", "namespace": "ns"},
+        "spec": {"template": {"metadata": {"labels": {"a": "b"}}, "spec": UNREAD_POD}},
+    }
+    out = ap.scan(ap.Inventory.from_documents([rollout]), top=5)
+    assert out["workloads"] == 0
+    assert any("no reader" in n for n in out["notRead"]), out["notRead"]
+    quiet = ap.scan(
+        ap.Inventory.from_documents(
+            [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "c", "namespace": "ns"}, "data": {}}]
+        ),
+        top=5,
+    )
+    assert quiet["notRead"] == []
+
+
+def test_the_detector_looks_as_deep_as_the_loader_accepts() -> None:
+    """Its first draft capped its own walk at 24 levels while the loader accepts 100, so a pod spec nested deeper
+    than that went unmentioned -- the silent miss this detector exists to end, reintroduced inside it."""
+    from kube_noob.yamlio import MAX_DEPTH
+
+    node: dict[str, Any] = {"spec": UNREAD_POD}
+    for _ in range(MAX_DEPTH - 12):  # inside what the loader permits, far outside the first draft's 24
+        node = {"next": node}
+    doc = {"apiVersion": "example.com/v1", "kind": "Deep", "metadata": {"name": "d"}, "spec": node}
+    assert any("no reader" in a for a in analyze(json.dumps(doc)).assumptions)
+
+
+def test_a_document_deeper_than_the_loader_allows_is_refused_by_the_loader() -> None:
+    from kube_noob.errors import ManifestError
+
+    node: dict[str, Any] = {"end": True}
+    for _ in range(400):
+        node = {"next": node}
+    doc = {"apiVersion": "example.com/v1", "kind": "Deep", "metadata": {"name": "d"}, "spec": node}
+    with pytest.raises(ManifestError):
+        analyze(json.dumps(doc))

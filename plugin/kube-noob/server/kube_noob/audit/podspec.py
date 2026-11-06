@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from kube_noob.yamlio import Document, PathT, get_path
+from kube_noob.yamlio import MAX_DEPTH, Document, PathT, get_path
 
 POD_SPEC_PATHS: dict[str, PathT] = {
     "Pod": ("spec",),
@@ -311,6 +311,64 @@ def _operator_labels(doc: Document, path: PathT) -> dict[str, str]:
     if isinstance(own, dict):
         out.update({str(k): str(v) for k, v in own.items()})
     return out
+
+
+#: Node budget for `unread_pod_specs`. The loader already refuses a document deeper than `MAX_DEPTH` or with more
+#: nodes than its own budget, so this walk inherits those bounds and only needs a backstop against pathological
+#: breadth. The depth limit is the LOADER's, deliberately: a lower one of its own would have made the detector go
+#: quiet on a pod spec nested deeper than it chose to look, which is the silent miss this whole function exists
+#: to end -- the first draft set it to 24, four times shallower than a document the loader happily accepts.
+_WALK_MAX_NODES = 200_000
+
+
+def _looks_like_a_pod_spec(node: dict[str, Any]) -> bool:
+    """True for a mapping that is a PodSpec in all but name.
+
+    Deliberately narrow: a `containers` list holding at least one mapping with an `image`. That is the shape every
+    pod spec has and almost nothing else does, and being narrow is what keeps this from accusing an unrelated CRD
+    of hiding pods.
+    """
+    items = node.get("containers")
+    if not isinstance(items, list):
+        return False
+    return any(isinstance(c, dict) and isinstance(c.get("image"), str) for c in items)
+
+
+def unread_pod_specs(doc: Document) -> list[PathT]:
+    """Every pod-spec-shaped mapping in this object that no reader above would have looked at.
+
+    This is the answer to the question the registries cannot answer: there are far more workload CRDs than four,
+    and a pod spec inside a kind with no reader produced no findings, no declined rules and **no word of any
+    kind** -- a privileged container in a document that reported clean. Enumerating the CRD universe is not
+    possible and guessing a path produces a confident wrong finding, so this does neither: it finds the shape,
+    reports that it was not audited, and leaves the verdict to a reader who will be told the gap exists.
+
+    Returns nothing for a kind the registries do read -- there the pod specs are known, and a `containers` list
+    somewhere else in such an object is far more likely to be a template for something else than a pod kube-noob
+    missed. For those kinds the registry is the claim, and extending it is how a new path gets read.
+    """
+    if not isinstance(doc.data, dict) or doc.kind in POD_SPEC_PATHS or doc.kind in EMBEDDED_POD_SPEC_PATHS:
+        return []
+    if refused_group(doc) is not None:
+        return []  # already reported as a kind read from the wrong group; one message is enough
+    out: list[PathT] = []
+    seen = 0
+    stack: list[tuple[Any, PathT, int]] = [(doc.data, (), 0)]
+    while stack:
+        node, path, depth = stack.pop()
+        seen += 1
+        if seen > _WALK_MAX_NODES or depth > MAX_DEPTH:
+            break
+        if isinstance(node, dict):
+            if _looks_like_a_pod_spec(node):
+                out.append(path)
+                continue  # its own containers are the finding; no need to walk into them
+            for key in sorted(node, key=str):
+                stack.append((node[key], (*path, key), depth + 1))
+        elif isinstance(node, list):
+            for i, item in enumerate(node[:200]):
+                stack.append((item, (*path, i), depth + 1))
+    return sorted(out)
 
 
 def containers(pod: PodTemplate, include_init: bool = True, *, ephemeral: bool = True) -> Iterator[ContainerRef]:

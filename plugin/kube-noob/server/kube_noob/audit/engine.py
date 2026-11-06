@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from kube_noob.audit.model import Report, Severity, Stage
-from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_GROUPS, refused_group
+from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_GROUPS, refused_group, unread_pod_specs
 from kube_noob.audit.redteam import red_team
 from kube_noob.audit.rules import RULES, AuditContext, run_rules
 from kube_noob.catalog import OPENSHIFT_FAMILY, PLATFORMS, k8s_version_for
@@ -64,6 +64,20 @@ def analyze(
             "were not evaluated: from these documents alone they cannot tell a real gap from an object you "
             "did not pass. Pass the whole namespace to evaluate them: a directory on the command line, or "
             "partial_bundle=false with every object of the namespace in one call."
+        )
+    unread: list[str] = []
+    for d in docs:
+        for path in unread_pod_specs(d):
+            unread.append(f"{d.ref()} at spec path {'.'.join(str(x) for x in path) or '(root)'}")
+    if unread:
+        # A pod spec in a kind with no reader used to produce nothing at all -- no finding, no declined rule, no
+        # word -- so a privileged container sat inside a document that reported clean. The shape is detectable
+        # even where the path is not known, and saying so is the whole of the difference (G232).
+        report.assumptions.append(
+            f"{len(unread)} pod spec(s) are in kinds kube-noob has no reader for, so their containers were NOT "
+            f"audited: {', '.join(unread[:5])}"
+            f"{f' and {len(unread) - 5} more' if len(unread) > 5 else ''}. Audit the Deployments the operator "
+            "creates from them, or ask for the kind to be added with its published schema."
         )
     for d in docs:
         group = refused_group(d)
