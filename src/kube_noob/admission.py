@@ -126,7 +126,7 @@ class Config:
                 f"admission.enforce cannot enforce {', '.join(bad)}: these rules need other objects or the whole "
                 "bundle (they warn with admission.lookups, or kube-noob audit checks them)"
             )
-        if "KN-S036" in enforce and not allowed_registries:
+        if "KN-S036" in enforce and not [e for e in allowed_registries if e.strip()]:
             # Fail at startup, not quietly at admission: `enforce: [KN-S036]` with no allowlist would deny
             # nothing while the chart said a registry policy was being enforced (G243).
             raise AdmissionConfigError(

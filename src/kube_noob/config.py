@@ -417,7 +417,7 @@ class JiraSettings(_Base):
 #: generator compiles (kube_noob.generate.policies._REGISTRY_ENTRY): a lower-case host, an optional port, and
 #: optional path segments.
 MAX_ALLOWED_REGISTRIES = 64
-_REGISTRY_ENTRY = re.compile(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*")
+_REGISTRY_ENTRY = re.compile(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*")
 
 
 class AuditSettings(_Base):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from kube_noob.audit import detection
 from kube_noob.audit.model import Report, Severity, Stage
 from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_GROUPS, refused_group, unread_pod_specs
 from kube_noob.audit.redteam import red_team
@@ -33,7 +34,10 @@ def build_context(
         platform_version=platform_version,
         partial_bundle=partial_bundle,
         cni=cni,
-        allowed_registries=tuple(allowed_registries),
+        # Blank entries dropped here, not at every reader: a list of whitespace is not a configured policy,
+        # and left in it made KN-S036 report every image against an allowlist of "  " (G245). The settings
+        # validator already refuses them; a programmatic caller gets the same treatment.
+        allowed_registries=tuple(e.strip() for e in allowed_registries if e.strip()),
     )
 
 
@@ -100,6 +104,9 @@ def analyze(
     evaluated: list[str] = []
     findings = run_rules(ctx, rule_stages, evaluated) if rule_stages else []
     report.evaluated_rules = evaluated
+    # A projection of what was already read, not a rule: the audit configuration says which categories of API
+    # activity this cluster can record, where `KN-S035` reports only the two settings that record nothing (R4).
+    report.detection_coverage = detection.coverage(docs)
     if schema and Stage.VALIDATE in stages:
         schema_findings, notes = validate_documents(docs)
         findings.extend(schema_findings)

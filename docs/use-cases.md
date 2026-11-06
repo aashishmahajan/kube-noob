@@ -994,6 +994,28 @@ kube-noob audit -f k8s/ --exceptions examples/kube-noob-exceptions.yaml
 kube-noob policy generate --mode enforce --exceptions examples/kube-noob-exceptions.yaml -o policies.yaml
 ```
 
+### What this cluster's audit configuration can and cannot record
+
+Pass the cluster's `APIServer` object (it is in a must-gather, and `oc get apiserver cluster -o yaml` prints it)
+and the audit adds a detection-coverage block: which categories of API activity the settings record -- who did
+what to which object, what a create or update contained, what a get or list returned, an OAuth token grant --
+and which they do not. Every statement comes from the field documentation of `Audit` in openshift/api, so it is
+checkable rather than advice: under the default profile, for instance, what a request *contained* is not
+recorded, and API activity on Event objects is not recorded under any profile at all, so a deleted Event leaves
+no trace. A `customRules` entry is reported per group, with its precedence, because the first matching entry
+overrides the top-level profile.
+
+It also lists what no reading of that object can establish -- whether the records leave the cluster, how long
+they are kept, whether anyone reads them, and anything that is not an API request to the OpenShift-provided API
+servers. That is the honest half of a coverage claim, and the reason this is a projection of one setting rather
+than a family of checks about a SIEM kube-noob has no credentials for.
+
+```bash
+oc get apiserver cluster -o yaml > apiserver.yaml
+kube-noob audit -f apiserver.yaml --platform openshift --version 4.20
+kube-noob audit -f apiserver.yaml --platform openshift --format json | jq .detectionCoverage
+```
+
 ### Enforce the audit rules at admission
 
 `policy generate` turns every audit rule that can be decided from one object into an admission policy: a

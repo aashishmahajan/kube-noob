@@ -159,6 +159,11 @@ _PARITY_IMAGES = (
     "app:x:latest",
     "nginx:",
     "",
+    "   ",
+    " quay.io/my-org/app:1",
+    "quay.io/my-org ",
+    "\tquay.io/my-org/app",
+    "quay.io/my-org/app\n",
 )
 _PARITY_LISTS = (
     ("quay.io",),
@@ -196,11 +201,12 @@ def test_an_allowlist_the_generator_cannot_compile_emits_nothing() -> None:
     assert registry_cel(("myregistry",)) is None
     assert registry_cel(("quay.io/My-Org",)) is None
     assert registry_cel(("quay.io/my-org'; true || '",)) is None
+    blank = r"c.image.matches('^[ \t\n\r\f\v]*$')"  # the audit's BLANK_IMAGE_CHARS, as an RE2 class
     assert registry_cel(("quay.io",)) == (
-        "variables.containers.all(c, !has(c.image) || c.image == '' || c.image.startsWith('quay.io/'))"
+        f"variables.containers.all(c, !has(c.image) || {blank} || c.image.startsWith('quay.io/'))"
     )
     assert registry_cel(("quay.io/my-org",)) == (
-        "variables.containers.all(c, !has(c.image) || c.image == '' || c.image == 'quay.io/my-org' || "
+        f"variables.containers.all(c, !has(c.image) || {blank} || c.image == 'quay.io/my-org' || "
         "c.image.startsWith('quay.io/my-org/') || c.image.startsWith('quay.io/my-org@'))"
     )
 
@@ -252,3 +258,113 @@ def test_the_webhook_and_the_audit_read_the_same_list() -> None:
         hit = any(w.startswith("[KN-S036]") for w in warnings)
         assert hit == refused, image
         assert hit == bool(_fired(image, allowed)), f"{image}: webhook and audit disagree"
+
+
+def test_one_image_written_three_ways_gets_one_verdict() -> None:
+    """The reference normalisation (G245). `nginx`, `library/nginx` and `docker.io/library/nginx` are one image.
+
+    Before this, an allowlist of `docker.io/library` admitted the middle spelling and reported the other two,
+    and `docker.io/bitnami` reported `docker.io/bitnami/nginx` -- the fully qualified form of the thing it was
+    written to allow. Under G243 that list reaches the admission webhook, so a false report became a denial.
+    """
+    for allowed, images in (
+        (("docker.io/library",), ("nginx:1.27", "library/nginx:1.27", "docker.io/library/nginx:1.27")),
+        (("docker.io/bitnami",), ("bitnami/nginx", "docker.io/bitnami/nginx")),
+        (("docker.io",), ("nginx", "library/nginx", "docker.io/library/nginx", "bitnami/nginx")),
+    ):
+        for image in images:
+            assert not _fired(image, allowed), f"{image} should come from {allowed[0]}"
+    # And the narrowing still narrows: an organisation is not every organisation.
+    for image in ("bitnami/nginx", "docker.io/bitnami/nginx", "nginx"):
+        assert _fired(image, ("docker.io/other",)), image
+
+
+def test_the_repository_is_the_path_a_runtime_would_pull() -> None:
+    from kube_noob.audit.rules import image_repository
+
+    for image, repository in (
+        ("nginx", "library/nginx"),
+        ("nginx:1.27", "library/nginx:1.27"),
+        ("library/nginx", "library/nginx"),
+        ("docker.io/library/nginx", "library/nginx"),
+        ("bitnami/nginx", "bitnami/nginx"),
+        ("quay.io/my-org/app:1", "my-org/app:1"),
+        ("quay.io/app", "app"),
+        ("registry.local:5000/team/app", "team/app"),
+        ("gcr.io/proj/img@sha256:" + "a" * 64, "proj/img"),
+    ):
+        assert image_repository(image) == repository, image
+
+
+def test_a_whitespace_only_allowlist_is_not_a_configured_policy() -> None:
+    """It reached `analyze` programmatically and reported every image against an allowlist of "  " (G245)."""
+    from kube_noob import admission as adm
+    from kube_noob.errors import KubeNoobError
+
+    report = _report("quay.io/app", ("  ", "\n"))
+    assert not [f for f in report.findings if f.rule_id == "KN-S036"]
+    assert "KN-S036" not in report.evaluated_rules, "a declined rule must not be recorded as checked and clean"
+    with pytest.raises((adm.AdmissionConfigError, KubeNoobError)):
+        adm.Config.build(enforce=["KN-S036"], allowed_registries=["  "])
+
+
+def test_a_fullwidth_digit_port_is_refused_everywhere() -> None:
+    """`\\d` matches U+FF10..U+FF19, and no runtime pulls from `quay.io:\uff15\uff10\uff10\uff10` (G245)."""
+    from kube_noob.config import load_settings
+    from kube_noob.errors import ConfigError
+    from kube_noob.generate.policies import registry_cel
+
+    entry = "quay.io:\uff15\uff10\uff10\uff10"
+    assert registry_cel((entry,)) is None
+    with pytest.raises(ConfigError):
+        load_settings(overrides={"audit": {"allowedRegistries": [entry]}})
+
+
+def test_the_chart_schema_refuses_what_the_configuration_refuses() -> None:
+    """Both gates, one answer: otherwise `helm install` succeeds and every pod crash-loops at config load."""
+    import json
+    import re
+    from pathlib import Path
+
+    from pydantic import ValidationError
+
+    from kube_noob.config import AuditSettings
+
+    root = Path(__file__).resolve().parent.parent
+    schema = json.loads((root / "deploy" / "helm" / "kube-noob" / "values.schema.json").read_text())
+    pattern = schema["properties"]["audit"]["properties"]["allowedRegistries"]["items"]["pattern"]
+    entries = (
+        "quay.io",
+        "quay.io/my-org",
+        "localhost",
+        "localhost:5000",
+        "localhost:5000/app",
+        "localhostx",
+        "registry.example.com:5000/team",
+        "registry.local:5000",
+        "sub.domain.example.io/a/b/c",
+        "1.2.3.4:5000/x",
+        "myregistry",
+        "a",
+        "MyRegistry",
+        "quay.io/My-Org",
+        "quay.io/",
+        "quay.io:",
+        "quay.io//a",
+        "-quay.io",
+        "quay.io-/a",
+        "quay.io:\uff15\uff10\uff10\uff10",
+        "quay.io/my-org'; true || '",
+    )
+    for entry in entries:
+        by_schema = re.fullmatch(pattern, entry) is not None
+        try:
+            AuditSettings(allowed_registries=[entry])
+            by_config = True
+        except ValidationError:
+            by_config = False
+        assert by_schema == by_config, f"{entry!r}: schema={by_schema} config={by_config}"
+    # The one difference, and it is deliberate: the settings strip surrounding whitespace off a YAML value
+    # before matching, and a JSON Schema pattern cannot strip. Both end up with the same entry.
+    assert re.fullmatch(pattern, "quay.io\n") is None
+    assert AuditSettings(allowed_registries=["quay.io\n"]).allowed_registries == ["quay.io"]

@@ -1867,11 +1867,38 @@ def image_registry(image: str) -> str:
     however little they look like it, and an allowlist that missed that would pass every unqualified image
     (G241).
     """
-    ref = image.split("@", 1)[0].strip()
+    ref = image.split("@", 1)[0]
     head = ref.split("/", 1)[0]
     if "/" in ref and ("." in head or ":" in head or head == "localhost"):
         return head
     return "docker.io"
+
+
+#: The whitespace a blank image reference may be made of. ASCII only, and spelled out rather than left to
+#: `str.strip()`, because the generated admission policy decides the same question with an RE2 character class
+#: and `str.strip()` also removes U+00A0 and other Unicode spaces, which RE2 would not (G245).
+BLANK_IMAGE_CHARS = " \t\n\r\f\v"
+
+
+def image_repository(image: str) -> str:
+    """The repository path a reference names, as the runtime resolves it: no registry host, Docker Hub expanded.
+
+    This is the part an `host/org` allowlist entry is compared against, and it has to be the path the runtime
+    would pull, not the text after the first slash. Two normalisations, and without either one the same image
+    written three ways got three verdicts (G245):
+
+    * The registry host is removed when the reference states it, so `docker.io/bitnami/nginx` is the
+      `bitnami/nginx` repository and not a repository called `docker.io/bitnami/nginx`.
+    * A single-component Docker Hub path is expanded to the organisation it really lives in, so `nginx`,
+      `library/nginx` and `docker.io/library/nginx` are all `library/nginx`.
+    """
+    ref = image.split("@", 1)[0]
+    registry = image_registry(image)
+    head, _, rest = ref.partition("/")
+    path = rest if (head == registry and rest) else ref
+    if registry == "docker.io" and "/" not in path:
+        path = f"library/{path}"
+    return path
 
 
 def _registry_allowed(image: str, allowed: tuple[str, ...]) -> bool:
@@ -1879,11 +1906,11 @@ def _registry_allowed(image: str, allowed: tuple[str, ...]) -> bool:
 
     An entry with a path narrows the allowance to that organisation: `quay.io/my-org` permits
     `quay.io/my-org/app` and refuses `quay.io/someone-else/app`, which is the point of an allowlist for a
-    registry anyone can push to.
+    registry anyone can push to. The entry's path is an organisation prefix, not a repository, so it is NOT
+    put through `image_repository`: `docker.io/library` means the organisation every official image lives in.
     """
-    ref = image.split("@", 1)[0].strip()
     registry = image_registry(image)
-    path = ref.split("/", 1)[1] if "/" in ref and registry != "docker.io" else ref
+    path = image_repository(image)
     for entry in allowed:
         host, _, prefix = entry.strip().partition("/")
         if host != registry:
@@ -1916,8 +1943,8 @@ def _s036(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, pt in ctx.workloads():
         for c in containers(pt):
             image = c.container.get("image")
-            if not isinstance(image, str) or not image.strip():
-                continue
+            if not isinstance(image, str) or not image.strip(BLANK_IMAGE_CHARS):
+                continue  # no image to measure; KN-S012 reports that
             if _registry_allowed(image, ctx.allowed_registries):
                 continue
             where = image_registry(image)

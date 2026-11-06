@@ -126,6 +126,34 @@ def test_registry_rule_is_generated_only_with_an_allowlist() -> None:
     assert g.skipped == [] and len(g.documents) == 2  # the policy and its binding
 
 
+def test_the_header_states_that_an_embedded_pod_spec_is_not_matched_at_admission() -> None:
+    """The audit reads pod specs inside operator CRDs (G229); these policies match the core workloads only.
+
+    The gap is real and pre-dates the generator's registry rule, so what is asserted here is that it is
+    STATED: a reader who takes "the policies refuse exactly what the audit reports" literally would otherwise
+    believe a KServe predictor was refused at admission. Closing it is R6 (G245).
+    """
+    from kube_noob.audit.engine import analyze
+
+    g = pol.generate(engines=("vap",), rules=["KN-S001"])
+    head = pol.header(g, platform="kubernetes", platform_version=None, mode="enforce", engines=("vap",))
+    assert g.pod_rules == ("KN-S001",)
+    assert any("embedded in an operator CRD" in line for line in head), head
+    isvc = {
+        "apiVersion": "serving.kserve.io/v1beta1",
+        "kind": "InferenceService",
+        "metadata": {"name": "m", "namespace": "shop"},
+        "spec": {"predictor": {"model": {"image": "quay.io/o/m:1", "securityContext": {"privileged": True}}}},
+    }
+    assert "KN-S001" in {f.rule_id for f in analyze(yaml.safe_dump(isvc), platform="kubernetes").findings}
+    assert failures(_policy("KN-S001", "kubernetes", None), isvc) == [], "no policy matches this kind"
+    # A set with no pod rule in it makes no such claim, so the line is absent rather than always printed.
+    other = pol.generate(engines=("vap",), rules=["KN-S017"])
+    assert other.pod_rules == ()
+    head2 = pol.header(other, platform="kubernetes", platform_version=None, mode="enforce", engines=("vap",))
+    assert not any("embedded in an operator CRD" in line for line in head2)
+
+
 def test_documents_are_well_formed_for_both_engines_and_modes() -> None:
     for platform, version in PLATFORMS:
         for mode in pol.MODES:

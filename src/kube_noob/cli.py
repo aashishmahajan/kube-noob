@@ -375,6 +375,11 @@ def _print_report(rep: dict[str, Any]) -> None:
     touched = (rep.get("controlSummary") or {}).get("controls") or []
     if touched:
         print("NIST SP 800-53 controls with findings: " + ", ".join(f"{c['id']} ({c['findings']})" for c in touched))
+    if cov := rep.get("detectionCoverage"):
+        from kube_noob.audit.detection import render_text
+
+        print()
+        print(render_text(cov), end="")
     for sc in rep.get("redTeam", []):
         if sc["verdict"] == "exposed":
             print(f"[RED-TEAM {sc['severity'].upper()}] {sc['scenarioId']}: {sc['question']}")

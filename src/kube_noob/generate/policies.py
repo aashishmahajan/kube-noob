@@ -432,11 +432,16 @@ NOT_GENERATED: dict[str, str] = {
 #: by one or more path segments. Anything else is refused rather than escaped into a CEL string literal, because
 #: an operator-supplied string that reaches a generated ENFORCING policy is the last place to be relaxed about
 #: quoting -- and a policy that fails to compile denies every request under `failurePolicy: Fail` (G242).
-_REGISTRY_ENTRY = re.compile(r"\A[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*\Z")
+_REGISTRY_ENTRY = re.compile(r"\A[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*\Z")
 #: An unqualified reference (`nginx`, `bitnami/nginx`) resolves here. Allowing it needs the "is the first path
 #: component a host" test, which needs string surgery the API server's CEL cannot do without `split`, so the
 #: rule is not generated when an entry names this registry -- stated, not silently half-enforced.
 _IMPLICIT_REGISTRY = "docker.io"
+#: A reference made only of ASCII whitespace, which the audit skips as "no image" (`BLANK_IMAGE_CHARS`). The
+#: same character set on both sides and spelled as a class rather than `\s`: RE2's `\s` leaves out `\v`, and
+#: the API server's CEL has no `trim`, so an exact set is the only way the two agree (G245). The escapes are
+#: CEL string escapes, which the API server unescapes before RE2 ever sees them.
+_BLANK_IMAGE = r"^[ \t\n\r\f\v]*$"
 
 
 def _looks_like_a_host(head: str) -> bool:
@@ -480,7 +485,8 @@ def registry_cel(allowed: Sequence[str]) -> str | None:
             tests.append(f"c.image == '{entry}' || c.image.startsWith('{entry}/') || c.image.startsWith('{entry}@')")
         else:
             tests.append(f"c.image.startsWith('{entry}/')")
-    return "variables.containers.all(c, !has(c.image) || c.image == '' || " + " || ".join(tests) + ")"
+    allowed_cel = " || ".join(tests)
+    return f"variables.containers.all(c, !has(c.image) || c.image.matches('{_BLANK_IMAGE}') || {allowed_cel})"
 
 
 def _checks(
@@ -1223,6 +1229,9 @@ class Generated:
     documents: list[dict[str, Any]]
     generated: list[dict[str, str]]
     skipped: list[dict[str, str]]
+    #: The generated rules that read a pod spec. Not part of `summary()`: the header needs it to state, once,
+    #: that a pod spec embedded in an operator CRD is audited but not matched at admission (G245).
+    pod_rules: tuple[str, ...] = ()
 
     def yaml(self, header: Sequence[str] = ()) -> str:
         lines = [f"# {h}" for h in header]
@@ -1283,7 +1292,12 @@ def generate(
             if accepted:
                 row["exceptions"] = ", ".join(accepted)
             generated.append(row)
-    return Generated(docs, generated, skipped)
+    return Generated(
+        docs,
+        generated,
+        skipped,
+        tuple(rid for rid in sorted({row["ruleId"] for row in generated}) if checks[rid].pod),
+    )
 
 
 def header(
@@ -1306,6 +1320,17 @@ def header(
         active = [e for e in exceptions if e.status == "active"]
         out.append(f"Exceptions applied as exemptions: {', '.join(f'{e.id} ({e.rule})' for e in active) or 'none'}.")
         out += [f"  not applied, {e.status}: {e.id} ({e.rule}): {e.reason}" for e in exceptions if e.status != "active"]
+    if g.pod_rules:
+        # Said once, here, rather than on every pod policy: the audit reads the pod specs embedded in operator
+        # CRDs (a KServe predictor, a Ray worker group) and these policies match the core pod workloads, so a
+        # container in one of those is audited and NOT refused at admission. A reader who takes "the policies
+        # refuse exactly what the audit reports" literally would otherwise believe a gap closed that is not
+        # (G245; closing it is R6 in docs/roadmap.md).
+        out.append(
+            "Pod rules match Pods and the core workload kinds. A pod spec embedded in an operator CRD "
+            "(KServe InferenceService, KubeRay RayCluster and the other kinds kube-noob audit reads) is not "
+            "matched here, so those containers are checked by kube-noob audit and not at admission."
+        )
     if g.skipped:
         out.append("Not generated:")
         out += [f"  {row['ruleId']}: {row['reason']}" for row in g.skipped]
