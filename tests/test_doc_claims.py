@@ -47,6 +47,33 @@ def test_the_generated_table_sums_to_the_rule_count() -> None:
         assert row.generated + row.not_generated == len(list_rules()), row
 
 
+def test_the_roadmap_states_the_measured_numbers() -> None:
+    """The one file that measures the whole product was the one the generator did not cover, so it drifted: "91
+    rules" and "28 of NIST's controls" on the day the catalogue reached 92 and the thirtieth control got a rule,
+    and "105 commands" matching no counting method at all (G230)."""
+    text = (ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8")
+    n = dn.measured()
+    flat = " ".join(text.split())
+    assert f"exactly {n.rules} rules, {n.mcp_tools} MCP tools, {n.commands} commands" in flat
+    assert f"about {round(n.engine_lines, -3):,} lines across {n.modules} modules" in flat
+    assert f"about {round(n.test_lines, -3):,} lines of tests" in flat
+    assert f"names {n.controls} of NIST SP 800-53 Rev. 5's controls across its {n.rules} rules" in flat
+
+
+def test_the_measured_sentence_counts_the_catalogue_the_audit_runs() -> None:
+    """Pins each figure to its source rather than to the generator, so rewriting the regex cannot quietly
+    redefine what a number means while `--check` still passes."""
+    from kube_noob.audit.controls import RULE_CONTROLS
+    from kube_noob.audit.engine import list_rules
+
+    n = dn.measured()
+    assert n.rules == len(list_rules())
+    assert n.controls == len({c for cs in RULE_CONTROLS.values() for c in cs})
+    assert n.modules == len(sorted((ROOT / "src" / "kube_noob").rglob("*.py")))
+    assert n.chart_templates == len(sorted((ROOT / "deploy" / "helm" / "kube-noob" / "templates").glob("*.yaml")))
+    assert n.commands > n.chart_templates, "every subcommand node, at any depth"
+
+
 def test_the_limits_table_states_the_measured_numbers() -> None:
     text = (ROOT / "docs" / "limits.md").read_text(encoding="utf-8")
     for row in dn.policy_rows():
