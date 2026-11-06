@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The release workflow installs the runtime dependencies before the steps that import the package (G228).** v0.8.0's release failed at `krew_manifest.py --check` with `No module named 'yaml'`, having published nothing. `build-dist` switches interpreter a second time to match the publish action, and the krew check began importing the rule catalogue in 0.8.0, so it ran on a Python with no dependencies. It now installs the same hash-locked file the action uses, and a test holds the ordering.
+
 - **KN-S035 matches the API group exactly rather than by prefix (G227).** A CodeQL alert on the original `startswith` was wrong about the category and right about the code: a prefix match is the wrong tool for a group/version field. Behaviour is unchanged for every real input.
 
 - **`KN-S035`: cluster audit logging turned off, for everyone or for one group (G226).** OpenShift keeps its audit settings in a cluster-scoped `APIServer` singleton that read-only RBAC can read, so this is the one logging question a credential-free tool can actually decide. It reports `spec.audit.profile: None`, and -- the useful half -- a `customRules` entry that logs nothing for a named group while the top-level profile still reads `Default`. `AU-2` and `AU-12` join the control catalogue, which gives KSI-MLA-LET real evidence for the first time; KSI-MLA-OSM and KSI-MLA-RVL are reached through the same control and are marked as warnings rather than evidence, because operating a SIEM and reviewing logs are not this rule's subject.

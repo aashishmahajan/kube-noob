@@ -469,3 +469,43 @@ def test_nothing_promises_an_artefact_that_has_never_published() -> None:
     assert not offenders, "these promise a daily rebuild of an image that has never published: " + ", ".join(
         sorted(offenders)
     )
+
+
+def test_the_release_installs_dependencies_before_importing_the_package() -> None:
+    """v0.8.0's release died at `krew_manifest.py --check` with `No module named 'yaml'`, after publishing
+    nothing (PyPI returned 404 for 0.8.0, so the version was not burned).
+
+    The shape is worth keeping. `build-dist` calls `setup-python` twice: once for the build, then again to match
+    the publish action's interpreter. Everything after that second switch runs on a fresh Python with no project
+    dependencies, and `krew_manifest.py` began importing the rule catalogue in #42 -- after v0.7.1 -- so the
+    release path imported `kube_noob` for the first time on an interpreter that could not. The last few releases
+    passing is exactly what made it invisible.
+
+    This asserts the ordering rather than the symptom: after the last interpreter switch, nothing may import the
+    package until something has installed its dependencies (G228).
+    """
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    job = yaml.safe_load((root / ".github/workflows/release.yml").read_text())["jobs"]["build-dist"]
+    steps = job["steps"]
+
+    def _is_setup_python(s: dict[str, object]) -> bool:
+        return str(s.get("uses", "")).startswith("actions/setup-python@")
+
+    def _installs_deps(s: dict[str, object]) -> bool:
+        run = str(s.get("run", ""))
+        return "pip install" in run and "requirements.lock" in run
+
+    def _imports_the_package(s: dict[str, object]) -> bool:
+        run = str(s.get("run", ""))
+        return "krew_manifest.py" in run or "from kube_noob" in run or "import kube_noob" in run
+
+    last_switch = max(i for i, s in enumerate(steps) if _is_setup_python(s))
+    installs = [i for i, s in enumerate(steps) if _installs_deps(s) and i > last_switch]
+    importers = [i for i, s in enumerate(steps) if _imports_the_package(s) and i > last_switch]
+    assert importers, "no step imports the package; this guard has lost its subject"
+    assert installs, "nothing installs the runtime dependencies after the interpreter switch"
+    assert min(installs) < min(importers), (
+        f"step {min(importers)} imports kube_noob before step {min(installs)} installs its dependencies"
+    )
