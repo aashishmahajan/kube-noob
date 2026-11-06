@@ -55,8 +55,14 @@ def _flags(doc: dict[str, Any], rule_id: str, platform: str, version: str | None
     return any(f.severity >= Severity.LOW for f in rule.check(ctx, rule))
 
 
-def _policy(rule_id: str, platform: str, version: str | None, engine: pol.Engine = "vap") -> dict[str, Any]:
-    c = pol.checks_for(platform, version)[rule_id]
+def _policy(
+    rule_id: str,
+    platform: str,
+    version: str | None,
+    engine: pol.Engine = "vap",
+    registries: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    c = pol.checks_for(platform, version, registries)[rule_id]
     return pol.documents(c, engine, "enforce", platform)[0]
 
 
@@ -93,12 +99,31 @@ def test_audit_flags_the_bad_fixture_and_not_the_good(rule_id: str) -> None:
 def test_every_rule_is_generated_or_has_a_reason() -> None:
     generated: set[str] = set()
     for platform, version in PLATFORMS:
-        checks = pol.checks_for(platform, version)
-        assert not set(checks) & set(pol.NOT_GENERATED)
-        generated |= set(checks)
+        # KN-S036 exists as a policy only once an organisation has named the registries it approves, so the
+        # closure is taken over both states of that list; with neither it would fall out of the catalogue
+        # altogether, which is how a rule goes quietly unenforced (G242).
+        for registries in ((), ("quay.io/my-org",)):
+            checks = pol.checks_for(platform, version, registries)
+            assert not set(checks) & set(pol.NOT_GENERATED)
+            generated |= set(checks)
     assert generated | set(pol.NOT_GENERATED) == set(RULES)
     assert not generated & set(pol.NOT_GENERATED)
     assert len(generated) >= 40
+
+
+def test_registry_rule_is_generated_only_with_an_allowlist() -> None:
+    assert "KN-S036" not in pol.checks_for("kubernetes", None)
+    assert "KN-S036" in pol.checks_for("kubernetes", None, ("quay.io/my-org",))
+    skipped = {r["ruleId"]: r["reason"] for r in pol.generate(engines=("vap",), rules=["KN-S036"]).skipped}
+    assert "audit.allowedRegistries" in skipped["KN-S036"]
+    # An entry the generator refuses to compile is reported the same way: nothing is emitted that would
+    # disagree with the audit, and the reason says so rather than a policy quietly admitting everything.
+    for refused in ("docker.io", "quay.io/MY-ORG", "myregistry", "quay.io/my-org/"):
+        g = pol.generate(engines=("vap",), rules=["KN-S036"], allowed_registries=(refused,))
+        assert g.documents == [], refused
+        assert "audit.allowedRegistries" in g.skipped[0]["reason"], refused
+    g = pol.generate(engines=("vap",), rules=["KN-S036"], allowed_registries=("quay.io/my-org",))
+    assert g.skipped == [] and len(g.documents) == 2  # the policy and its binding
 
 
 def test_documents_are_well_formed_for_both_engines_and_modes() -> None:
@@ -146,7 +171,7 @@ def _fixture_cases() -> list[tuple[str, str, str | None]]:
     for rid in sorted(RULES):
         data = _fixture(rid)
         platform, version = data.get("platform", "kubernetes"), data.get("version")
-        if rid in pol.checks_for(platform, version):
+        if rid in pol.checks_for(platform, version, tuple(data.get("allowedRegistries") or ())):
             out.append((rid, platform, version))
     return out
 
@@ -157,7 +182,7 @@ def test_policy_admits_good_and_refuses_bad(
     rule_id: str, platform: str, version: str | None, engine: pol.Engine
 ) -> None:
     data = _fixture(rule_id)
-    policy = _policy(rule_id, platform, version, engine)
+    policy = _policy(rule_id, platform, version, engine, tuple(data.get("allowedRegistries") or ()))
     good = [d for d in yaml.safe_load_all(data["good"]) if d]
     bad = [d for d in yaml.safe_load_all(data["bad"]) if d]
     for d in good:
@@ -169,22 +194,35 @@ def test_policy_admits_good_and_refuses_bad(
 
 def test_fixture_cases_cover_all_generated_rules() -> None:
     covered = {rid for rid, _, _ in _fixture_cases()}
-    generated = set().union(*(pol.checks_for(p, v) for p, v in PLATFORMS))
+    generated = set().union(*(pol.checks_for(p, v, ("quay.io/my-org",)) for p, v in PLATFORMS))
     assert covered == generated
 
 
 # --- the policies decide exactly as the audit does, on 1,800 random objects per platform --------------------------
 
 
+#: Two entries against the corpus's own image list (tests/policy_corpus.py IMAGES): one narrowed to an
+#: organisation and one a host with a port, so the random cross-check exercises both shapes of entry against
+#: references with tags, digests, two colons, an empty string and no registry at all (G242).
+CORPUS_REGISTRIES = ("quay.io/acme", "registry.local:5000/team")
+
+
 @pytest.mark.parametrize(("platform", "version"), PLATFORMS)
 def test_policy_equals_audit_on_random_objects(platform: str, version: str | None) -> None:
-    checks = pol.checks_for(platform, version)
+    checks = pol.checks_for(platform, version, CORPUS_REGISTRIES)
     corpus = policy_corpus.corpus(seed=20261028, n=900, openshift=platform != "kubernetes")
     policies = {rid: pol.documents(c, "vap", "enforce", platform)[0] for rid, c in checks.items()}
     mismatches: list[str] = []
     seen: dict[str, list[int]] = {rid: [0, 0] for rid in checks}
     for i, doc in enumerate(corpus):
-        ctx = build_context(load_documents(yaml.safe_dump(doc, sort_keys=False)), platform, version)
+        ctx = build_context(
+            load_documents(yaml.safe_dump(doc, sort_keys=False)),
+            platform,
+            version,
+            False,
+            None,
+            CORPUS_REGISTRIES,
+        )
         cache: dict[tuple[str, str], Any] = {}
         for rid, policy in policies.items():
             c = checks[rid]

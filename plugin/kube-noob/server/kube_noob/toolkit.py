@@ -1360,6 +1360,7 @@ class Toolkit:
             rules=p.rules or None,
             exclude_namespaces=p.exclude_namespaces,
             exceptions=entries,
+            allowed_registries=self._allowed_registries(),
         )
         self._observe([f"policy-generate:{e}" for e in engines])
         header = policies.header(

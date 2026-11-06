@@ -392,10 +392,6 @@ NOT_GENERATED: dict[str, str] = {
     "checks the bundle",
     "KN-S033": "pausing a pool is a legitimate maintenance step, and the finding is about a pool LEFT "
     "paused, which one object at one moment cannot tell from one paused a minute ago",
-    "KN-S036": "this one SHOULD be generated and is not yet: the generator's contract is that a policy fails "
-    "exactly what the audit reports, and the audit declines without a configured allowlist, so the policy needs "
-    "that list threaded into `policy generate` before it can be written. Recorded as R3b in docs/roadmap.md "
-    "rather than emitted with an empty list, which would admit everything while looking like enforcement",
     "KN-S035": "admission cannot help: the finding is the state of one cluster-scoped singleton that "
     "already exists, not an object anybody is about to create, and a policy that blocked edits to it "
     "would stop an administrator turning auditing back ON as readily as off",
@@ -432,7 +428,66 @@ NOT_GENERATED: dict[str, str] = {
 }
 
 
-def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Check], dict[str, str]]:
+#: An allowlist entry this generator will compile: a lower-case hostname with optional port, optionally followed
+#: by one or more path segments. Anything else is refused rather than escaped into a CEL string literal, because
+#: an operator-supplied string that reaches a generated ENFORCING policy is the last place to be relaxed about
+#: quoting -- and a policy that fails to compile denies every request under `failurePolicy: Fail` (G242).
+_REGISTRY_ENTRY = re.compile(r"\A[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*\Z")
+#: An unqualified reference (`nginx`, `bitnami/nginx`) resolves here. Allowing it needs the "is the first path
+#: component a host" test, which needs string surgery the API server's CEL cannot do without `split`, so the
+#: rule is not generated when an entry names this registry -- stated, not silently half-enforced.
+_IMPLICIT_REGISTRY = "docker.io"
+
+
+def _looks_like_a_host(head: str) -> bool:
+    """Docker's own test, which decides whether a reference names a registry at all.
+
+    It matters here because the audit applies it: with the entry `myregistry` (no dot, no port), the image
+    `myregistry/app` comes from Docker Hub, not from `myregistry`, so `_registry_allowed` refuses it. A CEL
+    `startsWith('myregistry/')` would ADMIT it, so such an entry is refused by the generator instead of
+    compiled into a policy that disagrees with the audit (G242).
+    """
+    return "." in head or ":" in head or head == "localhost"
+
+
+def registry_cel(allowed: Sequence[str]) -> str | None:
+    """CEL that passes a container whose image comes from one of `allowed`, or None when it cannot be compiled.
+
+    Prefix matching only, which is exactly what a reference that names its registry needs, and it is written to
+    agree with `kube_noob.audit.rules._registry_allowed` case by case rather than approximately:
+
+    * `quay.io` admits every reference whose first path component is that host, which is `quay.io/...` and
+      nothing else. Not `quay.io` on its own (no slash, so Docker Hub resolves it) and not `quay.io:443/...`
+      (a different registry, which the audit also refuses).
+    * `quay.io/my-org` admits `quay.io/my-org` itself, `quay.io/my-org/app:1` and `quay.io/my-org@sha256:...`,
+      and refuses `quay.io/my-org-evil/app` because every test carries its separator.
+
+    An unqualified `nginx` matches no prefix and is refused, which is the correct verdict whenever Docker Hub is
+    not on the list -- and the reason the rule is not generated when it is.
+    """
+    entries = [e.strip() for e in allowed if e.strip()]
+    if not entries:
+        return None
+    for entry in entries:
+        if not _REGISTRY_ENTRY.match(entry):
+            return None
+        host = entry.split("/", 1)[0]
+        if not _looks_like_a_host(host) or host == _IMPLICIT_REGISTRY:
+            return None
+    tests: list[str] = []
+    for entry in sorted(set(entries)):
+        if "/" in entry:
+            tests.append(f"c.image == '{entry}' || c.image.startsWith('{entry}/') || c.image.startsWith('{entry}@')")
+        else:
+            tests.append(f"c.image.startsWith('{entry}/')")
+    return "variables.containers.all(c, !has(c.image) || c.image == '' || " + " || ".join(tests) + ")"
+
+
+def _checks(
+    platform: str,
+    platform_version: str | None,
+    allowed_registries: Sequence[str] = (),
+) -> tuple[dict[str, Check], dict[str, str]]:
     """The checks for this platform, and the rules skipped here (with the reason) beyond NOT_GENERATED."""
     openshift = platform in OPENSHIFT_FAMILY
     s003_k8s = (
@@ -908,6 +963,19 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
         else:
             kinds = tuple(k for k in c.kinds if openshift or TARGETS[k].group not in OPENSHIFT_GROUPS)
             out[c.rule_id] = c if kinds == c.kinds else _with_kinds(c, kinds)
+    # KN-S036 is a policy only when an organisation has said which registries it approves. With no list there
+    # is no expression to write: emitting one that admits everything would look like enforcement while enforcing
+    # nothing, which is the absence-read-as-a-pass failure this whole catalogue is built against. So the rule is
+    # recorded as skipped WITH the reason, exactly as the audit declines it (G241, G242).
+    registry = registry_cel(allowed_registries)
+    if registry is None:
+        skipped["KN-S036"] = (
+            "no registry allowlist to enforce: set audit.allowedRegistries in the configuration file (entries "
+            "like quay.io or quay.io/my-org). An entry naming docker.io, or a host with no dot, port or "
+            "`localhost`, is refused here because the resulting CEL would disagree with `kube-noob audit`"
+        )
+    else:
+        out["KN-S036"] = Check("KN-S036", _POD_KINDS, (registry,), pod=True)
     # DeploymentConfig is a pod workload on OpenShift.
     if openshift:
         for rid, c in list(out.items()):
@@ -931,8 +999,12 @@ def _with_kinds(c: Check, kinds: tuple[str, ...]) -> Check:
     )
 
 
-def checks_for(platform: str, platform_version: str | None = None) -> dict[str, Check]:
-    return _checks(platform, platform_version)[0]
+def checks_for(
+    platform: str,
+    platform_version: str | None = None,
+    allowed_registries: Sequence[str] = (),
+) -> dict[str, Check]:
+    return _checks(platform, platform_version, allowed_registries)[0]
 
 
 def _exempt(c: Check, platform: str, exceptions: Sequence[Checked] = ()) -> str:
@@ -1174,6 +1246,7 @@ def generate(
     rules: Sequence[str] | None = None,
     exclude_namespaces: Sequence[str] = (),
     exceptions: Sequence[Checked] = (),
+    allowed_registries: Sequence[str] = (),
 ) -> Generated:
     """Policies for ``rules`` (default: all) on ``platform``, one set per engine, in rule-id order."""
     unknown_engines = [e for e in engines if e not in ENGINES]
@@ -1190,7 +1263,7 @@ def generate(
     unknown = [r for r in wanted if r not in RULES]
     if unknown:
         raise ValueError(f"unknown rule id(s): {unknown[:5]} (kube-noob rules lists them)")
-    checks, platform_skips = _checks(platform, platform_version)
+    checks, platform_skips = _checks(platform, platform_version, allowed_registries)
     exclude = list(dict.fromkeys([*DEFAULT_EXCLUDED_NAMESPACES, *exclude_namespaces]))
     docs: list[dict[str, Any]] = []
     generated: list[dict[str, str]] = []

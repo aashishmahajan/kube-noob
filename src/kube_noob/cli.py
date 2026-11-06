@@ -2922,6 +2922,9 @@ def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             rules=a.rules or None,
             exclude_namespaces=a.exclude_namespaces,
             exceptions=entries,
+            # From the configuration file, like the audit's: which registries are approved is an organisational
+            # decision, not a flag a caller picks per invocation (G241, G242).
+            allowed_registries=tuple(s.audit.allowed_registries),
         )
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc

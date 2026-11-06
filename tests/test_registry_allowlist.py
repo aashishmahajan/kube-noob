@@ -128,3 +128,78 @@ def test_a_blank_or_missing_image_is_not_a_registry_finding() -> None:
     """KN-V001 and the schema own a malformed container; this rule says nothing about one."""
     for image in ("", "   "):
         assert not _fired(image, ("quay.io/my-org",))
+
+
+# --- R3b: the same verdict at admission (G242) ---------------------------------------------------------------
+
+
+#: Every reference shape where the generated CEL and `_registry_allowed` could plausibly part company: an entry
+#: hit exactly, a digest on that exact entry, a tag on it (the audit compares the tag as part of the path, so
+#: this is NOT allowed), a longer organisation that shares the prefix, the same host on another port, and the
+#: three unqualified forms that resolve to Docker Hub. The test asserts the two agree, rather than asserting a
+#: verdict twice: the generator's contract is that a policy refuses exactly what the audit reports.
+_PARITY_IMAGES = (
+    "quay.io/my-org/app:1.2.3",
+    "quay.io/my-org/app@sha256:" + "a" * 64,
+    "quay.io/my-org",
+    "quay.io/my-org@sha256:" + "b" * 64,
+    "quay.io/my-org:1",
+    "quay.io/my-org-evil/app:1",
+    "quay.io/my-orgx/app",
+    "quay.io:443/my-org/app:1",
+    "quay.io",
+    "nginx",
+    "nginx:1.27",
+    "bitnami/nginx",
+    "docker.io/library/nginx",
+    "localhost:5000/app:1",
+    "registry.example.com:5000/team/app:2",
+    "registry.example.com:5000/team",
+    "ghcr.io/org/app",
+    "app:x:latest",
+    "nginx:",
+    "",
+)
+_PARITY_LISTS = (
+    ("quay.io",),
+    ("quay.io/my-org",),
+    ("registry.example.com:5000/team", "quay.io/my-org"),
+    ("localhost:5000",),
+)
+
+
+@pytest.mark.parametrize("allowed", _PARITY_LISTS)
+@pytest.mark.parametrize("image", _PARITY_IMAGES)
+def test_the_generated_policy_refuses_exactly_what_the_audit_reports(image: str, allowed: tuple[str, ...]) -> None:
+    from kube_noob.generate import policies as pol
+    from tests.policy_cel import failures
+
+    check = pol.checks_for("kubernetes", None, allowed)["KN-S036"]
+    policy = pol.documents(check, "vap", "enforce", "kubernetes")[0]
+    refused = bool(failures(policy, _deployment(image)))
+    assert refused == bool(_fired(image, allowed)), f"{image!r} against {allowed}: policy={refused}"
+
+
+def test_an_allowlist_the_generator_cannot_compile_emits_nothing() -> None:
+    """Refusing to emit is the only safe answer: a policy that disagrees with the audit is worse than none.
+
+    `docker.io` needs the "is the first path component a host" test, which the API server's CEL cannot do
+    without `split`. A host with no dot, port or `localhost` (`myregistry`) is never a registry to a runtime, so
+    `myregistry/app` comes from Docker Hub and a `startsWith('myregistry/')` policy would admit an image the
+    audit reports. Both are stated in the skip reason instead.
+    """
+    from kube_noob.generate.policies import registry_cel
+
+    assert registry_cel(()) is None
+    assert registry_cel(("docker.io",)) is None
+    assert registry_cel(("docker.io/library",)) is None
+    assert registry_cel(("myregistry",)) is None
+    assert registry_cel(("quay.io/My-Org",)) is None
+    assert registry_cel(("quay.io/my-org'; true || '",)) is None
+    assert registry_cel(("quay.io",)) == (
+        "variables.containers.all(c, !has(c.image) || c.image == '' || c.image.startsWith('quay.io/'))"
+    )
+    assert registry_cel(("quay.io/my-org",)) == (
+        "variables.containers.all(c, !has(c.image) || c.image == '' || c.image == 'quay.io/my-org' || "
+        "c.image.startsWith('quay.io/my-org/') || c.image.startsWith('quay.io/my-org@'))"
+    )

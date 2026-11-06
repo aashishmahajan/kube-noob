@@ -63,7 +63,8 @@ SKIPPED_RULES = frozenset(
         # Needs `audit.allowedRegistries`, which the webhook's Config does not carry: an admitted object says
         # nothing about which registries the organisation approved. Evaluating it without the list would admit
         # every image while the webhook looked like it was enforcing a registry policy, which is worse than not
-        # evaluating it. Threading the list in is R3b (G241).
+        # evaluating it. The GENERATED policies do enforce it from the configuration file (R3b, G242); threading
+        # the same list into this webhook is R3c.
         "KN-S036",
         "KN-V014",  # bundle properties
         "KN-V018",

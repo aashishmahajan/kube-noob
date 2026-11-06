@@ -1013,6 +1013,15 @@ listed in the file header with the reason. Platform namespaces (`kube-*`, and `o
 platform's operators are exempt; calibrate rules (probes, resources, replicas) skip objects a controller owns, so a
 rollout is never blocked by its own ReplicaSets.
 
+One rule is generated only when you have configured it: `KN-S036` refuses an image from a registry outside
+`audit.allowedRegistries`, and with no list there is nothing to enforce, so the file header says so rather than
+emitting a policy that admits everything. Set the list in the configuration file (`quay.io`, or
+`quay.io/my-org` to narrow it to one organisation) and it generates for both engines. Two kinds of list are
+refused rather than compiled, again with the reason in the header: one naming `docker.io`, because deciding
+whether `nginx` is a Docker Hub image needs string handling the API server's CEL does not have, and one whose
+host has no dot, port or `localhost`, because `myregistry/app` is a Docker Hub image and the policy would admit
+what `kube-noob audit` reports.
+
 ```bash
 kube-noob policy generate --platform openshift --version 4.20 --mode audit -o kube-noob-policies.yaml
 oc apply -f kube-noob-policies.yaml
