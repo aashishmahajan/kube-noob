@@ -1055,9 +1055,16 @@ namespace (a PodDisruptionBudget for a Deployment, a NetworkPolicy, a claim's St
 `admission.lookups`, which lists those kinds read-only in the background, and can never be enforced. Exceptions use
 the same ExceptionList as `kube-noob audit --exceptions`.
 
+One rule needs configuring before the webhook can say anything about it. `KN-S036` compares every image against
+`audit.allowedRegistries`, and with no list it declines, so it warns about nothing; set the list and the webhook,
+`kube-noob audit` and `policy generate` all read the same one and give the same verdict. Enforcing it without a
+list is refused at install and at startup rather than denying nothing, and an entry that could never match an
+image -- `MyRegistry`, or a host with no dot, port or `localhost` -- is refused by the chart's values schema and
+when the configuration loads.
+
 ```bash
 helm upgrade --install kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob -n kube-noob --create-namespace \
-  --set admission.enabled=true
+  --set admission.enabled=true --set "audit.allowedRegistries={quay.io/my-org}"
 helm upgrade kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob -n kube-noob --reuse-values \
   --set "admission.enforce={KN-S001,KN-S009}"
 kube-noob admission review -f review.json --enforce KN-S001

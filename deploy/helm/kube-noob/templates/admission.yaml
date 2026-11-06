@@ -20,6 +20,9 @@ a dead or slow webhook never blocks the cluster; it only stops warning. Off by d
 {{- if and $a.lookups .Values.networkPolicy.enabled .Values.networkPolicy.egress.enabled (not .Values.networkPolicy.egress.apiServerCIDRs) }}
 {{- fail "admission.lookups reads the API server: set networkPolicy.egress.apiServerCIDRs (or networkPolicy.egress.enabled=false)" }}
 {{- end }}
+{{- if and (has "KN-S036" ($a.enforce | default list)) (not (.Values.audit | default dict).allowedRegistries) }}
+{{- fail "admission.enforce KN-S036 needs audit.allowedRegistries: with no approved registries the rule declines and would deny nothing (R3c)" }}
+{{- end }}
 {{- $tlsSecret := ternary $a.tls.secretName (printf "%s-tls" $name) (eq $a.certificates "secret") }}
 {{- $excluded := concat (list "kube-system" "kube-public" "kube-node-lease" "openshift" $ns) ($a.excludedNamespaces | default list) | uniq }}
 apiVersion: v1
@@ -55,6 +58,10 @@ data:
       {{- if $a.exceptions }}
       exceptionsFile: /etc/kube-noob-admission/config/exceptions.yaml
       {{- end }}
+    {{- with (.Values.audit | default dict).allowedRegistries }}
+    audit:
+      allowedRegistries: {{- toYaml . | nindent 8 }}
+    {{- end }}
   {{- with $a.exceptions }}
   exceptions.yaml: |
     {{- . | nindent 4 }}
@@ -113,7 +120,7 @@ spec:
     metadata:
       labels: {{- include "kube-noob.admissionLabels" . | nindent 8 }}
       annotations:
-        checksum/config: {{ printf "%s|%s|%s|%s" (toJson $a.enforce) (toJson $excluded) (toString $a.lookups) ($a.exceptions | default "") | sha256sum }}
+        checksum/config: {{ printf "%s|%s|%s|%s|%s" (toJson $a.enforce) (toJson $excluded) (toString $a.lookups) ($a.exceptions | default "") (toJson ((.Values.audit | default dict).allowedRegistries | default list)) | sha256sum }}
     spec:
       serviceAccountName: {{ $name }}
       automountServiceAccountToken: {{ $a.lookups }}

@@ -60,12 +60,6 @@ SKIPPED_RULES = frozenset(
         "KN-V012",
         "KN-V023",  # same: the containerPorts the Service's pods declare are in other objects
         "KN-N014",  # needs the cluster's CNI and version, which no admitted object carries
-        # Needs `audit.allowedRegistries`, which the webhook's Config does not carry: an admitted object says
-        # nothing about which registries the organisation approved. Evaluating it without the list would admit
-        # every image while the webhook looked like it was enforcing a registry policy, which is worse than not
-        # evaluating it. The GENERATED policies do enforce it from the configuration file (R3b, G242); threading
-        # the same list into this webhook is R3c.
-        "KN-S036",
         "KN-V014",  # bundle properties
         "KN-V018",
         "KN-S018",  # every Secret in a cluster holds data: the rule is about Git
@@ -103,6 +97,10 @@ class Config:
     max_warnings: int = 10
     exceptions: Any = None  # a reviewed ExceptionList (kube_noob.audit.exceptions.Review)
     lookups: bool = False
+    #: `audit.allowedRegistries` from the same configuration file. KN-S036 is the one rule whose answer is a
+    #: policy rather than a property of the object, so with no list the rule declines (it reports nothing and is
+    #: not recorded as checked) and enforcing it is refused below rather than enforcing nothing (R3c, G243).
+    allowed_registries: tuple[str, ...] = ()
 
     @classmethod
     def build(
@@ -115,6 +113,7 @@ class Config:
         max_warnings: int = 10,
         exceptions_text: str | None = None,
         lookups: bool = False,
+        allowed_registries: list[str] | tuple[str, ...] = (),
     ) -> Config:
         from kube_noob.audit.rules import RULES
 
@@ -126,6 +125,13 @@ class Config:
             raise AdmissionConfigError(
                 f"admission.enforce cannot enforce {', '.join(bad)}: these rules need other objects or the whole "
                 "bundle (they warn with admission.lookups, or kube-noob audit checks them)"
+            )
+        if "KN-S036" in enforce and not allowed_registries:
+            # Fail at startup, not quietly at admission: `enforce: [KN-S036]` with no allowlist would deny
+            # nothing while the chart said a registry policy was being enforced (G243).
+            raise AdmissionConfigError(
+                "admission.enforce includes KN-S036 but audit.allowedRegistries is empty: name the registries "
+                "you approve (quay.io, or quay.io/my-org to narrow it to one organisation) or drop the rule"
             )
         if not 1 <= max_warnings <= 50:
             raise AdmissionConfigError("admission.maxWarnings must be 1-50")
@@ -140,7 +146,16 @@ class Config:
                     f"admission.exceptionsFile has refused entries ({', '.join(e.id for e in refused[:5])}): fix them "
                     "with kube-noob exceptions check"
                 )
-        return cls(frozenset(enforce), frozenset(excluded), platform, version, max_warnings, review, lookups)
+        return cls(
+            frozenset(enforce),
+            frozenset(excluded),
+            platform,
+            version,
+            max_warnings,
+            review,
+            lookups,
+            tuple(allowed_registries),
+        )
 
 
 def _response(uid: str, allowed: bool, warnings: list[str], message: str | None = None) -> dict[str, Any]:
@@ -191,6 +206,7 @@ def _findings(
         version=cfg.version,
         stages={Stage.VALIDATE, Stage.AUDIT, Stage.CALIBRATE},
         schema=False,
+        allowed_registries=cfg.allowed_registries,
     )
     out: list[tuple[str, str, str, str]] = []
     for f in report.findings:

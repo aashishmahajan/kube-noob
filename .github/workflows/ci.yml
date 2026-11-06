@@ -334,6 +334,31 @@ jobs:
                --set monitoring.allowUnauthenticatedMetrics=true | grep -q "authorization:"; then
             echo "::error title=chart::an opened /metrics must not still send credentials"; exit 1
           fi
+          # The registry allowlist (KN-S036, R3c) has to reach BOTH config files -- the sidecar's and the
+          # webhook's -- because `kube-noob audit` and the webhook must give one verdict, and an entry that can
+          # never match an image, or enforcing the rule with no list at all, must fail at install rather than
+          # look like a registry policy while allowing everything through.
+          reg="--set audit.allowedRegistries={quay.io/my-org,registry.example.com:5000}"
+          helm template kn deploy/helm/kube-noob $base "$reg" --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['audit']['allowedRegistries'] == ['quay.io/my-org', 'registry.example.com:5000'], cfg
+          "
+          helm template kn deploy/helm/kube-noob $base "$reg" --set admission.enabled=true \
+            --show-only templates/admission.yaml | python -c "
+          import sys, yaml
+          maps = [d for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind') == 'ConfigMap']
+          cfg = yaml.safe_load(maps[0]['data']['config.yaml'])
+          assert cfg['audit']['allowedRegistries'] == ['quay.io/my-org', 'registry.example.com:5000'], cfg
+          "
+          if helm template kn deploy/helm/kube-noob $base --set "audit.allowedRegistries={MyRegistry}" \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::an entry that is not a lower-case registry must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set admission.enabled=true \
+               --set "admission.enforce={KN-S036}" >/dev/null 2>&1; then
+            echo "::error title=chart::enforcing KN-S036 with no allowlist must fail to render"; exit 1
+          fi
           helm template kn deploy/helm/kube-noob $base --set config.webEnabled=true \
             | grep -A1 "name: KUBE_NOOB_WEB_ENABLED" | grep -q '"true"'
           helm template kn deploy/helm/kube-noob $base --set config.offline=true \

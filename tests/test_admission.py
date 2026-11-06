@@ -115,17 +115,47 @@ def test_warn_mode_never_denies_fuzzed() -> None:
     assert adm.review_bytes(big, cfg)["response"]["allowed"] is True
 
 
+def _registries(rule: str) -> tuple[str, ...]:
+    """The fixture's `allowedRegistries`, which KN-S036 needs to decide anything at all (G243)."""
+    data = yaml.safe_load((RULES / f"{rule}.yaml").read_text())
+    return tuple(str(r) for r in (data.get("allowedRegistries") or []))
+
+
 def test_every_bad_fixture_warns_and_is_admitted() -> None:
-    cfg = adm.Config.build(platform="openshift", version="4.20")
     for rule, which, doc in FIXTURES:
         if which != "bad" or rule in adm.SKIPPED_RULES | adm.CROSS_OBJECT:
             continue
+        registries = _registries(rule)
+        cfg = adm.Config.build(platform="openshift", version="4.20", allowed_registries=registries)
         ns = (doc.get("metadata") or {}).get("namespace") or "shop"
         r = _well_formed(adm.review(_review(doc, ns=ns), cfg), cfg)
         assert r["allowed"] is True
-        single = {f.rule_id for f in analyze(yaml.safe_dump(doc), platform="openshift", version="4.20").findings}
+        single = {
+            f.rule_id
+            for f in analyze(
+                yaml.safe_dump(doc), platform="openshift", version="4.20", allowed_registries=registries
+            ).findings
+        }
         if rule in single:
             assert any(w.startswith(f"[{rule}]") for w in r.get("warnings", [])), (rule, r.get("warnings"))
+
+
+def test_the_registry_rule_declines_rather_than_warning_without_an_allowlist() -> None:
+    """With no list the webhook says nothing about registries, and refuses to pretend it is enforcing one."""
+    bad = yaml.safe_load(yaml.safe_dump(next(d for r, w, d in FIXTURES if r == "KN-S036" and w == "bad")))
+    off = adm.Config.build(platform="openshift", version="4.20")
+    r = _well_formed(adm.review(_review(bad, ns="shop"), off), off)
+    assert r["allowed"] is True and not [w for w in r.get("warnings", []) if w.startswith("[KN-S036]")]
+    on = adm.Config.build(platform="openshift", version="4.20", allowed_registries=("quay.io/my-org",))
+    warned = _well_formed(adm.review(_review(bad, ns="shop"), on), on)
+    assert any(w.startswith("[KN-S036]") for w in warned.get("warnings", []))
+    with pytest.raises(adm.AdmissionConfigError, match="allowedRegistries"):
+        adm.Config.build(enforce=["KN-S036"], platform="openshift", version="4.20")
+    enforcing = adm.Config.build(
+        enforce=["KN-S036"], platform="openshift", version="4.20", allowed_registries=("quay.io/my-org",)
+    )
+    denied = _well_formed(adm.review(_review(bad, ns="shop"), enforcing), enforcing)
+    assert denied["allowed"] is False and "[KN-S036]" in denied["status"]["message"]
 
 
 # -- enforce ---------------------------------------------------------------------------------------------------------
@@ -140,13 +170,19 @@ ENFORCEABLE = sorted(
 def test_enforce_denies_only_the_listed_rule(rule: str) -> None:
     data = yaml.safe_load((RULES / f"{rule}.yaml").read_text())
     platform, version = data.get("platform", "openshift"), str(data.get("version", "4.20"))
-    cfg = adm.Config.build(enforce=[rule], platform=platform, version=version)
+    registries = tuple(str(r) for r in (data.get("allowedRegistries") or []))
+    cfg = adm.Config.build(enforce=[rule], platform=platform, version=version, allowed_registries=registries)
     denied_bad = False
     for which in ("good", "bad"):
         for doc in [d for d in yaml.safe_load_all(data[which]) if isinstance(d, dict)]:
             ns = (doc.get("metadata") or {}).get("namespace") or "shop"
             r = _well_formed(adm.review(_review(doc, ns=ns), cfg), cfg)
-            single = {f.rule_id for f in analyze(yaml.safe_dump(doc), platform=platform, version=version).findings}
+            single = {
+                f.rule_id
+                for f in analyze(
+                    yaml.safe_dump(doc), platform=platform, version=version, allowed_registries=registries
+                ).findings
+            }
             if rule in single and which == "bad":
                 assert r["allowed"] is False, (rule, doc.get("kind"))
                 assert f"[{rule}]" in r["status"]["message"] and r["status"]["code"] == 403
@@ -326,6 +362,31 @@ def test_cli_review(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
 # -- the chart (deploy/helm/kube-noob/templates/admission.yaml); rendered and installed in CI (helm, kind) -------------
 
 CHART = ROOT / "deploy" / "helm" / "kube-noob"
+
+
+def test_chart_carries_the_registry_allowlist_to_both_config_files() -> None:
+    """One list, three readers (R3c, G243).
+
+    `kube-noob audit` in the sidecar, the webhook, and `policy generate` must agree about which registries are
+    approved, so the chart writes the same value into both config files -- and refuses at install, rather than
+    at a crash loop, when the list could never match an image or when the rule is enforced without one.
+    """
+    import jsonschema
+
+    values = yaml.safe_load((CHART / "values.yaml").read_text())
+    assert values["audit"]["allowedRegistries"] == []
+    schema = jsonschema.Draft7Validator(json.loads((CHART / "values.schema.json").read_text()))
+    good = {**values, "audit": {"allowedRegistries": ["quay.io/my-org", "localhost:5000", "registry.local:5000/t"]}}
+    assert not list(schema.iter_errors(good))
+    for bad in (["MyRegistry"], ["quay.io/My-Org"], [""], ["quay.io/"], ["quay.io"] * 65, [5]):
+        assert list(schema.iter_errors({**values, "audit": {"allowedRegistries": bad}})), bad
+    for name in ("configmap.yaml", "admission.yaml"):
+        text = (CHART / "templates" / name).read_text()
+        assert "allowedRegistries: {{- toYaml . | nindent 8 }}" in text, name
+    admission = (CHART / "templates" / "admission.yaml").read_text()
+    assert 'has "KN-S036" ($a.enforce | default list)' in admission, "enforcing it with no list must not render"
+    checksum = next(line for line in admission.splitlines() if "checksum/config" in line)
+    assert "allowedRegistries" in checksum, "the webhook must restart when the allowlist changes"
 
 
 def test_chart_values_and_schema() -> None:

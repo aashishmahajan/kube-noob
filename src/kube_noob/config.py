@@ -413,6 +413,13 @@ class JiraSettings(_Base):
         raise ValueError("jira.projects must be default, all, or comma-separated project keys such as OCPBUGS,ROX")
 
 
+#: At most this many registry entries, and the shape each one has to have. The same grammar the policy
+#: generator compiles (kube_noob.generate.policies._REGISTRY_ENTRY): a lower-case host, an optional port, and
+#: optional path segments.
+MAX_ALLOWED_REGISTRIES = 64
+_REGISTRY_ENTRY = re.compile(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*")
+
+
 class AuditSettings(_Base):
     #: Registries an image may come from. A POLICY, not a fact about a manifest: no document states which
     #: registries an organisation has approved, so KN-S036 declines to decide when this is empty rather than
@@ -423,6 +430,33 @@ class AuditSettings(_Base):
     #: Each entry is a registry host, optionally with a port, and optionally with a leading path segment to
     #: narrow it to one organisation: `quay.io`, `registry.example.com:5000`, `quay.io/my-org`.
     allowed_registries: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_registries")
+    @classmethod
+    def _registries(cls, v: list[str]) -> list[str]:
+        """Refuse an entry that could never match, loudly, at load (G243).
+
+        An image reference is lower-case and its first component is the registry only when it looks like a host
+        -- a dot, a port, or exactly `localhost`. So `MyRegistry` and `myregistry` match no image a runtime can
+        pull from that registry: left in, they would report every image in the cluster as unapproved while
+        looking like a configured allowlist. A typo is a startup error instead.
+        """
+        cleaned = [e.strip() for e in v if e.strip()]
+        if len(cleaned) > MAX_ALLOWED_REGISTRIES:
+            raise ValueError(f"audit.allowedRegistries takes at most {MAX_ALLOWED_REGISTRIES} entries")
+        for entry in cleaned:
+            if not _REGISTRY_ENTRY.fullmatch(entry):
+                raise ValueError(
+                    f"audit.allowedRegistries {entry!r} is not a registry: write a lower-case host with an "
+                    "optional port and optional path, such as quay.io, registry.example.com:5000 or quay.io/my-org"
+                )
+            host = entry.split("/", 1)[0]
+            if not ("." in host or ":" in host or host == "localhost"):
+                raise ValueError(
+                    f"audit.allowedRegistries {entry!r} names no registry: a reference whose first component has "
+                    "no dot, port or 'localhost' comes from docker.io, so this entry would match no image"
+                )
+        return cleaned
 
 
 class MetricsSettings(_Base):

@@ -224,6 +224,14 @@ notify:
 gate:
   enabled: false             # tier G: forward approved tool calls to an upstream MCP server
 
+audit:
+  # Registries an image may come from (KN-S036). A POLICY, not a fact about a manifest: no document says which
+  # registries you approve, so with this empty the rule declines rather than reporting every image as fine. Each
+  # entry is a lower-case host with an optional port, optionally narrowed to one organisation by a path:
+  # quay.io, registry.example.com:5000, quay.io/my-org. It reaches the audit tools, the admission webhook and
+  # `kube-noob policy generate` from here, so all three give the same verdict.
+  allowedRegistries: []
+
 admission:
   # Tier A: kube-noob-admission, a validating webhook. Every kube-noob finding of a created or updated object becomes
   # an admission warning (kubectl prints them); a request is denied only for a rule listed in enforce, and on UPDATE

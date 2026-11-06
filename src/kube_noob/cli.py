@@ -846,6 +846,9 @@ def _admission_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             max_warnings=ad.max_warnings,
             exceptions_text=ad.exceptions_file.read_text(encoding="utf-8") if ad.exceptions_file else None,
             lookups=ad.lookups,
+            # KN-S036's allowlist lives with the audit's, in one place: the webhook and `kube-noob audit` read
+            # the same configuration file and must give the same verdict (R3c, G243).
+            allowed_registries=tuple(s.audit.allowed_registries),
         )
     except (admission.AdmissionConfigError, OSError, ValueError) as exc:
         raise ConfigError(str(exc)) from exc

@@ -46,6 +46,10 @@ data:
       {{- end }}
     probe:
       enabled: {{ .Values.probe.enabled }}
+    {{- with (.Values.audit | default dict).allowedRegistries }}
+    audit:
+      allowedRegistries: {{- toYaml . | nindent 8 }}
+    {{- end }}
     dryRun:
       enabled: {{ .Values.dryRun.enabled }}
     itsm:

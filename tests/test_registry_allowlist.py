@@ -203,3 +203,52 @@ def test_an_allowlist_the_generator_cannot_compile_emits_nothing() -> None:
         "variables.containers.all(c, !has(c.image) || c.image == '' || c.image == 'quay.io/my-org' || "
         "c.image.startsWith('quay.io/my-org/') || c.image.startsWith('quay.io/my-org@'))"
     )
+
+
+def test_an_entry_that_could_never_match_is_refused_at_load() -> None:
+    """A typo in the allowlist is a startup error, not a cluster where every image is suddenly unapproved.
+
+    `MyRegistry` and `myregistry` match no reference a runtime can pull from that registry -- an image
+    reference is lower-case, and a first component with no dot, port or `localhost` is a Docker Hub
+    repository. Left in, such an entry reports every image in the cluster against a registry that does not
+    exist, which reads as 93 rules working and one lying (G243).
+    """
+    from kube_noob.config import MAX_ALLOWED_REGISTRIES, load_settings
+    from kube_noob.errors import ConfigError
+
+    ok = load_settings(overrides={"audit": {"allowedRegistries": [" quay.io/my-org ", "localhost:5000"]}})
+    assert ok.audit.allowed_registries == ["quay.io/my-org", "localhost:5000"]
+    for bad in (
+        ["MyRegistry"],
+        ["myregistry"],
+        ["quay.io/My-Org"],
+        ["quay.io/"],
+        ["quay.io/my-org'; true || '"],
+        ["quay.io"] * (MAX_ALLOWED_REGISTRIES + 1),
+    ):
+        with pytest.raises(ConfigError):
+            load_settings(overrides={"audit": {"allowedRegistries": bad}})
+
+
+def test_the_webhook_and_the_audit_read_the_same_list() -> None:
+    """One configured list, the same verdict from the webhook as from `kube-noob audit` (R3c, G243)."""
+    from kube_noob import admission as adm
+
+    allowed = ("quay.io/my-org",)
+    cfg = adm.Config.build(platform="kubernetes", allowed_registries=list(allowed))
+    for image, refused in (("quay.io/my-org/app:1", False), ("ghcr.io/someone/app:1", True)):
+        review = {
+            "apiVersion": "admission.k8s.io/v1",
+            "kind": "AdmissionReview",
+            "request": {
+                "uid": "u1",
+                "operation": "CREATE",
+                "namespace": "shop",
+                "userInfo": {"username": "alice"},
+                "object": _deployment(image),
+            },
+        }
+        warnings = adm.review(review, cfg)["response"].get("warnings", [])
+        hit = any(w.startswith("[KN-S036]") for w in warnings)
+        assert hit == refused, image
+        assert hit == bool(_fired(image, allowed)), f"{image}: webhook and audit disagree"
