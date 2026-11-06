@@ -1515,6 +1515,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32); without it the rule that decides whether "
         "an AdminNetworkPolicy is inert cannot decide, and the row says so",
     )
+    ksi.add_argument(
+        "--exceptions",
+        default=None,
+        help="the exception list `audit --exceptions` takes: active entries move their findings to 'excepted' on "
+        "the indicators they reach, so this page reconciles with the audit report",
+    )
+    ksi.add_argument(
+        "--min-severity",
+        default="low",
+        choices=["info", "low", "medium", "high", "critical"],
+        help="hide findings below this severity; the default is `audit`'s default, because this view is a "
+        "projection of one audit and a rule a threshold hid is reported as withheld rather than clean",
+    )
     ksi.add_argument("--indicator", default=None, help="one indicator by id, e.g. KSI-IAM-ELP")
     ksi.add_argument("--control", default=None, help="the indicators citing one NIST control, e.g. AC-6")
     ksi.add_argument("--evidenced-only", action="store_true", help="hide indicators no kube-noob rule can see")
@@ -2283,84 +2296,43 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         return 0
 
     if a.cmd == "ksi":
-        from kube_noob.audit import fedramp
+        # Delegated to the toolkit rather than audited here. Two implementations of one view is what N14 was:
+        # this command and the `fedramp_ksi` tool each audited the bundle their own way, so the same files gave
+        # two sets of numbers -- and the fix for one would not have been the fix for the other (G246). What the
+        # command still owns is its input pipeline: `--skip-unreadable`, and an unreadable file that must exit 5
+        # and be named rather than dropped.
+        from kube_noob.audit.exceptions import ExceptionsError
 
-        if a.indicator and a.indicator not in fedramp.INDICATORS:
-            raise ConfigError(
-                f"no indicator {a.indicator} in {fedramp.DATASET} {fedramp.DATASET_VERSION}. "
-                f"The dataset keys indicators by mnemonic (KSI-IAM-ELP), not by number"
-            )
-        if a.control and a.control not in fedramp.BY_CONTROL:
-            raise ConfigError(f"{a.control} is not one of the controls kube-noob maps; see docs/compliance.md")
-        rule_ids: list[str] = []
-        evaluated: list[str] | None = None
-        fired: list[str] | None = None
+        manifests: str | None = None
         not_read: list[dict[str, str]] = []
-        assumptions: list[str] = []
-        ceiling: dict[str, str] | None = None
         if a.file:
-            # The same input pipeline as `audit`, not a shortcut past it. Reading the files directly meant a Helm
-            # values file was audited as one object and reported 31 least-privilege rules clean (`audit` refuses
-            # it); one file counted the rules that fire on an absent object as clean instead of not evaluated,
-            # which is G202 through a second door; and an unreadable file in a directory was dropped without a
-            # word where `audit` exits 5 and names it.
-            from kube_noob.audit.engine import analyze, refuse_if_not_manifests
-            from kube_noob.catalog import not_checked_beyond
-
-            text, not_read = _manifest_input(a)
+            manifests, not_read = _manifest_input(a)
             if not_read and not a.skip_unreadable:
                 _refuse_unreadable(not_read)
                 return 5
-            refuse_if_not_manifests(text)
-            audited = analyze(
-                text,
-                platform=a.platform or s.default_platform,
-                version=a.pversion,
-                partial_bundle=_partial_input(a),
-                cni=a.cni,
-                allowed_registries=tuple(s.audit.allowed_registries),
+        try:
+            out = kit.fedramp_ksi(
+                tk.KsiIn(
+                    manifests=manifests,
+                    platform=a.platform or s.default_platform,
+                    version=a.pversion,
+                    cni=a.cni,
+                    partial_bundle=_partial_input(a) if a.file else False,
+                    indicator=a.indicator,
+                    control=a.control,
+                    evidenced_only=a.evidenced_only,
+                    exceptions=_read(a.exceptions) if a.exceptions else None,
+                    min_severity=a.min_severity,
+                )
             )
-            rule_ids = [f.rule_id for f in audited.findings]
-            evaluated, fired = sorted(audited.evaluated_rules), sorted(audited.fired_rules)
-            assumptions = list(audited.assumptions)
-            ceiling = not_checked_beyond(audited.kubernetes_version)
-        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired, not_checked_beyond=ceiling)
-        if assumptions:
-            # What the audit assumed decides what its counts mean: an API "removed in the target version" is
-            # evidence against an assumed version, and a partial bundle is why a row says notEvaluated.
-            out["assumptions"] = assumptions
+        except ExceptionsError as exc:
+            raise ConfigError(f"{a.exceptions}: {exc}") from exc
         if not_read:
             out["unreadable"] = not_read
-        rows = out["indicators"]
-        total = len(rows)
-        hidden: dict[str, Any] = {}
-        if a.indicator:
-            rows = [r for r in rows if r["id"] == a.indicator]
-            hidden["indicator"] = a.indicator
-        if a.control:
-            cited = set(fedramp.indicators_for(a.control))
-            rows = [r for r in rows if r["id"] in cited]
-            out["forControl"] = {"id": a.control, "indicators": sorted(cited)}
-        if a.evidenced_only:
-            before = len(rows)
-            rows = [r for r in rows if r["evidenced"]]
-            hidden["evidencedOnly"] = before - len(rows)
-        out["indicators"] = rows
-        if len(rows) != total:
-            # A filter that quietly removes rows is the G215 defect in another costume: a reader counts what is
-            # on the page. This says how many are not, and an empty page says why rather than printing a header.
-            hidden["shown"] = len(rows)
-            hidden["of"] = total
-            if not rows:
-                hidden["why"] = (
-                    f"no indicator matches these filters: {a.indicator or 'any indicator'}"
-                    + (f" and the indicators citing {a.control}" if a.control else "")
-                    + (", with --evidenced-only" if a.evidenced_only else "")
-                )
-            out["filtered"] = hidden
         _write_html(a.html, out)
         if a.format == "text":
             _tprint(_ksi_markdown(out, audited=bool(a.file)))
+            _print_exceptions(out)
         else:
             _emit(out, fmt)
         return 0

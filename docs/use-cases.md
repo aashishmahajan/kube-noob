@@ -727,9 +727,16 @@ not read, and carries the audit's own assumptions into the page. A finding whose
 schema error, or a rule whose only control nothing cites -- is listed under `findingsNotMapped` rather than
 dropped, and a filter that hides rows says how many.
 
+It is a projection of one audit, not a second audit, so the numbers reconcile: it takes the same
+`--exceptions` list and the same `--min-severity` as `audit`, with the same defaults. An excepted finding is
+counted under `excepted` on the indicators it reaches rather than as an open finding -- an exception is a
+reviewed, owned, expiring decision about a control, and it reads the same way on both pages -- and a finding the
+threshold removed is reported as `withheld` rather than counted clean.
+
 ```bash
 kube-noob ksi
 kube-noob ksi -f k8s/ --evidenced-only
+kube-noob ksi -f k8s/ --exceptions kube-noob-exceptions.yaml --format json
 kube-noob ksi --control AC-6 --format json
 kube-noob ksi --indicator KSI-IAM-JIT
 ```
