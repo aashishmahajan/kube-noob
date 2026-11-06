@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 import yaml
 
-from kube_noob import drift, gate, report_html
+from kube_noob import charts, drift, gate, report_html
 
 ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests/fixtures/drift"
@@ -137,6 +137,8 @@ def test_a_withheld_standing_says_why_instead_of_showing_a_table() -> None:
     page = report_html.render(drift.first_report(snap))
     assert "forbidden" in page
     assert re.search(r"no standing|withheld entirely|cannot be trusted", page, re.I)
+    # And no chart of it either: a bucket that cannot be trusted as a number cannot be trusted as a bar.
+    assert "Per-control standing" not in page
 
 
 def test_the_ksi_view_carries_the_sentence_that_says_what_it_is_not() -> None:
@@ -227,3 +229,131 @@ def test_a_row_with_no_counts_does_not_sit_under_the_findings_heading() -> None:
 
     page = report_html.render(fedramp.summary([], evaluated_rule_ids=[]))
     assert 'colspan="4"' in page or 'colspan="5"' in page
+
+
+def _series(state: Path, incomplete: int = 0, days: int = 4) -> dict[str, Any]:
+    """A posture state folder with ``days`` snapshots, the first ``incomplete`` of them a partial read."""
+    docs = [d for d in yaml.safe_load_all((FIX / "day2.yaml").read_text()) if d]
+    report: dict[str, Any] = {}
+    for i in range(days):
+        snap = drift.snapshot(
+            docs[: len(docs) - (i % 2)],
+            source="live",
+            taken_at=dt.datetime(2026, 10, 1, tzinfo=dt.UTC) + dt.timedelta(days=i),
+            not_read=["roles in shop: forbidden"] if i < incomplete else [],
+        )
+        report, _ = drift.write_report(state, snap, keep=365)
+    return report
+
+
+def test_the_chart_shows_the_same_counts_as_the_table_beside_it() -> None:
+    """The rule the whole module rests on (U3): a chart is a second reading of numbers the reader can check
+    row by row, never a new claim. A bar whose value is not in the table is a claim nobody can audit."""
+    report = _gate_report()
+    page = report_html.render(report)
+    drawn = page[page.index("Findings by severity") : page.index("</svg>")]
+    labelled = dict(
+        zip(
+            re.findall(r'text-anchor="end">([a-z]+)</text>', drawn),
+            re.findall(r'class="val"[^>]*>(\d+)</text>', drawn),
+            strict=True,
+        )
+    )
+    assert labelled == {k: str(v) for k, v in report["counts"].items()}
+    for name, count in report["counts"].items():
+        assert re.search(rf"<td>{name}</td><td class=\"n\">{count}</td>", page), name
+
+
+def test_a_trend_is_drawn_only_when_every_snapshot_was_a_complete_read(tmp_path: Path) -> None:
+    """A snapshot that was refused a resource reports a floor, not a measurement. A line through that point
+    publishes a fall in findings that may only be a fall in what kube-noob was allowed to see."""
+    whole = report_html.render(_series(tmp_path / "ok"))
+    assert "Open findings over time" in whole
+    assert "<polyline" in whole, "four complete reads are a trend"
+
+    partial = report_html.render(_series(tmp_path / "partial", incomplete=1))
+    assert "Open findings over time" in partial
+    assert "<polyline" not in partial
+    assert "No trend is drawn" in partial
+    assert "1 of the 4 kept came from a snapshot that could not read every resource" in partial
+
+
+def test_a_report_that_cannot_say_whether_it_read_everything_withholds_the_line(tmp_path: Path) -> None:
+    """Every report kube-noob wrote before 0.8 carries no completeness record, under the same format string.
+    Unknown is not yes, and the page says which of the two it is in the table as well as in the caveat."""
+    report = _series(tmp_path / "old")
+    report["history"]["points"][0]["complete"] = None
+    page = report_html.render(report)
+    assert "<polyline" not in page
+    assert "1 were written before kube-noob recorded whether a snapshot had read everything" in page
+    assert page.count(">not recorded</span>") == 1
+    assert page.count(">yes</td>") == 3
+
+
+def test_a_series_that_mixes_two_populations_is_not_one_line(tmp_path: Path) -> None:
+    """A folder holding a `-f manifests` run and a `--live` run holds two different populations. Joining them
+    draws a comparison nobody made."""
+    report = _series(tmp_path / "mixed")
+    report["history"]["points"][1]["source"] = "manifests"
+    page = report_html.render(report)
+    assert "<polyline" not in page
+    assert "mixes snapshots of different things (live, manifests)" in page
+
+
+def test_the_counts_stay_on_the_page_when_the_trend_is_withheld(tmp_path: Path) -> None:
+    """Withholding the line is not withholding the numbers: each point is still listed, marked with whether
+    its read was complete, so the reader can see the shape and the reason together."""
+    page = report_html.render(_series(tmp_path / "partial", incomplete=2))
+    assert page.count('<span class="mono">2026-10-0') == 4, "every kept point is still a row"
+    assert page.count('<span class="fails">no</span>') == 2, "both partial reads are marked, not just one"
+
+
+def test_a_point_with_no_timestamp_withholds_the_line_instead_of_vanishing(tmp_path: Path) -> None:
+    """Dropping it would join the line across the gap without saying so, which is the whole defect this page
+    exists to avoid."""
+    report = _series(tmp_path / "ok")
+    report["history"]["points"][1]["at"] = None
+    page = report_html.render(report)
+    assert "<polyline" not in page
+    assert "1 do not say when they were taken" in page
+    assert page.count("\u2014</span>") >= 1, "the missing date is a dash, never an empty cell"
+
+
+def test_a_kept_file_behind_no_point_is_named_even_when_there_is_no_trend(tmp_path: Path) -> None:
+    """With one readable report and two that are not, the section used to disappear entirely -- so the page
+    said nothing at all about the files it could not place."""
+    state = tmp_path / "broken"
+    _series(state, days=3)
+    for path in sorted(state.glob("report-*.json"))[:2]:
+        path.write_text("{not json", encoding="utf-8")
+    report = drift.latest_report(state)
+    assert report is not None
+    page = report_html.render(report)
+    assert "Open findings over time" in page
+    assert "2 could not be read back or were not read" in page
+    assert "<polyline" not in page
+
+
+def test_a_series_longer_than_the_chart_says_what_it_left_out(tmp_path: Path) -> None:
+    """The table carries every point and the chart at most sixty. A reader comparing the two must not find a
+    different left-hand end with no reason given."""
+    report = _series(tmp_path / "long", days=charts.MAX_POINTS + 3)
+    page = report_html.render(report)
+    assert "<polyline" in page
+    assert "3 older point(s) are in the table below, not in the chart" in page
+    assert page.count('<span class="mono">2026-1') == charts.MAX_POINTS + 3
+
+
+def test_one_snapshot_is_not_a_trend(tmp_path: Path) -> None:
+    state = tmp_path / "one"
+    docs = [d for d in yaml.safe_load_all((FIX / "day2.yaml").read_text()) if d]
+    report, _ = drift.write_report(state, drift.snapshot(docs, source="manifests"), keep=14)
+    assert len(report["history"]["points"]) == 1
+    assert "Open findings over time" not in report_html.render(report)
+
+
+def test_the_charts_fetch_nothing_either(tmp_path: Path) -> None:
+    for page in (report_html.render(_gate_report()), report_html.render(_series(tmp_path / "ok"))):
+        assert "<svg" in page, "the page under test has to actually carry a chart"
+        sinks = _parsed(page)
+        assert (sinks.scripts, sinks.events, sinks.loads) == (0, [], [])

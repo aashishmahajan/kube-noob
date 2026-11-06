@@ -689,6 +689,18 @@ drawn their conclusion. `audited: false`, `assumed`, `not checked that far`, a f
 withheld control standing, and the shows/does-not-show pair all survive into the page -- an HTML report that drops
 them would be the same defect in a third format.
 
+The page carries charts, and they are drawn rather than plotted: inline SVG, still no script and still nothing
+fetched. A gate report gets findings by severity; a posture report gets open findings per control, the five
+standing buckets as a stacked bar, and open against excepted findings across the snapshots still kept. Three rules
+decide what may be drawn. A chart shows only what a table on the same page shows, so every bar has a row under it
+to check. Every bar is labelled with its name and its count, so a reader in print, in forced colours or with no
+colour vision at all loses nothing -- the palettes were put through a colour-vision validator in both light and
+dark rather than eyeballed. And a count that was withheld is not drawn at all: the trend is withheld entirely when
+any snapshot in the series could not read every resource, when a report written before kube-noob recorded that
+cannot say, when a kept file could not be read back, or when the folder mixes a `-f` run with a `--live` run --
+in every case with the reason and the per-snapshot counts in its place, because a line through a floor publishes
+a fall in findings that may only be a fall in what kube-noob was allowed to see.
+
 Everything from a manifest is escaped before it is written. Resource names, messages and paths come from someone
 else's cluster, and this is the one place in the product where that text becomes a document another person opens:
 a Deployment named `<script>alert(1)</script>` appears as text, and a test asserts both that it is shown and that

@@ -12,6 +12,10 @@ Two rules hold the whole module up.
 count means, and a reader who meets an empty findings table first has already drawn their conclusion. An HTML
 report that drops them would be G221 in a third format.
 
+**A chart shows only what a table on the same page shows** (U3). Every chart in :mod:`kube_noob.charts` is a
+second reading of counts the reader can check row by row underneath it, and a count that was withheld is not
+drawn at all -- an empty bar and a zero-length bar are the same picture, which is G221 again in ink.
+
 **Nothing from a manifest is ever markup.** Resource names, messages, paths and reasons come from someone else's
 cluster, and this is the one place in the product where that text becomes a document another person opens. Every
 value goes through :func:`_esc`; there is no template interpolation anywhere that does not.
@@ -22,6 +26,8 @@ from __future__ import annotations
 import datetime as dt
 import html
 from typing import Any
+
+from kube_noob import charts
 
 #: Rows past this are summarised rather than listed: a 4,000-row table is not a report anybody reads, and the
 #: count says how many are missing rather than letting the table end silently.
@@ -116,6 +122,135 @@ def _table(headers: list[str], rows: list[list[str]], numeric: set[int] | None =
     return out
 
 
+#: Worst first, which is the order the findings table is already sorted in. A severity this does not name is
+#: listed after these, alphabetically, rather than guessed at a position.
+_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+
+#: Written where a value is missing, so an empty cell is never read as a zero.
+_EM_DASH = "\u2014"
+
+
+def _severity_sections(report: dict[str, Any]) -> list[str]:
+    """The gate's own `counts`, as a table and a bar per severity. Nothing when every count is zero: a row of
+    empty bars says less than the sentence about there being no finding."""
+    counts = report.get("counts")
+    if not isinstance(counts, dict):
+        return []
+    rows: list[tuple[str, int]] = []
+    for name in _SEVERITY_ORDER:
+        if isinstance(counts.get(name), int):
+            rows.append((name, int(counts[name])))
+    rows += sorted((str(k), int(v)) for k, v in counts.items() if isinstance(v, int) and k not in _SEVERITY_ORDER)
+    if not any(c for _, c in rows):
+        return []
+    drawn = charts.bars(rows, caption="Findings by severity", classes=charts.SEVERITY_CLASS)
+    table = _table(["Severity", "Findings"], [[_esc(n), _esc(c)] for n, c in rows], numeric={1})
+    return drawn + table
+
+
+def _trend_sections(report: dict[str, Any]) -> list[str]:
+    """Open and excepted findings across the snapshots still kept (U3).
+
+    The table is always rendered; the line only when every point is a complete measurement of the same
+    population. Each reason it is withheld is one of the ways a number can be absent rather than zero -- a
+    snapshot that was refused a resource reports a floor, a report written before kube-noob recorded
+    completeness cannot say, a report that does not say when it was taken cannot be placed, a file that could
+    not be read is a point missing from the middle, and two sources in one folder are two populations. Joining
+    any of them to its neighbours would publish a change in findings that may only be a change in what
+    kube-noob was allowed to see.
+    """
+    hist = report.get("history")
+    if not isinstance(hist, dict):
+        return []
+    points = [p for p in hist.get("points") or [] if isinstance(p, dict)]
+    unplaced = [str(x) for x in hist.get("unplaced") or []]
+    if len(points) < 2 and not unplaced:
+        return []
+    out = ["<h2>Open findings over time</h2>"]
+    kept = len(points) + len(unplaced)
+    counted = [p for p in points if isinstance(p.get("open"), int) and isinstance(p.get("excepted"), int)]
+    partial = [p for p in points if p.get("complete") is False]
+    unknown = [p for p in points if p.get("complete") is None]
+    undated = [p for p in points if not p.get("at")]
+    sources = sorted({str(p["source"]) for p in points if p.get("source")})
+    why: list[str] = []
+    if partial:
+        why.append(
+            f"{len(partial)} of the {kept} kept came from a snapshot that could not read every resource, so "
+            "their open-finding counts are a floor rather than a measurement"
+        )
+    if unknown:
+        why.append(
+            f"{len(unknown)} were written before kube-noob recorded whether a snapshot had read everything, "
+            "so whether their counts are complete is not known"
+        )
+    if undated:
+        why.append(f"{len(undated)} do not say when they were taken")
+    if len(counted) != len(points):
+        why.append(f"{len(points) - len(counted)} do not carry both counts")
+    if unplaced:
+        why.append(f"{len(unplaced)} could not be read back or were not read ({', '.join(unplaced)})")
+    if len(sources) > 1:
+        why.append(
+            "the series mixes snapshots of different things (" + ", ".join(sources) + "), which are different "
+            "populations rather than one population over time"
+        )
+    if why or len(points) < 2:
+        out.append(
+            '<div class="caveat"><b>No trend is drawn.</b>'
+            + _esc("; ".join(why) or "there is one point, which is not a trend")
+            + ". A line through those points would publish a change in findings that may only be a change in "
+            "what kube-noob was allowed to see. The counts themselves are below, each marked with whether its "
+            "snapshot read every resource.</div>"
+        )
+    else:
+        shown = points[-charts.MAX_POINTS :]
+        out += charts.lines(
+            [str(p["at"])[:10] for p in shown],
+            [
+                ("Open", [int(p["open"]) for p in shown]),
+                ("Excepted", [int(p["excepted"]) for p in shown]),
+            ],
+            caption="Open and excepted findings per snapshot",
+        )
+        out.append(
+            '<p class="note">The points are evenly spaced by snapshot, not by date: the dates say which '
+            "snapshot each point is, and a gap between two runs is not drawn as a gap.</p>"
+        )
+        if len(points) > len(shown):
+            out.append(
+                f'<p class="note">{len(points) - len(shown)} older point(s) are in the table below, not in '
+                "the chart.</p>"
+            )
+    out += _table(
+        ["Taken", "Open", "Excepted", "Source", "Read everything"],
+        [
+            [
+                f'<span class="mono">{_esc(p.get("at") or _EM_DASH)}</span>',
+                _esc(p["open"]) if isinstance(p.get("open"), int) else _EM_DASH,
+                _esc(p["excepted"]) if isinstance(p.get("excepted"), int) else _EM_DASH,
+                _esc(p.get("source") or _EM_DASH),
+                "yes"
+                if p.get("complete") is True
+                else f'<span class="fails">{"no" if p.get("complete") is False else "not recorded"}</span>',
+            ]
+            for p in points
+        ],
+        numeric={1, 2},
+    )
+    out.append(
+        '<p class="note">"Read everything" is whether the snapshot was refused a resource it asked the cluster '
+        "for. It does not cover a kind kube-noob has no reader for: the audit records that as an assumption on "
+        "the run itself.</p>"
+    )
+    if unplaced:
+        out.append(
+            '<p class="note">Kept files behind a point that could not be made: '
+            f'<span class="mono">{_esc(", ".join(unplaced))}</span>.</p>'
+        )
+    return out
+
+
 def _caveats(report: dict[str, Any]) -> list[str]:
     """Everything that changes what a count below means. Rendered first, always."""
     out: list[str] = []
@@ -169,6 +304,7 @@ def _gate_sections(report: dict[str, Any]) -> list[str]:
                 '<p class="note">No finding at or above the configured severity. Read the caveats above before '
                 "reading that as a clean result.</p>"
             )
+        out += _severity_sections(report)
         out += _table(
             ["Rule", "Severity", "Fails gate", "Resource", "Where", "What"],
             [
@@ -239,6 +375,10 @@ def _standing_sections(report: dict[str, Any]) -> list[str]:
     by_control = (report.get("violations") or {}).get("byControl")
     if by_control:
         out.append("<h2>Open findings by control</h2>")
+        out += charts.bars(
+            [(str(c.get("control")), int(c.get("findings") or 0)) for c in by_control if isinstance(c, dict)],
+            caption="Most open findings first",
+        )
         out += _table(
             ["Control", "Title", "Findings", "Namespaces"],
             [
@@ -263,6 +403,12 @@ def _standing_sections(report: dict[str, Any]) -> list[str]:
         )
         return out
     controls = standing.get("controls") or []
+    buckets = ("findings", "excepted", "withheld", "clean", "notEvaluated")
+    out += charts.stacked(
+        [(str(c.get("id")), [int(c.get(b) or 0) for b in buckets]) for c in controls if isinstance(c, dict)],
+        series=["Findings", "Excepted", "Withheld", "Clean", "Not evaluated"],
+        caption="Per-control standing, rules counted",
+    )
     out += _table(
         ["Control", "Title", "Findings", "Excepted", "Withheld", "Clean", "Not evaluated"],
         [
@@ -387,7 +533,7 @@ def render(report: dict[str, Any], *, generated_at: dt.datetime | None = None) -
         '<html lang="en"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         f"<title>{_esc(title)}</title>",
-        f"<style>{_CSS}</style>",
+        f"<style>{_CSS}{charts.CSS}</style>",
         "</head><body><main>",
         f"<h1>{_esc(title)}</h1>",
         f'<p class="sub">Generated {_esc(when)} by kube-noob'
@@ -405,6 +551,7 @@ def render(report: dict[str, Any], *, generated_at: dt.datetime | None = None) -
     if is_posture:
         parts += _posture_findings(report)
         parts += _standing_sections(report)
+        parts += _trend_sections(report)
     parts += _ksi_sections(report)
     parts += ["</main></body></html>", ""]
     return "\n".join(parts)
