@@ -23,6 +23,10 @@ TITLES: dict[str, str] = {
     "AC-6(5)": "Least Privilege | Privileged Accounts",
     "AC-6(10)": "Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions",
     "AC-14": "Permitted Actions Without Identification or Authentication",
+    # AU arrives with KN-S035: the first rule in this catalogue that reads audit CONFIGURATION rather
+    # than inferring the state of logging from the absence of a log. Nothing here reads an audit event.
+    "AU-2": "Event Logging",
+    "AU-12": "Audit Record Generation",
     "CM-2": "Baseline Configuration",
     "CM-3(2)": "Configuration Change Control | Testing, Validation, and Documentation of Changes",
     "CM-6": "Configuration Settings",
@@ -144,6 +148,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S032": ("AC-6", "CM-6"),  # the pod security level the namespace enforces
     "KN-S033": ("SI-2",),  # a paused pool stops receiving OS and runtime patches
     "KN-S034": ("CM-3(2)",),  # an operator upgrade nobody reviewed
+    "KN-S035": ("AU-2", "AU-12"),  # audit turned off, for everyone or for one group
     "KN-C016": ("SC-5", "SC-6"),  # one namespace can take the cluster's capacity
 }
 

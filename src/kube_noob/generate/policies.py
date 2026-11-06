@@ -392,6 +392,9 @@ NOT_GENERATED: dict[str, str] = {
     "checks the bundle",
     "KN-S033": "pausing a pool is a legitimate maintenance step, and the finding is about a pool LEFT "
     "paused, which one object at one moment cannot tell from one paused a minute ago",
+    "KN-S035": "admission cannot help: the finding is the state of one cluster-scoped singleton that "
+    "already exists, not an object anybody is about to create, and a policy that blocked edits to it "
+    "would stop an administrator turning auditing back ON as readily as off",
     "KN-S034": "the webhook and the generated policies exempt openshift-* namespaces, where operator "
     "Subscriptions normally live, so a policy would not see the objects this rule is about",
     "KN-C015": "needs the namespace's ResourceClaims and templates (other objects); `kube-noob audit` checks "

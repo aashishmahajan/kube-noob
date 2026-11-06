@@ -50,8 +50,8 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - Per-user identity in the service: authorization is one shared token unless you add the OAuth proxy, and audit
   records do not carry the caller's identity yet.
 - The 20x Key Security Indicator crosswalk now ships -- `kube-noob ksi` -- and what is left is its reach, not its
-  absence. 26 of the 28 controls kube-noob maps are cited by an indicator; `SC-6` and `SC-36` are cited by none, so
-  no finding reaches an indicator through them, and 18 of the 46 indicators have no kube-noob rule behind them at
+  absence. 28 of the 30 controls kube-noob maps are cited by an indicator; `SC-6` and `SC-36` are cited by none, so
+  no finding reaches an indicator through them, and 15 of the 46 indicators have no kube-noob rule behind them at
   all and say so rather than showing a zero. See [FedRAMP 20x KSI](fedramp-ksi.md), which is generated from the
   vendored dataset with its version and hash. The five specifics this bullet used to carry were all wrong by
   2026-11-02 and it asserted them anyway: there is no separate `FRMR.KSI.key-security-indicators.json` at 25.11C,
@@ -61,7 +61,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 91 audit rules and their controls
+## The 92 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -129,6 +129,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S032 | Namespace does not enforce a pod security level | AC-6, CM-6 |
 | KN-S033 | MachineConfigPool is paused | SI-2 |
 | KN-S034 | Operator Subscription upgrades without review | CM-3(2) |
+| KN-S035 | Cluster audit logging is turned off, for everyone or for one group | AU-2, AU-12 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |
@@ -168,6 +169,8 @@ Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/
 | AC-6(5) | Least Privilege \| Privileged Accounts |
 | AC-6(10) | Least Privilege \| Prohibit Non-privileged Users from Executing Privileged Functions |
 | AC-14 | Permitted Actions Without Identification or Authentication |
+| AU-2 | Event Logging |
+| AU-12 | Audit Record Generation |
 | CM-2 | Baseline Configuration |
 | CM-3(2) | Configuration Change Control \| Testing, Validation, and Documentation of Changes |
 | CM-6 | Configuration Settings |

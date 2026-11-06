@@ -3834,6 +3834,76 @@ def _c014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 )
 
 
+#: The one audit profile that logs nothing, from openshift/api config/v1 types_apiserver.go (retrieved
+#: 2026-11-06). The other three -- Default, WriteRequestBodies, AllRequestBodies -- differ in how much of each
+#: request they record, not in whether they record it.
+AUDIT_PROFILE_NONE = "None"
+
+
+@rule(
+    "KN-S035",
+    "Cluster audit logging is turned off, for everyone or for one group",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Set spec.audit.profile to Default or higher on the APIServer named 'cluster', and remove any customRules "
+    "entry whose profile is None. If a group genuinely must be excluded, record why: an assessor will ask.",
+    "An OpenShift cluster can be configured to log no API requests at all, or -- less visibly -- to log none of "
+    "the requests made by one group, through a customRules entry that overrides a healthy-looking top-level "
+    "profile.",
+)
+def _s035(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    """Audit configuration, read as settings rather than inferred from the absence of a log.
+
+    This is the only check in the logging family that a read-only client can actually decide. `spec.audit` on the
+    cluster-scoped `APIServer` singleton is configuration, not audit content: no event, no request body, nothing
+    about a person. Everything else a reader might want here -- whether events reach a SIEM, whether anyone reads
+    them, whether retention holds -- needs a system kube-noob has no credentials for, and forty rules that answer
+    "not evaluated" would be coverage theatre rather than coverage.
+
+    The second finding is the one worth having. `customRules` is evaluated top to bottom and the first match
+    takes precedence over `spec.audit.profile`, so a cluster reporting `profile: Default` can log nothing at all
+    for a named group. A reader who checks only the top-level profile sees a configured cluster; this is that
+    same shape again, in someone else's API (G202, G216).
+
+    On a bundle that does not carry the object this declines rather than passing: on OpenShift the singleton
+    always exists, so its absence means it was not collected, not that auditing is on.
+    """
+    if not ctx.is_openshift:
+        return  # the resource does not exist off OpenShift; see N15 on telling that apart from a pass
+    docs = [d for d in ctx.by_kind("APIServer") if d.api_version.startswith("config.openshift.io/")]
+    if not docs:
+        ctx.cannot_decide(r.rule_id)
+        return
+    for d in docs:
+        spec = d.data.get("spec") if isinstance(d.data, dict) else None
+        audit = spec.get("audit") if isinstance(spec, dict) else None
+        if not isinstance(audit, dict):
+            continue  # the default is Default; an absent audit block is not an absent profile
+        if str(audit.get("profile", "")) == AUDIT_PROFILE_NONE:
+            yield r.finding(
+                d,
+                ("spec", "audit", "profile"),
+                "spec.audit.profile is None, so the API server records no requests at all: there is no audit "
+                "evidence for anything that happens on this cluster, and nothing to forward to a SIEM.",
+            )
+        rules = audit.get("customRules")
+        if not isinstance(rules, list):
+            continue
+        for i, entry in enumerate(rules):
+            if not isinstance(entry, dict) or str(entry.get("profile", "")) != AUDIT_PROFILE_NONE:
+                continue
+            group = str(entry.get("group") or "(unnamed group)")
+            yield r.finding(
+                d,
+                ("spec", "audit", "customRules", i, "profile"),
+                f"spec.audit.customRules[{i}] logs nothing for group {group!r}. customRules are evaluated in "
+                f"order and the first match overrides spec.audit.profile "
+                f"({str(audit.get('profile') or 'Default')!r}), so this cluster looks audited and is not, for "
+                f"everyone in that group.",
+            )
+
+
 def run_rules(ctx: AuditContext, stages: set[Stage] | None = None, evaluated: list[str] | None = None) -> list[Finding]:
     """Every rule in ``stages``, appending the ids that actually ran to ``evaluated`` when given.
 

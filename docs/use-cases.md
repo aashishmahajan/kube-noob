@@ -68,8 +68,8 @@ kube-noob --format json audit -f k8s/ --platform openshift --compact
 
 Each rule's constant fields -- title, severity, remediation, citations, controls and the rest -- are collected
 once into a `ruleInfo` map keyed by rule id instead of being repeated on every finding that rule produced. On
-this repository's `examples/` directory that is 115 findings over 21 rules, and the JSON goes from 141 349 to
-69 936 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
+this repository's `examples/` directory that is 115 findings over 21 rules, and the JSON goes from 141 690 to
+70 277 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
 exactly. The MCP and HTTP tool takes the same thing as `compact: true`, off by default so the flat shape stays
 what it was. The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
 
@@ -696,7 +696,7 @@ Read the two lines under a curated indicator before quoting the first one, and r
 them. `KSI-CNA-RNT` (Restricting Network Traffic) is evidence that policies exist, not that the cluster enforces
 them; `KSI-SVC-VRI` (Validating Resource Integrity) is evidence that images are pinned by digest, not that any
 signature verifies; `KSI-RPL-ABO` (Aligning Backups with Objectives) is about surviving the loss of a pod, and says
-nothing about backups at all. 18 of the 46 indicators have no kube-noob rule behind them and say so instead of
+nothing about backups at all. 15 of the 46 indicators have no kube-noob rule behind them and say so instead of
 showing a zero.
 
 Two rows carry a warning rather than evidence, and they are the most useful thing in the page. An indicator and a

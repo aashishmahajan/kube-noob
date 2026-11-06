@@ -77,6 +77,12 @@ ALLOWED_RESOURCES: dict[str, ResourceDef] = {
     "routes": ResourceDef("route.openshift.io/v1", "routes", True),
     "clusteroperators": ResourceDef("config.openshift.io/v1", "clusteroperators", False),
     "clusterversions": ResourceDef("config.openshift.io/v1", "clusterversions", False),
+    # The cluster's audit configuration, from openshift/api config/v1 types_apiserver.go (retrieved 2026-11-06):
+    # group config.openshift.io, version v1, scope Cluster, the singleton named "cluster". `spec.audit.profile`
+    # is one of Default, WriteRequestBodies, AllRequestBodies or None, and `spec.audit.customRules` is a
+    # per-group list evaluated top to bottom whose first match TAKES PRECEDENCE over the top-level profile.
+    # Settings only -- no audit event, no log content, nothing about a person.
+    "apiservers": ResourceDef("config.openshift.io/v1", "apiservers", False),
     "securitycontextconstraints": ResourceDef("security.openshift.io/v1", "securitycontextconstraints", False),
     "deploymentconfigs": ResourceDef("apps.openshift.io/v1", "deploymentconfigs", True),
     # RBAC objects (who may do what; no credentials): read by the attack-path scan (kube_noob.attack_paths)

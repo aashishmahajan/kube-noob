@@ -62,7 +62,7 @@ rules:
     resources: [storageclasses]
     verbs: [get, list]
   - apiGroups: [config.openshift.io]
-    resources: [clusteroperators, clusterversions]
+    resources: [apiservers, clusteroperators, clusterversions]
     verbs: [get, list]
   - apiGroups: [security.openshift.io]
     resources: [securitycontextconstraints]

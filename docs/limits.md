@@ -32,8 +32,8 @@ specific and generate there but have nothing to match on plain Kubernetes:
 
 | Platform | Rules generated | Not generated |
 | --- | --- | --- |
-| kubernetes | 47 | 44 |
-| openshift 4.20 | 54 | 37 |
+| kubernetes | 47 | 45 |
+| openshift 4.20 | 54 | 38 |
 
 Run `kube-noob policy generate --platform <your platform>` and read the header for the list that applies to you.
 The reasons fall into three honest categories:
