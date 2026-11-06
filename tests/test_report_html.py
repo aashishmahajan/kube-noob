@@ -9,6 +9,7 @@ rendered as markup.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
@@ -474,11 +475,89 @@ def test_the_masthead_never_points_at_a_section_the_page_does_not_have() -> None
     """The absence tile counts the checks nobody ran and the verdict sends the reader to section 1 for them,
     so section 1 has to list them. The first version counted them and never rendered them anywhere."""
     page = report_html.render(_gate_report())
-    assert "section 1 says what they cover" in page
+    assert "section 1 says what they would have covered" in page
     assert '<h2 id="limits"><span class="num">1</span>Limits of this examination' in page
     assert "Not run." in page and "scanner-report" in page, "the checks the tile counted are the ones listed"
+
+
+def test_the_ksi_masthead_counts_indicators_and_claims_no_section_it_lacks() -> None:
+    """One wording over all three report shapes printed "21 findings are open, and 15 rules reached no
+    verdict" over tiles reading "indicators", and sent the reader to a section 1 the crosswalk does not have.
+    That is G257's own rule broken in the page that introduced G257, so each shape counts its own units."""
+    report = {
+        "indicators": [
+            {"id": "KSI-SVC-01", "evidenced": True, "findings": 2},
+            {"id": "KSI-SVC-02", "evidenced": True, "findings": 0},
+            {"id": "KSI-IAM-01", "evidenced": False, "findings": 0},
+            {"id": "KSI-IAM-02", "evidenced": False, "findings": 0},
+        ]
+    }
+    page = report_html.render(report)
+    verdict = re.search(r'class="verdict">([^<]+)', page)
+    assert verdict, "a crosswalk with indicators states a verdict"
+    said = verdict.group(1)
+    assert said == ("1 indicator has findings against it, and 2 indicators no kube-noob rule behind them at all."), said
+    assert "finding are open" not in said and "rules reached no verdict" not in said
+    assert "section 1" not in page, "the crosswalk has no limits section to send the reader to"
+    assert "not a zero and not a pass" in page
+
+
+def test_the_ksi_masthead_survives_a_findings_count_of_any_shape() -> None:
+    """A KSI row's `findings` is an int; a posture report's is a bucket dict. Reading one as the other
+    crashed `ksi --html` outright, so every shape that arrives here must produce a number or a zero."""
+    rows = [
+        {"id": "a", "evidenced": True, "findings": 3},
+        {"id": "b", "evidenced": True, "findings": {"open": 1}},
+        {"id": "c", "evidenced": True, "findings": None},
+        {"id": "d", "evidenced": True, "findings": True},
+        {"id": "e", "evidenced": True, "findings": "4"},
+        {"id": "f", "evidenced": True},
+    ]
+    page = report_html.render({"indicators": rows})
+    verdict = re.search(r'class="verdict">([^<]+)', page)
+    assert verdict and verdict.group(1).startswith("2 indicators have findings against them"), page[:400]
 
 
 def test_the_gate_verdict_is_stated_once() -> None:
     page = report_html.render(_gate_report())
     assert page.count("The gate failed") == 1, "the masthead states it; the body used to repeat it"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["gate", "-f", "EXAMPLE"],
+        ["ksi", "-f", "EXAMPLE"],
+        ["posture", "diff", "A", "B"],
+        ["posture", "report"],
+    ],
+    ids=["gate", "ksi", "posture-diff", "posture-report"],
+)
+def test_every_command_that_writes_html_actually_writes_it(tmp_path: Path, argv: list[str]) -> None:
+    """Every `--html` path, rendered end to end through the CLI.
+
+    U5 rebuilt the top of the page from each report's own keys, and a KSI row's `findings` is a COUNT where a
+    posture report's is a bucket dict -- so `ksi --html` raised AttributeError and wrote no file at all. The
+    unit tests all passed: they build reports by hand, and none of them was the shape that broke. A page that
+    three of four commands can produce is not a feature, so this covers all four by running the command.
+    """
+    from kube_noob import drift
+    from kube_noob.cli import main
+
+    args = [str(ROOT / "examples" / "insecure-deployment.yaml") if a == "EXAMPLE" else a for a in argv]
+    if argv[:2] == ["posture", "diff"]:
+        for name, fixture in (("A", "day1.yaml"), ("B", "day2.yaml")):
+            objs = [d for d in yaml.safe_load_all((FIX / fixture).read_text()) if d]
+            path = tmp_path / f"{name}.json"
+            path.write_text(json.dumps(drift.snapshot(objs, source="manifests")), encoding="utf-8")
+            args[args.index(name)] = str(path)
+    elif argv[:2] == ["posture", "report"]:
+        args = ["posture", "report", "--state-dir", str(tmp_path / "state"), "-f", str(FIX / "day1.yaml")]
+
+    out = tmp_path / "page.html"
+    main([*args, "--html", str(out)])
+    assert out.exists(), f"{' '.join(argv)} --html produced no file"
+    page = out.read_text(encoding="utf-8")
+    assert page.startswith("<!doctype html>") and page.rstrip().endswith("</html>")
+    sinks = _parsed(page)
+    assert (sinks.scripts, sinks.events, sinks.loads) == (0, [], [])

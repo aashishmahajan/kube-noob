@@ -207,6 +207,22 @@ class Tile:
     absence: bool = False
 
 
+@dataclass(frozen=True)
+class Masthead:
+    """The three numbers and the sentence that goes over them, from the same place.
+
+    The sentence belongs to the shape, not to a generic template: a posture report counts findings and rules,
+    a KSI crosswalk counts indicators, and a gate counts checks that never ran. One wording over all three
+    printed "21 findings are open, and 15 rules reached no verdict" above tiles reading "indicators", and
+    pointed at a section 1 that did not list them -- which is the defect G257 is about, in the page that
+    introduced G257.
+    """
+
+    tiles: list[Tile]
+    head: str
+    lede: str
+
+
 def _plural(n: int, one: str, many: str | None = None) -> str:
     return one if n == 1 else (many or one + "s")
 
@@ -220,12 +236,17 @@ def _standing_totals(report: dict[str, Any]) -> dict[str, int] | None:
     return {k: sum(int(r.get(k) or 0) for r in rows if isinstance(r, dict)) for k in keys}
 
 
-def _tiles(report: dict[str, Any]) -> list[Tile]:
-    """The three numbers that decide what the reader does next, for whichever report this is.
+def _masthead_of(report: dict[str, Any]) -> Masthead | None:
+    """The three numbers and the sentence over them, decided together by which report this is.
 
-    The middle one is always the absence: how much of this run reached no verdict. Every other scanner reports
-    what failed, and a reader who only ever sees that number cannot tell a clean cluster from an unexamined
-    one -- so it is a tile beside the findings rather than a column in a table thirty rows long.
+    The middle tile is always the absence: how much of this run reached no verdict. Every other scanner
+    reports what failed, and a reader who only ever sees that number cannot tell a clean cluster from an
+    unexamined one -- so it is a tile beside the findings rather than a column in a table thirty rows long.
+
+    The sentence is built in the same branch as the tiles, because a wording shared across all three shapes
+    printed "21 findings are open, and 15 rules reached no verdict" over tiles reading "indicators" and sent
+    the reader to a section 1 that did not list them. That is G257's own rule broken in the page that
+    introduced G257; each shape now counts the thing its own tiles count, and names only a section it has.
     """
     totals = _standing_totals(report)
     if totals is not None:
@@ -238,7 +259,7 @@ def _tiles(report: dict[str, Any]) -> list[Tile]:
         buckets = report.get("findings")
         found = int(buckets.get("open") or 0) if isinstance(buckets, dict) else totals["findings"]
         excepted = int(buckets.get("excepted") or 0) if isinstance(buckets, dict) else totals["excepted"]
-        return [
+        tiles = [
             Tile(
                 str(found),
                 _plural(found, "finding"),
@@ -260,12 +281,26 @@ def _tiles(report: dict[str, Any]) -> list[Tile]:
                 "ran and found nothing, counted once per control",
             ),
         ]
+        is_are = "is" if found == 1 else "are"
+        if not unseen:
+            return Masthead(
+                tiles,
+                f"{found} {_plural(found, 'finding')} {is_are} open.",
+                "Every rule that applies was evaluated, and nothing was withheld.",
+            )
+        return Masthead(
+            tiles,
+            f"{found} {_plural(found, 'finding')} {is_are} open, and {unseen} rule "
+            f"{_plural(unseen, 'result')} reached no verdict.",
+            "A rule result that reached no verdict is not a pass. Section 1 says what each one would have "
+            "covered, and every count on this page is bounded by them.",
+        )
     counts = report.get("counts")
     if isinstance(counts, dict) and isinstance(report.get("findings"), list):
         total = sum(int(v) for v in counts.values() if isinstance(v, int))
         worst = next((n for n in _SEVERITY_ORDER if int(counts.get(n) or 0) > 0), None)
         not_run = len(report.get("notRun") or []) + len(report.get("skipped") or [])
-        return [
+        tiles = [
             Tile(
                 str(total),
                 _plural(total, "finding"),
@@ -276,58 +311,52 @@ def _tiles(report: dict[str, Any]) -> list[Tile]:
             Tile(str(not_run), _plural(not_run, "check"), "Not run", "no input was given for them", absence=True),
             Tile(str(int(report.get("excepted") or 0)), "excepted", "Excepted", "accepted, and still listed"),
         ]
+        lede = (
+            f"{total} {_plural(total, 'finding')} at <code>--fail-on {_esc(report.get('failOn'))}</code> for "
+            f"platform <code>{_esc(report.get('platform'))}</code>."
+        )
+        if not_run:
+            lede += (
+                f" {not_run} {_plural(not_run, 'check')} never ran because no input was given for "
+                f"{'it' if not_run == 1 else 'them'}: that is not a pass, and section 1 says what "
+                f"{'it' if not_run == 1 else 'they'} would have covered."
+            )
+        return Masthead(tiles, "The gate passed." if report.get("passed") else "The gate failed.", lede)
     rows = report.get("indicators")
     if isinstance(rows, list) and rows:
+        # A KSI row's `findings` is a COUNT, not a bucket dict -- reading it as one crashed `ksi --html`
+        # outright. Guarded by type rather than by `or {}`, because the next shape to arrive here should
+        # produce a tile that says nothing rather than an exception or a confident zero.
+        def _open(row: dict[str, Any]) -> int:
+            got = row.get("findings")
+            if isinstance(got, dict):
+                got = got.get("open")
+            return got if isinstance(got, int) and not isinstance(got, bool) else 0
+
         bare = sum(1 for r in rows if isinstance(r, dict) and not r.get("evidenced"))
-        hit = sum(1 for r in rows if isinstance(r, dict) and int((r.get("findings") or {}).get("open") or 0) > 0)
-        return [
+        hit = sum(1 for r in rows if isinstance(r, dict) and _open(r) > 0)
+        clean = len(rows) - bare - hit
+        tiles = [
             Tile(str(hit), _plural(hit, "indicator"), "With open findings", "evidence against them", harm=hit > 0),
             Tile(
                 str(bare), _plural(bare, "indicator"), "No rule behind them", "not a zero, and not a pass", absence=True
             ),
-            Tile(
-                str(len(rows) - bare - hit),
-                _plural(len(rows) - bare - hit, "indicator"),
-                "Evidenced and clean",
-                "rules ran, nothing open",
-            ),
+            Tile(str(clean), _plural(clean, "indicator"), "Evidenced and clean", "rules ran, nothing open"),
         ]
-    return []
-
-
-def _verdict(report: dict[str, Any], tiles: list[Tile]) -> tuple[str, str]:
-    """The sentence a reader can paste into a ticket, and the line under it.
-
-    Never a badge: a badge cannot be quoted into a change ticket, and a number on its own does not say whether
-    it is the whole number. The second clause is the one that matters -- it names the part of the run that
-    reached no verdict, in the same sentence as the findings, so the two are read together or not at all.
-    """
-    if not tiles:
-        return ("", "")
-    harm, absence = tiles[0], tiles[1]
-    found = int(harm.value) if harm.value.isdigit() else 0
-    unseen = int(absence.value) if absence.value.isdigit() else 0
-    if "passed" in report:
-        verdict = "The gate passed." if report.get("passed") else "The gate failed."
+        has_have = "has" if hit == 1 else "have"
+        head = f"{hit} {_plural(hit, 'indicator')} {has_have} findings against {'it' if hit == 1 else 'them'}"
+        if bare:
+            head += f", and {bare} {_plural(bare, 'indicator')} no kube-noob rule behind "
+            head += "it at all." if bare == 1 else "them at all."
+        else:
+            head += ", and every indicator has at least one rule behind it."
         lede = (
-            f"{found} {harm.what.lower()} at <code>--fail-on {_esc(report.get('failOn'))}</code> for platform "
-            f"<code>{_esc(report.get('platform'))}</code>."
+            "An indicator with no rule behind it is not a zero and not a pass: kube-noob has nothing to say "
+            "about it, and the evidence has to come from somewhere else. The crosswalk below lists every "
+            "indicator and the rules, if any, that bear on it."
         )
-        if unseen:
-            lede += f" {unseen} {absence.what.lower()}: that is not a pass, and section 1 says what they cover."
-        return (verdict, lede)
-    is_are = "is" if found == 1 else "are"
-    if not unseen:
-        return (
-            f"{found} {_plural(found, 'finding')} {is_are} open.",
-            "Every rule that applies was evaluated, and nothing was withheld.",
-        )
-    return (
-        f"{found} {_plural(found, 'finding')} {is_are} open, and {unseen} "
-        f"{_plural(unseen, 'rule')} reached no verdict.",
-        "A rule that reached no verdict is not a pass. Section 1 says what each one would have covered, and "
-        "every count on this page is bounded by them.",
-    )
+        return Masthead(tiles, head, lede)
+    return None
 
 
 def _provenance(report: dict[str, Any], when: str, version: str) -> list[str]:
@@ -353,12 +382,15 @@ def _provenance(report: dict[str, Any], when: str, version: str) -> list[str]:
 
 
 def _masthead(report: dict[str, Any], when: str, version: str) -> list[str]:
-    tiles = _tiles(report)
-    if not tiles:
+    mast = _masthead_of(report)
+    if mast is None:
         return _provenance(report, when, version)
-    head, lede = _verdict(report, tiles)
-    out = [f'<p class="verdict">{_esc(head)}</p>', f'<p class="lede">{lede}</p>', '<div class="tiles">']
-    for t in tiles:
+    out = [
+        f'<p class="verdict">{_esc(mast.head)}</p>',
+        f'<p class="lede">{mast.lede}</p>',
+        '<div class="tiles">',
+    ]
+    for t in mast.tiles:
         cls = ' class="absence"' if t.absence else ""
         big = ' class="big harm"' if t.harm else ' class="big"'
         out.append(
