@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -62,16 +63,61 @@ def _dir_yaml(d: Path) -> tuple[list[tuple[str, str]], list[dict[str, str]]]:
 
 def _manifest_input(a: argparse.Namespace) -> tuple[str, list[dict[str, str]]]:
     """The manifest text for the audit family, with the files in a directory that could not be read."""
+    text, bad, _sources = _manifest_sources(a)
+    return text, bad
+
+
+def _manifest_sources(a: argparse.Namespace) -> tuple[str, list[dict[str, str]], list[tuple[str, int]]]:
+    """The same text, plus where each file starts in it: (path, its first line of the combined text).
+
+    The audit reads one string, so a directory is concatenated -- and every line number after the first file
+    was then a line of a document nobody can open. `_locate` uses these ranges to put a finding back in the
+    file it came from, which is what `_dir_yaml`'s own docstring says an unreadable file deserved (G251).
+    """
     p = Path(a.file) if a.file != "-" else None
     if p is None or not p.is_dir():
-        return _read(a.file), []
+        return _read(a.file), [], ([] if p is None else [(str(a.file), 1)])
     ok, bad = _dir_yaml(p)
     if not ok:
         named = "; ".join(f"{b['path']}: {b['why']}" for b in bad)
         raise ConfigError(
             f"{a.file}: no readable manifest here" + (f" ({named})" if named else " (no .yaml or .yml files)")
         )
-    return "\n---\n".join(text for _, text in ok), bad
+    sep = "\n---\n"
+    parts: list[str] = []
+    sources: list[tuple[str, int]] = []
+    for path, text in ok:
+        # Counted off the text that will precede this file, separator included: whether a file ends with a
+        # newline changes the arithmetic, and a line number that is right for most inputs is the defect this
+        # replaces. `sep.join(parts)` alone is not that text -- joining one part inserts no separator.
+        before = (sep.join(parts) + sep) if parts else ""
+        sources.append((path, before.count("\n") + 1))
+        parts.append(text)
+    return sep.join(parts), bad, sources
+
+
+def _locate(report: dict[str, Any], sources: Sequence[tuple[str, int]]) -> None:
+    """Put every finding back in the file it came from, in place.
+
+    `line` becomes the line of THAT file and `file` names it. Without this, `kube-noob audit -f dir/` reported
+    a finding in the second file of a directory at a line of the concatenation -- often past the end of the
+    file it was in, and against no path at all. A finding with no line keeps none, and with several files and
+    no line nothing is claimed about which file it was in (G251).
+    """
+    if not sources:
+        return
+    for key in ("findings", "excepted"):
+        for f in report.get(key) or []:
+            if not isinstance(f, dict):
+                continue
+            line = f.get("line")
+            if not isinstance(line, int) or line < 1:
+                if len(sources) == 1:
+                    f["file"] = sources[0][0]
+                continue
+            path, start = next((p, s) for p, s in reversed(sources) if s <= line)
+            f["file"] = path
+            f["line"] = line - start + 1
 
 
 def _partial_input(a: argparse.Namespace) -> bool:
@@ -366,8 +412,12 @@ def _print_report(rep: dict[str, Any]) -> None:
         # limit before they read an empty finding list as a clean one.
         print(f"  not checked: {limit['why']}")
     for f in rep["findings"]:
-        loc = f"L{f['line']}" if f.get("line") else ""
-        print(f"[{f['severity'].upper():8}] {f['ruleId']:9} {f['resource']} {loc} {f['path']}")
+        # `file:line` when the caller gave files, `L<n>` when the input was stdin and there is nothing to
+        # name. A bare line number against a directory audit was a line of the concatenation (G251).
+        where = f"{f['file']}:{f['line']}" if f.get("file") and f.get("line") else ""
+        if not where:
+            where = f.get("file") or (f"L{f['line']}" if f.get("line") else "")
+        print(f"[{f['severity'].upper():8}] {f['ruleId']:9} {f['resource']} {where} {f['path']}")
         print(f"           {f['message']}")
         print(f"           fix: {f['remediation']}")
         if f.get("stackroxPolicies"):
@@ -2096,7 +2146,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         print(completion.script(a.shell, build_parser()), end="")
         return 0
     if a.cmd in {"audit", "validate", "redteam", "fix"}:
-        text, unreadable = _manifest_input(a)
+        text, unreadable, sources = _manifest_sources(a)
         if unreadable and not getattr(a, "skip_unreadable", False):
             _refuse_unreadable(unreadable)
             return 5
@@ -2123,6 +2173,9 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             except ExceptionsError as exc:
                 raise ConfigError(f"{a.exceptions}: {exc}") from exc
             rep["unreadable"] = unreadable
+            # Before anything is printed or emitted, and before OSCAL and the compact form are built from it:
+            # they all carry the line numbers (G251).
+            _locate(rep, sources)
             if a.oscal:
                 from kube_noob.oscal import assessment_results, check_import_ap
 
@@ -2158,6 +2211,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             return 1 if any(Severity.parse(f["severity"]) >= limit for f in rep["findings"]) else 0
         if a.cmd == "validate":
             rep = kit.validate(tk.ManifestsIn(manifests=text, platform=platform, version=a.pversion))
+            _locate(rep, sources)
             _print_report(rep) if a.format == "text" else _emit(rep, fmt)
             return 1 if rep["summary"]["counts"]["high"] + rep["summary"]["counts"]["critical"] else 0
         if a.cmd == "redteam":

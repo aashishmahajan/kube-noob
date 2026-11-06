@@ -180,6 +180,12 @@ def _observations(findings: list[dict[str, Any]], collected: str, scope: str) ->
                 _prop("severity", f.get("severity", "")),
                 _prop("resource", f.get("resource", "")),
                 _prop("path", f["path"]) if f.get("path") else None,
+                # The file, when the caller audited files rather than a pasted string: an assessment result
+                # that names a resource and a field but no path leaves the assessor to find it (G251). The
+                # LINE is deliberately not here: it depends on where a document sits inside its file, and
+                # `test_the_document_does_not_depend_on_the_order_the_documents_arrived_in` holds this
+                # document to being identical for a reordered bundle. The line is in the JSON report.
+                _prop("file", str(f["file"])) if f.get("file") else None,
             )
             if p is not None
         ]
