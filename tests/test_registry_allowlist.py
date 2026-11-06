@@ -13,6 +13,7 @@ unqualified image, which is the commonest image reference there is.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import pytest
@@ -98,7 +99,10 @@ def test_an_unqualified_image_is_measured_against_docker_hub_and_says_so() -> No
     """The reference says nothing about a registry, and that is exactly when a reader needs telling which one
     they are actually pulling from."""
     found = _fired("nginx:1.27", ("quay.io/my-org",))
-    assert found and "docker.io" in found[0]
+    # The phrase, not the hostname loose in the string: a substring test against a dotted literal is also
+    # how URL-validation bugs are written, which is why CodeQL reads one as a defect wherever it appears --
+    # and asserting the sentence is the stronger test anyway (G253).
+    assert found and re.search(r"pulls from 'docker\.io'", found[0]), found
     assert "unqualified" in found[0]
     assert not _fired("nginx:1.27", ("docker.io",))
 
@@ -121,7 +125,7 @@ def test_the_finding_names_the_field_and_the_policy() -> None:
     report = _report("ghcr.io/someone/app:1", ("quay.io/my-org", "registry.example.com"))
     finding = next(f for f in report.findings if f.rule_id == "KN-S036")
     assert "image" in str(finding.path)
-    assert "quay.io/my-org" in finding.message and "registry.example.com" in finding.message
+    assert re.search(r"allowedRegistries \(quay\.io/my-org, registry\.example\.com\)", finding.message), finding.message
 
 
 def test_a_blank_or_missing_image_is_not_a_registry_finding() -> None:

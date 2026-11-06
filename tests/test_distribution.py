@@ -423,8 +423,9 @@ def test_the_package_points_at_the_website() -> None:
     import tomllib
 
     urls = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["urls"]
-    assert any("kube-noob.com" in u for u in urls.values()), f"no project URL points at the site: {urls}"
-    assert "kube-noob.com" in (ROOT / "README.md").read_text(encoding="utf-8"), "the README never names the site"
+    site = re.compile(r"\bkube-noob\.com\b")
+    assert any(site.search(u) for u in urls.values()), f"no project URL points at the site: {urls}"
+    assert site.search((ROOT / "README.md").read_text(encoding="utf-8")), "the README never names the site"
 
 
 def test_nothing_promises_an_artefact_that_has_never_published() -> None:

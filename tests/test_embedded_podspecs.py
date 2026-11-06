@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from typing import Any
 
 import pytest
@@ -439,7 +440,7 @@ def test_a_refused_api_group_is_said_out_loud() -> None:
     other["apiVersion"] = "example.com/v1"
     report = analyze(json.dumps(other))
     assert not report.findings
-    assert any("example.com" in a and "not audited" in a for a in report.assumptions), report.assumptions
+    assert any(re.search(r"API group example\.com\b.*not audited", a) for a in report.assumptions), report.assumptions
 
 
 def test_the_threat_model_still_sees_an_embedded_workload() -> None:
