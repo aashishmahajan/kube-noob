@@ -332,6 +332,55 @@ def test_asgi_app_metrics_and_limits() -> None:
     assert 'kube_noob_admission_duration_seconds_bucket{le="+Inf"} 3' in m
 
 
+def test_a_padded_object_does_not_outrun_the_webhooks_timeout() -> None:
+    """The locator was O(n^2) in a list's length, so an object padded with containers neutralised the webhook.
+
+    Measured before the fix: 2,000 containers took 6.1 s, 8,000 took 90 s and 16,000 took 352 s -- all far
+    past the chart's `timeoutSeconds: 3`, so the API server gave up and admitted the object with no warning
+    and no denial, while the single process stayed busy and every other request timed out with it. The keys a
+    list's items share are computed once per list now (G252), which makes the cost linear.
+    """
+    cfg = adm.Config.build(enforce=["KN-S001"], platform="kubernetes")
+
+    def padded(n: int) -> dict[str, Any]:
+        return {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "d", "namespace": "shop"},
+            "spec": {
+                "selector": {"matchLabels": {"a": "b"}},
+                "template": {
+                    "metadata": {"labels": {"a": "b"}},
+                    "spec": {
+                        "containers": [
+                            {"name": f"c{i}", "image": "nginx", "securityContext": {"privileged": True}}
+                            for i in range(n)
+                        ]
+                    },
+                },
+            },
+        }
+
+    start = time.perf_counter()
+    out = adm.review(_review(padded(4000)), cfg)["response"]
+    elapsed = time.perf_counter() - start
+    # 4,000 containers took about 24 s before; the bound here is loose enough for a slow runner and still
+    # an order of magnitude under the quadratic cost.
+    assert elapsed < 5.0, f"{elapsed:.1f}s for 4,000 containers"
+    assert out["allowed"] is False, "and it still decides: the denial is the point of being fast enough"
+    # The sibling memo must not change what a locator says: a shared name is still ambiguous, a unique one
+    # still identifies its item.
+    from kube_noob.yamlio import load_documents, locator
+
+    doc = load_documents(yaml.safe_dump(padded(3)))[0]
+    path = ("spec", "template", "spec", "containers", 1)
+    assert locator(doc.data, path, doc.ambiguous_keys).endswith("[name=c1]")
+    dupes = padded(2)
+    dupes["spec"]["template"]["spec"]["containers"][1]["name"] = "c0"
+    same = load_documents(yaml.safe_dump(dupes))[0]
+    assert locator(same.data, path, same.ambiguous_keys).endswith("[1]")
+
+
 def test_p99_well_under_50_ms() -> None:
     cfg = adm.Config.build(platform="openshift", version="4.20")
     cases = [_review(doc) for _, which, doc in FIXTURES if which == "bad"][:60]

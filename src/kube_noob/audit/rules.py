@@ -139,7 +139,7 @@ class Rule:
             message=message,
             remediation=remediation or self.remediation,
             path=fmt_path(path),
-            locator=locator(doc.data, path) if doc else fmt_path(path),
+            locator=locator(doc.data, path, doc.ambiguous_keys) if doc else fmt_path(path),
             line=doc.line_for(path) if doc else None,
             doc_index=doc.index if doc else None,
             citations=list(self.citations),

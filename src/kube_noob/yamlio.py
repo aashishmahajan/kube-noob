@@ -30,6 +30,9 @@ class Document:
     lines: dict[PathT, int] = field(default_factory=dict)
     start_line: int = 1
     duplicate_keys: list[tuple[PathT, int]] = field(default_factory=list)
+    #: Per-list memo for `locator`: the keys a list's items share, computed once per list rather than once
+    #: per finding (G252). Out of `repr` and `==` so a Document still prints and compares as its content.
+    ambiguous_keys: dict[PathT, frozenset[str]] = field(default_factory=dict, repr=False, compare=False)
 
     def line_for(self, path: PathT) -> int:
         """Best line for a path: exact match, else nearest existing ancestor, else doc start."""
@@ -201,7 +204,7 @@ def fmt_path(path: PathT) -> str:
     return s
 
 
-def locator(data: Any, path: PathT) -> str:
+def locator(data: Any, path: PathT, ambiguous: dict[PathT, frozenset[str]] | None = None) -> str:
     """``fmt_path`` with list indices replaced by the key that identifies the item.
 
     ``spec.template.spec.containers[0].securityContext`` becomes
@@ -228,11 +231,33 @@ def locator(data: Any, path: PathT) -> str:
             out += f".{seg}" if out else str(seg)
             continue
         key = _item_key(get_path(data, tuple(path[: i + 1])))
-        if key:
-            siblings = get_path(data, tuple(path[:i]))
-            if isinstance(siblings, list) and sum(1 for s in siblings if _item_key(s) == key) > 1:
-                key = ""
+        if key and key in _ambiguous_keys(data, tuple(path[:i]), ambiguous):
+            key = ""
         out += f"[{key or seg}]"
+    return out
+
+
+def _ambiguous_keys(data: Any, prefix: PathT, cache: dict[PathT, frozenset[str]] | None) -> frozenset[str]:
+    """The keys two or more items of the list at ``prefix`` share, computed once per list when a cache is given.
+
+    Without the cache this scanned every sibling for every finding, which is O(n^2) in the list's length: a
+    Deployment with 2,000 containers took six seconds and one with 16,000 took six minutes, so an object
+    padded with containers outran the admission webhook's three-second timeout and was admitted with no
+    warning and no denial -- while the single process stayed busy and every other request timed out with it.
+    One pass per list makes it linear (G252).
+    """
+    if cache is not None and prefix in cache:
+        return cache[prefix]
+    siblings = get_path(data, prefix)
+    seen: dict[str, int] = {}
+    if isinstance(siblings, list):
+        for item in siblings:
+            key = _item_key(item)
+            if key:
+                seen[key] = seen.get(key, 0) + 1
+    out = frozenset(k for k, n in seen.items() if n > 1)
+    if cache is not None:
+        cache[prefix] = out
     return out
 
 
