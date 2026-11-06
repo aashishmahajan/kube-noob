@@ -215,6 +215,7 @@ Defaults of `kube_noob.config.Settings`, evaluated with no configuration file an
 | `mustGather.allowedDir` | `null` | off | opt-in feature |
 | `posture.reportEnabled` | `false` | off | opt-in feature |
 | `rhacs.enabled` | `false` | off | opt-in feature |
+| `server.metrics.allowUnauthenticated` | `false` | off | opt-in feature |
 | `watch.enabled` | `false` | off | opt-in feature |
 | `admission.enforce` | `[]` | off | tier A |
 | `dryRun.enabled` | `false` | off | tier D |

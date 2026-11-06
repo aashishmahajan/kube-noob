@@ -2016,7 +2016,11 @@ class Toolkit:
                 "Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at "
                 "once) and runs every analyser that applies: diagnosis with reported issues and team memory, the "
                 "denial explainer, the audit, the documentation. Returns every finding with its source, read-only "
-                "next steps and what was not analysed and why. Read-only, local.",
+                "next steps and what was not analysed and why. When the input is a QUESTION about something this "
+                "product does, `answeredBy` names the command that answers it and why -- a question about exposure "
+                "and node access is answered by `posture scan`, not by reading pods. It is empty whenever the "
+                "input was recognised as something pasted, and empty for a sentence reporting a malfunction, "
+                "because the diagnosis above it is the answer to those. Read-only, local.",
                 InsightIn,
                 self.insight,
             ),

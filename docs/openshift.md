@@ -106,6 +106,56 @@ LLM provider settings.
 4. Check: ask Lightspeed "audit this Deployment for OpenShift 4.22" with a manifest pasted in. The kube-noob audit log
    (`oc logs deploy/kube-noob -n kube-noob`) shows a `tool=kubenoob_...` line for each call.
 
+## Monitoring and alerting
+
+A platform team should not run a pod it cannot alert on. The server serves `/metrics` on the same port as
+everything else, behind the same bearer token, and the chart ships a ServiceMonitor and a PrometheusRule. Both are
+off by default because both need the Prometheus Operator CRDs, and a chart that renders a CRD the cluster does not
+serve fails the install. OpenShift user-workload monitoring has them.
+
+```bash
+helm upgrade --install kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob \
+  -n kube-noob --set auth.existingSecret=kn-token \
+  --set monitoring.serviceMonitor.enabled=true \
+  --set monitoring.prometheusRule.enabled=true
+```
+
+The ServiceMonitor carries the token from the same Secret your clients use; Prometheus reads that Secret itself, so
+the token is never written into the ServiceMonitor. Enabling the PrometheusRule without the ServiceMonitor is
+refused rather than rendered: an alert on a metric nobody scrapes never fires, and silence is indistinguishable
+from health.
+
+What is exported, and nothing else: the version and default platform, uptime, tool calls by tool, surface and
+outcome, call duration as a histogram, and how old the knowledge built into the image is. No argument, no resource
+name, no namespace, no manifest content and no caller address appears in any label, and every label value comes
+from a fixed set, so an exception type a caller can provoke becomes `error` rather than a new Prometheus label.
+Counters are per process, and the chart runs one.
+
+Three alerts, and what each one really means:
+
+| Alert | Fires when | What it is telling you |
+|---|---|---|
+| `KubeNoobDown` | no successful scrape for 10m | the tools may still be serving; what is certain is that nothing here can be alerted on until the scrape is back |
+| `KubeNoobKnowledgeStale` | `kube_noob_knowledge_age_seconds` over `monitoring.prometheusRule.knowledgeMaxAgeDays` | the age of the knowledge in the **image**, fixed when it was built -- not a failed refresh. Update the image, or turn the alert off if you pin the version deliberately |
+| `KubeNoobToolErrorRatio` | crash + error over total above `toolErrorRatio` for 15m | `invalid-arguments` is deliberately excluded: a caller sending bad input is not this pod failing, and paging someone for somebody else's typo teaches them to mute the alert |
+
+### Alertmanager can post straight to it
+
+`POST /v1/alerts` takes an Alertmanager webhook payload as it is -- `{"receiver": ..., "status": ..., "alerts":
+[...]}` -- and answers with the signals it carries, which is what the incident watch and the diagnosis read. Point
+a receiver at it and an alert becomes a diagnosis without anyone copying JSON out of a browser:
+
+```yaml
+receivers:
+  - name: kube-noob
+    webhook_configs:
+      - url: http://kube-noob.kube-noob.svc:8080/v1/alerts
+        http_config:
+          authorization: {type: Bearer, credentials_file: /etc/kube-noob/token}
+```
+
+It reads the payload in memory and stores nothing.
+
 ## Compatibility
 
 OpenShift 4.20 and later (Kubernetes 1.33 and later), including ROSA Classic and ROSA HCP. Every change runs the chart

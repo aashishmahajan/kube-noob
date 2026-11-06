@@ -311,6 +311,29 @@ jobs:
                --api-versions security.openshift.io/v1 | grep -q "fsGroup"; then
             echo "::error title=chart::fsGroup must not be set on OpenShift"; exit 1
           fi
+          # Monitoring (N11): both objects need the Prometheus Operator CRDs, so both are off by default and a
+          # default render must contain neither; a PrometheusRule without a ServiceMonitor must refuse, because an
+          # alert on a metric nobody scrapes never fires and looks exactly like a healthy cluster.
+          mon="--set monitoring.serviceMonitor.enabled=true"
+          if helm template kn deploy/helm/kube-noob $base | grep -q "kind: ServiceMonitor"; then
+            echo "::error title=chart::ServiceMonitor must be off by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base | grep -q "kind: PrometheusRule"; then
+            echo "::error title=chart::PrometheusRule must be off by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set monitoring.prometheusRule.enabled=true \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::a PrometheusRule without a ServiceMonitor must fail to render"; exit 1
+          fi
+          helm template kn deploy/helm/kube-noob $base $mon | grep -q "path: /metrics"
+          helm template kn deploy/helm/kube-noob $base $mon | grep -q "name: \"kn-token\""
+          helm template kn deploy/helm/kube-noob $base $mon --set monitoring.prometheusRule.enabled=true \
+            | grep -q "alert: KubeNoobToolErrorRatio"
+          # The scrape must carry the bearer token unless the operator opened /metrics deliberately.
+          if helm template kn deploy/helm/kube-noob $base $mon \
+               --set monitoring.allowUnauthenticatedMetrics=true | grep -q "authorization:"; then
+            echo "::error title=chart::an opened /metrics must not still send credentials"; exit 1
+          fi
           helm template kn deploy/helm/kube-noob $base --set config.webEnabled=true \
             | grep -A1 "name: KUBE_NOOB_WEB_ENABLED" | grep -q '"true"'
           helm template kn deploy/helm/kube-noob $base --set config.offline=true \

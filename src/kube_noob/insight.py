@@ -432,6 +432,75 @@ _CONCEPTUAL = re.compile(
 )
 _ERRORISH = re.compile(r"(?i)\b(?:error|failed|failure|denied|forbidden|refused|timeout|cannot|can't)\b|\w+: \w+")
 WEAK_PLAYBOOK = 0.4  # a playbook below this confidence matched on a word or two, not on an error
+#: `\b` treats `-`, `/`, `:` and `.` as word boundaries, so a route word inside a Kubernetes NAME matched it: a
+#: pod called `ci-runner-gate-5`, a Deployment called `upgrade-checker`, a namespace called `evidence`. Every
+#: route pattern below is written with `\b` for readability and compiled with this instead, which requires a
+#: character that cannot appear in a resource name on each side (G237).
+_NAME_SAFE_BOUNDARY = r"(?:(?<![\w/.:-])(?=\w)|(?<=\w)(?![\w/.:-]))"
+
+
+def _route(source: str) -> re.Pattern[str]:
+    """Compile a route pattern: name-safe boundaries, and anchored so the cost is linear.
+
+    The anchor is the performance half. Every pattern is a series of `(?=.*word)` lookaheads, and `search`
+    retries the whole series from each of up to 600 start positions, which measured 75-92 ms per call on a
+    600-character line that matches nothing -- paid on every one-line paste, on every surface. Anchored at the
+    start the lookaheads scan forward once: 0.3-0.9 ms. Each pattern must therefore begin with a lookahead or
+    `.*?`, which is checked below rather than left to whoever adds the next one.
+    """
+    # `raise`, not `assert`: an assertion is stripped under `python -O`, and these are the two structural
+    # invariants that keep a route from firing on one word or costing 80 ms a call. A broken route stops the
+    # import, which is loud and immediate, rather than shipping a quietly wrong answer.
+    if not source.startswith("(?i)"):
+        raise ValueError(f"a route pattern must start with (?i): {source[:40]}")
+    body = source[4:]
+    if not body.startswith(("(?=", ".*")):
+        raise ValueError(f"an anchored pattern must start with a lookahead or .*: {source[:40]}")
+    _refuse_a_word_in_two_groups(source)
+    return re.compile("(?i)\\A" + body.replace(r"\b", _NAME_SAFE_BOUNDARY))
+
+
+def _refuse_a_word_in_two_groups(source: str) -> None:
+    """A word may not appear in two of a route's lookahead groups, checked at import.
+
+    Every over-matching defect in this table has been the same one. `fail` was in both halves of the CI route, so
+    a Helm render error that says it twice matched on one word pretending to be two. Then `gate` was, so the bare
+    word `gate` matched. Then `takeover` and `blast radius` in the exposure route, so `takeover` alone matched.
+    Then `evidence` in the compliance route. Each was found by someone attacking the table; a word in two groups
+    makes the route fire on a single word, which is precisely what requiring two groups was meant to prevent, so
+    it is refused here rather than left for the next reviewer to notice (G237).
+    """
+    groups = re.findall(r"\(\?=(.*?)\)(?=\(\?=|\Z)", source.replace("\n", ""), re.S)
+    if len(groups) < 2:
+        return
+    seen: dict[str, int] = {}
+    for i, group in enumerate(groups):
+        for word in _literal_words(group):
+            if seen.get(word) not in (None, i):
+                raise ValueError(f"{word!r} is in two lookahead groups of a route, so one word matches both")
+            seen[word] = i
+
+
+def _literal_words(group: str) -> set[str]:
+    """The literal words a lookahead group matches on.
+
+    The regex syntax has to come out first, and the first version of this did not do it properly: it read
+    `\bfail\b` as the word "bfail", so the two groups of a route never appeared to share anything and the guard
+    only fired where the tokens happened to line up. It still caught three real defects, which is how a guard
+    that is right by accident stays unnoticed.
+    """
+    cleaned = group.replace(r"\b", " ")
+    cleaned = re.sub(r"\\[a-zA-Z]|\(\?:|\(\?=|\(|\)|[*+?.\[\]{}^$]|\d", " ", cleaned)
+    out: set[str] = set()
+    for part in cleaned.split("|"):
+        word = " ".join(part.split())
+        # Two letters is enough to be a word here (`ci`, `pr`), and a two-letter word in both
+        # groups would make the route fire on it alone just as surely as a long one.
+        if len(word) >= 2 and all(c.isalpha() or c in " -" for c in word):
+            out.add(word.lower())
+    return out
+
+
 #: What answers a typed question that names a job this product does. Each row is (what the question is asking,
 #: the command that answers it, what to give it).
 #:
@@ -447,34 +516,52 @@ WEAK_PLAYBOOK = 0.4  # a playbook below this confidence matched on a word or two
 #: that exists.
 CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\b(?:exposed?|exposure|internet|public|route|ingress|loadbalancer|nodeport|lateral|"
             r"blast ?radius|attack ?paths?|reach(?:es|able)?|takeover|escape)\b)"
             # "pods" is NOT enough on its own here: "can a pod in shop reach a pod in payments" is a
             # NetworkPolicy question, and this route was answering it before `policy reach` did.
-            r"(?=.*\b(?:node|nodes|secrets?|cluster-admin|escalat\w*|takeover|blast ?radius|attack ?paths?)\b)"
+            r"(?=.*\b(?:node|nodes|secrets?|cluster-admin|escalat\w*|what can|what could)\b)"
         ),
         "kube-noob posture scan -f <dir>",
         "ranks every path from a Route, Ingress, LoadBalancer or NodePort to what the pods it reaches can do",
     ),
     (
-        re.compile(
-            r"(?i)(?=.*\b(?:reach|talk to|connect to|allowed|denied|blocked)\b)(?=.*\bnetwork ?polic\w+|"
-            r"\bfrom\b.*\bto\b.*\bnamespace\b|\bpod\b.*\bpod\b)"
+        _route(
+            r"(?i)(?=.*\b(?:reach|talk to|connect to|allowed|denied|blocked)\b)"
+            # ONE lookahead over the whole alternation. Flat it parsed as `(?=(.*A)|(B)|(C))`, where only the
+            # first branch had `.*` and the other two worked only because `search` scanned the string; anchored,
+            # they would silently never match (G237).
+            r"(?=.*(?:\bnetwork ?polic\w+|\bfrom\b.*\bto\b.*\bnamespace\b|\bpod\b.*\bpod\b))"
         ),
-        "kube-noob policy reach --from <ns>/<pod> --to <ns>/<pod>",
+        "kube-noob policy reach --from <ns>/<pod> --to <ns>/<pod> --port <port> -f <dir>",
         "names the deciding tier, policy and rule, and why every other rule did not match",
     ),
+    # Above `upgrade-risks`: "which CVEs matter before we upgrade to 4.18?" is a CVE question (G237).
     (
-        re.compile(
+        _route(
+            r"(?i)(?=.*\b(?:cve|cves|vulnerabilit\w+|vulns?)\b)"
+            r"(?=.*\b(?:matter|priorit\w+|which|reachable|exploitable|rank|first|actually|real)\b)"
+        ),
+        "kube-noob vuln report -r <scanner.json>",
+        "normalises the scanner's output, applies Red Hat VEX and ranks what is left; add `-m <dir>` to rank by "
+        "whether the pods that run the image are reachable",
+    ),
+    (
+        # The second group is an OpenShift signal and nothing else. `upgrade-risks` answers from a snapshot of
+        # targets in OpenShift 4.18 and later -- `--to 1.31.0` returns "0 declared risks ... 1.31.0 is older, so
+        # it was not looked up" -- so matching on "version", "release", "risky" or "breaks" sent `Error: UPGRADE
+        # FAILED`, a Calico-to-Cilium question and a cert-manager version question all here, each of which would
+        # have been answered confidently with nothing (G237).
+        _route(
             r"(?i)(?=.*(?:\b(?:upgrade|upgrading|update|migrat\w+|moving|move)\b|\bgoing from\b))"
-            r"(?=.*\b(?:4\.\d+|1\.\d+|version|release|break|breaks|risky|risks?|watch out)\b)"
+            r"(?=.*\b(?:4\.\d+|openshift|ocp|rosa)\b)"
         ),
         "kube-noob upgrade-risks --from <x.y.z> --to <x.y.z>",
         "the known risks between two releases, from the bundled corpus",
     ),
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\bkyverno\b)(?=.*\b(?:1\.\d+|migrat\w+|drop\w*|remov\w*|deprecat\w*|"
             r"affected|still work)\b)"
         ),
@@ -482,128 +569,194 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
         "which of your Kyverno policies use types the next release removes",
     ),
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\b(?:fedramp|ksi|20x|nist|800-53|control|controls|compliance|evidence|auditor)\b)"
-            r"(?=.*\b(?:which|what|indicators?|speak|map|maps|cover\w*|show|report|evidence)\b)"
+            r"(?=.*\b(?:which|what|indicators?|speak|map|maps|cover\w*|show|report|produce)\b)"
         ),
         "kube-noob ksi -f <dir>",
         "the FedRAMP 20x indicators your findings are evidence about, and the ones nothing here evidences",
     ),
     (
-        re.compile(
-            r"(?i)(?=.*\b(?:suppress|waive|waiver|exception|exempt|ignore|silence|accept)\b)"
-            r"(?=.*\b(?:rule|finding|kn-[a-z]?\d+|namespace|until|quarter|temporarily)\b)"
+        _route(
+            # Not "accept" or "temporarily": "how do I accept the risk of the node going down temporarily?" is
+            # an availability question, and this route is about the exception FILE (G237).
+            r"(?i)(?=.*\b(?:suppress|waive|waiver|exception|exempt|silence)\b)"
+            r"(?=.*\b(?:rule|finding|kn-[a-z]?\d+|namespace|until|quarter|expiry|owner)\b)"
         ),
         "kube-noob exceptions check <file>",
         "an exception needs an owner, a reason, a scope no wider than a namespace and an expiry; this refuses "
         "the ones that do not",
     ),
     (
-        re.compile(r"(?i)\bKN-[A-Z]{0,2}\d{3}\b"),
+        # No lookahead of its own, so it needs the leading `.*?` the anchored form requires.
+        _route(r"(?i).*?\bKN-[A-Z]{0,2}\d{3}\b"),
         "kube-noob explain <rule-id>",
         "what the rule checks, why it matters, the NIST controls it is evidence about and how to fix it",
     ),
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\b(?:rhacs|stackrox|acs)\b)(?=.*\b(?:compare|overlap|gap|gaps|differ\w*|instead|"
             r"gives|cover\w*|what does)\b)"
         ),
-        "kube-noob rhacs compare",
+        "kube-noob rhacs compare -f <policies-export.json>",
         "the overlap, the related policies, the gaps each tool leaves and what is outside kube-noob's scope",
     ),
+    # Above `gate`: "why did the build fail in the CI pipeline?" asks why it failed (G237).
     (
-        re.compile(
-            r"(?i)(?=.*\b(?:cve|cves|vulnerabilit\w+|vulns?)\b)"
-            r"(?=.*\b(?:matter|priorit\w+|which|reachable|exploitable|rank|first|actually|real)\b)"
+        # Not bare "image": `ImagePullBackOff: ... failed to pull and unpack image` is a runtime pull failure and
+        # was being answered with the build analyser.
+        _route(
+            r"(?i)(?=.*\b(?:build|builds|building|buildconfig|containerfile|dockerfile|buildah)\b)"
+            # Not "why": "the build deployment keeps restarting, why" is a diagnosis question about a workload
+            # that happens to be called build, not a question about a build log (G237).
+            r"(?=.*\b(?:fail\w*|error|broke|debug|log|logs)\b)"
         ),
-        "kube-noob vuln rank -f <scanner-output>",
-        "normalises the scanner's output, applies Red Hat VEX and ranks by whether the pods that run the image "
-        "are reachable",
+        "kube-noob build diagnose -f <log>",
+        "why the build failed, from the log; `kube-noob build audit -f Containerfile` audits the image it would "
+        "produce",
     ),
     (
-        # The first group deliberately excludes "fail": a Helm render error says "fail" twice and is not a CI
-        # question, and it was being answered with `gate` before `helm-audit`.
-        re.compile(
-            r"(?i)(?=.*\b(?:ci|pipeline|pull request|github action|merge|gate|gating|before deploy)\b)"
+        # Neither group may hold a word the other holds. "fail" came out of the first group because a Helm render
+        # error says it twice; `gate` came out of it too, because `gate` alone -- the bare word, a Deployment
+        # called `gate`, a pod called `gate-7d9f` -- routed here, which is the same defect one word over (G237).
+        _route(
+            # Bare "ci" and "pipeline" are ordinary nouns: "deployment gate in ci is failing readiness" matched
+            # both groups and got the CI gate instead of a diagnosis. CI intent, or `ci` next to a CI noun.
+            r"(?i)(?=.*(?:\b(?:pull request|github action|merge|gating|before deploy)\b"
+            r"|\bci\b.{0,24}\b(?:check|job|step|run|pipeline)\b))"
             r"(?=.*\b(?:fail|block|gate|critical|threshold|annotat\w*|stop)\b)"
         ),
         "kube-noob gate -f <dir> --fail-on high",
         "one command for CI: audit, admission policy and Containerfiles, with SARIF and pull-request annotations",
     ),
     (
-        re.compile(
-            r"(?i)(?=.*\b(?:changed|change|drift|since|yesterday|last week|regress\w*|new)\b)"
+        _route(
+            # Not bare "new": "new cluster" and "a new VPC" are not questions about what changed (G237).
+            r"(?i)(?=.*\b(?:changed|change|drift|since|yesterday|last week|regress\w*)\b)"
             r"(?=.*\b(?:cluster|namespace|posture|findings?|control|snapshot)\b)"
         ),
-        "kube-noob posture snapshot --live && kube-noob posture diff",
-        "what is open per NIST control and per namespace, and which controls had nothing evaluated at all",
+        "kube-noob posture snapshot --live -o today.json && kube-noob posture diff yesterday.json today.json",
+        "what changed between two snapshots: objects, findings opened and fixed, and which controls had nothing "
+        "evaluated",
+    ),
+    # Above `helm-audit`, because the cap is two and table order decides which comes first: "scaffold a
+    # Helm chart" was being answered with the auditor (G237).
+    (
+        _route(r"(?i)(?=.*\b(?:scaffold|bootstrap|start|new|skeleton)\b)(?=.*\b(?:chart|helm)\b)"),
+        "kube-noob helm-chart --name <app> --platform openshift",
+        "a chart that already passes the audit for that platform, rather than one to fix afterwards",
     ),
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\bhelm\b)(?=.*\b(?:fail\w*|error|render\w*|upgrade|install|template|values|"
             r"chart)\b)"
         ),
-        "kube-noob helm-audit -f <chart>",
-        "renders the chart and audits what it produces, and decodes the common Helm failures",
+        "kube-noob helm-audit <chart>",
+        "renders the chart and audits what it produces; a pasted Helm error is decoded by the diagnosis above "
+        "this, not by the audit",
     ),
     (
-        # Not bare "image": `ImagePullBackOff: ... failed to pull and unpack image` is a runtime pull failure and
-        # was being answered with the build analyser.
-        re.compile(
-            r"(?i)(?=.*\b(?:build|builds|building|buildconfig|containerfile|dockerfile|buildah)\b)"
-            r"(?=.*\b(?:fail\w*|error|broke|why|debug)\b)"
-        ),
-        "kube-noob build -f <log>",
-        "why the build failed, plus an audit of the Containerfile and the image it would produce",
-    ),
-    (
-        re.compile(r"(?i)(?=.*\bmust-?gather\b)"),
-        "kube-noob must-gather <path>",
+        _route(r"(?i)(?=.*\bmust-?gather\b)"),
+        "kube-noob must-gather analyze <path>",
         "opens the bundle safely and routes what it finds to the analysers, without reading Secrets",
     ),
     (
-        re.compile(r"(?i)(?=.*\b(?:threat ?model|threats|stride|what could go wrong)\b)"),
+        # Needs the phrase, not the bare noun: "threats" alone, and an app CALLED threats, matched this.
+        _route(r"(?i)(?=.*\b(?:threat ?model|threat ?modell?ing|stride|what could go wrong)\b)"),
         "kube-noob vuln threat -f <dir>",
         "the threats for each application, with the finding that is evidence for each one",
     ),
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\b(?:teach|learn|lesson|tutorial|exercise|practi[cs]e|study|beginner|"
             r"explain how to)\b)(?=.*\b(?:me|about|kubernetes|openshift|networkpolicy|rbac|track)\b)"
         ),
         "kube-noob learn tracks",
-        "five tracks with graded exercises, offline, with the answers checked rather than described",
+        "the tracks and their lessons, offline, with each exercise's answer checked rather than described",
     ),
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\b(?:generate|write|give me|create)\b)"
             r"(?=.*\b(?:polic\w+|kyverno|gatekeeper|vap|validatingadmissionpolicy|admission)\b)"
         ),
-        "kube-noob generate policies -f <dir>",
-        "Kyverno, Gatekeeper and ValidatingAdmissionPolicy for the rules that can be enforced at admission",
+        "kube-noob policy generate --engine kyverno",
+        "Kyverno or ValidatingAdmissionPolicy (`--engine vap`) for the rules that can be enforced at admission",
     ),
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\b(?:fix|harden|correct|repair)\b)(?=.*\b(?:manifest|yaml|deployment|chart|"
             r"for me|automatically)\b)"
         ),
         "kube-noob fix -f <dir>",
         "the manifest change for each finding it can fix, re-audited afterwards so what is left is visible",
     ),
+    # Added after a red team found questions with a precise answer and no route at all (G237). Each is narrow:
+    # a product name, a file format or a verb that only this job uses.
+    (
+        _route(
+            r"(?i)(?=.*\b(?:known|reported|seen this|anyone else)\b)"
+            r"(?=.*\b(?:bug|bugs|issue|issues|before)\b)"
+        ),
+        "kube-noob known-issues '<symptom>' --version <x.y.z>",
+        "the reported OpenShift bugs whose text matches, with the releases each is fixed in",
+    ),
+    (
+        _route(
+            r"(?i)(?=.*\b(?:scc|podsecurity|pod security|psa|kyverno|gatekeeper|quota|limitrange|webhook)\b)"
+            r"(?=.*\b(?:denied|deny|reject\w*|refus\w*|blocked|forbidden|why)\b)"
+        ),
+        "kube-noob policy explain -f <denial.txt>",
+        "which admission tier refused it, the rule that did, and what to change",
+    ),
+    (
+        _route(
+            r"(?i)(?=.*\b(?:semgrep|codeql|bandit|spotbugs|eslint|sarif)\b)(?=.*\b(?:which|matter|worth|"
+            r"shipped|real|priorit\w*|triage)\b)"
+        ),
+        "kube-noob code report -s <findings.sarif> -m <dir>",
+        "the code findings whose file ships in an image a pod actually runs, ranked by that",
+    ),
+    (
+        _route(
+            r"(?i)(?=.*\b(?:red ?team|attacker|adversar\w+)\b)(?=.*\b(?:manifest|manifests|yaml|chart|"
+            r"what would|scenario|scenarios)\b)"
+        ),
+        "kube-noob redteam -f <dir>",
+        "the scenarios an attacker could run against these manifests, each with the findings that enable it",
+    ),
+    (
+        _route(r"(?i)(?=.*\b(?:removed|deprecated|retired)\b)(?=.*\b(?:api|apis|apiversion|kind|kinds)\b)"),
+        "kube-noob audit -f <dir> --version <x.y>",
+        "the APIs in these manifests that the target release has removed or deprecated, with what replaces them",
+    ),
     # Last, because almost any of the above is a better answer when it matches. This one catches the broadest
     # ask there is -- "is this all right to ship" -- which was getting the generic pod-triage steps.
     (
-        re.compile(
+        _route(
             r"(?i)(?=.*\b(?:safe|ok|okay|all right|alright|wrong|review|check|problems?|issues?|"
             r"production[- ]ready|good)\b)"
+            # Not "this" or bare "pod": "ok this", "check this", "wrong pod" and "is this cluster ok?" all
+            # matched, because the second group was true of almost any sentence (G237).
             r"(?=.*\b(?:manifest|manifests|yaml|deployment|deployments|statefulset|daemonset|chart|"
-            r"helm|pod|workload|this|ship|deploy|apply)\b)"
+            r"helm|workload|workloads|ship|deploy|apply)\b)"
         ),
         "kube-noob audit -f <dir>",
         "every rule in the catalogue over your manifests -- schema, removed APIs, security, RBAC, network, "
         "storage, reliability -- each finding naming the field that proves it",
     ),
 )
+#: A sentence that reports a MALFUNCTION is a diagnosis, whatever else it says. "service ingress-nginx in
+#: namespace public crashes on the new node" shares words with the exposure route, and "what is the blast radius
+#: of losing one node?" shares them with the attack-path route, but neither is asking what either command
+#: answers: the first wants a cause and the second is about availability. The playbooks and the audit answer
+#: those, and they already run. Deliberately NOT including bare "fail" or "error": "my image build failed" and
+#: "why did my helm upgrade fail" are exactly the questions two routes exist for (G237).
+_A_MALFUNCTION = re.compile(
+    r"(?i)\b(?:crashloopbackoff|imagepull\w*|oomkilled|evicted|unschedulable|terminating|crash(?:es|ing|ed)?|"
+    r"restarting|stuck|pending|not ready|unready|failing readiness|degraded|flapping|hung|hanging|"
+    r"losing|lose|goes down|went down|outage|unavailable|stack ?trace|traceback)\b"
+)
+
 MAX_ROUTES = 2
 
 
@@ -613,7 +766,10 @@ def capability_routes(text: str) -> list[dict[str, str]]:
     Only for short typed text. A pasted log or manifest is not a question, and matching one would put advice
     about `upgrade-risks` under somebody's stack trace.
     """
-    if len(text) > 600 or "\n" in text.strip():
+    # `\r` counts: a manifest with old Mac line endings has no `\n` at all and was being read as one question.
+    if len(text) > 600 or any(ch in text for ch in "\n\r"):
+        return []
+    if _A_MALFUNCTION.search(text):
         return []
     out: list[dict[str, str]] = []
     for pattern, command, why in CAPABILITY_ROUTES:
@@ -1392,17 +1548,25 @@ def insight(kit: Any, text: str, platform: str | None = None, version: str | Non
         "code",
     }
     about_a_cluster = bool(platform) or bool(_CLUSTER_WORDS.search(text[:20_000]))
+    # Only a QUESTION is routed. `capability_routes` sees the text, not what was recognised in it, and on its own
+    # that sent a pasted Event whose pod was called `gate-7d9f` to the CI gate, a Deployment named `upgrade` to
+    # `upgrade-risks`, and an SBOM with a component called `gate` to the gate again. A subset test rather than
+    # `"question" in names`, because `recognise` finds NO kind at all for several real typed questions
+    # ("produce an OSCAL assessment for our auditor"), and requiring the kind would silence those (G237).
+    answered_by = capability_routes(text) if names <= {"question"} else []
     if (
         not steps
         and not any(f["source"] in evidence for f in findings)
         and (names & textual or not names)
         and about_a_cluster
+        # The generic gather steps answer "something is broken, what is it". When the question has a direct
+        # answer and nothing was diagnosed, printing `get pods` under it is the very noise G235 is about.
+        and not (answered_by and not findings)
     ):
         ns = context.get("namespace")
         steps = gather_steps(platform, ns if isinstance(ns, str) else None)
         ran.append("gather")
     _engine_playbook_first(findings, text)
-    answered_by = capability_routes(text)
     findings.sort(key=lambda f: (f["rank"], str(f.get("id"))))
     for f in findings:
         f.pop("rank", None)

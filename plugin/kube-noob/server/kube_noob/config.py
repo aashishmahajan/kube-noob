@@ -413,6 +413,13 @@ class JiraSettings(_Base):
         raise ValueError("jira.projects must be default, all, or comma-separated project keys such as OCPBUGS,ROX")
 
 
+class MetricsSettings(_Base):
+    #: `/metrics` sits behind the same bearer token as everything else by default. Opening it is a deliberate
+    #: choice for a mesh that authenticates upstream: the document names every tool this deployment serves and
+    #: how often each is called, which is operational intelligence about the team running it (N11).
+    allow_unauthenticated: bool = False
+
+
 class ServerSettings(_Base):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
@@ -420,6 +427,7 @@ class ServerSettings(_Base):
     auth_token_env: str | None = None  # default set in kube_noob.server.http, the only code that reads it
     allowed_hosts: list[str] = Field(default_factory=list)
     allowed_origins: list[str] = Field(default_factory=list)
+    metrics: MetricsSettings = Field(default_factory=MetricsSettings)
 
 
 def _default_data_dir() -> Path:

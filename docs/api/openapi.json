@@ -508,6 +508,23 @@
     "title": "PolicyMigrateCheckIn",
     "type": "object"
    },
+   "SignalsIn": {
+    "additionalProperties": false,
+    "properties": {
+     "text": {
+      "description": "An Alertmanager payload, events, a ClusterOperator, pod status, logs or an error in words.",
+      "maxLength": 400000,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "SignalsIn",
+    "type": "object"
+   },
    "UpgradeRisksIn": {
     "additionalProperties": false,
     "properties": {
@@ -583,7 +600,7 @@
    "post": {
     "operationId": "post_insight",
     "summary": "Paste anything: recognised, routed to every analyser, one answer",
-    "description": "Start here for anything the user pastes. Names what the input is (events, pod status, logs, an Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at once) and runs every analyser that applies: diagnosis with reported issues and team memory, the denial explainer, the audit, the documentation. Returns every finding with its source, read-only next steps and what was not analysed and why. Read-only, local.",
+    "description": "Start here for anything the user pastes. Names what the input is (events, pod status, logs, an Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at once) and runs every analyser that applies: diagnosis with reported issues and team memory, the denial explainer, the audit, the documentation. Returns every finding with its source, read-only next steps and what was not analysed and why. When the input is a QUESTION about something this product does, `answeredBy` names the command that answers it and why -- a question about exposure and node access is answered by `posture scan`, not by reading pods. It is empty whenever the input was recognised as something pasted, and empty for a sentence reporting a malfunction, because the diagnosis above it is the answer to those. Read-only, local.",
     "responses": {
      "200": {
       "description": "The tool's result (always carries knowledgeAsOf)",
@@ -1441,6 +1458,86 @@
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/MustGatherIn"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/alerts": {
+   "post": {
+    "operationId": "post_extract_signals",
+    "summary": "Alertmanager webhook receiver: post the payload, get the signals it carries",
+    "description": "Read the canonical names in an error: Alertmanager alert names (webhook payload or text), event and ClusterOperator condition reasons, container reasons, admission rules, components and normalised error templates, plus the alerts its words imply. Returns each signal with where it was found, the catalogue entry (components, playbooks, upstream source) and the playbooks it points at. Read-only and offline.",
+    "responses": {
+     "200": {
+      "description": "The tool's result (always carries knowledgeAsOf)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid arguments, or the tool refused the input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "No or wrong bearer token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown id",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Request body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal error (details in the server log only)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SignalsIn"
        }
       }
      }

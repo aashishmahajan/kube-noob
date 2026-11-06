@@ -31,6 +31,7 @@ from kube_noob.knowledge.store import get_store
 from kube_noob.knowledge_status import line as knowledge_line
 from kube_noob.learn.tutor import curriculum
 from kube_noob.prompts import system_prompt
+from kube_noob.server import metrics
 from kube_noob.toolkit import Toolkit, ToolSpec
 
 TOOL_PREFIX = "kubenoob_"
@@ -183,14 +184,18 @@ def run_tool(spec: ToolSpec, kwargs: dict[str, Any], knowledge: str, via: str = 
         raise CallFailed(500, outcome, f"internal error ({type(exc).__name__}); see the server log") from None
     finally:
         # Audit trail without content: which tool, argument names and sizes, outcome, duration.
+        elapsed = time.monotonic() - started
         _audit.info(
             "tool=%s via=%s args=%s outcome=%s ms=%d",
             TOOL_PREFIX + spec.name,
             via,
             _argument_shape(kwargs),
             outcome,
-            (time.monotonic() - started) * 1000,
+            elapsed * 1000,
         )
+        # The same four facts as a metric. This is the one instrumentation point both surfaces pass through, so
+        # one call here covers the MCP tools and the REST routes and they cannot drift apart (N11).
+        metrics.REGISTRY.record(spec.name, via, outcome, elapsed)
 
 
 def _wrapper(spec: ToolSpec, knowledge: str) -> Any:
@@ -255,6 +260,8 @@ def build_server(settings: Settings, *, shared: bool = False, rest: Any = None) 
     # the offending line). Our own audit line (tool, argument sizes, outcome) is the record; keep the SDK quiet.
     logging.getLogger("mcp.server.mcpserver.server").setLevel(logging.WARNING)
     knowledge = knowledge_line(settings.data_dir)
+    # So an unexpected tool label becomes `other` rather than growing the metric's label space (N11).
+    metrics.REGISTRY.known_tools(frozenset(spec.name for spec in toolkit.specs()))
     for spec in toolkit.specs():
         mcp.tool(
             name=TOOL_PREFIX + spec.name,
