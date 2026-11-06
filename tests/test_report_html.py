@@ -377,3 +377,108 @@ def test_a_posture_page_says_what_the_audit_had_to_assume(tmp_path: Path) -> Non
     page = report_html.render(report)
     assert "no reader for" in page
     assert "caveat" in page, "it is rendered as a caveat above the findings, not buried"
+
+
+def test_the_verdict_agrees_with_the_table_it_summarises(tmp_path: Path) -> None:
+    """U5's sharpest risk. The first version summed the standing column and printed "5 findings are open" in
+    the largest type on the page, two sections above a table reading 3: one finding is evidence about several
+    controls, so the per-control sum double-counts it. The headline is the finding count or nothing."""
+    report = _series(tmp_path / "ok", days=2)
+    page = report_html.render(report)
+    verdict = re.search(r'class="verdict">([^<]+)', page)
+    assert verdict, "every report with countable findings states a verdict"
+    assert verdict.group(1).startswith(f"{report['findings']['open']} finding")
+    assert f'<td class="n">{report["findings"]["open"]}</td>' in page, "and the table says the same number"
+
+
+def test_the_masthead_names_what_reached_no_verdict_beside_what_failed(tmp_path: Path) -> None:
+    """The middle tile is the product: a reader who only ever sees the failure count cannot tell a clean
+    cluster from an unexamined one."""
+    page = report_html.render(_series(tmp_path / "ok", days=2))
+    assert 'class="absence"' in page
+    assert "Withheld or not evaluated" in page
+    assert "reached no verdict" in page or "Every rule that applies was evaluated" in page
+
+
+def test_a_limit_is_a_numbered_section_and_not_a_strip_to_skim(tmp_path: Path) -> None:
+    rollout = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Rollout",
+        "metadata": {"name": "web", "namespace": "shop"},
+        "spec": {"template": {"spec": {"containers": [{"name": "web", "image": "nginx:1.27"}]}}},
+    }
+    report, _ = drift.write_report(
+        tmp_path / "r",
+        drift.snapshot([rollout], source="live", taken_at=dt.datetime(2026, 10, 1, tzinfo=dt.UTC)),
+        keep=14,
+    )
+    page = report_html.render(report)
+    assert '<h2 id="limits"><span class="num">1</span>Limits of this examination' in page
+    assert "no reader for" in page
+    assert page.index("Limits of this examination") < page.index("What changed"), "limits come before findings"
+
+
+def test_sections_are_numbered_in_the_order_they_are_written(tmp_path: Path) -> None:
+    """A reviewer cites "section 3" at a colleague, so the contents and the headings have to agree, and the
+    numbers have to come from the sections actually rendered rather than from a fixed list."""
+    page = report_html.render(_series(tmp_path / "ok", days=3))
+    heads = re.findall(r'<h2 id="([a-z]+)"><span class="num">(\d+)</span>([^<]+)', page)
+    assert [int(n) for _a, n, _t in heads] == list(range(1, len(heads) + 1)), heads
+    for anchor, n, title in heads:
+        assert f'<a href="#{anchor}"><span class="n">{n}</span><span class="t">{title}' in page
+
+
+def test_every_control_row_and_every_finding_can_be_linked_to(tmp_path: Path) -> None:
+    gate_page = report_html.render(_gate_report())
+    ids = re.findall(r'<a id="(f-[^"]+)" href="#\1"', gate_page)
+    assert len(ids) == len(set(ids)) and len(ids) >= 3, ids
+    assert all(re.fullmatch(r"f-[A-Za-z0-9._-]+", i) for i in ids), "an anchor is an id, never a path"
+    posture_page = report_html.render(_series(tmp_path / "ok", days=2))
+    assert re.search(r'<a id="c-AC-6" href="#c-AC-6"', posture_page)
+
+
+def test_a_finding_keeps_its_anchor_when_the_list_order_changes() -> None:
+    """`#f-3` meaning a different finding tomorrow is worse than no anchor. The id is the rule and the
+    resource, which is what a reader has in hand when they want to point at a row."""
+    report = _gate_report()
+    first = set(re.findall(r'id="(f-[^"]+)"', report_html.render(report)))
+    report["findings"] = list(reversed(report["findings"]))
+    assert set(re.findall(r'id="(f-[^"]+)"', report_html.render(report))) == first
+
+
+def test_controls_with_nothing_to_report_fold_away_and_open_again_in_print(tmp_path: Path) -> None:
+    """Thirty rows of which eight say anything is the shape that hid `notEvaluated` in the first place. What
+    is folded is not hidden evidence: the printed PDF must not be a subset of the page a colleague opened."""
+    page = report_html.render(_series(tmp_path / "ok", days=2))
+    assert '<details class="quiet">' in page
+    assert "with nothing to report" in page
+    assert "details.quiet > div { display: block !important; }" in page
+    folded = page[page.index('<details class="quiet">') :]
+    assert "AC-4" in folded or "AU-12" in folded, "the folded rows are present in the document, not dropped"
+
+
+def test_the_page_states_the_scope_its_numbers_are_true_of(tmp_path: Path) -> None:
+    page = report_html.render(_series(tmp_path / "ok", days=2))
+    assert 'class="prov"' in page
+    for label in ("scope", "taken", "by", "network"):
+        assert f"<dt>{label}</dt>" in page
+
+
+def test_the_redesign_still_fetches_nothing(tmp_path: Path) -> None:
+    for page in (report_html.render(_gate_report()), report_html.render(_series(tmp_path / "ok", days=2))):
+        sinks = _parsed(page)
+        assert (sinks.scripts, sinks.events, sinks.loads) == (0, [], [])
+
+
+def test_the_masthead_never_points_at_a_section_the_page_does_not_have() -> None:
+    """The absence tile counts the checks nobody ran and the verdict sends the reader to section 1 for them,
+    so section 1 has to list them. The first version counted them and never rendered them anywhere."""
+    page = report_html.render(_gate_report())
+    assert "section 1 says what they cover" in page
+    assert '<h2 id="limits"><span class="num">1</span>Limits of this examination' in page
+    assert "Not run." in page and "scanner-report" in page, "the checks the tile counted are the ones listed"
+
+
+def test_the_gate_verdict_is_stated_once() -> None:
+    page = report_html.render(_gate_report())
+    assert page.count("The gate failed") == 1, "the masthead states it; the body used to repeat it"

@@ -689,6 +689,8 @@ drawn their conclusion. `audited: false`, `assumed`, `not checked that far`, a f
 withheld control standing, and the shows/does-not-show pair all survive into the page -- an HTML report that drops
 them would be the same defect in a third format.
 
+The page is laid out as what it is: an evidence document, not a dashboard. It opens with the verdict as a sentence, the three numbers that decide what the reader does next -- findings, how much reached no verdict, and what was evaluated and clean -- and a provenance block stating the scope those numbers are true of. Section 1 is the limits of the examination, numbered and ahead of anything the run found, because a rule that was never evaluated is indistinguishable from a clean one in any table that does not say so. Sections are numbered so a reviewer can cite one, every finding and control row has an id so a colleague can be sent to a single line, and controls with nothing to report fold away on screen and open again in print, so the PDF in an audit package is never a subset of the page.
+
 The page carries charts, and they are drawn rather than plotted: inline SVG, still no script and still nothing
 fetched. A gate report gets findings by severity; a posture report gets open findings per control, the five
 standing buckets as a stacked bar, and open against excepted findings across the snapshots still kept. Three rules
@@ -863,7 +865,7 @@ object and the path, and `posture scan` records the same in `notRead`. You get a
 clean report you cannot trust, and a kind worth reading properly can be added with its published schema.
 
 ```bash
-kube-noob audit -f serving/            # the same 92 rules, now reaching the components
+kube-noob audit -f serving/            # the same 93 rules, now reaching the components
 kube-noob posture scan -f serving/     # per-component attack paths
 kube-noob --cluster-enabled posture scan --live -n model-serving
 ```

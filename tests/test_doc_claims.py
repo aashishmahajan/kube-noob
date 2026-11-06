@@ -16,6 +16,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import doc_numbers as dn  # noqa: E402
@@ -205,3 +207,45 @@ def test_an_openshift_version_on_the_kubernetes_platform_is_refused() -> None:
     assert k8s_version_for("openshift", "1.33") == "1.33", "the reverse is still accepted, as it always was"
     with pytest.raises(ValueError, match="not a Kubernetes version"):
         k8s_version_for("kubernetes", "4.22")
+
+
+def test_every_guarded_claim_is_measured_from_the_code() -> None:
+    """P8. Each entry in GUARDS names a key of `counted()`, and `counted()` reads the code or the data rather
+    than another document. A guard pointing at a key nobody measures would pass by accident."""
+    measured = dn.counted()
+    for path, _pattern, key, why in dn.GUARDS:
+        assert key in measured, f"{path.name}: the guard for {why} names {key}, which nothing measures"
+    assert all(isinstance(v, int) for v in measured.values())
+
+
+def test_a_reworded_sentence_fails_rather_than_stops_being_guarded() -> None:
+    """The failure mode worth catching: somebody edits the prose, the pattern stops matching, and the claim
+    quietly leaves the guard. A guard that matches zero or several times is an error, not a skip."""
+    path, pattern, _key, _why = dn.GUARDS[0]
+    text = path.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as gone:
+        dn.guarded({path: text.replace(pattern.split("(")[0].strip("\\"), "REWORDED", 1)})
+    assert "reworded or removed" in str(gone.value)
+
+
+def test_a_stale_guarded_number_is_rewritten_not_accepted() -> None:
+    path, pattern, _key, _why = dn.GUARDS[0]
+    text = path.read_text(encoding="utf-8")
+    wrong = re.sub(pattern, lambda m: m.group(0).replace(m.group(1), "4242", 1), text, count=1)
+    assert wrong != text, "the fixture has to actually differ from the committed text"
+    assert dn.guarded({path: wrong})[path] == text
+
+
+def test_the_guards_cover_the_rule_count_wherever_a_document_states_it() -> None:
+    """The defect this item was opened for: `docs/use-cases.md` said "the same 92 rules" while the code had 93.
+    Any document stating a bare rule count has to be guarded, or the next one drifts the same way."""
+
+    guarded_files = {p for p, *_ in dn.GUARDS}
+    rules = dn.counted()["rules"]
+    pat = re.compile(r"\b(\d{2,3}) (?:audit )?rules\b")
+    for doc in (dn.ROOT / "README.md", dn.ROOT / "docs" / "use-cases.md", dn.ROOT / "docs" / "compliance.md"):
+        for found in pat.findall(doc.read_text(encoding="utf-8")):
+            assert int(found) == rules or doc in guarded_files, (
+                f"{doc.name} states {found} rules; the code has {rules}. Guard the sentence in "
+                "scripts/doc_numbers.py GUARDS or correct it."
+            )

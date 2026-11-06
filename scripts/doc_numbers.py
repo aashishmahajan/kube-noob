@@ -206,6 +206,144 @@ def measured() -> Measured:
     )
 
 
+#: Countable claims somebody TYPED, each paired with the thing that measures it. These are not generated prose:
+#: the sentence is the author's, and only the number in it is this script's. Written out because every one of
+#: them is a claim a reader can check, which makes a stale one a defect rather than a cosmetic slip -- "the same
+#: 92 rules" sat in a published document while the code had 93, which is how this table came to exist.
+#:
+#: Each entry: the file, a pattern whose group 1 is the number, what measures it, and why the claim matters. A
+#: pattern that does not match EXACTLY once is itself a failure: a sentence somebody reworded has stopped being
+#: guarded, and silently passing would be worse than the stale number.
+GUARDS: tuple[tuple[Path, str, str, str], ...] = (
+    (ROOT / "README.md", r"Also: (\d+) rules with strict schemas", "rules", "the headline rule count"),
+    (ROOT / "README.md", r"schemas and (\d+) red-team scenarios", "scenarios", "the red-team scenarios"),
+    (ROOT / "README.md", r"scenarios; (\d+) offline playbooks", "playbooks", "the debug playbooks"),
+    (ROOT / "README.md", r"policies; (\d+) tracks, \d+ lessons", "tracks", "the curriculum's tracks"),
+    (ROOT / "README.md", r"policies; \d+ tracks, (\d+) lessons", "lessons", "the curriculum's lessons"),
+    (
+        ROOT / "docs" / "use-cases.md",
+        r"audit -f serving/            # the same (\d+) rules",
+        "rules",
+        "the rule count the CRD-reach example quotes",
+    ),
+    (
+        ROOT / "docs" / "learning.md",
+        r"The curriculum has (\d+) tracks",
+        "tracks",
+        "the curriculum's tracks",
+    ),
+    (ROOT / "docs" / "learning.md", r"tracks \([^)]*\), with (\d+) lessons", "lessons", "its lessons"),
+    (ROOT / "docs" / "learning.md", r"with \d+ lessons, (\d+) graded", "graded", "its graded exercises"),
+    (
+        ROOT / "docs" / "architecture.md",
+        r"\((\d+) findings per analyser, \d+ in all",
+        "per_analyser",
+        "the must-gather per-analyser cap",
+    ),
+    (
+        ROOT / "docs" / "architecture.md",
+        r"\(\d+ findings per analyser, (\d+) in all",
+        "findings_cap",
+        "the must-gather total cap",
+    ),
+    (
+        ROOT / "docs" / "architecture.md",
+        r"in all, (\d+) event reasons\)",
+        "event_reasons",
+        "the must-gather event-reason cap",
+    ),
+    (
+        ROOT / "docs" / "compliance.md",
+        r"(\d+) of the \d+ controls kube-noob maps are cited",
+        "controls_cited",
+        "the controls an indicator cites",
+    ),
+    (
+        ROOT / "docs" / "compliance.md",
+        r"\d+ of the (\d+) controls kube-noob maps are cited",
+        "controls",
+        "the controls kube-noob maps",
+    ),
+    (
+        ROOT / "docs" / "compliance.md",
+        r"and (\d+) of the \d+ indicators have no kube-noob rule",
+        "indicators_bare",
+        "the indicators with no rule behind them",
+    ),
+    (
+        ROOT / "docs" / "compliance.md",
+        r"and \d+ of the (\d+) indicators have no kube-noob rule",
+        "indicators",
+        "the KSI indicators",
+    ),
+    (
+        ROOT / "docs" / "use-cases.md",
+        r"backups at all. (\d+) of the \d+ indicators have no kube-noob rule",
+        "indicators_bare",
+        "the indicators with no rule behind them",
+    ),
+    (
+        ROOT / "docs" / "use-cases.md",
+        r"backups at all. \d+ of the (\d+) indicators have no kube-noob rule",
+        "indicators",
+        "the KSI indicators",
+    ),
+)
+
+
+def counted() -> dict[str, int]:
+    """Every number GUARDS asserts, measured from the code and the data rather than from another document."""
+    import yaml
+
+    from kube_noob.audit.controls import TITLES
+    from kube_noob.audit.fedramp import BY_CONTROL, INDICATORS, indicator_rules
+    from kube_noob.audit.rules import RULES
+    from kube_noob.debug.playbooks import PLAYBOOKS
+    from kube_noob.demo import SCENARIOS
+    from kube_noob.mustgather import analyse
+
+    tracks = yaml.safe_load((ROOT / "src" / "kube_noob" / "data" / "curriculum.yaml").read_text())["tracks"]
+    # "Bare" is asked of the same function the crosswalk itself asks, `indicator_rules`, rather than worked out
+    # here. The hand-rolled intersection looked right and answered 46 of 46: an indicator cites its controls in
+    # lower case (`at-2`) and kube-noob names them in upper (`AT-2`), so it never matched, and the number it
+    # produced -- every indicator unevidenced -- is one nobody would have questioned in a sentence of prose.
+    return {
+        "rules": len(RULES),
+        "controls": len(TITLES),
+        "controls_cited": sum(1 for cited in BY_CONTROL.values() if cited),
+        "indicators": len(INDICATORS),
+        "indicators_bare": sum(1 for i in INDICATORS if not indicator_rules(i)),
+        "scenarios": len(SCENARIOS),
+        "playbooks": len(PLAYBOOKS),
+        "tracks": len(tracks),
+        "lessons": sum(len(t["lessons"]) for t in tracks),
+        "graded": sum(len(t.get("exercises") or []) for t in tracks),
+        "per_analyser": analyse.MAX_PER_ANALYSER,
+        "findings_cap": analyse.MAX_FINDINGS,
+        "event_reasons": analyse.MAX_EVENT_REASONS,
+    }
+
+
+def guarded(texts: dict[Path, str]) -> dict[Path, str]:
+    """Rewrite each guarded number in place. ``texts`` carries whatever earlier passes already changed, so a
+    file can be both generated and guarded without one pass undoing the other."""
+    want = counted()
+    out = dict(texts)
+    for path, pattern, key, why in GUARDS:
+        text = out.get(path) or path.read_text(encoding="utf-8")
+        rx = re.compile(pattern)
+        hits = rx.findall(text)
+        if len(hits) != 1:
+            raise SystemExit(
+                f"{path.relative_to(ROOT)}: the sentence stating {why} was reworded or removed "
+                f"({len(hits)} matches for the guard). Fix the pattern in scripts/doc_numbers.py GUARDS, or "
+                "restore the sentence: a claim nobody checks is how the last four wrong numbers got published."
+            )
+        value = str(want[key])
+        out[path] = rx.sub(lambda m, v=value: m.group(0).replace(m.group(1), v, 1), text, count=1)
+    return out
+
+
 def _table() -> str:
     head = "| Platform | Rules generated | Not generated |\n| --- | --- | --- |\n"
     return head + "".join(f"| {r.label} | {r.generated} | {r.not_generated} |\n" for r in policy_rows())
@@ -242,7 +380,7 @@ def render() -> dict[Path, str]:
     )
     road = _CEILING.sub(lambda m: f"{m[1]}{n.controls}{m[2]}{n.rules}{m[3]}", road, count=1)
     road = _CEILING_EVIDENCE.sub(lambda m: f"{m[1]}{n.controls}{m[2]}", road)
-    return {LIMITS: limits, USE_CASES: cases, ROADMAP: road}
+    return guarded({LIMITS: limits, USE_CASES: cases, ROADMAP: road})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -256,7 +394,10 @@ def main(argv: list[str] | None = None) -> int:
             for p in stale:
                 print(f"{p.relative_to(ROOT)} is stale: run python scripts/doc_numbers.py", file=sys.stderr)
             return 1
-        print("docs/limits.md, docs/use-cases.md and docs/roadmap.md state the measured numbers")
+        print(
+            f"docs/limits.md, docs/use-cases.md and docs/roadmap.md state the measured numbers, and "
+            f"{len(GUARDS)} typed claims across {len({p for p, *_ in GUARDS})} documents match the code"
+        )
         return 0
     for p, text in rendered.items():
         p.write_text(text, encoding="utf-8")
