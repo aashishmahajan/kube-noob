@@ -638,3 +638,79 @@ def test_a_document_deeper_than_the_loader_allows_is_refused_by_the_loader() -> 
     doc = {"apiVersion": "example.com/v1", "kind": "Deep", "metadata": {"name": "d"}, "spec": node}
     with pytest.raises(ManifestError):
         analyze(json.dumps(doc))
+
+
+# --- a kind name is unique only inside its group, and a declared exposure is an exposure (G233) -------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "api_version", "kind"),
+    [
+        ("Knative Service", "serving.knative.dev/v1", "Service"),
+        ("Volcano Job", "batch.volcano.sh/v1alpha1", "Job"),
+        ("Tekton Task", "tekton.dev/v1", "Task"),
+        ("Argo Workflow", "argoproj.io/v1alpha1", "Workflow"),
+    ],
+)
+def test_a_crd_reusing_a_core_kind_name_is_not_called_invalid(label: str, api_version: str, kind: str) -> None:
+    """KN-V002 keyed on the kind name alone, and a kind name is unique only within its group: it told a Knative
+    user their correct Service "is not served by serving.knative.dev/v1. Use v1" -- as a CRITICAL, which fails a
+    gate on a valid manifest. A wrong CRITICAL costs more trust than a missed finding (G233)."""
+    doc = {"apiVersion": api_version, "kind": kind, "metadata": {"name": "x", "namespace": "ns"}, "spec": {}}
+    fired = [f for f in analyze(json.dumps(doc)).findings if f.rule_id == "KN-V002"]
+    assert not fired, f"{label}: {[f.message for f in fired]}"
+
+
+@pytest.mark.parametrize(
+    ("api_version", "kind"),
+    [("v1", "Deployment"), ("apps/v1", "Ingress"), ("apps.openshift.io/v1", "Route")],
+)
+def test_a_built_in_kind_in_the_wrong_group_still_fires(api_version: str, kind: str) -> None:
+    """Narrowing the rule must not silence it. The last case is the rule's own documented example."""
+    doc = {"apiVersion": api_version, "kind": kind, "metadata": {"name": "x", "namespace": "ns"}, "spec": {}}
+    fired = [
+        f for f in analyze(json.dumps(doc), platform="openshift", version="4.20").findings if f.rule_id == "KN-V002"
+    ]
+    assert fired, f"{api_version} {kind} should still be refused"
+
+
+def _ray_head(**head: Any) -> dict[str, Any]:
+    pod = {
+        "serviceAccountName": "default",
+        "containers": [{"name": "c", "image": "ray:2", "securityContext": {"privileged": True}}],
+    }
+    return {
+        "apiVersion": "ray.io/v1",
+        "kind": "RayCluster",
+        "metadata": {"name": "r", "namespace": "ns"},
+        "spec": {"headGroupSpec": {**head, "template": {"metadata": {"labels": {"app": "ray"}}, "spec": pod}}},
+    }
+
+
+@pytest.mark.parametrize(
+    ("head", "expected_weight"),
+    [({"serviceType": "LoadBalancer"}, 3), ({"serviceType": "NodePort"}, 2), ({"enableIngress": True}, 3)],
+)
+def test_an_exposure_the_object_declares_is_an_exposure(head: dict[str, Any], expected_weight: int) -> None:
+    """The Service the operator will create is not in the manifest, so nothing matched a selector and the scan
+    answered "0 attack paths from 0 exposures" for an internet-facing Ray head running privileged (G233)."""
+    out = ap.scan(ap.Inventory.from_documents([_ray_head(**head)]), top=10)
+    assert out["total"] >= 1, out["summary"]
+    path = out["paths"][0]
+    assert path["score"] == expected_weight * 9, path  # privileged container is weight 9
+    assert any("serviceType" in st["evidence"] or "enableIngress" in st["evidence"] for st in path["steps"])
+
+
+def test_a_cluster_ip_head_declares_nothing() -> None:
+    out = ap.scan(ap.Inventory.from_documents([_ray_head(serviceType="ClusterIP")]), top=10)
+    assert out["total"] == 0, out["summary"]
+
+
+def test_a_declared_entry_does_not_invent_a_service_step() -> None:
+    """The first version reused the selector step, which printed `Service/ns/ --selects--> ...` with the evidence
+    "selector {} matches the pod template labels": a Service with no name, and an untrue evidence line."""
+    out = ap.scan(ap.Inventory.from_documents([_ray_head(serviceType="LoadBalancer")]), top=10)
+    for st in out["paths"][0]["steps"]:
+        assert not st["from"].startswith("Service//"), st
+        assert st["from"] != "Service/ns/", st
+        assert "selector {}" not in st["evidence"], st

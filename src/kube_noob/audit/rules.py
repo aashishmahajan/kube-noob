@@ -40,6 +40,7 @@ from kube_noob.catalog import (
     PROVISIONERS,
     ROSA_FAMILY,
     api_group,
+    claims_a_known_group,
     deprecated_api,
     parse_minor,
     removed_api,
@@ -461,6 +462,12 @@ def _v002(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             continue
         valid = KIND_API_VERSIONS.get(d.kind)
         if not valid or d.api_version in valid:
+            continue
+        if not claims_a_known_group(d.api_version):
+            # A kind name is unique only inside its group. `Service` is core v1 AND serving.knative.dev/v1;
+            # `Job` is batch/v1 AND batch.volcano.sh/v1alpha1. Firing on the name alone called a correct Knative
+            # Service invalid, as a CRITICAL (G233). An unknown group is somebody else's CRD: the report already
+            # says there is no bundled schema for it, and that is the honest statement.
             continue
         if removed_api(d.api_version, d.kind, "99.0") is not None:
             continue  # handled by the deprecation rules with a precise version message

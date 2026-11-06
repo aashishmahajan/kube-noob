@@ -160,6 +160,12 @@ class Entry:
     namespace: str
     service: str
     fix: str
+    #: Set when the object DECLARES its own exposure and the Service that implements it is created by an
+    #: operator, so there is nothing in this input to match a selector against. `("RayCluster/ns/r", path)` says
+    #: which object and which pod spec path the edge lands on. Without this a RayCluster asking for
+    #: `serviceType: LoadBalancer` scored `0 attack paths from 0 exposures` -- an internet-facing Ray head with a
+    #: privileged container, reported as nothing at all (G233).
+    declared_on: tuple[str, PathT] | None = None
 
 
 @dataclass
@@ -458,6 +464,90 @@ def _entries(inv: Inventory) -> list[Entry]:
             label, weight, evidence, fix = exp
             src = label.split(" (")[0]
             out.append(Entry(label, weight, (Step(src, _ref(s), "exposed by", evidence),), _ns(s), _name(s), fix))
+    out += _declared_entries(inv)
+    return out
+
+
+#: Exposures a workload CRD asks for in its own spec, where the Service or Ingress that implements it is created
+#: by the operator and so is never in the manifest. (field path, which pod spec it exposes, how to read the
+#: value, label, weight, fix). Every path is from the published CRD: `headGroupSpec.serviceType` and
+#: `headGroupSpec.enableIngress` in ray.io_rayclusters.yaml v1 and v1alpha1, `spec.serveService` in
+#: ray.io_rayservices.yaml, read 2026-11-06.
+_DECLARED_EXPOSURES: tuple[tuple[str, PathT, PathT], ...] = (
+    ("RayCluster", ("spec", "headGroupSpec"), ("spec", "headGroupSpec", "template", "spec")),
+    (
+        "RayService",
+        ("spec", "rayClusterConfig", "headGroupSpec"),
+        ("spec", "rayClusterConfig", "headGroupSpec", "template", "spec"),
+    ),
+    (
+        "RayJob",
+        ("spec", "rayClusterSpec", "headGroupSpec"),
+        ("spec", "rayClusterSpec", "headGroupSpec", "template", "spec"),
+    ),
+)
+
+
+def _declared_entries(inv: Inventory) -> list[Entry]:
+    """Exposures the object asks for itself.
+
+    A `RayCluster` with `headGroupSpec.serviceType: LoadBalancer` is asking the operator for a load balancer in
+    front of its head pod -- the Ray dashboard and the job submission API, on a pod that often runs privileged.
+    The Service does not exist in the manifest, so nothing matched a selector and the scan answered `0 attack
+    paths from 0 exposures`: a declared internet exposure reported as no exposure (G233).
+    """
+    out: list[Entry] = []
+    for kind, head, pods in _DECLARED_EXPOSURES:
+        for obj in inv.of(kind):
+            ref, target = _ref(obj), (_ref(obj), pods)
+            node = _get(obj, *(str(k) for k in head))
+            if not isinstance(node, dict):
+                continue
+            service_type = str(node.get("serviceType") or "")
+            if service_type in {"LoadBalancer", "NodePort"}:
+                label, weight = (
+                    ("internet (LoadBalancer)", 3) if service_type == "LoadBalancer" else ("node network", 2)
+                )
+                out.append(
+                    Entry(
+                        label,
+                        weight,
+                        (
+                            Step(
+                                label.split(" (")[0],
+                                ref,
+                                "exposed by",
+                                f"{'.'.join(str(k) for k in head)}.serviceType={service_type}, so the operator "
+                                "creates that Service for the head pod",
+                            ),
+                        ),
+                        _ns(obj),
+                        "",
+                        "set serviceType: ClusterIP and reach the head through a Route or Ingress with "
+                        "authentication in front of it",
+                        declared_on=target,
+                    )
+                )
+            if node.get("enableIngress") is True:
+                out.append(
+                    Entry(
+                        "internet (Ingress)",
+                        3,
+                        (
+                            Step(
+                                "internet",
+                                ref,
+                                "exposed by",
+                                f"{'.'.join(str(k) for k in head)}.enableIngress=true, so the operator creates an "
+                                "Ingress for the head pod",
+                            ),
+                        ),
+                        _ns(obj),
+                        "",
+                        "set enableIngress: false, or put authentication in front of the generated Ingress",
+                        declared_on=target,
+                    )
+                )
     return out
 
 
@@ -774,7 +864,13 @@ class _Index:
             for k, v in site.labels.items():
                 by_label.setdefault((_ns(site.obj), k, v), []).append(n)
         selects: dict[int, list[tuple[int, Entry, dict[str, Any]]]] = {}
+        by_target = {(site.ref.split("[")[0], site.path): n for n, site in enumerate(sites)}
         for i, e in enumerate(entries):
+            if e.declared_on is not None:
+                target_n = by_target.get(e.declared_on)
+                if target_n is not None:
+                    selects.setdefault(id(sites[target_n]), []).append((i, e, {}))
+                continue
             svc = services.get((e.namespace, e.service))
             selector = _get(svc, "spec", "selector") if svc else None
             if not isinstance(selector, dict) or not selector:
@@ -800,12 +896,23 @@ def _reach(
     w, spec, ref = site.obj, site.spec, site.ref
     reach_entries: list[tuple[int, Entry, list[Step]]] = []
     for i, entry, selector in index.selects.get(id(site), []):
-        to_w = Step(
-            f"Service/{entry.namespace}/{entry.service}",
-            ref,
-            "selects",
-            f"selector {selector} matches the pod template labels",
-        )
+        if entry.declared_on is not None:
+            # The object asked for the exposure itself, so there is no Service in this input to step through.
+            # Reusing the selector step here printed `Service/ns/ --selects--> ...  (selector {} matches ...)`:
+            # a Service with no name, and an evidence line that was simply untrue (G233).
+            to_w = Step(
+                entry.declared_on[0],
+                ref,
+                "runs",
+                f"this pod spec is at {'.'.join(str(k) for k in site.path)} of that object",
+            )
+        else:
+            to_w = Step(
+                f"Service/{entry.namespace}/{entry.service}",
+                ref,
+                "selects",
+                f"selector {selector} matches the pod template labels",
+            )
         reach_entries.append((i, entry, [*entry.steps, to_w]))
     api: list[tuple[Capability, list[Step]]] = []
     tok = _token(index.no_automount, w, spec)
