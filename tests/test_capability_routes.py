@@ -81,6 +81,17 @@ def test_every_route_says_why() -> None:
         ("red team these manifests, what would an attacker do?", "redteam"),
         ("scaffold a Helm chart for orders-api", "helm-chart"),
         ("which APIs are removed when we go to Kubernetes 1.32?", "audit"),
+        # A third pass (G247): one question was answered with the wrong command and three had no answer at all.
+        # "exposed in the public repo" is about Git -- the attack-path scan reads a cluster.
+        ("which secrets are exposed in the public repo?", "audit"),
+        ("did we commit a secret to git?", "audit"),
+        ("we pushed an API key to github by mistake", "audit"),
+        # And the plainest form of the question `posture scan` exists for matched nothing, because `internet`
+        # and `public` sat in the first lookahead group where the second group could never also hold them.
+        ("is anything in my cluster exposed to the internet?", "posture scan"),
+        ("is my ingress internet-facing?", "posture scan"),
+        ("are any of our services publicly reachable?", "posture scan"),
+        ("can anything be reached from outside?", "posture scan"),
     ],
 )
 def test_a_question_reaches_the_command_that_answers_it(question: str, expected: str) -> None:
@@ -211,6 +222,11 @@ def test_a_pasted_denial_is_left_to_the_explainer_that_already_ran() -> None:
         "what is the blast radius of losing one node?",
         "how do I accept the risk of the node going down temporarily?",
         "I have an exception in my Java stack trace, which rule applies?",
+        # G247: the words the exposure route gained must not fire on text that is not asking about exposure.
+        "dial tcp: lookup api.example.com: no route to host",
+        "the public internet gateway",
+        "git commit",
+        "publicly",
     ],
 )
 def test_nothing_is_routed_for_text_that_only_shares_words(text: str) -> None:
@@ -302,3 +318,32 @@ def test_a_question_with_a_direct_answer_is_not_also_given_pod_triage_steps() ->
     assert not out["findings"]
     assert out["readOnlyNextSteps"] == [], out["readOnlyNextSteps"]
     assert "gather" not in out["ran"]
+
+
+def test_a_question_about_a_repository_is_not_answered_with_a_cluster_scan() -> None:
+    """S6 from the second red team: "which secrets are exposed in the public repo?" got `posture scan`.
+
+    It is a question about files in Git, and that command walks Routes, ServiceAccounts and RBAC in a cluster.
+    The negative lookahead is the fix, and it is asserted here as well as by the route order, because the two
+    routes would otherwise both match and the cap of two would simply hide the wrong one behind the right one.
+    """
+    for question in (
+        "which secrets are exposed in the public repo?",
+        "are there credentials committed in this repository?",
+        "is any token exposed in our gitlab repos?",
+    ):
+        routes = [r["command"] for r in capability_routes(question)]
+        assert routes and "audit" in routes[0], f"{question!r} -> {routes}"
+        assert not any("posture scan" in r for r in routes), f"{question!r} -> {routes}"
+
+
+def test_a_negative_lookahead_may_lead_a_route_and_is_still_anchored() -> None:
+    """The structural guard had to learn one more shape, so the invariant it protects is asserted directly."""
+    from kube_noob import insight
+
+    pattern = insight._route(r"(?i)(?!.*\bgit\b)(?=.*\bexposed\b)(?=.*\bnode\b)")
+    assert pattern.pattern.startswith("(?i)\\A")
+    assert pattern.search("is the node exposed")
+    assert not pattern.search("is the node exposed in git")
+    with pytest.raises(ValueError, match="must start with"):
+        insight._route(r"(?i)\bexposed\b")

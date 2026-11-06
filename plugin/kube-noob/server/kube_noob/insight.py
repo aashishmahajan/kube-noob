@@ -454,8 +454,11 @@ def _route(source: str) -> re.Pattern[str]:
     if not source.startswith("(?i)"):
         raise ValueError(f"a route pattern must start with (?i): {source[:40]}")
     body = source[4:]
-    if not body.startswith(("(?=", ".*")):
-        raise ValueError(f"an anchored pattern must start with a lookahead or .*: {source[:40]}")
+    # A negative lookahead may lead: `\A(?!.*word)` scans forward once, exactly like a positive one, so the
+    # linear-cost invariant holds -- and a route that has to say what it is NOT about needs somewhere to say
+    # it (G247).
+    if not body.startswith(("(?=", "(?!", ".*")):
+        raise ValueError(f"an anchored pattern must start with a lookahead, a negative lookahead or .*: {source[:40]}")
     _refuse_a_word_in_two_groups(source)
     return re.compile("(?i)\\A" + body.replace(r"\b", _NAME_SAFE_BOUNDARY))
 
@@ -515,13 +518,38 @@ def _literal_words(group: str) -> set[str]:
 #: least two of the asking words rather than any one of them. A test holds every command here to being a command
 #: that exists.
 CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    # First, and above the exposure route on purpose: a secret in a repository is a question about files, and
+    # the attack-path scan reads a cluster. Asked "which secrets are exposed in the public repo?" the router
+    # sent `posture scan`, which would go looking for Routes and ServiceAccounts (G247).
     (
         _route(
-            r"(?i)(?=.*\b(?:exposed?|exposure|internet|public|route|ingress|loadbalancer|nodeport|lateral|"
-            r"blast ?radius|attack ?paths?|reach(?:es|able)?|takeover|escape)\b)"
+            r"(?i)(?=.*\b(?:secrets?|credential|credentials|password|passwords|token|tokens|api ?keys?|"
+            r"private ?key)\b)"
+            r"(?=.*\b(?:repo|repos|repositor\w+|git|github|gitlab|commit\w*|source ?control|"
+            r"version ?control|pushed)\b)"
+        ),
+        "kube-noob audit -f <dir>",
+        "secret material committed in a manifest is KN-S018 and a credential in a ConfigMap is KN-S026; "
+        "kube-noob never reads a Secret's contents from a cluster",
+    ),
+    (
+        _route(
+            # Not a question about a repository. "which secrets are exposed in the public repo?" is about Git
+            # and this command reads a cluster, so it was answering with an attack-path scan of manifests: a
+            # different question, and a wrong answer. The route above this one answers that question (G247).
+            r"(?i)(?!.*\b(?:repo|repos|repositor\w+|git|github|gitlab|commit\w*|source ?control|"
+            r"version ?control)\b)"
+            r"(?=.*\b(?:exposed?|exposure|route|ingress|loadbalancer|nodeport|lateral|"
+            r"blast ?radius|attack ?paths?|reach(?:es|ed|able)?|takeover|escape)\b)"
             # "pods" is NOT enough on its own here: "can a pod in shop reach a pod in payments" is a
-            # NetworkPolicy question, and this route was answering it before `policy reach` did.
-            r"(?=.*\b(?:node|nodes|secrets?|cluster-admin|escalat\w*|what can|what could)\b)"
+            # NetworkPolicy question, and this route was answering it before `policy reach` did. The
+            # internet-exposure words are PHRASES and `publicly`, not the bare nouns `internet` and `public`:
+            # those two sat in the first group, where they made "exposed to the internet" -- the plainest form
+            # of the question this command answers -- match nothing at all, and bare `public` matched a
+            # namespace called public (G247).
+            r"(?=.*(?:\b(?:node|nodes|secrets?|cluster-admin|escalat\w*|what can|what could)\b"
+            r"|\binternet[- ]?facing\b|\bpublicly\b|\b(?:to|from) the internet\b|\bfrom outside\b"
+            r"|\boutside the cluster\b))"
         ),
         "kube-noob posture scan -f <dir>",
         "ranks every path from a Route, Ingress, LoadBalancer or NodePort to what the pods it reaches can do",
