@@ -714,3 +714,98 @@ def test_a_declared_entry_does_not_invent_a_service_step() -> None:
         assert not st["from"].startswith("Service//"), st
         assert st["from"] != "Service/ns/", st
         assert "selector {}" not in st["evidence"], st
+
+
+# --- de-duplication must not become deletion (G234) --------------------------------------------------------------
+
+
+def _priv_pod() -> dict[str, Any]:
+    return {
+        "serviceAccountName": "default",
+        "containers": [{"name": "c", "image": "x:1", "securityContext": {"privileged": True}}],
+    }
+
+
+def _dep(name: str, owner: dict[str, Any] | None = None) -> dict[str, Any]:
+    d: dict[str, Any] = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": name, "namespace": "ns", "labels": {"app": "m"}},
+        "spec": {
+            "selector": {"matchLabels": {"app": "m"}},
+            "template": {"metadata": {"labels": {"app": "m"}}, "spec": _priv_pod()},
+        },
+    }
+    if owner is not None:
+        d["metadata"]["ownerReferences"] = [owner]
+    return d
+
+
+def _lb() -> dict[str, Any]:
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {"name": "s", "namespace": "ns"},
+        "spec": {"type": "LoadBalancer", "selector": {"app": "m"}, "ports": [{"port": 80}]},
+    }
+
+
+def test_a_workload_owned_by_a_crd_is_still_scored() -> None:
+    """On a live cluster the Deployment a KServe InferenceService creates is controller-owned BY it, so the scan
+    dropped it and a privileged predictor behind a LoadBalancer scored nothing -- in `--live`, which is the
+    remedy the scan's own limitation text recommends (G234)."""
+    owner = {
+        "apiVersion": "serving.kserve.io/v1beta1",
+        "kind": "InferenceService",
+        "name": "i",
+        "uid": "u",
+        "controller": True,
+    }
+    out = ap.scan(ap.Inventory.from_documents([_lb(), _dep("i-predictor", owner)]), top=5)
+    assert out["total"] >= 1, out["summary"]
+
+
+def test_a_deployment_and_its_own_replica_set_are_still_one_workload() -> None:
+    """Which is what the ownership filter is for; narrowing it must not treble every path."""
+    rs = {
+        "apiVersion": "apps/v1",
+        "kind": "ReplicaSet",
+        "metadata": {
+            "name": "d-abc",
+            "namespace": "ns",
+            "labels": {"app": "m"},
+            "ownerReferences": [
+                {"apiVersion": "apps/v1", "kind": "Deployment", "name": "d", "uid": "u2", "controller": True}
+            ],
+        },
+        "spec": {
+            "selector": {"matchLabels": {"app": "m"}},
+            "template": {"metadata": {"labels": {"app": "m"}}, "spec": _priv_pod()},
+        },
+    }
+    out = ap.scan(ap.Inventory.from_documents([_lb(), _dep("d"), rs]), top=5)
+    assert out["workloads"] == 1, out
+    assert out["total"] == 1, out
+
+
+def test_an_orphan_replica_set_is_scored_rather_than_dropped() -> None:
+    """Dropping on the owner's KIND alone loses every ReplicaSet in a namespace scanned without its Deployments.
+    The owner has to actually be in the input for its pods to be considered already accounted for."""
+    rs = {
+        "apiVersion": "apps/v1",
+        "kind": "ReplicaSet",
+        "metadata": {
+            "name": "d-abc",
+            "namespace": "ns",
+            "labels": {"app": "m"},
+            "ownerReferences": [
+                {"apiVersion": "apps/v1", "kind": "Deployment", "name": "d", "uid": "u2", "controller": True}
+            ],
+        },
+        "spec": {
+            "selector": {"matchLabels": {"app": "m"}},
+            "template": {"metadata": {"labels": {"app": "m"}}, "spec": _priv_pod()},
+        },
+    }
+    out = ap.scan(ap.Inventory.from_documents([_lb(), rs]), top=5)
+    assert out["total"] == 1, out["summary"]

@@ -34,6 +34,7 @@ from kube_noob.audit.podspec import (
     EMBEDDED_CONTAINER_KEYS,
     EMBEDDED_POD_SPEC_PATHS,
     INJECTED_CONTAINERS,
+    POD_SPEC_PATHS,
     PodTemplate,
     pod_templates,
     selector_decides,
@@ -332,13 +333,37 @@ def _sites_of(obj: dict[str, Any]) -> list[_Site]:
 def _sites(inv: Inventory, *, owned: bool = True) -> list[_Site]:
     """Every pod spec in the inventory's workloads, in workload order. ``owned=False`` drops the workloads another
     controller owns, as the scan does so that a Deployment's ReplicaSets and Pods are not counted three times."""
-    return [site for obj in inv.of(*_WORKLOAD_KINDS) if owned or not _owned(obj) for site in _sites_of(obj)]
+    present = frozenset((str(o.get("kind")), _name(o)) for k in POD_SPEC_PATHS for o in inv.of(k))
+    return [site for obj in inv.of(*_WORKLOAD_KINDS) if owned or not _owned(obj, present) for site in _sites_of(obj)]
 
 
-def _owned(obj: dict[str, Any]) -> bool:
-    return any(
-        isinstance(o, dict) and o.get("controller") is True for o in _list(_get(obj, "metadata", "ownerReferences"))
-    )
+def _owned(obj: dict[str, Any], present: frozenset[tuple[str, str]] | None = None) -> bool:
+    """True when another object in this input already accounts for these pods.
+
+    The point of this is de-duplication: a Deployment, its ReplicaSet and its Pods are one workload, and scoring
+    all three would treble every path. But "has a controller" is too broad a test for that. On a live cluster the
+    Deployment a KServe InferenceService creates is controller-owned BY the InferenceService, so a privileged
+    predictor behind a LoadBalancer scored nothing at all -- and `--live`, the remedy the scan's own limitation
+    text recommends, was where it happened (G233).
+
+    So two conditions, not one: the controller must be a kind whose own pod template carries the same spec (an
+    ordinary workload kind -- never a CRD, whose spec this scan may not read at all), and that owner must
+    actually be in `present`, the (kind, name) of every ordinary workload in this input, built ONCE by the
+    caller -- building it per object made the scan quadratic, which the complexity guard VUL1 added caught in the
+    same run. Without that second condition, scanning a namespace's ReplicaSets without their
+    Deployments would drop every one of them and report nothing, which is the same silent miss in a new place.
+    At worst this scores one duplicate; the alternative is losing an internet-facing privileged pod.
+    """
+    owners = [o for o in _list(_get(obj, "metadata", "ownerReferences")) if isinstance(o, dict)]
+    for o in owners:
+        if o.get("controller") is not True:
+            continue
+        kind = str(o.get("kind"))
+        if kind not in POD_SPEC_PATHS:
+            continue  # a CRD controller: its pods are these pods, and nothing else in this input scores them
+        if present is None or (kind, str(o.get("name"))) in present:
+            return True
+    return False
 
 
 def _containers(spec: dict[str, Any], site: _Site | None = None) -> Iterator[dict[str, Any]]:
@@ -1000,7 +1025,7 @@ def scan(inv: Inventory, *, top: int = DEFAULT_TOP) -> dict[str, Any]:
             f"No exposure edge could be traced to {shown}{more}. An operator merges in these pods' labels and "
             "creates the Services they are reached through, so this input cannot show the edge -- what they can "
             "do IS listed here, but no path is scored for them. Scan the Deployments and Services the operator "
-            "created alongside them to complete the picture."
+            "created alongside them -- `--live` reads those -- to complete the picture."
         )
     return {
         "paths": out_paths,
