@@ -72,7 +72,9 @@ jobs:
     # rules on every frame (capture.js --check), and stills of every scene, the walkthrough cards and the thumbnail
     # uploaded to look at. The 4K masters are rendered for releases by videos.yml.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 36, not 30, because the per-step budgets below have to fit inside it or a step timeout could never be the
+    # thing that fires -- and the ffmpeg budget had to grow once a real mirror stall was measured.
+    timeout-minutes: 36
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,14 +98,31 @@ jobs:
           python -m pip install --upgrade pip && pip install . "numpy==2.5.3" "pytest>=8.3"
       # DPkg::Lock::Timeout is the fix for the known runner hang: unattended-upgrades holds the dpkg lock and
       # apt-get waits for it forever by default. DEBIAN_FRONTEND needs `sudo -E`, which plain sudo would drop.
+      # The 4-minute bound this step used to carry was guessed, not measured -- the measurements above cover pip,
+      # npm and the render, and apt was named as the thing they could not measure. On 2026-11-05 at 21:19Z the
+      # Azure Ubuntu mirror served libflite1 (13.6 MB) in 62 seconds and the step was still downloading when the
+      # bound killed it, so a slow third-party mirror became a red pull request on a green commit. Three changes,
+      # cheapest first: skip apt entirely when the runner image already ships ffmpeg; let apt retry a dropped
+      # connection itself; and try twice before giving up. The bound stays -- an unbounded apt is the hang this
+      # job was split up to find -- but it is now above the slowest transfer actually observed, not below it.
       - name: ffmpeg
-        timeout-minutes: 4
+        timeout-minutes: 8
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          sudo -E apt-get update -q -o DPkg::Lock::Timeout=180
-          sudo -E apt-get install -y -q -o DPkg::Lock::Timeout=180 ffmpeg
+          if command -v ffmpeg > /dev/null; then
+            ffmpeg -version | head -1
+            exit 0
+          fi
+          apt=(sudo -E apt-get -q -o DPkg::Lock::Timeout=180 -o Acquire::Retries=3)
+          "${apt[@]}" update
+          for attempt in 1 2; do
+            if "${apt[@]}" install -y ffmpeg; then exit 0; fi
+            echo "apt attempt $attempt failed; the mirror may be slow or a package may have moved"
+            "${apt[@]}" update || true
+          done
+          exit 1
       - name: Video node modules (pinned in demos/video/package-lock.json)
         timeout-minutes: 4
         run: cd demos/video && npm ci --ignore-scripts --no-audit --no-fund
@@ -165,6 +184,8 @@ jobs:
         run: python scripts/compliance_doc.py --check
       - name: Documented measurements match what the commands produce
         run: python scripts/doc_numbers.py --check
+      - name: FedRAMP KSI crosswalk matches the vendored dataset
+        run: python scripts/fedramp_ksi.py --check
       - name: Plugin lock matches its pyproject
         run: uv lock --check --project plugin/kube-noob --default-index https://pypi.org/simple
       - name: Plugin dependency vulnerability audit

@@ -660,6 +660,82 @@ kube-noob redteam -f k8s/ --platform openshift
 kube-noob explain KN-S004
 ```
 
+### Something a reviewer will actually open
+
+`--html` writes one self-contained page: `gate --html report.html`, `posture report --html`, `posture diff --html`,
+`ksi --html`. One file, inline styling, no script, no stylesheet, no font, no image -- nothing the browser fetches,
+so it opens from an email attachment on a laptop with no network, which is the situation this tool is used in.
+Verified that way rather than asserted: a test parses the page and fails on any `src`, `href` on a `<link>`, inline
+handler or `<script>`, and the page is rendered in a real browser with the request log checked.
+
+The caveats come first and the findings after, because a reader who meets an empty findings table first has already
+drawn their conclusion. `audited: false`, `assumed`, `not checked that far`, a file that could not be read, a
+withheld control standing, and the shows/does-not-show pair all survive into the page -- an HTML report that drops
+them would be the same defect in a third format.
+
+Everything from a manifest is escaped before it is written. Resource names, messages and paths come from someone
+else's cluster, and this is the one place in the product where that text becomes a document another person opens:
+a Deployment named `<script>alert(1)</script>` appears as text, and a test asserts both that it is shown and that
+it is inert.
+
+```bash
+kube-noob gate -f deploy/ --fail-on high --html gate-report.html
+kube-noob posture report --live --html posture.html
+kube-noob ksi -f deploy/ --html ksi.html
+```
+
+### Which FedRAMP 20x indicators does a finding speak to?
+
+`ksi` joins kube-noob's findings to the FedRAMP 20x Key Security Indicators through the NIST SP 800-53 controls both
+sides name: every indicator in the dataset carries `controls: [...]`, kube-noob maps every rule to the controls it
+gives evidence about, and the crosswalk is the inversion. With `-f` it audits first and reports, per indicator, the
+findings, the rules that ran and found nothing, and the rules that did not run at all -- a zero on its own cannot
+tell a clean indicator from one nothing looked at.
+
+Read the two lines under a curated indicator before quoting the first one, and read the rule titles printed beside
+them. `KSI-CNA-RNT` (Restricting Network Traffic) is evidence that policies exist, not that the cluster enforces
+them; `KSI-SVC-VRI` (Validating Resource Integrity) is evidence that images are pinned by digest, not that any
+signature verifies; `KSI-RPL-ABO` (Aligning Backups with Objectives) is about surviving the loss of a pod, and says
+nothing about backups at all. 18 of the 46 indicators have no kube-noob rule behind them and say so instead of
+showing a zero.
+
+Two rows carry a warning rather than evidence, and they are the most useful thing in the page. An indicator and a
+rule meet here only because they name the same NIST control, and a shared control is not shared subject matter:
+`KSI-IAM-SNU` is about how non-user credentials are issued, it cites `ac-4` (Information Flow Enforcement), and
+kube-noob maps its NetworkPolicy rules to `ac-4` because that is what `ac-4` is -- so eight traffic and RBAC rules
+arrive under an authentication indicator. Those rows say so on their face.
+
+`ksi -f` reads its input exactly as `audit` does, which is deliberate: it refuses a Helm values file instead of
+scoring it, treats one file as part of a namespace rather than the whole of it, exits 5 and names a file it could
+not read, and carries the audit's own assumptions into the page. A finding whose rule reaches no indicator -- a
+schema error, or a rule whose only control nothing cites -- is listed under `findingsNotMapped` rather than
+dropped, and a filter that hides rows says how many.
+
+```bash
+kube-noob ksi
+kube-noob ksi -f k8s/ --evidenced-only
+kube-noob ksi --control AC-6 --format json
+kube-noob ksi --indicator KSI-IAM-JIT
+```
+
+The MCP server and the skill expose the same crosswalk as `fedramp_ksi`, with `manifests` optional. One difference
+from `audit_manifests`, and it is deliberate: `partial_bundle` defaults to **true** there, because a manifest pasted
+into a conversation is usually a fragment and a rule that fires on an absent object cannot tell a real gap from an
+object the caller did not paste. Set it false for a whole namespace. A test holds the two front doors to the same
+answer on the same input.
+
+Every row carries its own `evidence.shows` and `evidence.doesNotShow`, not only the counts, because the JSON is the
+whole of what an assistant reads and a count without that second sentence is the thing this page exists to prevent.
+A row whose rules reach it only through a shared control carries a `warning` as well. Without an audit there are no
+counts at all and `audited` is `false`: zeroes on 28 rows would read as 28 clean results. When a rule declines, the
+row names it -- `notEvaluatedRules: ["KN-N014"]` on an AdminNetworkPolicy bundle is the rule asking for the
+cluster's CNI, which `--cni` and the tool's `cni` supply. And when the target version is past the removal table's
+ceiling the reply carries `notCheckedBeyond`, because SA-22's evidence is exactly those removed-API rules.
+
+The dataset is vendored with its version and sha256 and the crosswalk is generated from it, because the hand-written
+version of this mapping asserted a release, a family count, an id scheme and a retirement list that were all wrong
+at once. A mapping is evidence, never a compliance claim: see [FedRAMP 20x KSI](fedramp-ksi.md).
+
 ### What does RHACS check that kube-noob does not, and the other way round?
 
 `rhacs compare` maps every RHACS policy (export them from the RHACS portal with Export policy to JSON, or

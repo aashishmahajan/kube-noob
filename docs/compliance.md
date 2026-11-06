@@ -49,12 +49,14 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 
 - Per-user identity in the service: authorization is one shared token unless you add the OAuth proxy, and audit
   records do not carry the caller's identity yet.
-- Machine-readable output for assessors: `kube-noob audit --oscal` writes OSCAL 1.2.3 assessment-results, validated in CI against NIST's published schema and the FedRAMP 20x Key Security Indicator
-  mapping. When that mapping ships it will name the release it was built from and carry the retirement list:
-  `FRMR.KSI.key-security-indicators.json` is at release 25.11C (published 2025-12-01), 20x is at Phase 2 Pilot,
-  and seven indicators are now marked `retired: true` -- KSI-CMT-05, KSI-MLA-03, KSI-MLA-04, KSI-MLA-06,
-  KSI-SVC-03, KSI-TPR-01 and KSI-TPR-02. The eleven families are unchanged. Evidence offered against a withdrawn
-  indicator is worse than no evidence, so a mapping without that list is not shippable.
+- The 20x Key Security Indicator crosswalk now ships -- `kube-noob ksi` -- and what is left is its reach, not its
+  absence. 26 of the 28 controls kube-noob maps are cited by an indicator; `SC-6` and `SC-36` are cited by none, so
+  no finding reaches an indicator through them, and 18 of the 46 indicators have no kube-noob rule behind them at
+  all and say so rather than showing a zero. See [FedRAMP 20x KSI](fedramp-ksi.md), which is generated from the
+  vendored dataset with its version and hash. The five specifics this bullet used to carry were all wrong by
+  2026-11-02 and it asserted them anyway: there is no separate `FRMR.KSI.key-security-indicators.json` at 25.11C,
+  there are ten families and not eleven, indicators are keyed by mnemonic and not by number, and nothing in the
+  consolidated dataset is flagged retired -- the seven ids recorded here as `retired: true` no longer exist as ids.
 - FIPS mode is checked by `doctor` but not exercised in CI (no FIPS-mode runner).
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.

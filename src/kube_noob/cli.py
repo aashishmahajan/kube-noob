@@ -188,6 +188,96 @@ def _print_ticket_lines(m: dict[str, Any]) -> None:
             _tprint(f"  {_REMARK_LABELS[r['kind']]} ({r.get('date') or r['from']}): {r['text']}")
 
 
+def _write_html(path: str | None, report: dict[str, Any]) -> None:
+    """Write the self-contained HTML report, when one was asked for (U1)."""
+    if not path:
+        return
+    from kube_noob import report_html
+
+    Path(path).write_text(report_html.render(report), encoding="utf-8", errors="replace")
+
+
+def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
+    """The KSI view as text. Every indicator keeps a row, including the ones kube-noob cannot see at all: a
+    column of zeros reads as a pass, and an indicator with no rule behind it has passed nothing (G217)."""
+
+    d = out["dataset"]
+    lines = [
+        f"FedRAMP 20x Key Security Indicators -- {d['name']} {d['version']} (updated {d['lastUpdated']})",
+        "",
+        out["note"],
+        "",
+        out["applicability"],
+        "",
+    ]
+    if out.get("unmappedControls"):
+        lines += [
+            "Controls kube-noob maps that no indicator cites, so no finding reaches an indicator through them: "
+            + ", ".join(out["unmappedControls"]),
+            "",
+        ]
+    for note in out.get("assumptions") or []:
+        lines += [f"assumed: {note}", ""]
+    if limit := out.get("notCheckedBeyond"):
+        # Before the rows, as `audit` does it: a reader has to see the limit before reading an empty finding
+        # count as a clean result.
+        lines += [f"not checked: {limit['why']}", ""]
+    for bad in out.get("unreadable") or []:
+        lines += [f"not read: {bad['path']}: {bad['why']}"]
+    if out.get("unreadable"):
+        lines += ["", "This is not a complete audit, so no row below is a clean result.", ""]
+    for miss in out.get("findingsNotMapped") or []:
+        lines += [f"{miss['findings']} finding(s) from {miss['ruleId']} reach no indicator: {miss['why']}"]
+    if out.get("findingsNotMapped"):
+        lines.append("")
+    f = out.get("filtered")
+    if f:
+        lines += [
+            f"showing {f['shown']} of {f['of']} indicators"
+            + (f"; --evidenced-only hid {f['evidencedOnly']}" if f.get("evidencedOnly") else ""),
+            "",
+        ]
+        if f.get("why"):
+            lines += [f["why"], ""]
+    lines += [out["sharedControlCaveat"], ""]
+    # `excepted` only when an exception list was actually read. `ksi` takes none, so printing a column of zeros
+    # asserted that nothing was excepted when nothing was even looked at (G199).
+    excepted = any("excepted" in r for r in out["indicators"])
+    counted = ""
+    if audited:
+        counted = "  findings" + ("  excepted" if excepted else "") + "  clean  not evaluated  withheld"
+    lines.append(f"{'INDICATOR':<14}{'FAM':<5}{'NAME':<36}{counted}")
+    for r in out["indicators"]:
+        name = r["name"][:34]
+        if not r["evidenced"]:
+            lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}  -- {r['why']}")
+            continue
+        if audited:
+            tail = f"  {r['findings']:>8}"
+            if excepted:
+                tail += f"  {r['excepted']:>8}"
+            tail += f"  {r.get('clean', 0):>5}  {r.get('notEvaluated', 0):>13}  {r.get('withheld', 0):>8}"
+        else:
+            tail = f"  {r['rulesBehind']} rule(s), controls {', '.join(r['controls'])}"
+        lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}{tail}")
+        if r["variesByClass"]:
+            lines.append(
+                f"{'':<14}{'':<5}varies by service class {', '.join(r['variesByClass'])}"
+                + (f"; optional for {', '.join(r['optionalFor'])}" if r["optionalFor"] else "")
+            )
+        if r.get("notEvaluatedRules"):
+            more = f" and {r['moreNotEvaluated']} more" if r.get("moreNotEvaluated") else ""
+            lines.append(f"{'':<19}not evaluated: {', '.join(r['notEvaluatedRules'])}{more}")
+        # From the row, not from EVIDENCE: one source, so the text and the JSON cannot drift apart.
+        if r.get("warning"):
+            lines.append(f"{'':<19}WARNING: {r['warning']}")
+        ev = r.get("evidence")
+        if ev:
+            lines.append(f"{'':<19}shows: {ev['shows']}")
+            lines.append(f"{'':<19}does NOT show: {ev['doesNotShow']}")
+    return "\n".join(lines)
+
+
 def _print_known_issues(out: dict[str, Any]) -> None:
     for m in out["matches"]:
         _tprint(f"{m['id']}  {m['status']}")
@@ -378,6 +468,7 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
+    _write_html(a.html, report)
     if getattr(a, "github_annotations", False):
         # Before the report, and on stdout: Actions reads workflow commands from the step's output, and a caller
         # parsing --format json filters the `::` lines (the test does exactly that).
@@ -1008,6 +1099,12 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--chart-path", default=None, help="the chart in the repository: findings point at its templates")
     gt.add_argument("--sarif", default=None, help="write SARIF 2.1.0 here (GitHub code scanning)")
     gt.add_argument("--summary", default=None, help="write the Markdown summary here ($GITHUB_STEP_SUMMARY)")
+    gt.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     gt.add_argument("--codequality", default=None, help="write GitLab code quality JSON here")
     gt.add_argument(
         "--scanner-report",
@@ -1383,6 +1480,38 @@ def build_parser() -> argparse.ArgumentParser:
     kis.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
     kis.add_argument("--limit", type=int, default=3)
 
+    ksi = sub.add_parser(
+        "ksi",
+        help="FedRAMP 20x Key Security Indicators: which ones a kube-noob finding is evidence for",
+        description="Join kube-noob's findings to the FedRAMP 20x Key Security Indicators through the NIST "
+        "controls both sides name. With no input it prints the crosswalk; with -f it audits the manifests first "
+        "and reports, per indicator, what was found. A mapping is evidence, never a compliance claim. "
+        "Example: kube-noob ksi -f deploy/ --format json",
+    )
+    ksi.add_argument("-f", "--file", default=None, help="manifest, directory or '-' for stdin")
+    ksi.add_argument(
+        "--skip-unreadable",
+        action="store_true",
+        help="audit the readable files and list the rest in the report instead of refusing",
+    )
+    ksi.add_argument("--platform", choices=PLATFORMS, default=None)
+    ksi.add_argument("--version", dest="pversion", help="target OpenShift or Kubernetes version")
+    ksi.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32); without it the rule that decides whether "
+        "an AdminNetworkPolicy is inert cannot decide, and the row says so",
+    )
+    ksi.add_argument("--indicator", default=None, help="one indicator by id, e.g. KSI-IAM-ELP")
+    ksi.add_argument("--control", default=None, help="the indicators citing one NIST control, e.g. AC-6")
+    ksi.add_argument("--evidenced-only", action="store_true", help="hide indicators no kube-noob rule can see")
+    ksi.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
+
     upr = sub.add_parser(
         "upgrade-risks",
         help="Known risks for an OpenShift update, from the public update graph (offline)",
@@ -1552,6 +1681,12 @@ def build_parser() -> argparse.ArgumentParser:
     pdf.add_argument("old", help="the earlier snapshot")
     pdf.add_argument("new", help="the later snapshot")
     pdf.add_argument("--markdown", default=None, help="also write the report as Markdown here")
+    pdf.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     prp = posub.add_parser(
         "report",
         help="Snapshot now, compare with the newest snapshot kept, write the report (the daily job)",
@@ -1559,6 +1694,12 @@ def build_parser() -> argparse.ArgumentParser:
         "them. Example: kube-noob --cluster-enabled posture report --live",
     )
     snap_source(prp)
+    prp.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     prp.add_argument("--state-dir", default=None, help="where snapshots and reports are kept")
     prp.add_argument("--keep", type=int, default=None, help="snapshots to keep (default posture.keep, 14)")
 
@@ -2124,6 +2265,88 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         out = kit.known_issues(tk.KnownIssuesIn(text=text, platform=a.platform, version=a.pversion, limit=a.limit))
         if a.format == "text":
             _print_known_issues(out)
+        else:
+            _emit(out, fmt)
+        return 0
+
+    if a.cmd == "ksi":
+        from kube_noob.audit import fedramp
+
+        if a.indicator and a.indicator not in fedramp.INDICATORS:
+            raise ConfigError(
+                f"no indicator {a.indicator} in {fedramp.DATASET} {fedramp.DATASET_VERSION}. "
+                f"The dataset keys indicators by mnemonic (KSI-IAM-ELP), not by number"
+            )
+        if a.control and a.control not in fedramp.BY_CONTROL:
+            raise ConfigError(f"{a.control} is not one of the controls kube-noob maps; see docs/compliance.md")
+        rule_ids: list[str] = []
+        evaluated: list[str] | None = None
+        fired: list[str] | None = None
+        not_read: list[dict[str, str]] = []
+        assumptions: list[str] = []
+        ceiling: dict[str, str] | None = None
+        if a.file:
+            # The same input pipeline as `audit`, not a shortcut past it. Reading the files directly meant a Helm
+            # values file was audited as one object and reported 31 least-privilege rules clean (`audit` refuses
+            # it); one file counted the rules that fire on an absent object as clean instead of not evaluated,
+            # which is G202 through a second door; and an unreadable file in a directory was dropped without a
+            # word where `audit` exits 5 and names it.
+            from kube_noob.audit.engine import analyze, refuse_if_not_manifests
+            from kube_noob.catalog import not_checked_beyond
+
+            text, not_read = _manifest_input(a)
+            if not_read and not a.skip_unreadable:
+                _refuse_unreadable(not_read)
+                return 5
+            refuse_if_not_manifests(text)
+            audited = analyze(
+                text,
+                platform=a.platform or s.default_platform,
+                version=a.pversion,
+                partial_bundle=_partial_input(a),
+                cni=a.cni,
+            )
+            rule_ids = [f.rule_id for f in audited.findings]
+            evaluated, fired = sorted(audited.evaluated_rules), sorted(audited.fired_rules)
+            assumptions = list(audited.assumptions)
+            ceiling = not_checked_beyond(audited.kubernetes_version)
+        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired, not_checked_beyond=ceiling)
+        if assumptions:
+            # What the audit assumed decides what its counts mean: an API "removed in the target version" is
+            # evidence against an assumed version, and a partial bundle is why a row says notEvaluated.
+            out["assumptions"] = assumptions
+        if not_read:
+            out["unreadable"] = not_read
+        rows = out["indicators"]
+        total = len(rows)
+        hidden: dict[str, Any] = {}
+        if a.indicator:
+            rows = [r for r in rows if r["id"] == a.indicator]
+            hidden["indicator"] = a.indicator
+        if a.control:
+            cited = set(fedramp.indicators_for(a.control))
+            rows = [r for r in rows if r["id"] in cited]
+            out["forControl"] = {"id": a.control, "indicators": sorted(cited)}
+        if a.evidenced_only:
+            before = len(rows)
+            rows = [r for r in rows if r["evidenced"]]
+            hidden["evidencedOnly"] = before - len(rows)
+        out["indicators"] = rows
+        if len(rows) != total:
+            # A filter that quietly removes rows is the G215 defect in another costume: a reader counts what is
+            # on the page. This says how many are not, and an empty page says why rather than printing a header.
+            hidden["shown"] = len(rows)
+            hidden["of"] = total
+            if not rows:
+                hidden["why"] = (
+                    f"no indicator matches these filters: {a.indicator or 'any indicator'}"
+                    + (f" and the indicators citing {a.control}" if a.control else "")
+                    + (", with --evidenced-only" if a.evidenced_only else "")
+                )
+            out["filtered"] = hidden
+        _write_html(a.html, out)
+        if a.format == "text":
+            _tprint(_ksi_markdown(out, audited=bool(a.file)))
         else:
             _emit(out, fmt)
         return 0
@@ -2873,6 +3096,7 @@ def _posture_drift(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             rep = drift.diff(drift.load(Path(a.old)), drift.load(Path(a.new)))
             if a.markdown:
                 Path(a.markdown).write_text(drift.markdown(rep), encoding="utf-8")
+            _write_html(a.html, rep)
             _print_drift(rep) if a.format == "text" else _emit(rep, fmt)
             return 0
         snap = _snapshot_from_args(a, s)
@@ -2889,6 +3113,7 @@ def _posture_drift(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             return 0
         state = Path(a.state_dir) if a.state_dir else s.data_dir / "posture"
         rep, paths = drift.write_report(state, snap, a.keep or s.posture.keep)
+        _write_html(a.html, rep)
         if a.format == "text":
             _print_drift(rep)
             _tprint(f"\nwrote {paths['report']} and {paths['markdown']}")
