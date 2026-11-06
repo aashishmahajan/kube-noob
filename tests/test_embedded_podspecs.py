@@ -809,3 +809,60 @@ def test_an_orphan_replica_set_is_scored_rather_than_dropped() -> None:
     }
     out = ap.scan(ap.Inventory.from_documents([_lb(), rs]), top=5)
     assert out["total"] == 1, out["summary"]
+
+
+# --- fix, and the readers that still saw one template (G238) -----------------------------------------------------
+
+
+def test_fix_hardens_an_embedded_pod_spec() -> None:
+    """`fix` is the one command whose job is to close findings, and it left every AI workload untouched while
+    the audit reported findings in it."""
+    import yaml
+
+    from kube_noob.audit.fixer import fix_manifests
+
+    res = fix_manifests(yaml.safe_dump(_isvc()), platform="kubernetes", harden=True)
+    paths = [str(c.path) for c in res.changes]
+    assert any(p.startswith("spec.predictor") for p in paths), paths
+
+
+def test_fix_writes_into_a_field_shaped_container_not_a_copy_of_it() -> None:
+    """`containers()` used to synthesise `{"name": key, **c}` for a `model:` block, which is a COPY: the fixer's
+    in-place hardening wrote to a dict the document had never seen and silently did nothing. `ContainerRef`
+    carries the real object and the name separately now (G238)."""
+    import yaml
+
+    from kube_noob.audit.fixer import fix_manifests
+
+    # A `model:` block the fixer WILL harden. The privileged, `runAsUser: 0` one in MODEL_FORM is deliberately
+    # left alone -- a pod-level runAsNonRoot would make the kubelet refuse an explicit root container, and
+    # removing `privileged` changes what the workload can do, which needs a person.
+    doc = copy.deepcopy(MODEL_FORM)
+    doc["spec"]["predictor"]["model"].pop("securityContext")
+    res = fix_manifests(yaml.safe_dump(doc), platform="kubernetes", harden=True)
+    paths = [str(c.path) for c in res.changes]
+    assert any(p.startswith("spec.predictor.model.securityContext") for p in paths), paths
+    out = yaml.safe_load(res.yaml())
+    assert out["spec"]["predictor"]["model"]["securityContext"], "and it is in the document that comes back"
+
+
+def test_a_mutable_tag_in_an_embedded_template_is_listed_as_manual_work() -> None:
+    import yaml
+
+    from kube_noob.audit.fixer import fix_manifests
+
+    ray = _raycluster()
+    res = fix_manifests(yaml.safe_dump(ray), platform="kubernetes", harden=True)
+    assert any("pin image" in note for note in res.manual), res.manual
+
+
+def test_a_probe_on_an_embedded_template_counts_as_a_probe() -> None:
+    import yaml
+
+    from kube_noob.build.image import manifests_have_probes
+
+    ray = _raycluster()
+    ray["spec"]["headGroupSpec"]["template"]["spec"] = {
+        "containers": [{"name": "h", "image": "ray:2", "readinessProbe": {"httpGet": {"port": 8265, "path": "/"}}}]
+    }
+    assert manifests_have_probes(yaml.safe_dump(ray))

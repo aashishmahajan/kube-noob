@@ -199,10 +199,15 @@ class ContainerRef:
     container: dict[str, Any]
     path: PathT
     init: bool
+    #: What to call a container that has no `name` of its own. A KServe `model:` block is a container whose name
+    #: is the KEY it sits under, and the first version of this synthesised `{"name": key, **c}` -- which is a
+    #: COPY, so the fixer's in-place hardening wrote to a dict the document had never seen and silently did
+    #: nothing. `container` is always the object as it appears in the document now (G238).
+    label: str = ""
 
     @property
     def name(self) -> str:
-        return str(self.container.get("name", "<unnamed>"))
+        return self.label or str(self.container.get("name", "<unnamed>"))
 
 
 def pod_template(doc: Document) -> PodTemplate | None:
@@ -388,14 +393,14 @@ def containers(pod: PodTemplate, include_init: bool = True, *, ephemeral: bool =
     for key in EMBEDDED_CONTAINER_KEYS.get(pod.path, ()):
         c = pod.spec.get(key)
         if isinstance(c, dict):
-            yield ContainerRef(pod=pod, container={"name": key, **c}, path=(*pod.path, key), init=False)
+            yield ContainerRef(pod=pod, container=c, path=(*pod.path, key), init=False, label=key)
     # Containers the operator injects into this pod from elsewhere in the object (KubeRay's autoscaler).
     for where, joins in INJECTED_CONTAINERS.get(pod.doc.kind, ()):
         if joins != pod.path:
             continue
         c = get_path(pod.doc.data, where)
         if isinstance(c, dict) and ("image" in c or "securityContext" in c):
-            yield ContainerRef(pod=pod, container={"name": where[-1], **c}, path=where, init=False)
+            yield ContainerRef(pod=pod, container=c, path=where, init=False, label=str(where[-1]))
 
 
 def replicas(doc: Document) -> int | None:
