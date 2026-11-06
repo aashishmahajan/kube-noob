@@ -20,6 +20,7 @@ def build_context(
     version: str | None,
     partial_bundle: bool = False,
     cni: str | None = None,
+    allowed_registries: tuple[str, ...] = (),
 ) -> AuditContext:
     if platform not in PLATFORMS:
         raise ValueError(f"Unknown platform {platform!r}; use one of {', '.join(PLATFORMS)}")
@@ -32,6 +33,7 @@ def build_context(
         platform_version=platform_version,
         partial_bundle=partial_bundle,
         cni=cni,
+        allowed_registries=tuple(allowed_registries),
     )
 
 
@@ -44,9 +46,10 @@ def analyze(
     schema: bool = True,
     partial_bundle: bool = False,
     cni: str | None = None,
+    allowed_registries: tuple[str, ...] = (),
 ) -> Report:
     docs = load_documents(manifests) if isinstance(manifests, str) else manifests
-    ctx = build_context(docs, platform, version, partial_bundle, cni)
+    ctx = build_context(docs, platform, version, partial_bundle, cni, allowed_registries)
     report = Report(
         platform=platform,
         kubernetes_version=ctx.k8s_version,

@@ -2310,6 +2310,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                 version=a.pversion,
                 partial_bundle=_partial_input(a),
                 cni=a.cni,
+                allowed_registries=tuple(s.audit.allowed_registries),
             )
             rule_ids = [f.rule_id for f in audited.findings]
             evaluated, fired = sorted(audited.evaluated_rules), sorted(audited.fired_rules)

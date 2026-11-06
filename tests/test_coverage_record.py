@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from kube_noob.audit.controls import RULE_CONTROLS, summary
 from kube_noob.audit.engine import analyze
+from kube_noob.yamlio import load_documents
 
 _CLEAN = """
 apiVersion: v1
@@ -62,12 +63,30 @@ def test_a_rule_with_findings_is_not_also_counted_clean() -> None:
                 assert entry["findings"] >= 1
 
 
-def test_an_audit_records_every_rule_it_ran() -> None:
-    rep = analyze(_CLEAN, "kubernetes", None)
-    assert len(rep.evaluated_rules) == len(RULE_CONTROLS), (
-        "an audit must record each rule it ran, or coverage cannot be reported"
+def test_an_audit_records_every_rule_it_ran_and_accounts_for_the_rest() -> None:
+    """Every rule is either recorded as evaluated or recorded as having declined -- never neither.
+
+    This asserted that EVERY rule appears in `evaluated_rules`, which held only while every rule could always
+    decide. KN-S036 cannot: a registry allowlist is a policy from the configuration file, and with none
+    configured the rule declines (G241). The invariant that matters is not "all evaluated" but "all accounted
+    for": a rule missing from both lists is one whose verdict nobody can describe, which is how a skipped rule
+    came to be published as clean (G202).
+    """
+    from kube_noob.audit.engine import build_context, run_rules
+
+    docs = load_documents(_CLEAN)
+    ctx = build_context(docs, "kubernetes", None)
+    evaluated: list[str] = []
+    run_rules(ctx, None, evaluated)
+    assert set(evaluated) | ctx.undecided == set(RULE_CONTROLS), (
+        f"unaccounted: {sorted(set(RULE_CONTROLS) - set(evaluated) - ctx.undecided)}"
     )
+    assert not set(evaluated) & ctx.undecided, "a rule was recorded as both evaluated and undecided"
+    assert len(set(evaluated)) == len(evaluated), "a rule was recorded twice"
+
+    rep = analyze(_CLEAN, "kubernetes", None)
     assert len(set(rep.evaluated_rules)) == len(rep.evaluated_rules), "a rule was recorded twice"
+    assert set(rep.evaluated_rules) <= set(RULE_CONTROLS)
 
 
 def test_a_clean_bundle_reports_coverage_rather_than_an_empty_list() -> None:

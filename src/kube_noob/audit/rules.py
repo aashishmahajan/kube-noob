@@ -73,6 +73,9 @@ class AuditContext:
     # and found nothing" are the two states a compliance record must never merge -- G186 made these rules
     # silent, G191 started calling a silent rule clean, and together they said a skipped rule had passed
     # (G202). A rule whose guard skips one branch but evaluates the rest does NOT register here.
+    # Registries an image may come from, from the configuration file. A POLICY: no manifest states which
+    # registries an organisation approved, so KN-S036 declines without it rather than passing every image.
+    allowed_registries: tuple[str, ...] = ()
     undecided: set[str] = field(default_factory=set)
 
     def cannot_decide(self, rule_id: str) -> None:
@@ -1853,6 +1856,78 @@ def image_tag(image: str) -> tuple[str | None, bool]:
     last = ref.rsplit("/", 1)[-1]
     tag = last.split(":", 1)[1] if ":" in last else None
     return tag, has_digest
+
+
+def image_registry(image: str) -> str:
+    """The registry an image reference names, as the container runtime resolves it.
+
+    Docker's rule, which is not obvious and is the whole of this function: the first path component is the
+    registry only when it looks like a host -- it contains a dot or a colon, or it is exactly `localhost`.
+    Everything else is a Docker Hub repository, so `nginx` and `bitnami/nginx` both come from `docker.io`
+    however little they look like it, and an allowlist that missed that would pass every unqualified image
+    (G241).
+    """
+    ref = image.split("@", 1)[0].strip()
+    head = ref.split("/", 1)[0]
+    if "/" in ref and ("." in head or ":" in head or head == "localhost"):
+        return head
+    return "docker.io"
+
+
+def _registry_allowed(image: str, allowed: tuple[str, ...]) -> bool:
+    """Whether this image comes from an allowed registry, honouring an `host/org` entry.
+
+    An entry with a path narrows the allowance to that organisation: `quay.io/my-org` permits
+    `quay.io/my-org/app` and refuses `quay.io/someone-else/app`, which is the point of an allowlist for a
+    registry anyone can push to.
+    """
+    ref = image.split("@", 1)[0].strip()
+    registry = image_registry(image)
+    path = ref.split("/", 1)[1] if "/" in ref and registry != "docker.io" else ref
+    for entry in allowed:
+        host, _, prefix = entry.strip().partition("/")
+        if host != registry:
+            continue
+        if not prefix or path == prefix or path.startswith(prefix.rstrip("/") + "/"):
+            return True
+    return False
+
+
+@rule(
+    "KN-S036",
+    "Image from a registry outside the allowlist",
+    Stage.AUDIT,
+    "supply-chain",
+    Severity.HIGH,
+    "Mirror the image into an approved registry and reference it there, or add the registry to "
+    "`audit.allowedRegistries` if it is approved.",
+    "An image from an unapproved registry is code of unknown provenance running with the pod's identity, and it "
+    "is the step every other supply-chain control depends on: a signature, an SBOM and a scan all describe an "
+    "artifact somebody chose to trust.",
+    ("k8s-images",),
+)
+def _s036(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if not ctx.allowed_registries:
+        # No manifest states which registries an organisation has approved. Reporting every image as fine
+        # because no policy was configured is the absence-read-as-pass failure this catalogue is built against,
+        # so the rule declines and `run_rules` keeps it out of the evaluated list (G241).
+        ctx.cannot_decide(r.rule_id)
+        return
+    for d, pt in ctx.workloads():
+        for c in containers(pt):
+            image = c.container.get("image")
+            if not isinstance(image, str) or not image.strip():
+                continue
+            if _registry_allowed(image, ctx.allowed_registries):
+                continue
+            where = image_registry(image)
+            implicit = " (an unqualified name resolves to Docker Hub)" if "/" not in image.split("@", 1)[0] else ""
+            yield r.finding(
+                d,
+                (*c.path, "image"),
+                f"Container '{c.name}' pulls from '{where}'{implicit}, which is not in "
+                f"audit.allowedRegistries ({', '.join(ctx.allowed_registries)}).",
+            )
 
 
 @rule(

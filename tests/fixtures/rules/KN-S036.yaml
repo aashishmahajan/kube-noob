@@ -1,0 +1,28 @@
+rule: KN-S036
+# The allowlist is a policy from the configuration file, so the fixture carries it the way it carries `cni`:
+# without it the rule declines to decide and the bad fixture cannot fire.
+allowedRegistries: [quay.io/my-org]
+good: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata: {name: web, namespace: shop}
+  spec:
+    selector: {matchLabels: {app: web}}
+    template:
+      metadata: {labels: {app: web}}
+      spec:
+        containers:
+        - name: web
+          image: quay.io/my-org/web:1.4.2
+bad: |
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata: {name: web, namespace: shop}
+  spec:
+    selector: {matchLabels: {app: web}}
+    template:
+      metadata: {labels: {app: web}}
+      spec:
+        containers:
+        - name: web
+          image: quay.io/someone-else/web:1.4.2

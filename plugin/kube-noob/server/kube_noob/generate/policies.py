@@ -392,6 +392,10 @@ NOT_GENERATED: dict[str, str] = {
     "checks the bundle",
     "KN-S033": "pausing a pool is a legitimate maintenance step, and the finding is about a pool LEFT "
     "paused, which one object at one moment cannot tell from one paused a minute ago",
+    "KN-S036": "this one SHOULD be generated and is not yet: the generator's contract is that a policy fails "
+    "exactly what the audit reports, and the audit declines without a configured allowlist, so the policy needs "
+    "that list threaded into `policy generate` before it can be written. Recorded as R3b in docs/roadmap.md "
+    "rather than emitted with an empty list, which would admit everything while looking like enforcement",
     "KN-S035": "admission cannot help: the finding is the state of one cluster-scoped singleton that "
     "already exists, not an object anybody is about to create, and a policy that blocked edits to it "
     "would stop an administrator turning auditing back ON as readily as off",

@@ -413,6 +413,18 @@ class JiraSettings(_Base):
         raise ValueError("jira.projects must be default, all, or comma-separated project keys such as OCPBUGS,ROX")
 
 
+class AuditSettings(_Base):
+    #: Registries an image may come from. A POLICY, not a fact about a manifest: no document states which
+    #: registries an organisation has approved, so KN-S036 declines to decide when this is empty rather than
+    #: reporting every image as fine. It lives in the configuration file and not on the command line because it
+    #: is an organisational decision that should be the same for every caller of a deployment, which is also why
+    #: the MCP tools do not take it as an argument.
+    #:
+    #: Each entry is a registry host, optionally with a port, and optionally with a leading path segment to
+    #: narrow it to one organisation: `quay.io`, `registry.example.com:5000`, `quay.io/my-org`.
+    allowed_registries: list[str] = Field(default_factory=list)
+
+
 class MetricsSettings(_Base):
     #: `/metrics` sits behind the same bearer token as everything else by default. Opening it is a deliberate
     #: choice for a mesh that authenticates upstream: the document names every tool this deployment serves and
@@ -444,6 +456,7 @@ class Settings(_Base):
     learning_enabled: bool = True  # local learning.json: confirmed notes, profile, pattern counters
     web_enabled: bool = False
     web: WebSettings = Field(default_factory=WebSettings)
+    audit: AuditSettings = Field(default_factory=AuditSettings)
     cluster: ClusterSettings = Field(default_factory=ClusterSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     judge: JudgeSettings = Field(default_factory=JudgeSettings)

@@ -61,7 +61,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 92 audit rules and their controls
+## The 93 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -130,6 +130,7 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S033 | MachineConfigPool is paused | SI-2 |
 | KN-S034 | Operator Subscription upgrades without review | CM-3(2) |
 | KN-S035 | Cluster audit logging is turned off, for everyone or for one group | AU-2, AU-12 |
+| KN-S036 | Image from a registry outside the allowlist | CM-2, SI-7 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |

@@ -947,6 +947,7 @@ class Toolkit:
                 p.version,
                 partial_bundle=p.partial_bundle,
                 cni=p.cni,
+                allowed_registries=self._allowed_registries(),
             )
             rule_ids = [f.rule_id for f in r.findings]
             evaluated, fired = sorted(r.evaluated_rules), sorted(r.fired_rules)
@@ -978,6 +979,15 @@ class Toolkit:
             out["filtered"] = hidden
         return out
 
+    def _allowed_registries(self) -> tuple[str, ...]:
+        """The registry allowlist from the configuration file.
+
+        Read from settings rather than taken as a tool argument: which registries an organisation has approved is
+        an organisational decision that should be the same for every caller of a deployment, not something a
+        caller chooses per request. With none configured, KN-S036 declines to decide (G241).
+        """
+        return tuple(self.settings.audit.allowed_registries)
+
     def audit(self, p: AuditIn) -> dict[str, Any]:
         from kube_noob.audit import exceptions as exc
         from kube_noob.audit.engine import refuse_if_not_manifests
@@ -993,6 +1003,7 @@ class Toolkit:
             min_severity=Severity.parse(p.min_severity),
             partial_bundle=p.partial_bundle,
             cni=p.cni,
+            allowed_registries=self._allowed_registries(),
         )
         excepted: list[dict[str, Any]] = []
         review = exc.review(p.exceptions) if p.exceptions else None

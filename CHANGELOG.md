@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`KN-S036`: an image from a registry nobody approved (R3, G241).** Set `audit.allowedRegistries` in the configuration file -- a host, or a host and an organisation such as `quay.io/my-org` -- and every container's image is measured against it, including the ones inside operator CRDs. With none configured the rule declines rather than reporting every image as approved. It reads a reference the way a runtime does, so `nginx` and `bitnami/nginx` are correctly measured against Docker Hub and the finding says so, and `quay.io/my-org-evil/app` cannot pass an allowlist of `quay.io/my-org`.
+
 - **`KN-S017` tells a `list` on Secrets apart from a `get`, and stops flagging the least-privilege pattern (G240).** `list` and `watch` return the Secrets' contents, so one namespaced grant hands over every value in that namespace; it was reported at LOW, identically to a `get`. It is MEDIUM namespaced and HIGH cluster-wide now, with a message that says what it hands over. And a `get` narrowed by `resourceNames` -- the pattern upstream RBAC guidance recommends -- is no longer reported as a privilege-escalation path.
 
 - **A Grafana dashboard for the new metrics (U2, G239).** `deploy/grafana/kube-noob.json`: version, uptime, calls per second by outcome, the failure ratio drawn with the same expression the alert fires on, which tools are used, and duration percentiles. A datasource variable rather than a hard-coded id, every panel scoped to a job you pick, and every metric any panel queries is checked against what the code emits -- a panel pointing at a metric that does not exist shows "No data" for ever, which is indistinguishable from a quiet system.
