@@ -61,7 +61,8 @@ def analyze(
             "Audited part of a namespace, so rules that fire because another object is absent "
             "(no NetworkPolicy selects this workload, no PodDisruptionBudget, an undeclared StorageClass) "
             "were not evaluated: from these documents alone they cannot tell a real gap from an object you "
-            "did not pass. Audit the directory to evaluate them."
+            "did not pass. Pass the whole namespace to evaluate them: a directory on the command line, or "
+            "partial_bundle=false with every object of the namespace in one call."
         )
     if not docs:
         report.assumptions.append("Input contained no YAML documents.")

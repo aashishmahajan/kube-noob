@@ -32,6 +32,7 @@ from kube_noob.catalog import (
     REMOVED_APIS,
     beyond_checked,
     k8s_version_for,
+    not_checked_beyond,
     parse_minor,
 )
 from kube_noob.config import Settings
@@ -110,8 +111,19 @@ class KsiIn(_In):
         max_length=MAX_MANIFEST_CHARS,
         description="One or more YAML documents to audit first. Omit to get the crosswalk with no findings.",
     )
-    platform: PlatformT = Field("kubernetes", description="Target platform.")
+    platform: PlatformT | None = Field(
+        None,
+        description="Target platform. Unset means the server's configured defaultPlatform, which is what the "
+        "`ksi` command uses -- a fixed default here made the two front doors disagree on a configured server.",
+    )
     version: str | None = Field(None, max_length=16, description="Platform version, e.g. '4.22' (OCP) or '1.35'.")
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). "
+        "Without it the rule that decides whether an AdminNetworkPolicy is inert cannot decide, and the row says "
+        "so instead of counting it clean.",
+    )
     partial_bundle: bool = Field(
         True,
         description="These documents are only part of a namespace. Default true here, unlike audit_manifests: a "
@@ -923,13 +935,24 @@ class Toolkit:
         evaluated: list[str] | None = None
         fired: list[str] | None = None
         assumptions: list[str] = []
-        if p.manifests:
+        ceiling: dict[str, str] | None = None
+        if p.manifests is not None:
+            # `is not None`, not truthiness: the model strips whitespace, so an empty or blank `manifests` used to
+            # be indistinguishable from omitting it and returned the crosswalk at success -- a caller who passed
+            # an empty file was told there were no findings.
             refuse_if_not_manifests(p.manifests)
-            r = analyze(p.manifests, p.platform, p.version, partial_bundle=p.partial_bundle)
+            r = analyze(
+                p.manifests,
+                p.platform or self.settings.default_platform,
+                p.version,
+                partial_bundle=p.partial_bundle,
+                cni=p.cni,
+            )
             rule_ids = [f.rule_id for f in r.findings]
             evaluated, fired = sorted(r.evaluated_rules), sorted(r.fired_rules)
             assumptions = list(r.assumptions)
-        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired)
+            ceiling = not_checked_beyond(r.kubernetes_version)
+        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired, not_checked_beyond=ceiling)
         if assumptions:
             out["assumptions"] = assumptions
         rows = out["indicators"]

@@ -3272,9 +3272,16 @@ def _st001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                         "default StorageClass supports ReadWriteMany (most block classes do not).",
                         severity=Severity.MEDIUM,
                     )
-            elif sc != "" and not ctx.partial_bundle:
+            elif sc != "":
                 # "" = static binding to a pre-created PV, no provisioner involved. Only this branch of the rule
                 # reads another object; the rest decide from the claim alone and still fire on a partial bundle.
+                if ctx.partial_bundle:
+                    # Declining is not the same as passing. Skipping this branch silently left the rule in
+                    # evaluated_rules, so a per-control summary counted it `clean` while the report's own
+                    # assumptions said an undeclared StorageClass was not evaluated -- the two halves of one
+                    # report disagreeing, with the reassuring half the one a reader sees first.
+                    ctx.cannot_decide(r.rule_id)
+                    continue
                 yield r.finding(
                     d,
                     (*path, "storageClassName"),

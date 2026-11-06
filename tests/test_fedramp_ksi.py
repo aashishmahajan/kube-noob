@@ -107,7 +107,8 @@ def test_an_indicator_kube_noob_cannot_evidence_is_listed_as_such() -> None:
     assert any(not r["evidenced"] for r in rows.values())
     for row in rows.values():
         if not row["evidenced"]:
-            assert row["rules"] == []
+            assert row["rulesFired"] == []
+            assert "rulesBehind" not in row
             assert "findings" not in row
 
 
@@ -147,7 +148,7 @@ def test_findings_become_evidence_against_the_indicators_their_controls_cite() -
     assert expected
     for ind in expected:
         assert rows[ind]["findings"] >= 1, ind
-        assert "KN-S001" in rows[ind]["rules"]
+        assert "KN-S001" in rows[ind]["rulesFired"]
     for ind, row in rows.items():
         if ind not in expected and row["evidenced"]:
             assert row["findings"] == 0
@@ -630,3 +631,156 @@ def test_the_tool_rejects_an_id_that_does_not_exist() -> None:
         spec.fn(spec.model(control="ac-6"))
     out = spec.fn(spec.model(control="SC-6"))
     assert out["indicators"] == [] and out["filtered"]["why"]
+
+
+# ---------------------------------------------------------------------------
+# Red team, 2026-11-06: 10 more defects on the tool and the engine beneath it. The worst was that the curated
+# prose -- the half of this feature that says what the counts are NOT evidence of -- was printed only by the
+# command's text renderer and never reached the JSON an assistant reads. (G221)
+# ---------------------------------------------------------------------------
+
+
+def test_every_row_carries_the_prose_not_just_the_counts() -> None:
+    """The tool returns JSON and nothing else. With the sentences living in the CLI renderer, an assistant saw
+    `KSI-SVC-VRI: clean 3` and had no way to know that kube-noob fetches no signature and verifies nothing."""
+    rows = {r["id"]: r for r in fedramp.summary([])["indicators"]}
+    for ind, body in fedramp.EVIDENCE.items():
+        ev = rows[ind]["evidence"]
+        assert ev["shows"] == body["shows"]
+        assert ev["doesNotShow"] == body["doesNotShow"]
+        assert ev["rulesNamed"] == list(body["rules"])
+    for ind, body in fedramp.EVIDENCE.items():
+        if not body["onSubject"]:
+            assert rows[ind]["warning"] == fedramp.OFF_SUBJECT_WARNING, ind
+        else:
+            assert "warning" not in rows[ind], ind
+
+
+def test_the_crosswalk_alone_asserts_no_counts() -> None:
+    """28 rows reading `findings: 0` when nothing was audited are indistinguishable from 28 clean results -- the
+    same argument that already kept counts off the rows no rule can evidence."""
+    rep = fedramp.summary([])
+    assert rep["audited"] is False
+    for row in rep["indicators"]:
+        for key in ("findings", "clean", "notEvaluated", "withheld", "excepted"):
+            assert key not in row, (row["id"], key)
+    audited = fedramp.summary([], evaluated_rule_ids=["KN-S001"])
+    assert audited["audited"] is True
+    assert all("findings" in r for r in audited["indicators"] if r["evidenced"])
+
+
+def test_an_evidenced_row_says_how_many_rules_are_behind_it() -> None:
+    """`rules: []` beside `evidenced: true` read as "no rules"; it meant "no rule fired"."""
+    rows = {r["id"]: r for r in fedramp.summary([], evaluated_rule_ids=[])["indicators"]}
+    row = rows["KSI-SVC-VRI"]
+    assert row["rulesFired"] == []
+    assert row["rulesBehind"] == len(fedramp.indicator_rules("KSI-SVC-VRI"))
+
+
+def test_a_declining_rule_is_named_so_the_caller_can_supply_what_it_wanted() -> None:
+    """A bare `notEvaluated: 1` on an AdminNetworkPolicy bundle is KN-N014 -- the one rule that knows the policy
+    may be inert -- and a caller who cannot see which rule declined cannot pass the CNI it was asking for."""
+    anp = (
+        "apiVersion: policy.networking.k8s.io/v1alpha1\nkind: AdminNetworkPolicy\n"
+        "metadata:\n  name: deny-all\nspec:\n  priority: 10\n  subject:\n    namespaces: {}\n"
+        "  ingress:\n  - action: Deny\n    from:\n    - namespaces: {}\n"
+    )
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    blind = spec.fn(spec.model(manifests=anp, partial_bundle=False, indicator="KSI-CNA-RNT"))
+    row = blind["indicators"][0]
+    assert "KN-N014" in row["notEvaluatedRules"]
+    told = spec.fn(spec.model(manifests=anp, partial_bundle=False, indicator="KSI-CNA-RNT", cni="calico:3.32"))
+    assert "KN-N014" not in told["indicators"][0].get("notEvaluatedRules", [])
+    assert "KN-N014" in told["indicators"][0]["rulesFired"]
+
+
+def test_a_target_past_the_removal_table_is_not_a_clean_result() -> None:
+    """KSI-SCR-MIT's evidence is the removed-API rules. `audit` says "no finding here means none through 1.37,
+    not none in 1.40"; this view dropped that and reported the row clean."""
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    manifests = (ROOT / "examples/insecure-deployment.yaml").read_text()
+    out = spec.fn(spec.model(manifests=manifests, version="1.40"))
+    assert out["notCheckedBeyond"]["target"] == "1.40"
+    code, text = _cli("ksi", "-f", "examples/insecure-deployment.yaml", "--version", "1.40")
+    assert code == 0, text
+    assert "not checked:" in text
+
+
+def test_blank_manifests_are_refused_rather_than_crosswalked() -> None:
+    """The model strips whitespace, so an empty file was indistinguishable from omitting the argument: a caller
+    who passed an empty manifest was told there were no findings."""
+    from kube_noob.errors import ConfigError
+
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    for blank in ("", "   ", "\n\n"):
+        with pytest.raises(ConfigError):
+            spec.fn(spec.model(manifests=blank))
+
+
+def test_the_tool_uses_the_configured_default_platform() -> None:
+    """A fixed "kubernetes" default made the two front doors disagree on a configured server: a Route audited as
+    Kubernetes picks up KN-V003 ("Route only exists on OpenShift"), which lands on six indicators as a finding
+    that is an artefact of the wrong platform."""
+    from kube_noob.config import Settings
+    from kube_noob.toolkit import Toolkit
+
+    route = (
+        "apiVersion: route.openshift.io/v1\nkind: Route\nmetadata:\n  name: web\n  namespace: shop\n"
+        "spec:\n  to:\n    kind: Service\n    name: web\n"
+    )
+    kit = Toolkit(Settings(defaultPlatform="openshift"))
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    assert spec.model(manifests=route).platform is None
+    out = spec.fn(spec.model(manifests=route))
+    assert not any("KN-V003" in r.get("rulesFired", []) for r in out["indicators"])
+
+
+def test_the_text_view_omits_the_excepted_column_when_no_list_was_read() -> None:
+    """`ksi` takes no exception list, so a column of zeros asserted that nothing was excepted when nothing was
+    even looked at (G199)."""
+    code, text = _cli("ksi", "-f", "examples/insecure-deployment.yaml")
+    assert code == 0, text
+    assert "excepted" not in text
+
+
+def test_the_partial_bundle_advice_fits_both_front_doors() -> None:
+    """The remedy said "Audit the directory", which an MCP caller holding pasted YAML cannot do -- and
+    partial_bundle defaults to true there, so every default call carried advice its caller could not follow."""
+    kit = _kit()
+    spec = next(s for s in kit.specs() if s.name == "fedramp_ksi")
+    out = spec.fn(spec.model(manifests=(ROOT / "examples/insecure-deployment.yaml").read_text()))
+    note = next(a for a in out["assumptions"] if "part of a namespace" in a)
+    assert "partial_bundle=false" in note
+    assert "Audit the directory to evaluate them." not in note
+
+
+def test_a_control_character_is_refused_not_an_internal_error() -> None:
+    """`yaml.SafeLoader(text)` validates the whole string in its constructor, and that line sat outside the
+    handler -- so ESC or NUL in a manifest raised a YAMLError that escaped as an unhandled exception and the MCP
+    server returned 500 "internal error" for input it simply could not parse. A caller cannot act on a 500."""
+    from kube_noob.errors import ManifestError
+    from kube_noob.yamlio import load_documents
+
+    for ch in ("\x1b", "\x00"):
+        with pytest.raises(ManifestError, match="Invalid YAML"):
+            load_documents(f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: 'a{ch}b'\n")
+
+
+def test_an_undeclared_storage_class_is_not_clean_on_a_partial_bundle() -> None:
+    """The rule skipped its one cross-object branch under `partial_bundle` without declining, so it stayed in
+    `evaluated_rules` and a per-control summary counted it clean -- while the same report's assumptions said an
+    undeclared StorageClass was not evaluated. Two halves of one report disagreeing, reassuring half first."""
+    from kube_noob.audit.engine import analyze
+
+    pvc = (
+        "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: shared\n  namespace: team\n"
+        "spec:\n  accessModes: [ReadWriteMany]\n  storageClassName: team-nfs\n"
+        "  resources: {requests: {storage: 1Gi}}\n"
+    )
+    part = analyze(pvc, "kubernetes", partial_bundle=True)
+    assert "KN-ST001" not in part.evaluated_rules
+    whole = analyze(pvc, "kubernetes", partial_bundle=False)
+    assert "KN-ST001" in {f.rule_id for f in whole.findings}

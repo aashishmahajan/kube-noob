@@ -98,7 +98,14 @@ def load_documents(text: str) -> list[Document]:
     """Parse one or more YAML documents. Empty documents are skipped. ``List`` kinds are flattened."""
     if len(text.encode("utf-8", errors="replace")) > MAX_INPUT_BYTES:
         raise ManifestError(f"Input exceeds {MAX_INPUT_BYTES} bytes; split it into smaller files.")
-    loader = yaml.SafeLoader(text)
+    try:
+        # Inside the try, because the Reader validates the whole string here: a control character (ESC, NUL)
+        # raises ReaderError from the constructor, and with this line outside the handler that YAMLError escaped
+        # as an unhandled exception -- which the MCP server turns into a 500 "internal error" for what is simply
+        # input it cannot parse. A caller cannot act on a 500.
+        loader = yaml.SafeLoader(text)
+    except yaml.YAMLError as exc:
+        raise ManifestError(f"Invalid YAML: {exc}") from exc
     docs: list[Document] = []
     budget = [MAX_NODE_VISITS]
     try:

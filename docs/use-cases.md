@@ -700,6 +700,14 @@ into a conversation is usually a fragment and a rule that fires on an absent obj
 object the caller did not paste. Set it false for a whole namespace. A test holds the two front doors to the same
 answer on the same input.
 
+Every row carries its own `evidence.shows` and `evidence.doesNotShow`, not only the counts, because the JSON is the
+whole of what an assistant reads and a count without that second sentence is the thing this page exists to prevent.
+A row whose rules reach it only through a shared control carries a `warning` as well. Without an audit there are no
+counts at all and `audited` is `false`: zeroes on 28 rows would read as 28 clean results. When a rule declines, the
+row names it -- `notEvaluatedRules: ["KN-N014"]` on an AdminNetworkPolicy bundle is the rule asking for the
+cluster's CNI, which `--cni` and the tool's `cni` supply. And when the target version is past the removal table's
+ceiling the reply carries `notCheckedBeyond`, because SA-22's evidence is exactly those removed-API rules.
+
 The dataset is vendored with its version and sha256 and the crosswalk is generated from it, because the hand-written
 version of this mapping asserted a release, a family count, an id scheme and a retirement list that were all wrong
 at once. A mapping is evidence, never a compliance claim: see [FedRAMP 20x KSI](fedramp-ksi.md).

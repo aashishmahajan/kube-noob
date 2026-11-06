@@ -191,7 +191,6 @@ def _print_ticket_lines(m: dict[str, Any]) -> None:
 def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
     """The KSI view as text. Every indicator keeps a row, including the ones kube-noob cannot see at all: a
     column of zeros reads as a pass, and an indicator with no rule behind it has passed nothing (G217)."""
-    from kube_noob.audit import fedramp
 
     d = out["dataset"]
     lines = [
@@ -210,6 +209,10 @@ def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
         ]
     for note in out.get("assumptions") or []:
         lines += [f"assumed: {note}", ""]
+    if limit := out.get("notCheckedBeyond"):
+        # Before the rows, as `audit` does it: a reader has to see the limit before reading an empty finding
+        # count as a clean result.
+        lines += [f"not checked: {limit['why']}", ""]
     for bad in out.get("unreadable") or []:
         lines += [f"not read: {bad['path']}: {bad['why']}"]
     if out.get("unreadable"):
@@ -228,7 +231,12 @@ def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
         if f.get("why"):
             lines += [f["why"], ""]
     lines += [out["sharedControlCaveat"], ""]
-    counted = "  findings  excepted  clean  not evaluated  withheld" if audited else ""
+    # `excepted` only when an exception list was actually read. `ksi` takes none, so printing a column of zeros
+    # asserted that nothing was excepted when nothing was even looked at (G199).
+    excepted = any("excepted" in r for r in out["indicators"])
+    counted = ""
+    if audited:
+        counted = "  findings" + ("  excepted" if excepted else "") + "  clean  not evaluated  withheld"
     lines.append(f"{'INDICATOR':<14}{'FAM':<5}{'NAME':<36}{counted}")
     for r in out["indicators"]:
         name = r["name"][:34]
@@ -236,22 +244,26 @@ def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
             lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}  -- {r['why']}")
             continue
         if audited:
-            tail = (
-                f"  {r['findings']:>8}  {r.get('excepted', 0):>8}  {r.get('clean', 0):>5}"
-                f"  {r.get('notEvaluated', 0):>13}  {r.get('withheld', 0):>8}"
-            )
+            tail = f"  {r['findings']:>8}"
+            if excepted:
+                tail += f"  {r['excepted']:>8}"
+            tail += f"  {r.get('clean', 0):>5}  {r.get('notEvaluated', 0):>13}  {r.get('withheld', 0):>8}"
         else:
-            tail = f"  {len(fedramp.indicator_rules(r['id']))} rule(s), controls {', '.join(r['controls'])}"
+            tail = f"  {r['rulesBehind']} rule(s), controls {', '.join(r['controls'])}"
         lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}{tail}")
         if r["variesByClass"]:
             lines.append(
                 f"{'':<14}{'':<5}varies by service class {', '.join(r['variesByClass'])}"
                 + (f"; optional for {', '.join(r['optionalFor'])}" if r["optionalFor"] else "")
             )
-        ev = fedramp.EVIDENCE.get(r["id"])
+        if r.get("notEvaluatedRules"):
+            more = f" and {r['moreNotEvaluated']} more" if r.get("moreNotEvaluated") else ""
+            lines.append(f"{'':<19}not evaluated: {', '.join(r['notEvaluatedRules'])}{more}")
+        # From the row, not from EVIDENCE: one source, so the text and the JSON cannot drift apart.
+        if r.get("warning"):
+            lines.append(f"{'':<19}WARNING: {r['warning']}")
+        ev = r.get("evidence")
         if ev:
-            if not ev["onSubject"]:
-                lines.append(f"{'':<19}WARNING: these rules reach this indicator only through a shared control.")
             lines.append(f"{'':<19}shows: {ev['shows']}")
             lines.append(f"{'':<19}does NOT show: {ev['doesNotShow']}")
     return "\n".join(lines)
@@ -1468,6 +1480,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ksi.add_argument("--platform", choices=PLATFORMS, default=None)
     ksi.add_argument("--version", dest="pversion", help="target OpenShift or Kubernetes version")
+    ksi.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32); without it the rule that decides whether "
+        "an AdminNetworkPolicy is inert cannot decide, and the row says so",
+    )
     ksi.add_argument("--indicator", default=None, help="one indicator by id, e.g. KSI-IAM-ELP")
     ksi.add_argument("--control", default=None, help="the indicators citing one NIST control, e.g. AC-6")
     ksi.add_argument("--evidenced-only", action="store_true", help="hide indicators no kube-noob rule can see")
@@ -2232,6 +2250,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         fired: list[str] | None = None
         not_read: list[dict[str, str]] = []
         assumptions: list[str] = []
+        ceiling: dict[str, str] | None = None
         if a.file:
             # The same input pipeline as `audit`, not a shortcut past it. Reading the files directly meant a Helm
             # values file was audited as one object and reported 31 least-privilege rules clean (`audit` refuses
@@ -2239,6 +2258,7 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             # which is G202 through a second door; and an unreadable file in a directory was dropped without a
             # word where `audit` exits 5 and names it.
             from kube_noob.audit.engine import analyze, refuse_if_not_manifests
+            from kube_noob.catalog import not_checked_beyond
 
             text, not_read = _manifest_input(a)
             if not_read and not a.skip_unreadable:
@@ -2250,11 +2270,13 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                 platform=a.platform or s.default_platform,
                 version=a.pversion,
                 partial_bundle=_partial_input(a),
+                cni=a.cni,
             )
             rule_ids = [f.rule_id for f in audited.findings]
             evaluated, fired = sorted(audited.evaluated_rules), sorted(audited.fired_rules)
             assumptions = list(audited.assumptions)
-        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired)
+            ceiling = not_checked_beyond(audited.kubernetes_version)
+        out = fedramp.summary(rule_ids, evaluated_rule_ids=evaluated, fired_rule_ids=fired, not_checked_beyond=ceiling)
         if assumptions:
             # What the audit assumed decides what its counts mean: an API "removed in the target version" is
             # evidence against an assumed version, and a partial bundle is why a row says notEvaluated.
