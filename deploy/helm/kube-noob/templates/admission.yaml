@@ -354,4 +354,16 @@ webhooks:
          resources: [gateways, httproutes]}
       - {apiGroups: [k8s.ovn.org], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
          resources: [egressfirewalls]}
+      # The AI-workload CRDs that CARRY pod specs. `kube-noob audit` reads the containers inside a KServe
+      # predictor and a Ray worker group -- including the ones written as a FIELD rather than a list entry --
+      # and the webhook runs the same rules, so the only reason a privileged container in one was admitted
+      # while the same container in a Deployment was denied is that these resources were never sent here (R6,
+      # G248). A rule naming a resource the cluster does not serve never matches, so the chart lists them
+      # whether or not KServe or KubeRay is installed. The generated ValidatingAdmissionPolicies still do not
+      # cover these kinds: their CEL would have to index each CRD's own pod-spec paths, which is why the
+      # generated file states the gap and this closes the half that costs nothing.
+      - {apiGroups: [serving.kserve.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [inferenceservices]}
+      - {apiGroups: [ray.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [rayclusters, rayjobs, rayservices]}
 {{- end }}

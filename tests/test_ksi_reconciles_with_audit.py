@@ -248,6 +248,61 @@ def test_the_command_and_the_tool_are_one_implementation(tmp_path: pathlib.Path)
     assert page["indicators"] == tool["indicators"]
 
 
+def test_a_list_that_excepts_nothing_still_shapes_the_rows_the_same_way() -> None:
+    """`excepted_ids or None` made the ROW SHAPE depend on whether an entry happened to match (G249).
+
+    A list whose only entry is unused, expired or refused produced an `exceptions` block and rows with no
+    `excepted` column at all, so reconciling the two pages hit a missing key instead of a zero.
+    """
+    unused = _exceptions("KN-S002")  # a rule this bundle does not trip
+    audit, ksi = _views(exceptions=unused)
+    assert audit["excepted"] == ksi["excepted"] == []
+    assert audit["exceptions"]["unused"] == ksi["exceptions"]["unused"] == ["EXC-001"]
+    for row in ksi["indicators"]:
+        if row["evidenced"]:
+            assert row["excepted"] == 0, row["id"]
+    _assert_rows_match(audit, ksi)
+    far = yaml.safe_load(_exceptions())
+    far["exceptions"][0]["expires"] = "2099-01-01"
+    audit_r, ksi_r = _views(exceptions=yaml.safe_dump(far))
+    _assert_rows_match(audit_r, ksi_r)
+
+
+def test_an_exception_list_is_reviewed_even_with_nothing_to_audit() -> None:
+    """With no manifests the list was dropped without a word: a refused entry returned success (G249)."""
+    import kube_noob.toolkit as tk
+
+    out = _kit().fedramp_ksi(tk.KsiIn(exceptions=_exceptions()))
+    assert out["exceptions"]["counts"]["active"] == 1 and out["exceptions"]["gate"] is True
+    far = yaml.safe_load(_exceptions())
+    far["exceptions"][0]["expires"] = "2099-01-01"
+    refused = _kit().fedramp_ksi(tk.KsiIn(exceptions=yaml.safe_dump(far)))
+    assert refused["exceptions"]["counts"]["refused"] == 1 and refused["exceptions"]["gate"] is False
+
+
+def test_the_command_exits_one_when_the_exception_gate_fails() -> None:
+    """It printed "gate: failed" and exited 0, where `audit` exits 1 on the same file (G249)."""
+    import tempfile
+
+    far = yaml.safe_load(_exceptions())
+    far["exceptions"][0]["expires"] = "2099-01-01"
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        fh.write(yaml.safe_dump(far))
+        path = fh.name
+    code, out = _cli("ksi", "-f", "-", "--platform", "kubernetes", "--exceptions", path, stdin=BUNDLE)
+    assert code == 1, out
+    assert "gate: failed" in out
+    ok, out_ok = _cli("ksi", "-f", "-", "--platform", "kubernetes", stdin=BUNDLE)
+    assert ok == 0, out_ok
+
+
+def test_an_over_long_flag_is_a_configuration_error_not_a_crash() -> None:
+    """The delegation put KsiIn's length limits in front of the lookup, so exit 4 and a pydantic dump (G249)."""
+    code, out = _cli("ksi", "--indicator", "K" * 40, stdin="")
+    assert code == 2, out
+    assert "at most 20 characters" in out
+
+
 def test_a_refused_exception_is_refused_the_same_way_on_both() -> None:
     """An expiry too far out is refused by the reviewer, and a KSI page must not quietly count it active."""
     import kube_noob.toolkit as tk

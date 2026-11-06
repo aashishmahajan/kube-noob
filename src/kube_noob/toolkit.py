@@ -956,6 +956,11 @@ class Toolkit:
         excepted: list[dict[str, Any]] = []
         excepted_ids: list[str] = []
         exceptions_block: dict[str, Any] | None = None
+        review = exc_mod.review(p.exceptions) if p.exceptions else None
+        if review is not None:
+            # Reviewed here, not inside the audit branch: with no manifests the list used to be dropped
+            # without a word -- a refused entry returned success and an active one was simply ignored (G249).
+            exceptions_block = {**review.summary(), "unused": [e.id for e in review.active]}
         if p.manifests is not None:
             # `is not None`, not truthiness: the model strips whitespace, so an empty or blank `manifests` used to
             # be indistinguishable from omitting it and returned the crosswalk at success -- a caller who passed
@@ -973,7 +978,6 @@ class Toolkit:
                 cni=p.cni,
                 allowed_registries=self._allowed_registries(),
             )
-            review = exc_mod.review(p.exceptions) if p.exceptions else None
             if review is not None:
                 kept, excepted, used = self._split_excepted(review, r.findings)
                 r.findings = kept
@@ -988,7 +992,11 @@ class Toolkit:
             ceiling = not_checked_beyond(r.kubernetes_version)
         out = fedramp.summary(
             rule_ids,
-            excepted_rule_ids=excepted_ids or None,
+            # `excepted_ids or None` made the row SHAPE depend on whether an entry happened to match: a list
+            # whose only entry was unused, expired or refused produced an `exceptions` block and rows with no
+            # `excepted` column at all, so a reader reconciling the two pages hit a missing key rather than a
+            # zero. A list that was passed is a list that was considered (G249).
+            excepted_rule_ids=excepted_ids if exceptions_block is not None else None,
             evaluated_rule_ids=evaluated,
             fired_rule_ids=fired,
             not_checked_beyond=ceiling,
@@ -1017,7 +1025,13 @@ class Toolkit:
             hidden["shown"] = len(rows)
             hidden["of"] = total
             if not rows:
-                hidden["why"] = "no indicator matches these filters"
+                # Named filters, not "these filters": a reader who asked for one indicator and one control
+                # needs to know which combination emptied the page (G249).
+                hidden["why"] = (
+                    f"no indicator matches these filters: {p.indicator or 'any indicator'}"
+                    + (f" and the indicators citing {p.control}" if p.control else "")
+                    + (", with evidenced_only" if p.evidenced_only else "")
+                )
             out["filtered"] = hidden
         return out
 

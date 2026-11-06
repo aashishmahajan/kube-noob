@@ -457,6 +457,13 @@ def test_chart_webhook_matches_the_server() -> None:
         "networkpolicies",
         "roles",
         "rolebindings",
+        # The AI-workload CRDs that carry pod specs (R6, G248). The webhook already audits the containers
+        # inside them -- it is the same rule code -- so the only reason a privileged KServe predictor was
+        # admitted while the same container in a Deployment was denied is that these were never sent.
+        "inferenceservices",
+        "rayclusters",
+        "rayjobs",
+        "rayservices",
     ):
         assert re.search(rf"[\[ ,]{resource}[\],]", rules), resource
     assert "scope: Namespaced" in rules and "secrets" not in rules
@@ -465,6 +472,67 @@ def test_chart_webhook_matches_the_server() -> None:
     assert '"--port", "8443"' in text and "/etc/kube-noob-admission/tls/tls.key" in text
     values = yaml.safe_load((CHART / "values.yaml").read_text())
     assert values["admission"]["enforce"] == [] and all(r in RULES for r in ("KN-S001",))
+
+
+def test_the_webhook_sends_every_kind_whose_pod_specs_the_audit_reads() -> None:
+    """The rules list is derived from what the audit can read, not maintained beside it (R6, G248).
+
+    `kube_noob.audit.podspec.EMBEDDED_POD_SPEC_GROUPS` is the audit's own table of CRDs that carry pod specs.
+    A kind added there and not here would be audited on a directory and admitted by the cluster, which is the
+    gap this closed -- so the test reads that table rather than a list someone has to remember to update.
+    """
+    from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_GROUPS
+
+    text = (CHART / "templates" / "admission.yaml").read_text()
+    rules = text.split("    rules:\n", 1)[1]
+    for kind, groups in EMBEDDED_POD_SPEC_GROUPS.items():
+        plural = f"{kind.lower()}s"
+        assert re.search(rf"[\[ ,]{plural}[\],]", rules), f"{kind}: the webhook is never sent {plural}"
+        for group in groups:
+            assert f"apiGroups: [{group}]" in rules, group
+
+
+def test_the_webhook_audits_a_container_inside_a_crd() -> None:
+    """End to end on the kinds the chart now sends: the finding, the denial and the field path."""
+    isvc = {
+        "apiVersion": "serving.kserve.io/v1beta1",
+        "kind": "InferenceService",
+        "metadata": {"name": "m", "namespace": "shop"},
+        "spec": {
+            "predictor": {
+                "model": {
+                    "modelFormat": {"name": "sklearn"},
+                    "image": "quay.io/o/m:1.2",
+                    "securityContext": {"privileged": True},
+                }
+            }
+        },
+    }
+    warn = adm.Config.build(platform="kubernetes")
+    out = _well_formed(adm.review(_review(isvc, ns="shop"), warn), warn)
+    assert out["allowed"] is True
+    assert any(w.startswith("[KN-S001]") and "model" in w for w in out["warnings"]), out["warnings"]
+    enforcing = adm.Config.build(enforce=["KN-S001"], platform="kubernetes")
+    denied = _well_formed(adm.review(_review(isvc, ns="shop"), enforcing), enforcing)
+    assert denied["allowed"] is False and "InferenceService/shop/m" in denied["status"]["message"]
+    ray = {
+        "apiVersion": "ray.io/v1",
+        "kind": "RayCluster",
+        "metadata": {"name": "r", "namespace": "shop"},
+        "spec": {
+            "headGroupSpec": {
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {"name": "ray-head", "image": "quay.io/o/ray:1", "securityContext": {"privileged": True}}
+                        ]
+                    }
+                }
+            }
+        },
+    }
+    out = _well_formed(adm.review(_review(ray, ns="shop"), warn), warn)
+    assert any(w.startswith("[KN-S001]") and "ray-head" in w for w in out["warnings"]), out["warnings"]
 
 
 def test_chart_config_loads_as_the_server_reads_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1519,7 +1519,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--exceptions",
         default=None,
         help="the exception list `audit --exceptions` takes: active entries move their findings to 'excepted' on "
-        "the indicators they reach, so this page reconciles with the audit report",
+        "the indicators they reach, so this page reconciles with the audit report; an expired or refused entry "
+        "fails the gate (exit 1), as it does for `audit`",
     )
     ksi.add_argument(
         "--min-severity",
@@ -2301,6 +2302,8 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         # two sets of numbers -- and the fix for one would not have been the fix for the other (G246). What the
         # command still owns is its input pipeline: `--skip-unreadable`, and an unreadable file that must exit 5
         # and be named rather than dropped.
+        from pydantic import ValidationError
+
         from kube_noob.audit.exceptions import ExceptionsError
 
         manifests: str | None = None
@@ -2327,6 +2330,12 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             )
         except ExceptionsError as exc:
             raise ConfigError(f"{a.exceptions}: {exc}") from exc
+        except ValidationError as exc:
+            # An over-long --indicator or --version used to escape as a raw pydantic error and exit 4, where
+            # the same flag with an unknown value exits 2 with a sentence. One front door, one exit code for a
+            # bad flag (G249).
+            detail = "; ".join(str(e["msg"]).removeprefix("Value error, ") for e in exc.errors())
+            raise ConfigError(detail or str(exc)) from exc
         if not_read:
             out["unreadable"] = not_read
         _write_html(a.html, out)
@@ -2335,7 +2344,10 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             _print_exceptions(out)
         else:
             _emit(out, fmt)
-        return 0
+        # The exception gate decides the exit code here as it does for `audit`: the page already printed
+        # "gate: failed" for an expired or refused entry, and saying so while exiting 0 is two answers (G249).
+        gate = (out.get("exceptions") or {}).get("gate")
+        return 0 if gate is not False else 1
 
     if a.cmd == "upgrade-risks":
         from pydantic import ValidationError

@@ -731,7 +731,8 @@ It is a projection of one audit, not a second audit, so the numbers reconcile: i
 `--exceptions` list and the same `--min-severity` as `audit`, with the same defaults. An excepted finding is
 counted under `excepted` on the indicators it reaches rather than as an open finding -- an exception is a
 reviewed, owned, expiring decision about a control, and it reads the same way on both pages -- and a finding the
-threshold removed is reported as `withheld` rather than counted clean.
+threshold removed is reported as `withheld` rather than counted clean. An expired or refused entry fails the
+gate here too, with exit 1.
 
 ```bash
 kube-noob ksi
@@ -834,6 +835,13 @@ protects nothing would be worse than saying nothing.
 It reads these four kinds in full, each at paths taken from the published CRD schema, and it checks the API group
 before reading: a CRD of the same name from somewhere else is left alone, and the report says which group it
 declared and that its pods were not audited rather than going quiet.
+
+The admission webhook runs the same rules, so a privileged predictor or a root Ray head is refused there too:
+the chart asks the API server to send `serving.kserve.io` InferenceServices and `ray.io` RayClusters, RayJobs
+and RayServices, whether or not KServe or KubeRay is installed (a webhook rule for a resource the cluster does
+not serve never matches). The generated ValidatingAdmissionPolicies and Kyverno policies do **not** cover these
+kinds -- their CEL would have to index each CRD's own pod-spec paths -- and the generated file says so in its
+header rather than leaving "the policies refuse exactly what the audit reports" to be read as covering them.
 
 **Any other workload CRD is named, not passed.** There are far more of them than four -- Argo Rollouts, Knative
 Services, Kubeflow Notebooks, the training-operator jobs, Seldon, Volcano, JobSet, Flink, ECK -- and a guessed
@@ -1005,12 +1013,18 @@ kube-noob policy generate --mode enforce --exceptions examples/kube-noob-excepti
 
 Pass the cluster's `APIServer` object (it is in a must-gather, and `oc get apiserver cluster -o yaml` prints it)
 and the audit adds a detection-coverage block: which categories of API activity the settings record -- who did
-what to which object, what a create or update contained, what a get or list returned, an OAuth token grant --
-and which they do not. Every statement comes from the field documentation of `Audit` in openshift/api, so it is
-checkable rather than advice: under the default profile, for instance, what a request *contained* is not
-recorded, and API activity on Event objects is not recorded under any profile at all, so a deleted Event leaves
-no trace. A `customRules` entry is reported per group, with its precedence, because the first matching entry
-overrides the top-level profile.
+what to which object, what a create or update contained, what a get or list returned, an OAuth token grant,
+activity on Event objects -- and which they do not.
+
+Every row is read from the manifests `cluster-kube-apiserver-operator` generates the real policy from
+(openshift/library-go), not from the API type's summary comment, and the block names that source so a reader
+can check it. The difference matters: the comment says events are never logged, and the rule that dropped them
+was removed in OpenShift 4.18, so that row is decided by `--version` and reported as undecidable without one --
+telling a reader that a deleted Event left no trace on a 4.20 cluster whose audit log has it would be the worst
+kind of wrong here. Two other rows the comment does not mention: no profile records the body of a Secret, a
+ServiceAccount token, a Route, a token review, an OAuthClient or a MachineConfig, and nothing is recorded for
+the discovery and health endpoints. A `customRules` entry is reported per group with its precedence, and the
+cluster-wide sentence says which groups it does not describe, because the first matching entry wins.
 
 It also lists what no reading of that object can establish -- whether the records leave the cluster, how long
 they are kept, whether anyone reads them, and anything that is not an API request to the OpenShift-provided API
@@ -1020,7 +1034,7 @@ than a family of checks about a SIEM kube-noob has no credentials for.
 ```bash
 oc get apiserver cluster -o yaml > apiserver.yaml
 kube-noob audit -f apiserver.yaml --platform openshift --version 4.20
-kube-noob audit -f apiserver.yaml --platform openshift --format json | jq .detectionCoverage
+kube-noob audit -f apiserver.yaml --platform openshift --version 4.20 --format json | jq .detectionCoverage
 ```
 
 ### Enforce the audit rules at admission

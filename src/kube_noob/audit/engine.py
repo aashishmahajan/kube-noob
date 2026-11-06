@@ -106,7 +106,11 @@ def analyze(
     report.evaluated_rules = evaluated
     # A projection of what was already read, not a rule: the audit configuration says which categories of API
     # activity this cluster can record, where `KN-S035` reports only the two settings that record nothing (R4).
-    report.detection_coverage = detection.coverage(docs)
+    # Gated exactly as that rule is gated. Off OpenShift the resource does not exist, and a report that
+    # ignores the object (the rule returns early) while drawing an AU-2 conclusion from it says two things at
+    # once; `kube-noob validate` is a schema command and has no business carrying a coverage statement (G249).
+    if platform in OPENSHIFT_FAMILY and Stage.AUDIT in stages:
+        report.detection_coverage = detection.coverage(docs, version)
     if schema and Stage.VALIDATE in stages:
         schema_findings, notes = validate_documents(docs)
         findings.extend(schema_findings)
