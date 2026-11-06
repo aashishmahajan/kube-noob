@@ -3839,6 +3839,10 @@ def _c014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 #: request they record, not in whether they record it.
 AUDIT_PROFILE_NONE = "None"
 
+#: The API group the cluster audit configuration lives in. An `APIServer` kind in any other group is a
+#: different resource that happens to share a name.
+APISERVER_GROUP = "config.openshift.io"
+
 
 @rule(
     "KN-S035",
@@ -3871,7 +3875,12 @@ def _s035(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     """
     if not ctx.is_openshift:
         return  # the resource does not exist off OpenShift; see N15 on telling that apart from a pass
-    docs = [d for d in ctx.by_kind("APIServer") if d.api_version.startswith("config.openshift.io/")]
+    # Exact group, not a prefix. `apiVersion` is a Kubernetes group/version, and comparing the group
+    # itself says what is meant -- any served version of config.openshift.io, and nothing whose group
+    # merely begins with those characters. CodeQL reads a dotted literal in `startswith` as URL
+    # validation and flags it; it was not exploitable here (the trailing slash makes it a true prefix),
+    # but a split on the separator is what the data model actually is.
+    docs = [d for d in ctx.by_kind("APIServer") if d.api_version.split("/", 1)[0] == APISERVER_GROUP]
     if not docs:
         ctx.cannot_decide(r.rule_id)
         return

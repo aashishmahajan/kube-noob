@@ -90,3 +90,21 @@ def test_the_cluster_reader_knows_the_resource() -> None:
     assert r.group_version == "config.openshift.io/v1"
     assert r.plural == "apiservers"
     assert r.namespaced is False
+
+
+def test_only_the_real_api_group_is_read() -> None:
+    """CodeQL flagged the original `startswith("config.openshift.io/")` as incomplete URL sanitization. The
+    framing was wrong -- `apiVersion` is a group/version, not a URL -- and the trailing slash made it a true
+    prefix, so a look-alike group was never admitted. But a prefix match is the wrong tool for an API group, and
+    an exact comparison says what is meant. This pins both halves (G227)."""
+    lookalike = (
+        "apiVersion: config.openshift.io.attacker.example/v1\nkind: APIServer\n"
+        "metadata: {name: cluster}\nspec:\n  audit: {profile: None}\n"
+    )
+    report = analyze(lookalike, "openshift", None)
+    assert not [f for f in report.findings if f.rule_id == "KN-S035"]
+    assert "KN-S035" not in report.evaluated_rules, "a foreign group is not the object, so nothing was decided"
+    future = CLUSTER.replace("config.openshift.io/v1", "config.openshift.io/v2") + "    profile: None\n"
+    assert [f for f in analyze(future, "openshift", None).findings if f.rule_id == "KN-S035"], (
+        "any served version of the real group is read"
+    )

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **KN-S035 matches the API group exactly rather than by prefix (G227).** A CodeQL alert on the original `startswith` was wrong about the category and right about the code: a prefix match is the wrong tool for a group/version field. Behaviour is unchanged for every real input.
+
 - **`KN-S035`: cluster audit logging turned off, for everyone or for one group (G226).** OpenShift keeps its audit settings in a cluster-scoped `APIServer` singleton that read-only RBAC can read, so this is the one logging question a credential-free tool can actually decide. It reports `spec.audit.profile: None`, and -- the useful half -- a `customRules` entry that logs nothing for a named group while the top-level profile still reads `Default`. `AU-2` and `AU-12` join the control catalogue, which gives KSI-MLA-LET real evidence for the first time; KSI-MLA-OSM and KSI-MLA-RVL are reached through the same control and are marked as warnings rather than evidence, because operating a SIEM and reviewing logs are not this rule's subject.
 
 ## 0.8.0 - 2026-11-06
