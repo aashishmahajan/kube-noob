@@ -556,7 +556,12 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     ),
     (
         _route(
-            r"(?i)(?=.*\b(?:reach|talk to|connect to|allowed|denied|blocked)\b)"
+            # Not an admission denial: "my pod is being denied by pod security admission" has `pod` twice --
+            # once in `pod security` -- so `\bpod\b.*\bpod\b` matched and the reachability checker answered a
+            # question `policy explain` answers (G247).
+            r"(?i)(?!.*\b(?:scc|podsecurity|pod ?security|psa|kyverno|gatekeeper|admission|webhook|quota|"
+            r"limitrange|forbidden)\b)"
+            r"(?=.*\b(?:reach|talk to|connect to|allowed|denied|blocked)\b)"
             # ONE lookahead over the whole alternation. Flat it parsed as `(?=(.*A)|(B)|(C))`, where only the
             # first branch had `.*` and the other two worked only because `search` scanned the string; anchored,
             # they would silently never match (G237).
@@ -624,7 +629,7 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     (
         _route(
             r"(?i)(?=.*\b(?:rhacs|stackrox|acs)\b)(?=.*\b(?:compare|overlap|gap|gaps|differ\w*|instead|"
-            r"gives|cover\w*|what does)\b)"
+            r"gives|cover\w*|what does|what do|do not|does not|miss\w*)\b)"
         ),
         "kube-noob rhacs compare -f <policies-export.json>",
         "the overlap, the related policies, the gaps each tool leaves and what is outside kube-noob's scope",
@@ -636,8 +641,10 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
         _route(
             r"(?i)(?=.*\b(?:build|builds|building|buildconfig|containerfile|dockerfile|buildah)\b)"
             # Not "why": "the build deployment keeps restarting, why" is a diagnosis question about a workload
-            # that happens to be called build, not a question about a build log (G237).
-            r"(?=.*\b(?:fail\w*|error|broke|debug|log|logs)\b)"
+            # that happens to be called build, not a question about a build log (G237). `check`, `audit`,
+            # `review`, `lint` and `wrong` reach the other half of this command, which audits the image a
+            # Containerfile would produce -- "what is wrong with my Dockerfile?" had no route at all (G247).
+            r"(?=.*\b(?:fail\w*|error|broke|debug|log|logs|check|audit|review|lint|wrong)\b)"
         ),
         "kube-noob build diagnose -f <log>",
         "why the build failed, from the log; `kube-noob build audit -f Containerfile` audits the image it would "
@@ -650,9 +657,9 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
         _route(
             # Bare "ci" and "pipeline" are ordinary nouns: "deployment gate in ci is failing readiness" matched
             # both groups and got the CI gate instead of a diagnosis. CI intent, or `ci` next to a CI noun.
-            r"(?i)(?=.*(?:\b(?:pull request|github action|merge|gating|before deploy)\b"
-            r"|\bci\b.{0,24}\b(?:check|job|step|run|pipeline)\b))"
-            r"(?=.*\b(?:fail|block|gate|critical|threshold|annotat\w*|stop)\b)"
+            r"(?i)(?=.*(?:\b(?:pull request|github action|merge|gating|before deploy|in ci)\b"
+            r"|\bci\b.{0,24}\b(?:check|job|step|pipeline)\b))"
+            r"(?=.*\b(?:fail|block|gate|critical|threshold|annotat\w*|stop|audit|scan)\b)"
         ),
         "kube-noob gate -f <dir> --fail-on high",
         "one command for CI: audit, admission policy and Containerfiles, with SARIF and pull-request annotations",
@@ -660,8 +667,8 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     (
         _route(
             # Not bare "new": "new cluster" and "a new VPC" are not questions about what changed (G237).
-            r"(?i)(?=.*\b(?:changed|change|drift|since|yesterday|last week|regress\w*)\b)"
-            r"(?=.*\b(?:cluster|namespace|posture|findings?|control|snapshot)\b)"
+            r"(?i)(?=.*\b(?:changed|change|drift|since|yesterday|last week|regress\w*|diff|compare)\b)"
+            r"(?=.*\b(?:cluster|namespace|posture|findings?|control|snapshot|snapshots)\b)"
         ),
         "kube-noob posture snapshot --live -o today.json && kube-noob posture diff yesterday.json today.json",
         "what changed between two snapshots: objects, findings opened and fixed, and which controls had nothing "
@@ -756,6 +763,86 @@ CAPABILITY_ROUTES: tuple[tuple[re.Pattern[str], str, str], ...] = (
         _route(r"(?i)(?=.*\b(?:removed|deprecated|retired)\b)(?=.*\b(?:api|apis|apiversion|kind|kinds)\b)"),
         "kube-noob audit -f <dir> --version <x.y>",
         "the APIs in these manifests that the target release has removed or deprecated, with what replaces them",
+    ),
+    # Added after a third sweep of realistic questions (G247). Each of these had an exact command answer and
+    # no route at all, which on a product whose pitch is "paste anything" reads as "it cannot do that".
+    (
+        # An OCPBUGS/OCPNODE key is an anchor the way a KN- rule id is: nothing else looks like it.
+        _route(r"(?i).*?\b(?:OCPBUGS|OCPNODE|RFE|SPLAT|STOR|NETOBSERV|CNV)-\d{3,7}\b"),
+        "kube-noob ticket <KEY>",
+        "what became of that ticket in the local copy of Red Hat's public Jira: status, fix versions, workaround",
+    ),
+    (
+        _route(
+            r"(?i)(?=.*\b(?:audit ?log\w*|audit ?logging|api ?requests?|log ?requests?|recorded?|"
+            r"detection ?coverage)\b)"
+            r"(?=.*\b(?:cluster|apiserver|api ?server|turned ?on|enabled|disabled|off|profile|who|events?)\b)"
+        ),
+        "kube-noob audit -f apiserver.yaml --platform openshift",
+        "auditing turned off, for everyone or for one group, is KN-S035, and the report states which categories "
+        "of API activity the configuration can and cannot record",
+    ),
+    (
+        _route(
+            # Not a pull failure: "image pull failed from quay" is a malfunction with a cause, and the
+            # diagnosis answers it. This route is about which registries are approved (G247).
+            r"(?i)(?!.*\b(?:failed|failing|backoff|unauthoriz\w*|denied|forbidden|not found|timeout|"
+            r"refused|error)\b)"
+            r"(?=.*\b(?:registry|registries|quay|dockerhub|docker ?hub|unapproved|approved|allowlist|"
+            r"whitelist|digest|pinned|mutable)\b)"
+            r"(?=.*\b(?:images?|pull\w*|tags?|where ?from|provenance)\b)"
+        ),
+        "kube-noob audit -f <dir>",
+        "every image is measured against audit.allowedRegistries by KN-S036, and a tag that can move under you "
+        "is KN-S012; both read the reference the way a runtime does",
+    ),
+    (
+        _route(
+            r"(?i)(?=.*\b(?:kserve|inferenceservice|kubeflow|seldon|raycluster|rayjob|rayservice|"
+            r"servingruntime|notebook)\b)"
+            r"(?=.*\b(?:audit\w*|check\w*|read\w*|see|support\w*|cover\w*|container|containers|"
+            r"privileged|hostnetwork|miss\w*)\b)"
+        ),
+        "kube-noob audit -f <dir>",
+        "the pod specs inside those CRDs are audited like any other, including the containers written as a "
+        "field rather than a list, and an unread one is named in the report's assumptions",
+    ),
+    (
+        _route(
+            # `watch` needs an object, not the bare verb: "the namespace has a watch annotation" matched it.
+            r"(?i)(?=.*(?:\b(?:incidents?|overnight|last ?night|while I was|happened|watching)\b"
+            r"|\bwatch (?:a|the|my|this|for)\b|\bkeep an eye\b))"
+            r"(?=.*\b(?:namespace|namespaces|cluster|pods?|workload|remember|record|ledger)\b)"
+        ),
+        "kube-noob watch -n <namespace> --once",
+        "opens an incident for what it sees read-only, explains it and remembers it; `kube-noob incidents list` "
+        "shows what the watch recorded",
+    ),
+    (
+        _route(
+            # The second group is PHRASES, not the words `every`, `all`, `which` and `what`: with those,
+            # "check all pods", "which checks failed in CI" and "liveness check failed on all replicas" all
+            # asked for the rule catalogue. A question about the catalogue says so (G247).
+            r"(?i)(?=.*\b(?:rules?|checks?|catalogue|catalog)\b)"
+            # Written out flat rather than as `(?:rule|check)` inside each phrase: a nested alternation makes
+            # the import guard read a bare `checks` as a word of this group, and it is right to refuse that --
+            # a word in both groups fires on one word. Flat phrases say what is meant and pass (G247).
+            r"(?=.*(?:\bdo you have\b|\bdo you check\b|\bdo you support\b|\bdoes kube-?noob\b"
+            r"|\bevery rule\b|\bevery check\b|\bhow many rules\b|\bhow many checks\b|\brule ids?\b"
+            r"|\bfull catalogue\b|\blist the rules\b|\blist all rules\b|\blist every rule\b"
+            r"|\blist the checks\b|\blist all checks\b))"
+        ),
+        "kube-noob rules",
+        "every rule with its stage, severity, family and the NIST controls it is evidence about",
+    ),
+    (
+        _route(
+            r"(?i)(?=.*\b(?:train|training|fine-?tun\w*|reward|rl|grade|grading|bench|benchmark)\b)"
+            r"(?=.*\b(?:model|models|agent|llm|dataset|tasks?|deterministic|score)\b)"
+        ),
+        "kube-noob train bench --tasks all",
+        "the deterministic tasks and their scoring, so a model's answer is graded against the rules rather than "
+        "against another model",
     ),
     # Last, because almost any of the above is a better answer when it matches. This one catches the broadest
     # ask there is -- "is this all right to ship" -- which was getting the generic pod-triage steps.

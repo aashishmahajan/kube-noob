@@ -92,6 +92,25 @@ def test_every_route_says_why() -> None:
         ("is my ingress internet-facing?", "posture scan"),
         ("are any of our services publicly reachable?", "posture scan"),
         ("can anything be reached from outside?", "posture scan"),
+        # And a sweep of forty realistic questions found seven more with an exact command answer and no route,
+        # plus one answered by the wrong command (G247).
+        ("my pod is being denied by pod security admission, what now", "policy explain"),
+        ("which rules do you have for storage?", "rules"),
+        ("how do I see every rule you check?", "rules"),
+        ("is audit logging turned on?", "audit -f apiserver.yaml"),
+        ("does this cluster log API requests?", "audit -f apiserver.yaml"),
+        ("which images come from registries we have not approved?", "audit"),
+        ("can you tell me which images are not pinned by digest?", "audit"),
+        ("how do I watch a namespace for incidents?", "watch"),
+        ("what happened in the shop namespace last night?", "watch"),
+        ("is OCPBUGS-12345 fixed yet?", "ticket"),
+        ("does the audit read KServe InferenceService?", "audit"),
+        ("my RayCluster has a privileged container, do you see it?", "audit"),
+        ("how do I bench the model against the rules?", "train bench"),
+        ("what is wrong with my Dockerfile?", "build"),
+        ("can you diff two posture snapshots?", "posture"),
+        ("how do I audit a whole directory of manifests in CI?", "gate"),
+        ("what do you do that RHACS does not?", "rhacs compare"),
     ],
 )
 def test_a_question_reaches_the_command_that_answers_it(question: str, expected: str) -> None:
@@ -227,6 +246,18 @@ def test_a_pasted_denial_is_left_to_the_explainer_that_already_ran() -> None:
         "the public internet gateway",
         "git commit",
         "publicly",
+        # The seven routes added in the same pass, each attacked with text that shares their words (G247).
+        "check all pods",
+        "which checks failed in CI",
+        "liveness check failed on all replicas",
+        "the storage team has all the rules",
+        "image pull failed from quay",
+        "the namespace has a watch annotation",
+        "watch the dashboard",
+        "the apiserver pod is in the cluster",
+        "train the team on namespaces",
+        "the model deployment in namespace ml",
+        "list all namespaces",
     ],
 )
 def test_nothing_is_routed_for_text_that_only_shares_words(text: str) -> None:
@@ -347,3 +378,27 @@ def test_a_negative_lookahead_may_lead_a_route_and_is_still_anchored() -> None:
     assert not pattern.search("is the node exposed in git")
     with pytest.raises(ValueError, match="must start with"):
         insight._route(r"(?i)\bexposed\b")
+
+
+def test_a_pull_failure_is_a_diagnosis_and_not_a_registry_policy_question() -> None:
+    """The registry route's words are the words a pull failure uses, so it carries a negative guard (G247)."""
+    for text in (
+        "image pull failed from quay",
+        "ErrImagePull: failed to pull and unpack image quay.io/x/y",
+        "unauthorized: authentication required pulling from quay.io",
+    ):
+        assert capability_routes(text) == [], f"{text!r} -> {capability_routes(text)}"
+    assert "audit" in capability_routes("which images come from registries we have not approved?")[0]["command"]
+
+
+def test_a_route_may_not_hide_behind_a_nested_alternation() -> None:
+    """A phrase group written `(?:rule|check)` makes the import guard read a bare `check` as its word.
+
+    That refusal is correct -- a word in both groups fires on one word -- so the table writes its phrases out
+    flat instead. Asserted because the first attempt at the catalogue route did exactly this and the guard
+    caught it, which is the third time a guard has shaped what the table can say (G247).
+    """
+    from kube_noob import insight
+
+    with pytest.raises(ValueError, match="two lookahead groups"):
+        insight._route(r"(?i)(?=.*\b(?:rules?|checks?)\b)(?=.*\bhow many (?:rules|checks)\b)")
