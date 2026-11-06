@@ -332,8 +332,14 @@ webhooks:
           !object.metadata.ownerReferences.exists(r, has(r.controller) && r.controller)
     {{- end }}
     rules:
+      # `pods/ephemeralcontainers` is how `kubectl debug` adds a container, and it is a different admission
+      # request from the Pod's own creation: without it a privileged debug container from an unapproved
+      # registry walked past every rule that had just refused the same container in a Deployment (R7, G250).
+      # The webhook reports only what the request ADDS -- it already compares the findings with the old
+      # object -- so a Pod that breaks a rule can still be debugged; a generated policy has no such diff,
+      # which is why that half of R7 stays open rather than being emitted as a trap.
       - {apiGroups: [""], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
-         resources: [pods, services, serviceaccounts, persistentvolumeclaims]}
+         resources: [pods, pods/ephemeralcontainers, services, serviceaccounts, persistentvolumeclaims]}
       - {apiGroups: [apps], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
          resources: [deployments, statefulsets, daemonsets, replicasets]}
       - {apiGroups: [batch], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,

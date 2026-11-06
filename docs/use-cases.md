@@ -1098,6 +1098,13 @@ namespace (a PodDisruptionBudget for a Deployment, a NetworkPolicy, a claim's St
 `admission.lookups`, which lists those kinds read-only in the background, and can never be enforced. Exceptions use
 the same ExceptionList as `kube-noob audit --exceptions`.
 
+`kubectl debug` is checked too, which almost nothing checks: an ephemeral container is added through the
+`pods/ephemeralcontainers` subresource, a different admission request from the Pod's own creation. The webhook
+evaluates that one subresource and reports only what the request adds, so a privileged debug container is
+refused where the rule is enforced while a Pod that already breaks that rule can still be debugged. The
+generated policies are deliberately not extended to it: they have no before-and-after comparison, so one would
+refuse every debug of an already-failing Pod.
+
 One rule needs configuring before the webhook can say anything about it. `KN-S036` compares every image against
 `audit.allowedRegistries`, and with no list it declines, so it warns about nothing; set the list and the webhook,
 `kube-noob audit` and `policy generate` all read the same one and give the same verdict. Enforcing it without a

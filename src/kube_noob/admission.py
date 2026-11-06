@@ -43,6 +43,12 @@ SYSTEM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease", 
 SYSTEM_PREFIXES = ("openshift-",)
 SKIP_OPERATIONS = frozenset({"DELETE", "CONNECT"})
 OWNED_KINDS = frozenset({"Pod", "ReplicaSet", "Job"})
+#: The one subresource worth evaluating. `kubectl debug` adds an ephemeral container through
+#: `pods/ephemeralcontainers`, which is a different admission request from the Pod's own creation: a policy that
+#: matches `pods` never sees it, so a privileged debug container from an unapproved registry walked past every
+#: rule that had just refused the same container in a Deployment (R7, G250). Every other subresource -- status,
+#: exec, log, portforward -- is somebody else's business and stays skipped.
+SUBRESOURCES = frozenset({"ephemeralcontainers"})
 SKIPPED_RULES = frozenset(
     {
         "KN-V001",  # the API server refuses objects without apiVersion, kind or name
@@ -242,19 +248,31 @@ def review(
         op = str(request.get("operation") or "")
         ns = str(request.get("namespace") or "")
         obj = request.get("object")
-        if op in SKIP_OPERATIONS or request.get("subResource") or not isinstance(obj, dict):
+        sub = str(request.get("subResource") or "")
+        if op in SKIP_OPERATIONS or (sub and sub not in SUBRESOURCES) or not isinstance(obj, dict):
             return _response(uid, True, [])
         if ns and excluded_namespace(ns, cfg):
             return _response(uid, True, [])
         raw_meta = obj.get("metadata")
         meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
-        if meta.get("deletionTimestamp") or (obj.get("kind") in OWNED_KINDS and _owned(obj)):
+        # The owner check deliberately does NOT apply to a subresource. A Pod owned by a ReplicaSet is skipped
+        # because its owner was audited and carries the same spec -- but no owner carries an ephemeral
+        # container, which is added straight to the Pod. Skipping it here would have made `kubectl debug` on
+        # any managed workload the one request nothing checks (G250).
+        if meta.get("deletionTimestamp") or (not sub and obj.get("kind") in OWNED_KINDS and _owned(obj)):
             return _response(uid, True, [])
         extra = context(ns) if (cfg.lookups and context is not None and ns) else []
         found = _findings(obj, ns, cfg, extra)
-        enforced = [f for f in found if f[0] in cfg.enforce]
-        if enforced and op == "UPDATE" and isinstance(request.get("oldObject"), dict):
+        before: set[tuple[str, str]] | None = None
+        if op == "UPDATE" and isinstance(request.get("oldObject"), dict):
             before = {(r, p) for r, p, _, _ in _findings(request["oldObject"], ns, cfg, extra)}
+        if sub and before is not None:
+            # On a subresource the request IS the change, so the Pod's existing findings are not this
+            # request's business: they were reported when it was created and repeating them here would bury
+            # the one line that matters under the workload's whole report.
+            found = [f for f in found if (f[0], f[1]) not in before]
+        enforced = [f for f in found if f[0] in cfg.enforce]
+        if enforced and before is not None:
             enforced = [f for f in enforced if (f[0], f[1]) not in before]
         warnings = [w for _, _, w, _ in found[: cfg.max_warnings]]
         if len(found) > cfg.max_warnings:

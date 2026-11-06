@@ -474,6 +474,66 @@ def test_chart_webhook_matches_the_server() -> None:
     assert values["admission"]["enforce"] == [] and all(r in RULES for r in ("KN-S001",))
 
 
+def test_a_debug_container_is_checked_and_the_pods_own_findings_are_not_repeated() -> None:
+    """R7/G250: `kubectl debug` goes through `pods/ephemeralcontainers`, which nothing was matching.
+
+    Three things have to hold at once, and each was a defect taken the other way: the request is evaluated at
+    all; the owner check does not skip it (no owner carries an ephemeral container, so a managed workload's
+    Pod would have been the one request nothing checked); and only what the request ADDS is reported, or a Pod
+    that already breaks an enforced rule could never be debugged.
+    """
+    pod = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": "web-7d9f",
+            "namespace": "shop",
+            "ownerReferences": [{"apiVersion": "apps/v1", "kind": "ReplicaSet", "name": "web-7d9", "controller": True}],
+        },
+        "spec": {"containers": [{"name": "web", "image": "nginx", "securityContext": {"privileged": True}}]},
+    }
+    debug = copy.deepcopy(pod)
+    debug["spec"]["ephemeralContainers"] = [
+        {"name": "debugger", "image": "quay.io/evil/tools:latest", "securityContext": {"privileged": True}}
+    ]
+    cfg = adm.Config.build(enforce=["KN-S001"], platform="kubernetes")
+    req = _review(debug, "UPDATE", old=pod, ns="shop", subResource="ephemeralcontainers")
+    out = _well_formed(adm.review(req, cfg), cfg)
+    assert out["allowed"] is False, "a privileged debug container is the request this rule is for"
+    assert "debugger" in out["status"]["message"]
+    assert out["warnings"] and all("debugger" in w for w in out["warnings"]), out["warnings"]
+    assert not any("'web'" in w for w in out["warnings"]), "the pod's own findings belong to its own request"
+    # The same Pod with a clean debug container is admitted, privileged app container and all.
+    clean = copy.deepcopy(pod)
+    clean["spec"]["ephemeralContainers"] = [
+        {
+            "name": "d",
+            "image": "quay.io/o/t@sha256:" + "a" * 64,
+            "securityContext": {
+                "privileged": False,
+                "allowPrivilegeEscalation": False,
+                "runAsNonRoot": True,
+                "runAsUser": 1001,
+                "readOnlyRootFilesystem": True,
+                "capabilities": {"drop": ["ALL"]},
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
+            "resources": {"requests": {"cpu": "10m", "memory": "32Mi"}, "limits": {"memory": "64Mi"}},
+        }
+    ]
+    ok = _well_formed(
+        adm.review(_review(clean, "UPDATE", old=pod, ns="shop", subResource="ephemeralcontainers"), cfg), cfg
+    )
+    assert ok["allowed"] is True and not ok.get("warnings")
+    # Every other subresource is still somebody else's business.
+    for other in ("status", "exec", "log", "portforward", "scale"):
+        res = adm.review(_review(debug, "UPDATE", old=pod, ns="shop", subResource=other), cfg)["response"]
+        assert res["allowed"] is True and not res.get("warnings"), other
+    assert set(adm.SUBRESOURCES) == {"ephemeralcontainers"}
+    text = (CHART / "templates" / "admission.yaml").read_text()
+    assert "pods/ephemeralcontainers" in text.split("    rules:\n", 1)[1]
+
+
 def test_the_webhook_sends_every_kind_whose_pod_specs_the_audit_reads() -> None:
     """The rules list is derived from what the audit can read, not maintained beside it (R6, G248).
 
