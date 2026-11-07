@@ -14,6 +14,9 @@ from typing import Any
 from kube_noob.errors import KubeNoobError
 
 REQUIRED = ("id", "title", "text", "sourceId", "license", "redistributable")
+# A shard file bigger than this is written as `<shard>.jsonl`, `<shard>-2.jsonl`, ... so `db_bundle.MAX_MEMBER`
+# (300_000_000) still accepts it. The two numbers are held together by a test. One record is never split.
+PART_MAX = 250_000_000
 
 
 class CorpusError(KubeNoobError):
@@ -56,41 +59,81 @@ def write_shard(
     for r in records:
         _validate(r)
         r.setdefault("sha256", hashlib.sha256(r["text"].encode("utf-8")).hexdigest())
-    target = cdir / f"{shard}.jsonl"
-    fd, tmp = tempfile.mkstemp(dir=cdir, prefix=f".{shard}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            for r in records:
-                fh.write(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n")
-        os.replace(tmp, target)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
-    entry = {
-        "shard": shard,
-        "file": target.name,
-        "records": len(records),
-        "sha256": digest,
-        "licenses": dict(Counter(r["license"] for r in records)),
-        # `all([])` is True, and nothing to redistribute is not permission to redistribute. `db_bundle` reads
-        # this flag to decide what may be published.
-        "redistributable": bool(records) and all(r["redistributable"] for r in records),
-        "sources": sorted({r["sourceId"] for r in records}),
-        "writtenAt": datetime.now(UTC).isoformat(timespec="seconds"),
-    }
+    groups: list[list[tuple[dict[str, Any], str]]] = [[]]
+    size = 0
+    for r in records:
+        line = json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n"
+        encoded = len(line.encode("utf-8"))
+        if groups[-1] and size + encoded > PART_MAX:
+            groups.append([])
+            size = 0
+        groups[-1].append((r, line))
+        size += encoded
+    entries: list[dict[str, Any]] = []
+    written: set[str] = set()
+    for n, group in enumerate(groups, 1):
+        name = shard if n == 1 else f"{shard}-{n}"
+        fname = f"{shard}.jsonl" if n == 1 else f"{shard}-{n}.jsonl"
+        target = cdir / fname
+        fd, tmp = tempfile.mkstemp(dir=cdir, prefix=f".{name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                for _, line in group:
+                    fh.write(line)
+            os.replace(tmp, target)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+        part_records = [r for r, _ in group]
+        entries.append(
+            {
+                "shard": name,
+                "file": fname,
+                "records": len(part_records),
+                "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                "licenses": dict(Counter(r["license"] for r in part_records)),
+                "redistributable": bool(part_records) and all(r["redistributable"] for r in part_records),
+                "sources": sorted({r["sourceId"] for r in part_records}),
+                "writtenAt": datetime.now(UTC).isoformat(timespec="seconds"),
+            }
+        )
+        written.add(name)
+    kept = {e["file"] for e in entries}
+    for old in cdir.glob(f"{shard}*.jsonl"):
+        tail = old.name[len(shard) :]
+        part = tail == ".jsonl" or (tail.startswith("-") and tail.endswith(".jsonl") and tail[1:-6].isdigit())
+        if part and old.name not in kept:
+            old.unlink()
     manifest_path = cdir / "MANIFEST.json"
     manifest: dict[str, Any] = {"shards": {}}
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest.setdefault("shards", {})[shard] = entry
+    shards = manifest.setdefault("shards", {})
+    for key in list(shards):
+        tail = key[len(shard) + 1 :] if key.startswith(shard + "-") else ""
+        if (key == shard or tail.isdigit()) and key not in written:
+            shards.pop(key)
+    for entry in entries:
+        shards[entry["shard"]] = entry
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return entry
+    if len(entries) == 1:
+        return entries[0]
+    out = dict(entries[0])
+    out["records"] = sum(e["records"] for e in entries)
+    out["parts"] = len(entries)
+    return out
 
 
 def read_manifest(data_dir: Path) -> dict[str, Any]:
     p = data_dir / "corpus" / "MANIFEST.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {"shards": {}}
+
+
+def shard_paths(data_dir: Path, shard: str) -> list[Path]:
+    """Every file of ``shard``, in part order. The plugin reads the same function from ``vuln.parts``."""
+    from kube_noob.vuln.parts import shard_paths as paths
+
+    return paths(data_dir, shard)
 
 
 def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
@@ -160,6 +203,19 @@ def import_corpus(source: Path, data_dir: Path) -> dict[str, Any]:
         for name, entry, _src in ready:
             current.setdefault("shards", {})[name] = entry
             imported.append(name)
+        incoming = set(imported)
+        families = set()
+        for name in incoming:
+            head, _, tail = name.rpartition("-")
+            families.add(head if tail.isdigit() and head else name)
+        for key in list(current.get("shards", {})):
+            head, _, tail = key.rpartition("-")
+            family = head if tail.isdigit() and head else key
+            if family in families and key not in incoming:
+                fname = str(current["shards"][key].get("file", ""))
+                if fname and "/" not in fname and "\\" not in fname:
+                    (target / fname).unlink(missing_ok=True)
+                current["shards"].pop(key)
         (target / "MANIFEST.json").write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         extras = restore_extras(checked, data_dir) if checked else {}  # its sync state and change log
     return {"imported": imported, "dataDir": str(data_dir), **({"jira": extras} if extras else {})}

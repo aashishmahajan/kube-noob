@@ -200,18 +200,18 @@ def run(
     replace: bool = False,
 ) -> dict[str, Any]:
     """Parse ``docs`` and merge their records into the ``redhat-vex`` shard (``replace`` starts it over)."""
-    from kube_noob.sources.corpus import read_manifest, write_shard
+    from kube_noob.sources.corpus import read_manifest, shard_paths, write_shard
 
     source = SOURCES["redhat-vex"]
     check_license(source)
     stamp = (now or datetime.now(UTC)).isoformat(timespec="seconds")
     current: dict[str, dict[str, Any]] = {}
-    shard = data_dir / "corpus" / "redhat-vex.jsonl"
-    if shard.is_file() and not replace and "redhat-vex" in (read_manifest(data_dir).get("shards") or {}):
-        for line in shard.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                rec = json.loads(line)
-                current[rec["cve"]] = rec
+    if not replace and "redhat-vex" in (read_manifest(data_dir).get("shards") or {}):
+        for path in shard_paths(data_dir, "redhat-vex"):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    rec = json.loads(line)
+                    current[rec["cve"]] = rec
     seen = kept = bad = 0
     for doc in docs:
         seen += 1

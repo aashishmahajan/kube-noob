@@ -116,3 +116,35 @@ merge it.
 
 Sign off every commit (`git commit -s`) to certify the Developer Certificate of Origin. Never force-push, rebase or
 rewrite history on a shared branch.
+
+## Already done (2026-11-04) — do not re-derive
+
+- Live `policy reach` reads Cilium `cilium.io/v2` `ciliumclusterwidenetworkpolicies` and Calico
+  `crd.projectcalico.org/v1` `globalnetworkpolicies`, cluster-scoped, once. A 404 stays a NetworkPolicy answer. A 403
+  does not. A namespace `CiliumNetworkPolicy` is not read and does not flip a pod-to-pod verdict. Merged as #38
+  (`cfe8acd`), on top of the file and hostNetwork case in #37 (`69a4959`).
+- pydantic is 2.14.2 in the plugin lock, the skill install hint and `requirements.lock` (#39, `e05e056`). The package
+  version is still 0.7.1. Do not tag, release or publish.
+- A corpus shard bigger than the bundle allows is stored as parts, not by raising `db_bundle.MAX_MEMBER` (300 MB).
+  `PART_MAX` is 250 MB. Files are `<shard>.jsonl` then `<shard>-2.jsonl`. `vuln.parts.shard_paths` reads them.
+  The plugin must not import `sources`: that package is how the Jira client, which names `JIRA_API_TOKEN`, would
+  be bundled. Held by `tests/test_db_bundle.py::test_a_shard_over_the_member_cap_is_written_as_parts_and_read_back`
+  and `tests/test_jira_main_copy.py::test_the_plugin_gets_reconciliation_without_the_jira_client` (G262).
+- `brew.yml` asks for macOS only on `workflow_dispatch` and `workflow_call`. A push, a pull request and the schedule
+  run Ubuntu. Run 41858323552 was cancelled because GitHub did not assign a macOS runner. The formula itself passed
+  on Ubuntu.
+- Issue #22 (weekly risk review 2026-W45) stays open until a later week supersedes it.
+- kube-noob.com is built by the private site repo and pushed to `kube-noob/kube-noob-www`. The path
+  `aashishmahajan/kube-noob-www` is the wrong target (site PR #4, merged). The push is still denied: both deploy
+  keys on `kube-noob-www` are `enabled: false` (ids 168038103 and 168088767, the second titled `kube-noob-site
+  deploy`) because the organization has deploy keys turned off. Creating a key returns 422 "Deploy keys are
+  disabled for this repository". The token available to an agent cannot change that organization setting (403).
+  An owner turns Deploy keys back on under the organization's Member privileges, then checks that key 168088767
+  is enabled. Do not mint a replacement key unless that one is deleted. Do not force-push `kube-noob-www` by
+  hand. The hand publish `f6ff300` (2026-11-04) left Pages with `cname: null`, so https://kube-noob.com returns
+  GitHub's "Site not found" while https://kube-noob.github.io/kube-noob-www/ still serves the files. Putting the
+  domain back is `PUT /repos/kube-noob/kube-noob-www/pages` with `cname=kube-noob.com`. This token cannot do that
+  (403, including a workflow whose `GITHUB_TOKEN` has `pages: write`). An owner sets Custom domain to
+  `kube-noob.com` in the repository's Pages settings. `www` still CNAMEs to `aashishmahajan.github.io`, so that
+  name does not match the certificate. The package version is still 0.7.1.
+
