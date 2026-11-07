@@ -392,6 +392,9 @@ NOT_GENERATED: dict[str, str] = {
     "checks the bundle",
     "KN-S033": "pausing a pool is a legitimate maintenance step, and the finding is about a pool LEFT "
     "paused, which one object at one moment cannot tell from one paused a minute ago",
+    "KN-S035": "admission cannot help: the finding is the state of one cluster-scoped singleton that "
+    "already exists, not an object anybody is about to create, and a policy that blocked edits to it "
+    "would stop an administrator turning auditing back ON as readily as off",
     "KN-S034": "the webhook and the generated policies exempt openshift-* namespaces, where operator "
     "Subscriptions normally live, so a policy would not see the objects this rule is about",
     "KN-C015": "needs the namespace's ResourceClaims and templates (other objects); `kube-noob audit` checks "
@@ -425,7 +428,72 @@ NOT_GENERATED: dict[str, str] = {
 }
 
 
-def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Check], dict[str, str]]:
+#: An allowlist entry this generator will compile: a lower-case hostname with optional port, optionally followed
+#: by one or more path segments. Anything else is refused rather than escaped into a CEL string literal, because
+#: an operator-supplied string that reaches a generated ENFORCING policy is the last place to be relaxed about
+#: quoting -- and a policy that fails to compile denies every request under `failurePolicy: Fail` (G242).
+_REGISTRY_ENTRY = re.compile(r"\A[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*\Z")
+#: An unqualified reference (`nginx`, `bitnami/nginx`) resolves here. Allowing it needs the "is the first path
+#: component a host" test, which needs string surgery the API server's CEL cannot do without `split`, so the
+#: rule is not generated when an entry names this registry -- stated, not silently half-enforced.
+_IMPLICIT_REGISTRY = "docker.io"
+#: A reference made only of ASCII whitespace, which the audit skips as "no image" (`BLANK_IMAGE_CHARS`). The
+#: same character set on both sides and spelled as a class rather than `\s`: RE2's `\s` leaves out `\v`, and
+#: the API server's CEL has no `trim`, so an exact set is the only way the two agree (G245). The escapes are
+#: CEL string escapes, which the API server unescapes before RE2 ever sees them.
+_BLANK_IMAGE = r"^[ \t\n\r\f\v]*$"
+
+
+def _looks_like_a_host(head: str) -> bool:
+    """Docker's own test, which decides whether a reference names a registry at all.
+
+    It matters here because the audit applies it: with the entry `myregistry` (no dot, no port), the image
+    `myregistry/app` comes from Docker Hub, not from `myregistry`, so `_registry_allowed` refuses it. A CEL
+    `startsWith('myregistry/')` would ADMIT it, so such an entry is refused by the generator instead of
+    compiled into a policy that disagrees with the audit (G242).
+    """
+    return "." in head or ":" in head or head == "localhost"
+
+
+def registry_cel(allowed: Sequence[str]) -> str | None:
+    """CEL that passes a container whose image comes from one of `allowed`, or None when it cannot be compiled.
+
+    Prefix matching only, which is exactly what a reference that names its registry needs, and it is written to
+    agree with `kube_noob.audit.rules._registry_allowed` case by case rather than approximately:
+
+    * `quay.io` admits every reference whose first path component is that host, which is `quay.io/...` and
+      nothing else. Not `quay.io` on its own (no slash, so Docker Hub resolves it) and not `quay.io:443/...`
+      (a different registry, which the audit also refuses).
+    * `quay.io/my-org` admits `quay.io/my-org` itself, `quay.io/my-org/app:1` and `quay.io/my-org@sha256:...`,
+      and refuses `quay.io/my-org-evil/app` because every test carries its separator.
+
+    An unqualified `nginx` matches no prefix and is refused, which is the correct verdict whenever Docker Hub is
+    not on the list -- and the reason the rule is not generated when it is.
+    """
+    entries = [e.strip() for e in allowed if e.strip()]
+    if not entries:
+        return None
+    for entry in entries:
+        if not _REGISTRY_ENTRY.match(entry):
+            return None
+        host = entry.split("/", 1)[0]
+        if not _looks_like_a_host(host) or host == _IMPLICIT_REGISTRY:
+            return None
+    tests: list[str] = []
+    for entry in sorted(set(entries)):
+        if "/" in entry:
+            tests.append(f"c.image == '{entry}' || c.image.startsWith('{entry}/') || c.image.startsWith('{entry}@')")
+        else:
+            tests.append(f"c.image.startsWith('{entry}/')")
+    allowed_cel = " || ".join(tests)
+    return f"variables.containers.all(c, !has(c.image) || c.image.matches('{_BLANK_IMAGE}') || {allowed_cel})"
+
+
+def _checks(
+    platform: str,
+    platform_version: str | None,
+    allowed_registries: Sequence[str] = (),
+) -> tuple[dict[str, Check], dict[str, str]]:
     """The checks for this platform, and the rules skipped here (with the reason) beyond NOT_GENERATED."""
     openshift = platform in OPENSHIFT_FAMILY
     s003_k8s = (
@@ -901,6 +969,19 @@ def _checks(platform: str, platform_version: str | None) -> tuple[dict[str, Chec
         else:
             kinds = tuple(k for k in c.kinds if openshift or TARGETS[k].group not in OPENSHIFT_GROUPS)
             out[c.rule_id] = c if kinds == c.kinds else _with_kinds(c, kinds)
+    # KN-S036 is a policy only when an organisation has said which registries it approves. With no list there
+    # is no expression to write: emitting one that admits everything would look like enforcement while enforcing
+    # nothing, which is the absence-read-as-a-pass failure this whole catalogue is built against. So the rule is
+    # recorded as skipped WITH the reason, exactly as the audit declines it (G241, G242).
+    registry = registry_cel(allowed_registries)
+    if registry is None:
+        skipped["KN-S036"] = (
+            "no registry allowlist to enforce: set audit.allowedRegistries in the configuration file (entries "
+            "like quay.io or quay.io/my-org). An entry naming docker.io, or a host with no dot, port or "
+            "`localhost`, is refused here because the resulting CEL would disagree with `kube-noob audit`"
+        )
+    else:
+        out["KN-S036"] = Check("KN-S036", _POD_KINDS, (registry,), pod=True)
     # DeploymentConfig is a pod workload on OpenShift.
     if openshift:
         for rid, c in list(out.items()):
@@ -924,8 +1005,12 @@ def _with_kinds(c: Check, kinds: tuple[str, ...]) -> Check:
     )
 
 
-def checks_for(platform: str, platform_version: str | None = None) -> dict[str, Check]:
-    return _checks(platform, platform_version)[0]
+def checks_for(
+    platform: str,
+    platform_version: str | None = None,
+    allowed_registries: Sequence[str] = (),
+) -> dict[str, Check]:
+    return _checks(platform, platform_version, allowed_registries)[0]
 
 
 def _exempt(c: Check, platform: str, exceptions: Sequence[Checked] = ()) -> str:
@@ -1144,6 +1229,9 @@ class Generated:
     documents: list[dict[str, Any]]
     generated: list[dict[str, str]]
     skipped: list[dict[str, str]]
+    #: The generated rules that read a pod spec. Not part of `summary()`: the header needs it to state, once,
+    #: that a pod spec embedded in an operator CRD is audited but not matched at admission (G245).
+    pod_rules: tuple[str, ...] = ()
 
     def yaml(self, header: Sequence[str] = ()) -> str:
         lines = [f"# {h}" for h in header]
@@ -1167,6 +1255,7 @@ def generate(
     rules: Sequence[str] | None = None,
     exclude_namespaces: Sequence[str] = (),
     exceptions: Sequence[Checked] = (),
+    allowed_registries: Sequence[str] = (),
 ) -> Generated:
     """Policies for ``rules`` (default: all) on ``platform``, one set per engine, in rule-id order."""
     unknown_engines = [e for e in engines if e not in ENGINES]
@@ -1183,7 +1272,7 @@ def generate(
     unknown = [r for r in wanted if r not in RULES]
     if unknown:
         raise ValueError(f"unknown rule id(s): {unknown[:5]} (kube-noob rules lists them)")
-    checks, platform_skips = _checks(platform, platform_version)
+    checks, platform_skips = _checks(platform, platform_version, allowed_registries)
     exclude = list(dict.fromkeys([*DEFAULT_EXCLUDED_NAMESPACES, *exclude_namespaces]))
     docs: list[dict[str, Any]] = []
     generated: list[dict[str, str]] = []
@@ -1203,7 +1292,12 @@ def generate(
             if accepted:
                 row["exceptions"] = ", ".join(accepted)
             generated.append(row)
-    return Generated(docs, generated, skipped)
+    return Generated(
+        docs,
+        generated,
+        skipped,
+        tuple(rid for rid in sorted({row["ruleId"] for row in generated}) if checks[rid].pod),
+    )
 
 
 def header(
@@ -1226,6 +1320,17 @@ def header(
         active = [e for e in exceptions if e.status == "active"]
         out.append(f"Exceptions applied as exemptions: {', '.join(f'{e.id} ({e.rule})' for e in active) or 'none'}.")
         out += [f"  not applied, {e.status}: {e.id} ({e.rule}): {e.reason}" for e in exceptions if e.status != "active"]
+    if g.pod_rules:
+        # Said once, here, rather than on every pod policy: the audit reads the pod specs embedded in operator
+        # CRDs (a KServe predictor, a Ray worker group) and these policies match the core pod workloads, so a
+        # container in one of those is audited and NOT refused at admission. A reader who takes "the policies
+        # refuse exactly what the audit reports" literally would otherwise believe a gap closed that is not
+        # (G245; closing it is R6 in docs/roadmap.md).
+        out.append(
+            "Pod rules match Pods and the core workload kinds. A pod spec embedded in an operator CRD "
+            "(KServe InferenceService, KubeRay RayCluster and the other kinds kube-noob audit reads) is not "
+            "matched here, so those containers are checked by kube-noob audit and not at admission."
+        )
     if g.skipped:
         out.append("Not generated:")
         out += [f"  {row['ruleId']}: {row['reason']}" for row in g.skipped]

@@ -664,7 +664,9 @@ def test_cli_policy_commands(capsys: pytest.CaptureFixture[str], tmp_path: Path)
             platform="openshift",
         )
     )
-    assert "oc get adminnetworkpolicy,baselineadminnetworkpolicy" in [s["command"] for s in out["readOnlyNextSteps"]]
+    assert "oc get adminnetworkpolicy,baselineadminnetworkpolicy,clusternetworkpolicy" in [
+        s["command"] for s in out["readOnlyNextSteps"]
+    ]
 
 
 def test_live_tool_and_cli_read_the_cluster(

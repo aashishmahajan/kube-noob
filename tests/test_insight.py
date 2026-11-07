@@ -8,6 +8,7 @@ held-out cases from the red team (RT1) and from users' own corpora (`selftest --
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -123,7 +124,7 @@ def test_component_message_templates_do_not_match_reported_issues() -> None:
     assert ki.match(PULL_SECRET_EVENTS, "openshift", "4.20.5", 3)["matches"] == []
     stripped = ki.strip_templates(PULL_SECRET_EVENTS)
     assert "regcred" in stripped and "attempting to pull the image may not succeed" not in stripped
-    assert "quay.io/acme/web:1.2" in stripped
+    assert re.search(r"\bquay\.io/acme/web:1\.2\b", stripped), stripped
 
 
 def test_denial_findings_come_first_with_their_steps(kit: tk.Toolkit) -> None:

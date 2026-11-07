@@ -30,9 +30,15 @@ def _fixture(rule_id: str) -> dict[str, Any]:
     return data
 
 
-def _audit_ids(text: str, platform: str, version: str | None, cni: str | None = None) -> set[str]:
+def _audit_ids(
+    text: str,
+    platform: str,
+    version: str | None,
+    cni: str | None = None,
+    allowed_registries: tuple[str, ...] = (),
+) -> set[str]:
     docs = load_documents(text)
-    ctx = build_context(docs, platform, version, False, cni)
+    ctx = build_context(docs, platform, version, False, cni, allowed_registries)
     found: set[str] = set()
     for rid, rule in RULES.items():
         if rule.check is not None and any(True for _ in rule.check(ctx, rule)):
@@ -49,8 +55,14 @@ def _flags(doc: dict[str, Any], rule_id: str, platform: str, version: str | None
     return any(f.severity >= Severity.LOW for f in rule.check(ctx, rule))
 
 
-def _policy(rule_id: str, platform: str, version: str | None, engine: pol.Engine = "vap") -> dict[str, Any]:
-    c = pol.checks_for(platform, version)[rule_id]
+def _policy(
+    rule_id: str,
+    platform: str,
+    version: str | None,
+    engine: pol.Engine = "vap",
+    registries: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    c = pol.checks_for(platform, version, registries)[rule_id]
     return pol.documents(c, engine, "enforce", platform)[0]
 
 
@@ -65,7 +77,10 @@ def test_every_rule_ships_a_good_and_a_bad_fixture() -> None:
         assert data["rule"] == rid
         # `cni` is for a rule whose answer depends on the cluster's CNI rather than on the documents (KN-N014):
         # no manifest states it, so without it the rule declines to decide and the bad fixture cannot fire.
-        assert set(data) <= {"rule", "platform", "version", "cni", "good", "bad"}, rid
+        # `allowedRegistries` is the second such fact (KN-S036): which registries an organisation approved is a
+        # policy from the configuration file, and without it that rule declines too.
+        allowed = {"rule", "platform", "version", "cni", "allowedRegistries", "good", "bad"}
+        assert set(data) <= allowed, rid
         assert data.get("good", "").strip() and data.get("bad", "").strip(), f"{rid} needs good and bad"
 
 
@@ -73,8 +88,9 @@ def test_every_rule_ships_a_good_and_a_bad_fixture() -> None:
 def test_audit_flags_the_bad_fixture_and_not_the_good(rule_id: str) -> None:
     data = _fixture(rule_id)
     platform, version, cni = data.get("platform", "kubernetes"), data.get("version"), data.get("cni")
-    assert rule_id in _audit_ids(data["bad"], platform, version, cni), "bad fixture not flagged"
-    assert rule_id not in _audit_ids(data["good"], platform, version, cni), "good fixture flagged"
+    registries = tuple(data.get("allowedRegistries") or ())
+    assert rule_id in _audit_ids(data["bad"], platform, version, cni, registries), "bad fixture not flagged"
+    assert rule_id not in _audit_ids(data["good"], platform, version, cni, registries), "good fixture flagged"
 
 
 # --- R3.1: every rule generated or explained ----------------------------------------------------------------------
@@ -83,12 +99,59 @@ def test_audit_flags_the_bad_fixture_and_not_the_good(rule_id: str) -> None:
 def test_every_rule_is_generated_or_has_a_reason() -> None:
     generated: set[str] = set()
     for platform, version in PLATFORMS:
-        checks = pol.checks_for(platform, version)
-        assert not set(checks) & set(pol.NOT_GENERATED)
-        generated |= set(checks)
+        # KN-S036 exists as a policy only once an organisation has named the registries it approves, so the
+        # closure is taken over both states of that list; with neither it would fall out of the catalogue
+        # altogether, which is how a rule goes quietly unenforced (G242).
+        for registries in ((), ("quay.io/my-org",)):
+            checks = pol.checks_for(platform, version, registries)
+            assert not set(checks) & set(pol.NOT_GENERATED)
+            generated |= set(checks)
     assert generated | set(pol.NOT_GENERATED) == set(RULES)
     assert not generated & set(pol.NOT_GENERATED)
     assert len(generated) >= 40
+
+
+def test_registry_rule_is_generated_only_with_an_allowlist() -> None:
+    assert "KN-S036" not in pol.checks_for("kubernetes", None)
+    assert "KN-S036" in pol.checks_for("kubernetes", None, ("quay.io/my-org",))
+    skipped = {r["ruleId"]: r["reason"] for r in pol.generate(engines=("vap",), rules=["KN-S036"]).skipped}
+    assert "audit.allowedRegistries" in skipped["KN-S036"]
+    # An entry the generator refuses to compile is reported the same way: nothing is emitted that would
+    # disagree with the audit, and the reason says so rather than a policy quietly admitting everything.
+    for refused in ("docker.io", "quay.io/MY-ORG", "myregistry", "quay.io/my-org/"):
+        g = pol.generate(engines=("vap",), rules=["KN-S036"], allowed_registries=(refused,))
+        assert g.documents == [], refused
+        assert "audit.allowedRegistries" in g.skipped[0]["reason"], refused
+    g = pol.generate(engines=("vap",), rules=["KN-S036"], allowed_registries=("quay.io/my-org",))
+    assert g.skipped == [] and len(g.documents) == 2  # the policy and its binding
+
+
+def test_the_header_states_that_an_embedded_pod_spec_is_not_matched_at_admission() -> None:
+    """The audit reads pod specs inside operator CRDs (G229); these policies match the core workloads only.
+
+    The gap is real and pre-dates the generator's registry rule, so what is asserted here is that it is
+    STATED: a reader who takes "the policies refuse exactly what the audit reports" literally would otherwise
+    believe a KServe predictor was refused at admission. Closing it is R6 (G245).
+    """
+    from kube_noob.audit.engine import analyze
+
+    g = pol.generate(engines=("vap",), rules=["KN-S001"])
+    head = pol.header(g, platform="kubernetes", platform_version=None, mode="enforce", engines=("vap",))
+    assert g.pod_rules == ("KN-S001",)
+    assert any("embedded in an operator CRD" in line for line in head), head
+    isvc = {
+        "apiVersion": "serving.kserve.io/v1beta1",
+        "kind": "InferenceService",
+        "metadata": {"name": "m", "namespace": "shop"},
+        "spec": {"predictor": {"model": {"image": "quay.io/o/m:1", "securityContext": {"privileged": True}}}},
+    }
+    assert "KN-S001" in {f.rule_id for f in analyze(yaml.safe_dump(isvc), platform="kubernetes").findings}
+    assert failures(_policy("KN-S001", "kubernetes", None), isvc) == [], "no policy matches this kind"
+    # A set with no pod rule in it makes no such claim, so the line is absent rather than always printed.
+    other = pol.generate(engines=("vap",), rules=["KN-S017"])
+    assert other.pod_rules == ()
+    head2 = pol.header(other, platform="kubernetes", platform_version=None, mode="enforce", engines=("vap",))
+    assert not any("embedded in an operator CRD" in line for line in head2)
 
 
 def test_documents_are_well_formed_for_both_engines_and_modes() -> None:
@@ -136,7 +199,7 @@ def _fixture_cases() -> list[tuple[str, str, str | None]]:
     for rid in sorted(RULES):
         data = _fixture(rid)
         platform, version = data.get("platform", "kubernetes"), data.get("version")
-        if rid in pol.checks_for(platform, version):
+        if rid in pol.checks_for(platform, version, tuple(data.get("allowedRegistries") or ())):
             out.append((rid, platform, version))
     return out
 
@@ -147,7 +210,7 @@ def test_policy_admits_good_and_refuses_bad(
     rule_id: str, platform: str, version: str | None, engine: pol.Engine
 ) -> None:
     data = _fixture(rule_id)
-    policy = _policy(rule_id, platform, version, engine)
+    policy = _policy(rule_id, platform, version, engine, tuple(data.get("allowedRegistries") or ()))
     good = [d for d in yaml.safe_load_all(data["good"]) if d]
     bad = [d for d in yaml.safe_load_all(data["bad"]) if d]
     for d in good:
@@ -159,22 +222,35 @@ def test_policy_admits_good_and_refuses_bad(
 
 def test_fixture_cases_cover_all_generated_rules() -> None:
     covered = {rid for rid, _, _ in _fixture_cases()}
-    generated = set().union(*(pol.checks_for(p, v) for p, v in PLATFORMS))
+    generated = set().union(*(pol.checks_for(p, v, ("quay.io/my-org",)) for p, v in PLATFORMS))
     assert covered == generated
 
 
 # --- the policies decide exactly as the audit does, on 1,800 random objects per platform --------------------------
 
 
+#: Two entries against the corpus's own image list (tests/policy_corpus.py IMAGES): one narrowed to an
+#: organisation and one a host with a port, so the random cross-check exercises both shapes of entry against
+#: references with tags, digests, two colons, an empty string and no registry at all (G242).
+CORPUS_REGISTRIES = ("quay.io/acme", "registry.local:5000/team")
+
+
 @pytest.mark.parametrize(("platform", "version"), PLATFORMS)
 def test_policy_equals_audit_on_random_objects(platform: str, version: str | None) -> None:
-    checks = pol.checks_for(platform, version)
+    checks = pol.checks_for(platform, version, CORPUS_REGISTRIES)
     corpus = policy_corpus.corpus(seed=20261028, n=900, openshift=platform != "kubernetes")
     policies = {rid: pol.documents(c, "vap", "enforce", platform)[0] for rid, c in checks.items()}
     mismatches: list[str] = []
     seen: dict[str, list[int]] = {rid: [0, 0] for rid in checks}
     for i, doc in enumerate(corpus):
-        ctx = build_context(load_documents(yaml.safe_dump(doc, sort_keys=False)), platform, version)
+        ctx = build_context(
+            load_documents(yaml.safe_dump(doc, sort_keys=False)),
+            platform,
+            version,
+            False,
+            None,
+            CORPUS_REGISTRIES,
+        )
         cache: dict[tuple[str, str], Any] = {}
         for rid, policy in policies.items():
             c = checks[rid]

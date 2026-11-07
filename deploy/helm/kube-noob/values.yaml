@@ -25,6 +25,29 @@ auth:
 service:
   port: 8080
 
+monitoring:
+  # Prometheus scraping and alerts. The server serves /metrics on the same port as everything else, behind the
+  # same bearer token: the document names every tool this deployment serves and how often each is called, which
+  # is operational intelligence about your team, so it is not public by default. The ServiceMonitor carries the
+  # token from the same Secret the clients use.
+  #
+  # serviceMonitor and prometheusRule need the Prometheus Operator CRDs (OpenShift user-workload monitoring has
+  # them). Both are off by default: a chart that renders a CRD the cluster does not serve fails the install.
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}               # labels your Prometheus selects ServiceMonitors by
+  prometheusRule:
+    enabled: false
+    labels: {}
+    # KubeNoobCorpusStale fires on the age of the knowledge built into the IMAGE, so it is really "this image is
+    # old": set it to how often you intend to update the image, and turn it off if you pin a version deliberately.
+    knowledgeMaxAgeDays: 45
+    toolErrorRatio: 0.05     # crash + error (NOT invalid-arguments: a caller's bad input is not this pod failing)
+  # Only for a mesh that authenticates the scrape upstream. Opens /metrics without the bearer token.
+  allowUnauthenticatedMetrics: false
+
 route:            # OpenShift Route (edge TLS)
   enabled: false
   host: ""        # required when enabled: it also goes into server.allowedHosts, and a generated
@@ -200,6 +223,14 @@ notify:
   enabled: false             # tier W: forward reports to chat or webhooks; refused under config.offline
 gate:
   enabled: false             # tier G: forward approved tool calls to an upstream MCP server
+
+audit:
+  # Registries an image may come from (KN-S036). A POLICY, not a fact about a manifest: no document says which
+  # registries you approve, so with this empty the rule declines rather than reporting every image as fine. Each
+  # entry is a lower-case host with an optional port, optionally narrowed to one organisation by a path:
+  # quay.io, registry.example.com:5000, quay.io/my-org. It reaches the audit tools, the admission webhook and
+  # `kube-noob policy generate` from here, so all three give the same verdict.
+  allowedRegistries: []
 
 admission:
   # Tier A: kube-noob-admission, a validating webhook. Every kube-noob finding of a created or updated object becomes

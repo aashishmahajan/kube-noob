@@ -12,9 +12,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kube_noob.audit.podspec import (
+    PodTemplate,
     containers,
     pdb_allows_no_disruption,
     pod_template,
+    pod_templates,
     replicas,
     selector_matches,
 )
@@ -192,10 +194,16 @@ class _Fixer:
 
     # -- security hardening -----------------------------------------------------------------------------
     def harden_pod(self, doc: Document, obj: dict[str, Any]) -> None:
-        tmp = Document(index=doc.index, data=obj)
-        pt = pod_template(tmp)
-        if pt is None:
-            return
+        """Harden every pod spec in the object, not just the one at `spec.template.spec`.
+
+        A KServe predictor or a Ray worker group is a pod spec like any other, and `fix` left them untouched
+        while the audit reported findings in them -- so the one command whose job is to close findings could not
+        close the findings on an AI workload (G238).
+        """
+        for pt in pod_templates(Document(index=doc.index, data=obj)):
+            self._harden_one(doc, pt)
+
+    def _harden_one(self, doc: Document, pt: PodTemplate) -> None:
         psc = _ensure_dict(pt.spec, "securityContext")
         if self.openshift_ids:
             # SCCs govern runAsUser (MustRunAsRange) and fsGroup (MustRunAs); runAsGroup has no SCC strategy.
@@ -540,12 +548,19 @@ def fix_manifests(
 
 
 def _image_manual(doc: Document, obj: dict[str, Any]) -> list[str]:
+
+    out: list[str] = []
+    # Every template, so a mutable tag in a KServe component or a Ray worker group is listed as manual work
+    # rather than passed over (G238).
+    for pt in pod_templates(Document(index=0, data=obj)):
+        out += _image_manual_for(doc, pt)
+    return out
+
+
+def _image_manual_for(doc: Document, pt: PodTemplate) -> list[str]:
     from kube_noob.audit.rules import image_tag
 
     out: list[str] = []
-    pt = pod_template(Document(index=0, data=obj))
-    if pt is None:
-        return out
     for c in containers(pt):
         img = c.container.get("image")
         if isinstance(img, str):

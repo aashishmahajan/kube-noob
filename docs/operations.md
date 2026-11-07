@@ -90,6 +90,37 @@ merged to `main` and someone presses "Check for new commits" (or sets up push up
 that is bumped on `main` but never tagged never reaches PyPI, the image or the MCP Registry: 0.5.0 (073fe80) was
 bumped on `main` and not tagged, so PyPI stopped at 0.4.0.
 
+## When a release fails before anything is published
+
+The opposite case, and it happened on **v0.8.0**: the tag was pushed, the first job failed on
+`ModuleNotFoundError: No module named 'yaml'` -- a step that imported the package before the runtime
+dependencies were installed, fixed in G228 -- and nothing reached PyPI, the chart repository, the MCP
+Registry, Homebrew or a GitHub release. The website was right to keep showing the previous version: it is
+built from the latest RELEASE, and the latest release was still 0.7.1.
+
+Verify before deciding, because the two cases are repaired in opposite ways:
+
+```bash
+pip index versions kube-noob
+gh release list --repo <owner>/<repo> --limit 5
+gh run list --repo <owner>/<repo> --workflow release.yml --limit 5
+```
+
+If nothing published, **cut the next patch version rather than re-pushing the tag**. The rule above --
+never delete or re-push a tag -- is about a release that published somewhere, and the reason to keep it here
+is different and still good: a tag someone may have fetched must keep meaning one tree. So bump, land the fix
+that broke the run, and release from a commit that contains it:
+
+```bash
+python scripts/bump_version.py <next patch> "<one line for the CHANGELOG>"
+python scripts/sync_plugin_server.py && bash scripts/check.sh
+git commit -s -am "release: <next patch>" && git push
+gh release list --repo <owner>/<repo> --limit 3
+```
+
+The version that never published is simply skipped, which is what the record should say about it. Do not
+publish the new version under the old number: the tag for it points at a tree without the fix.
+
 ## When a release job fails after the others have published
 
 The jobs publish to five places and only the last of them is the GitHub release, so a failure there leaves PyPI,

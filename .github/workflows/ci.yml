@@ -311,6 +311,57 @@ jobs:
                --api-versions security.openshift.io/v1 | grep -q "fsGroup"; then
             echo "::error title=chart::fsGroup must not be set on OpenShift"; exit 1
           fi
+          # Monitoring (N11): both objects need the Prometheus Operator CRDs, so both are off by default and a
+          # default render must contain neither; a PrometheusRule without a ServiceMonitor must refuse, because an
+          # alert on a metric nobody scrapes never fires and looks exactly like a healthy cluster.
+          mon="--set monitoring.serviceMonitor.enabled=true"
+          if helm template kn deploy/helm/kube-noob $base | grep -q "kind: ServiceMonitor"; then
+            echo "::error title=chart::ServiceMonitor must be off by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base | grep -q "kind: PrometheusRule"; then
+            echo "::error title=chart::PrometheusRule must be off by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set monitoring.prometheusRule.enabled=true \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::a PrometheusRule without a ServiceMonitor must fail to render"; exit 1
+          fi
+          helm template kn deploy/helm/kube-noob $base $mon | grep -q "path: /metrics"
+          helm template kn deploy/helm/kube-noob $base $mon | grep -q "name: \"kn-token\""
+          helm template kn deploy/helm/kube-noob $base $mon --set monitoring.prometheusRule.enabled=true \
+            | grep -q "alert: KubeNoobToolErrorRatio"
+          # The scrape must carry the bearer token unless the operator opened /metrics deliberately.
+          if helm template kn deploy/helm/kube-noob $base $mon \
+               --set monitoring.allowUnauthenticatedMetrics=true | grep -q "authorization:"; then
+            echo "::error title=chart::an opened /metrics must not still send credentials"; exit 1
+          fi
+          # The registry allowlist (KN-S036, R3c) has to reach BOTH config files -- the sidecar's and the
+          # webhook's -- because `kube-noob audit` and the webhook must give one verdict, and an entry that can
+          # never match an image, or enforcing the rule with no list at all, must fail at install rather than
+          # look like a registry policy while allowing everything through.
+          # An array, not a string: `"$reg"` made `--set audit.allowedRegistries={...}` ONE argument, so helm
+          # answered `unknown flag: --set audit.allowedRegistries` and this guard could never pass. The brace list
+          # has to stay one argument of its own, so it cannot be word-split like $base either.
+          reg=(--set "audit.allowedRegistries={quay.io/my-org,registry.example.com:5000}")
+          helm template kn deploy/helm/kube-noob $base "${reg[@]}" --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['audit']['allowedRegistries'] == ['quay.io/my-org', 'registry.example.com:5000'], cfg
+          "
+          helm template kn deploy/helm/kube-noob $base "${reg[@]}" --set admission.enabled=true \
+            --show-only templates/admission.yaml | python -c "
+          import sys, yaml
+          maps = [d for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind') == 'ConfigMap']
+          cfg = yaml.safe_load(maps[0]['data']['config.yaml'])
+          assert cfg['audit']['allowedRegistries'] == ['quay.io/my-org', 'registry.example.com:5000'], cfg
+          "
+          if helm template kn deploy/helm/kube-noob $base --set "audit.allowedRegistries={MyRegistry}" \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::an entry that is not a lower-case registry must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set admission.enabled=true \
+               --set "admission.enforce={KN-S036}" >/dev/null 2>&1; then
+            echo "::error title=chart::enforcing KN-S036 with no allowlist must fail to render"; exit 1
+          fi
           helm template kn deploy/helm/kube-noob $base --set config.webEnabled=true \
             | grep -A1 "name: KUBE_NOOB_WEB_ENABLED" | grep -q '"true"'
           helm template kn deploy/helm/kube-noob $base --set config.offline=true \

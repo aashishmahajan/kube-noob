@@ -12,6 +12,7 @@ once (the request is admitted with a warning naming the rule). Results are print
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -29,8 +30,8 @@ def _escape(text: str) -> str:
     return " ".join(text.replace("%", "%25").split())[:1500]
 
 
-def run(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+def run(args: list[str], timeout: int = 120, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False, env=env)
 
 
 def dry_run(kubectl: str, path: Path) -> tuple[int, str]:
@@ -38,10 +39,30 @@ def dry_run(kubectl: str, path: Path) -> tuple[int, str]:
     return out.returncode, out.stdout + out.stderr
 
 
-def generated(rule: str, platform: str, version: str | None, engine: str, mode: str, out: Path) -> bool:
+def generated(
+    rule: str,
+    platform: str,
+    version: str | None,
+    engine: str,
+    mode: str,
+    out: Path,
+    registries: tuple[str, ...] = (),
+) -> bool:
+    """Generate the policy for one rule, through a config file when the rule needs one (KN-S036, G242).
+
+    The registry allowlist is deliberately not a command-line flag, so the only way to generate that policy is
+    the configuration file -- and the only way this acceptance covers the one rule whose CEL is built from
+    operator-supplied strings is to write one. Without it the rule generates nothing and a real API server
+    would never see the expression.
+    """
     args = ["kube-noob", "policy", "generate", "--rule", rule, "--platform", platform, "--mode", mode]
     args += ["--engine", engine, "-o", str(out)] + (["--version", version] if version else [])
-    res = run(args)
+    env = dict(os.environ)
+    if registries:
+        config = out.with_suffix(".config.yaml")
+        config.write_text(yaml.safe_dump({"audit": {"allowedRegistries": list(registries)}}), encoding="utf-8")
+        env["KUBE_NOOB_CONFIG"] = str(config)
+    res = run(args, env=env)
     if res.returncode != 0:
         raise RuntimeError(f"kube-noob policy generate failed for {rule}: {res.stderr}")
     return any(d for d in yaml.safe_load_all(out.read_text(encoding="utf-8")) if d)
@@ -65,7 +86,9 @@ def check_rule(kubectl: str, engine: str, data: dict[str, object], tmp: Path) ->
     platform = str(data.get("platform", "kubernetes"))
     version = str(data["version"]) if data.get("version") else None
     policy = tmp / f"{rule}-{engine}.yaml"
-    if not generated(rule, platform, version, engine, "enforce", policy):
+    listed = data.get("allowedRegistries")
+    registries = tuple(str(r) for r in listed) if isinstance(listed, list) else ()
+    if not generated(rule, platform, version, engine, "enforce", policy, registries):
         return []
     good, bad = tmp / f"{rule}-good.yaml", tmp / f"{rule}-bad.yaml"
     good.write_text(str(data["good"]), encoding="utf-8")

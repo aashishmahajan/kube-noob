@@ -409,11 +409,16 @@ def model(
     audit = _audit(docs, platform, version)
     policies = _generated_policies(platform, version)
     stackrox = {rid: list(r.stackrox_policies) for rid, r in RULES.items()}
-    objects = {object_ref(o): o for kind in {ref.split("/")[0] for ref in reach} for o in inv.of(kind)}
+    # Looked up by `Reach.object`, the carrying object's own ref, not by the reach key: an embedded component's
+    # key is `Kind/ns/name[component]`, and matching that against `object_ref` found nothing, so a Ray head the
+    # scan had just called internet-reachable produced zero applications and zero threats here (G231).
+    kinds = {r.object.split("/")[0] for r in reach.values() if r.object}
+    objects = {object_ref(o): o for kind in kinds for o in inv.of(kind)}
     apps: dict[str, list[str]] = {}
     for ref in sorted(reach):
-        if ref in objects:
-            apps.setdefault(_app_of(objects[ref]), []).append(ref)
+        obj = objects.get(reach[ref].object)
+        if obj is not None:
+            apps.setdefault(_app_of(obj), []).append(ref)
     out_apps: list[dict[str, Any]] = []
     total = 0
     for app, refs in sorted(apps.items()):
@@ -436,10 +441,17 @@ def model(
             if entry_kind == "Service":
                 ev = _evidence(audit, [entry_ref], TEMPLATES["TM-S03"].rules)
                 threats.append(Threat(TEMPLATES["TM-S03"], Element("entry point", entry_ref), _status(ev), ev))
-        stores = [ref for ref in refs if _is_store(objects[ref])]
+        stores = [ref for ref in refs if _is_store(objects[reach[ref].object])]
         for ref in refs:
             threats.extend(
-                _workload_threats(reach[ref], objects[ref], audit, ref in exposed, ref in stores, vulnerable_images)
+                _workload_threats(
+                    reach[ref],
+                    objects[reach[ref].object],
+                    audit,
+                    ref in exposed,
+                    ref in stores,
+                    vulnerable_images,
+                )
             )
         namespaces = {reach[ref].namespace for ref in refs}
         app_refs = [ref for ns in sorted(namespaces) for ref in sorted(audit.by_resource) if f"/{ns}/" in ref]

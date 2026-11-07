@@ -46,6 +46,10 @@ data:
       {{- end }}
     probe:
       enabled: {{ .Values.probe.enabled }}
+    {{- with (.Values.audit | default dict).allowedRegistries }}
+    audit:
+      allowedRegistries: {{- toYaml . | nindent 8 }}
+    {{- end }}
     dryRun:
       enabled: {{ .Values.dryRun.enabled }}
     itsm:
@@ -71,6 +75,8 @@ data:
       host: 0.0.0.0
       port: {{ .Values.service.port }}
       authTokenEnv: KUBE_NOOB_HTTP_TOKEN
+      metrics:
+        allowUnauthenticated: {{ .Values.monitoring.allowUnauthenticatedMetrics | default false }}
       # Host-header allowlist (DNS-rebinding protection): Service DNS names, Route/Ingress host, loopback.
       allowedHosts:
         {{- $svc := include "kube-noob.fullname" . }}

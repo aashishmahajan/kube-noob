@@ -832,6 +832,8 @@ BY_CONTROL: dict[str, tuple[str, ...]] = {
     "AC-6": ("KSI-IAM-ELP", "KSI-IAM-JIT"),
     "AC-6(10)": ("KSI-IAM-JIT",),
     "AC-6(5)": ("KSI-IAM-JIT", "KSI-IAM-SNU"),
+    "AU-12": ("KSI-MLA-LET",),
+    "AU-2": ("KSI-CMT-LMC", "KSI-MLA-LET", "KSI-MLA-OSM", "KSI-MLA-RVL"),
     "CM-2": ("KSI-CMT-RMV", "KSI-CNA-DFP", "KSI-CNA-IBP", "KSI-MLA-EVC", "KSI-SVC-ACM"),
     "CM-3(2)": ("KSI-CMT-LMC", "KSI-CMT-RVP", "KSI-CMT-VTD"),
     "CM-6": ("KSI-CMT-LMC", "KSI-CMT-RMV", "KSI-MLA-EVC", "KSI-SVC-ACM"),
@@ -1011,6 +1013,37 @@ EVIDENCE: dict[str, dict[str, Any]] = {
         "here, and all three are evidence about controls this indicator does not cite, so they arrive under "
         "KSI-IAM-ELP and KSI-SVC-SIN instead. Nor does kube-noob ever read a Secret's value, so it cannot tell a "
         "short-lived projected token from a static one.",
+    },
+    "KSI-MLA-LET": {
+        "onSubject": True,
+        "rules": ("KN-S035",),
+        "shows": "whether the cluster is configured to record API requests at all, and whether a `customRules` "
+        "entry quietly exempts a group from being recorded (KN-S035). That is the event-type question this "
+        "indicator asks, read from `spec.audit` on the OpenShift `APIServer` singleton -- configuration, never "
+        "an audit event and never anything about a person.",
+        "doesNotShow": "whether the events the profile selects are the events this system needs, and nothing at "
+        "all off OpenShift: upstream Kubernetes keeps its audit policy in a file on the control-plane host, "
+        "which no read-only client can reach. A healthy profile is evidence that logging is on, not that the "
+        "right things are logged.",
+    },
+    "KSI-MLA-OSM": {
+        "onSubject": False,
+        "rules": ("KN-S035",),
+        "shows": "nothing about a SIEM. This indicator is about operating a centralised, tamper-resistant "
+        "logging capability, and what reaches it from kube-noob is one rule about whether the API server "
+        "records requests (KN-S035) -- which both sides happen to call `au-2`.",
+        "doesNotShow": "the subject. Whether logs are forwarded anywhere, whether the destination is "
+        "tamper-resistant, whether retention holds, whether the pipeline is healthy. All of it needs "
+        "credentials for a system kube-noob has none for, and holds none by design.",
+    },
+    "KSI-MLA-RVL": {
+        "onSubject": False,
+        "rules": ("KN-S035",),
+        "shows": "nothing about review. The one rule that reaches this indicator (KN-S035) says whether "
+        "requests are recorded; this indicator asks whether somebody looks at them.",
+        "doesNotShow": "any human activity. Who reviewed, when, what they found, what they escalated. A "
+        "configuration scanner cannot produce evidence of an organisation's practice, and a crosswalk that "
+        "implied otherwise would be this file's own failure mode.",
     },
     "KSI-RPL-ABO": {
         "onSubject": False,

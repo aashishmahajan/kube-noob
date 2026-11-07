@@ -1,14 +1,13 @@
 """A cluster-scoped policy kube-noob cannot read must not be answered with a verdict.
 
-`ClusterNetworkPolicy` (policy.networking.k8s.io/v1alpha2) sits above NetworkPolicy and is decided before it, and
-this evaluator does not read it. The kind was already named under `notEvaluated` and already attached a caveat to
-every proposed manifest -- but the verdict still said "allowed" and `kube-noob policy reach` still exited 0. A
-note in a JSON list does not stop a CI gate, so a pipeline merged on an answer a `Deny` in that policy reverses.
+Such a policy is decided outside the NetworkPolicies this evaluator reads and can reverse their answer. Naming
+it under `notEvaluated` was not enough: the verdict still said "allowed" and `kube-noob policy reach` still
+exited 0, so a gate merged on an answer the unread policy reverses. A note in a JSON list does not stop CI.
 
-This is not a future-API edge case. Calico 3.32 (13 May 2026) removed AdminNetworkPolicy and
-BaselineAdminNetworkPolicy enforcement outright -- "You must migrate to ClusterNetworkPolicy before upgrading to
-v3.32, as Calico will no longer enforce the old resources" -- so on a current Calico cluster the policy that
-actually decides the traffic is the one kind this evaluator cannot read.
+These tests were written against `ClusterNetworkPolicy`, which P4 made readable -- so they now use
+`CiliumClusterwideNetworkPolicy`, which is still unread, and the rule they guard is unchanged. That swap is the
+point of keeping them: the protection belongs to the CLASS of unread cluster-scoped policy, not to whichever
+kind happened to be unread when it was written, and a kind becoming readable must not quietly retire it.
 
 Deliberately NOT "denied": nothing here knows what the unread policy says. Unknown is the honest third answer,
 the same one a same-priority AdminNetworkPolicy tie already gets.
@@ -44,17 +43,13 @@ spec:
 
 CNP = """
 ---
-apiVersion: policy.networking.k8s.io/v1alpha2
-kind: ClusterNetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
 metadata: {name: deny-all-cross-namespace}
 spec:
-  tier: Admin
-  priority: 10
-  subject: {namespaces: {}}
-  ingress:
-  - name: deny-everything
-    action: Deny
-    from: [{namespaces: {}}]
+  endpointSelector: {}
+  ingressDeny:
+  - fromEndpoints: [{}]
 """
 
 SRC, DST = "web/deployment/frontend", "web/deployment/api"
@@ -68,16 +63,16 @@ def test_an_unreadable_cluster_scoped_policy_makes_the_verdict_undetermined() ->
     out = _reach(WORKLOADS + CNP)
     assert out["verdict"] == "undetermined", (
         "no NetworkPolicy selects either pod, so the NetworkPolicy tier allows this -- but a "
-        "ClusterNetworkPolicy Deny is decided first and would reverse it"
+        "an unread cluster-scoped Deny would reverse it"
     )
-    assert out["undeterminedBy"] == ["ClusterNetworkPolicy/deny-all-cross-namespace"]
+    assert out["undeterminedBy"] == ["CiliumClusterwideNetworkPolicy/deny-all-cross-namespace"]
 
 
 def test_the_summary_says_unknown_and_names_the_policy_that_made_it_unknown() -> None:
     summary = _reach(WORKLOADS + CNP)["summary"]
     assert summary.startswith("Undetermined:")
-    assert "ClusterNetworkPolicy/deny-all-cross-namespace" in summary
-    assert "does not evaluate it yet" in summary
+    assert "CiliumClusterwideNetworkPolicy/deny-all-cross-namespace" in summary
+    assert "does not evaluate it" in summary
     # It must not be reported as a denial either: nothing here knows what the policy says.
     assert not summary.startswith("Denied")
 
@@ -85,7 +80,7 @@ def test_the_summary_says_unknown_and_names_the_policy_that_made_it_unknown() ->
 def test_the_unread_policy_is_still_named_under_not_evaluated() -> None:
     """The verdict change is additive: the existing disclosure has to survive it."""
     out = _reach(WORKLOADS + CNP)
-    assert any("ClusterNetworkPolicy/deny-all-cross-namespace" in n for n in out["notEvaluated"])
+    assert any("CiliumClusterwideNetworkPolicy/deny-all-cross-namespace" in n for n in out["notEvaluated"])
 
 
 def test_without_the_cluster_scoped_policy_the_verdict_is_unchanged() -> None:
@@ -138,8 +133,8 @@ def _tmp(text: str) -> str:
 # with nothing saying why -- the information was present and the surface a person reads ignored it, which is the
 # defect this very commit was fixing one layer down.
 
-CNP_PORT_8080 = """apiVersion: policy.networking.k8s.io/v1alpha2
-kind: ClusterNetworkPolicy
+CNP_PORT_8080 = """apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
 metadata:
   name: deny-8080
 spec:
@@ -186,11 +181,16 @@ def test_the_terminal_says_why_the_verdict_is_undetermined(tmp_path, capsys) -> 
     out = _reach_text(tmp_path, capsys)
     assert "UNDETERMINED" in out
     head = out.partition("check (read-only)")[0]
-    assert "ClusterNetworkPolicy/deny-8080" in head, (
+    assert "CiliumClusterwideNetworkPolicy/deny-8080" in head, (
         "the policy that made the answer unknown must be named above the check list, not left to the trailing "
         "'not evaluated' line among boilerplate"
     )
-    assert "reverse" in head.lower(), "the reader has to be told it can go either way"
+    # Either wording carries it. "can reverse this either way" is the sentence for a kind decided BEFORE any
+    # NetworkPolicy; "can change this answer" is the one for a cluster-scoped kind that is not ordered that
+    # way. Asserting only the first tied this test to which kind happened to be unread.
+    assert "reverse" in head.lower() or "change this answer" in head.lower(), (
+        f"the reader has to be told it can go either way: {head}"
+    )
 
 
 def test_the_check_list_tells_the_operator_to_look_at_the_policy_that_decides(tmp_path, capsys) -> None:

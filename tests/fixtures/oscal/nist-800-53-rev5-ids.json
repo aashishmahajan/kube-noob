@@ -33,6 +33,14 @@
       "controlId": "ac-6.5",
       "objectiveId": "ac-6.5_obj"
     },
+    "AU-12": {
+      "controlId": "au-12",
+      "objectiveId": "au-12_obj"
+    },
+    "AU-2": {
+      "controlId": "au-2",
+      "objectiveId": "au-2_obj"
+    },
     "CM-2": {
       "controlId": "cm-2",
       "objectiveId": "cm-2_obj"

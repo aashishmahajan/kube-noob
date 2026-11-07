@@ -36,6 +36,15 @@ jobs:
           python-version: ${{ steps.action.outputs.python }}
       - name: Dists pass the twine bundled in the pinned PyPI publish action (same Python as its container)
         run: scripts/check_publishable.sh
+      # The setup-python above swapped the interpreter for the publish action's, and the steps below import
+      # kube_noob: krew_manifest.py reads the rule catalogue for the plugin description, which pulls in
+      # yamlio -> PyYAML. Nothing had installed the runtime dependencies on this interpreter, so v0.8.0 failed
+      # with ModuleNotFoundError: No module named 'yaml'. It is the hash-locked file the action itself
+      # installs, so the scripts run against the dependency set that ships, not whatever resolves today.
+      - name: Runtime dependencies on this interpreter, from the hash-locked file the action uses
+        run: |
+          python -m pip install --disable-pip-version-check --quiet --require-hashes --only-binary=:all: \
+            -r requirements.lock
       - name: SBOM matches the lock file it was generated from
         run: python scripts/sbom.py --check
       - run: cp docs/sbom.spdx.json dist/

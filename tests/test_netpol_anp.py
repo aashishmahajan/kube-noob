@@ -487,7 +487,7 @@ def test_the_read_only_steps_name_the_tier_that_decided_first() -> None:
     worth reading on kubectl too, not only on oc."""
     out = _check(ALLOW_ALL_NP, _anp(10, "Deny"))
     steps = [s["command"] for s in out["readOnlyNextSteps"]]
-    assert steps[0].endswith("get adminnetworkpolicy,baselineadminnetworkpolicy")
+    assert steps[0].endswith("get adminnetworkpolicy,baselineadminnetworkpolicy,clusternetworkpolicy")
     assert steps[0].startswith("kubectl ")
     plain = _check(DENY_ALL_NP)
     plain_steps = [s["command"] for s in plain["readOnlyNextSteps"]]

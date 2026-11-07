@@ -16,6 +16,7 @@ from typing import Any
 from kube_noob.audit.controls import controls_for
 from kube_noob.audit.model import Finding, Severity, Stage
 from kube_noob.audit.podspec import (
+    LONG_RUNNING_EMBEDDED_KINDS,
     LONG_RUNNING_KINDS,
     REPLICATED_KINDS,
     ContainerRef,
@@ -24,7 +25,9 @@ from kube_noob.audit.podspec import (
     effective_security,
     pdb_allows_no_disruption,
     pod_template,
+    pod_templates,
     replicas,
+    selector_decides,
     selector_matches,
 )
 from kube_noob.audit.quantity import parse_quantity
@@ -37,6 +40,7 @@ from kube_noob.catalog import (
     PROVISIONERS,
     ROSA_FAMILY,
     api_group,
+    claims_a_known_group,
     deprecated_api,
     parse_minor,
     removed_api,
@@ -69,6 +73,9 @@ class AuditContext:
     # and found nothing" are the two states a compliance record must never merge -- G186 made these rules
     # silent, G191 started calling a silent rule clean, and together they said a skipped rule had passed
     # (G202). A rule whose guard skips one branch but evaluates the rest does NOT register here.
+    # Registries an image may come from, from the configuration file. A POLICY: no manifest states which
+    # registries an organisation approved, so KN-S036 declines without it rather than passing every image.
+    allowed_registries: tuple[str, ...] = ()
     undecided: set[str] = field(default_factory=set)
 
     def cannot_decide(self, rule_id: str) -> None:
@@ -86,10 +93,14 @@ class AuditContext:
         return [d for d in self.docs if d.kind in kinds]
 
     def workloads(self) -> Iterator[tuple[Document, PodTemplate]]:
+        """Every pod spec in the bundle, including the ones embedded in an operator's own kind.
+
+        One object can yield several: a RayCluster has a head and a template per worker group, an
+        InferenceService up to three components. Before this read them, every pod-level rule returned nothing
+        for those kinds and the bundle came back clean (G229).
+        """
         for d in self.docs:
-            pt = pod_template(d)
-            if pt is not None:
-                yield d, pt
+            yield from ((d, pt) for pt in pod_templates(d))
 
     def ns(self, doc: Document) -> str:
         return doc.namespace or "<default>"
@@ -128,7 +139,7 @@ class Rule:
             message=message,
             remediation=remediation or self.remediation,
             path=fmt_path(path),
-            locator=locator(doc.data, path) if doc else fmt_path(path),
+            locator=locator(doc.data, path, doc.ambiguous_keys) if doc else fmt_path(path),
             line=doc.line_for(path) if doc else None,
             doc_index=doc.index if doc else None,
             citations=list(self.citations),
@@ -455,6 +466,12 @@ def _v002(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         valid = KIND_API_VERSIONS.get(d.kind)
         if not valid or d.api_version in valid:
             continue
+        if not claims_a_known_group(d.api_version):
+            # A kind name is unique only inside its group. `Service` is core v1 AND serving.knative.dev/v1;
+            # `Job` is batch/v1 AND batch.volcano.sh/v1alpha1. Firing on the name alone called a correct Knative
+            # Service invalid, as a CRITICAL (G233). An unknown group is somebody else's CRD: the report already
+            # says there is no bundled schema for it, and that is the honest statement.
+            continue
         if removed_api(d.api_version, d.kind, "99.0") is not None:
             continue  # handled by the deprecation rules with a precise version message
         yield r.finding(d, ("apiVersion",), f"{d.kind} is not served by '{d.api_version}'. Use {' or '.join(valid)}.")
@@ -649,12 +666,20 @@ def _v011(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         same_ns = [pt for d, pt in workloads if ctx.ns(d) == ns]
         if not same_ns:
             continue
-        if not any(selector_matches({"matchLabels": sel}, pt.labels()) for pt in same_ns):
-            yield r.finding(
-                svc,
-                ("spec", "selector"),
-                f"Selector {sel} matches no pod template in namespace {ns}; the Service will have no endpoints.",
-            )
+        verdicts = [selector_decides({"matchLabels": sel}, pt) for pt in same_ns]
+        if any(v is True for v in verdicts):
+            continue
+        if any(v is None for v in verdicts):
+            # A component whose pod labels an operator merges in from outside this input might well be selected
+            # by this Service. Reporting "no endpoints" there told the reader their working Service was broken
+            # (G231), so the rule declines instead.
+            ctx.cannot_decide(r.rule_id)
+            continue
+        yield r.finding(
+            svc,
+            ("spec", "selector"),
+            f"Selector {sel} matches no pod template in namespace {ns}; the Service will have no endpoints.",
+        )
 
 
 @rule(
@@ -1833,6 +1858,105 @@ def image_tag(image: str) -> tuple[str | None, bool]:
     return tag, has_digest
 
 
+def image_registry(image: str) -> str:
+    """The registry an image reference names, as the container runtime resolves it.
+
+    Docker's rule, which is not obvious and is the whole of this function: the first path component is the
+    registry only when it looks like a host -- it contains a dot or a colon, or it is exactly `localhost`.
+    Everything else is a Docker Hub repository, so `nginx` and `bitnami/nginx` both come from `docker.io`
+    however little they look like it, and an allowlist that missed that would pass every unqualified image
+    (G241).
+    """
+    ref = image.split("@", 1)[0]
+    head = ref.split("/", 1)[0]
+    if "/" in ref and ("." in head or ":" in head or head == "localhost"):
+        return head
+    return "docker.io"
+
+
+#: The whitespace a blank image reference may be made of. ASCII only, and spelled out rather than left to
+#: `str.strip()`, because the generated admission policy decides the same question with an RE2 character class
+#: and `str.strip()` also removes U+00A0 and other Unicode spaces, which RE2 would not (G245).
+BLANK_IMAGE_CHARS = " \t\n\r\f\v"
+
+
+def image_repository(image: str) -> str:
+    """The repository path a reference names, as the runtime resolves it: no registry host, Docker Hub expanded.
+
+    This is the part an `host/org` allowlist entry is compared against, and it has to be the path the runtime
+    would pull, not the text after the first slash. Two normalisations, and without either one the same image
+    written three ways got three verdicts (G245):
+
+    * The registry host is removed when the reference states it, so `docker.io/bitnami/nginx` is the
+      `bitnami/nginx` repository and not a repository called `docker.io/bitnami/nginx`.
+    * A single-component Docker Hub path is expanded to the organisation it really lives in, so `nginx`,
+      `library/nginx` and `docker.io/library/nginx` are all `library/nginx`.
+    """
+    ref = image.split("@", 1)[0]
+    registry = image_registry(image)
+    head, _, rest = ref.partition("/")
+    path = rest if (head == registry and rest) else ref
+    if registry == "docker.io" and "/" not in path:
+        path = f"library/{path}"
+    return path
+
+
+def _registry_allowed(image: str, allowed: tuple[str, ...]) -> bool:
+    """Whether this image comes from an allowed registry, honouring an `host/org` entry.
+
+    An entry with a path narrows the allowance to that organisation: `quay.io/my-org` permits
+    `quay.io/my-org/app` and refuses `quay.io/someone-else/app`, which is the point of an allowlist for a
+    registry anyone can push to. The entry's path is an organisation prefix, not a repository, so it is NOT
+    put through `image_repository`: `docker.io/library` means the organisation every official image lives in.
+    """
+    registry = image_registry(image)
+    path = image_repository(image)
+    for entry in allowed:
+        host, _, prefix = entry.strip().partition("/")
+        if host != registry:
+            continue
+        if not prefix or path == prefix or path.startswith(prefix.rstrip("/") + "/"):
+            return True
+    return False
+
+
+@rule(
+    "KN-S036",
+    "Image from a registry outside the allowlist",
+    Stage.AUDIT,
+    "supply-chain",
+    Severity.HIGH,
+    "Mirror the image into an approved registry and reference it there, or add the registry to "
+    "`audit.allowedRegistries` if it is approved.",
+    "An image from an unapproved registry is code of unknown provenance running with the pod's identity, and it "
+    "is the step every other supply-chain control depends on: a signature, an SBOM and a scan all describe an "
+    "artifact somebody chose to trust.",
+    ("k8s-images",),
+)
+def _s036(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if not ctx.allowed_registries:
+        # No manifest states which registries an organisation has approved. Reporting every image as fine
+        # because no policy was configured is the absence-read-as-pass failure this catalogue is built against,
+        # so the rule declines and `run_rules` keeps it out of the evaluated list (G241).
+        ctx.cannot_decide(r.rule_id)
+        return
+    for d, pt in ctx.workloads():
+        for c in containers(pt):
+            image = c.container.get("image")
+            if not isinstance(image, str) or not image.strip(BLANK_IMAGE_CHARS):
+                continue  # no image to measure; KN-S012 reports that
+            if _registry_allowed(image, ctx.allowed_registries):
+                continue
+            where = image_registry(image)
+            implicit = " (an unqualified name resolves to Docker Hub)" if "/" not in image.split("@", 1)[0] else ""
+            yield r.finding(
+                d,
+                (*c.path, "image"),
+                f"Container '{c.name}' pulls from '{where}'{implicit}, which is not in "
+                f"audit.allowedRegistries ({', '.join(ctx.allowed_registries)}).",
+            )
+
+
 @rule(
     "KN-S012",
     "Mutable image reference",
@@ -1848,6 +1972,12 @@ def _s012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, _pt, c in _containers(ctx):
         image = c.container.get("image")
         if not isinstance(image, str) or not image:
+            if c.label:
+                # A field-shaped container -- a KServe `model:`, one of its framework shorthands, KubeRay's
+                # injected autoscaler -- gets its image from the ServingRuntime or the operator, so an absent
+                # one is the canonical form rather than a defect. The report says the image was not read
+                # instead of calling the upstream sample a HIGH finding (G252).
+                continue
             yield r.finding(d, c.path, f"Container '{c.name}' has no image.", severity=Severity.HIGH)
             continue
         tag, digest = image_tag(image)
@@ -2044,8 +2174,35 @@ def _s017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             if verbs & ESCALATION_VERBS:
                 yield r.finding(d, ("rules", i, "verbs"), f"Grants {sorted(verbs & ESCALATION_VERBS)}.")
             if "secrets" in resources and verbs & {"get", "list", "watch", "*"}:
-                sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.LOW
-                yield r.finding(d, ("rules", i, "resources"), f"{d.kind} can read Secrets.", severity=sev)
+                # `list` and `watch` return the Secrets' CONTENTS, so one grant hands over every value in scope;
+                # a `get` hands over the ones whose names the holder already knows. All three external reviews
+                # of this catalogue asked for that distinction and it was not being made: a namespaced `list`
+                # was reported at LOW, the same as a `get` (G240).
+                #
+                # The severity does NOT depend on `resourceNames` for `list` and `watch`, deliberately. Whether
+                # `resourceNames` narrows a list request is a question about the authorizer that this project
+                # has not verified against the published reference, so the rule takes the conservative reading
+                # in which it does not -- which is right whichever way that falls, instead of resting on it.
+                values = bool(verbs & {"list", "watch", "*"})
+                names = [str(n) for n in (rr.get("resourceNames") or [])]
+                if not values and names:
+                    # `get` restricted to named Secrets is the least-privilege pattern the upstream RBAC guidance
+                    # recommends. Reporting it as an escalation path told people their correct configuration was
+                    # a defect, which is the one thing a security rule must not do.
+                    continue
+                if values:
+                    sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.MEDIUM
+                    scope = (
+                        "every Secret in the cluster" if d.kind == "ClusterRole" else "every Secret in the namespace"
+                    )
+                    message = (
+                        f"{d.kind} grants {sorted(verbs & {'list', 'watch', '*'})} on Secrets, which returns their "
+                        f"contents: this hands over the values of {scope}, not only the names."
+                    )
+                else:
+                    sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.LOW
+                    message = f"{d.kind} can read Secrets."
+                yield r.finding(d, ("rules", i, "resources"), message, severity=sev)
             if resources & {"pods/exec", "pods/attach"} and verbs & {"create", "*"}:
                 yield r.finding(d, ("rules", i, "resources"), "Grants exec/attach into pods.", severity=Severity.MEDIUM)
             if "nodes/proxy" in resources:
@@ -2571,7 +2728,8 @@ def _n001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     flagged: set[str] = set()
     for d, _pt in ctx.workloads():
         ns = ctx.ns(d)
-        if d.kind in LONG_RUNNING_KINDS | {"Pod"} and ns not in netpol_ns and ns not in flagged:
+        long_running = LONG_RUNNING_KINDS | LONG_RUNNING_EMBEDDED_KINDS | {"Pod"}
+        if d.kind in long_running and ns not in netpol_ns and ns not in flagged:
             flagged.add(ns)
             yield r.finding(d, ("metadata",), f"No NetworkPolicy for namespace {ns} in this bundle.")
 
@@ -2990,21 +3148,28 @@ def _selects_something(selector: dict[str, Any]) -> bool:
     ("k8s-networkpolicy",),
 )
 def _n012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    by_ns: dict[str, list[dict[str, str]]] = {}
+    by_ns: dict[str, list[PodTemplate]] = {}
     for d, pt in ctx.workloads():
-        by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
+        by_ns.setdefault(ctx.ns(d), []).append(pt)
     for d in ctx.by_kind("NetworkPolicy"):
         sel = get_path(d.data, ("spec", "podSelector"))
         pods = by_ns.get(ctx.ns(d))
         if not isinstance(sel, dict) or not _selects_something(sel) or not pods:
             continue
-        if not any(selector_matches(sel, labels) for labels in pods):
-            yield r.finding(
-                d,
-                ("spec", "podSelector"),
-                f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
-                f"namespace {ctx.ns(d)}: this policy protects nothing.",
-            )
+        verdicts = [selector_decides(sel, pt) for pt in pods]
+        if any(v is True for v in verdicts):
+            continue
+        if any(v is None for v in verdicts):
+            # Same reason as KN-V011: an operator-merged label could be exactly the one this selector asks for,
+            # and "this policy protects nothing" is the most alarming thing this rule can say (G231).
+            ctx.cannot_decide(r.rule_id)
+            continue
+        yield r.finding(
+            d,
+            ("spec", "podSelector"),
+            f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
+            f"namespace {ctx.ns(d)}: this policy protects nothing.",
+        )
 
 
 _DNS_PORTS = frozenset({53, 5353})  # 53 is the Service port; OpenShift CoreDNS pods listen on 5353
@@ -3832,6 +3997,85 @@ def _c014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                     f"{d.ref()} sets replicas: {count} and {h.ref()} scales it: every apply or GitOps sync of this "
                     f"manifest resets the count to {count} and fights the HPA. Remove spec.replicas.",
                 )
+
+
+#: The one audit profile that logs nothing, from openshift/api config/v1 types_apiserver.go (retrieved
+#: 2026-11-06). The other three -- Default, WriteRequestBodies, AllRequestBodies -- differ in how much of each
+#: request they record, not in whether they record it.
+AUDIT_PROFILE_NONE = "None"
+
+#: The API group the cluster audit configuration lives in. An `APIServer` kind in any other group is a
+#: different resource that happens to share a name.
+APISERVER_GROUP = "config.openshift.io"
+
+
+@rule(
+    "KN-S035",
+    "Cluster audit logging is turned off, for everyone or for one group",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Set spec.audit.profile to Default or higher on the APIServer named 'cluster', and remove any customRules "
+    "entry whose profile is None. If a group genuinely must be excluded, record why: an assessor will ask.",
+    "An OpenShift cluster can be configured to log no API requests at all, or -- less visibly -- to log none of "
+    "the requests made by one group, through a customRules entry that overrides a healthy-looking top-level "
+    "profile.",
+)
+def _s035(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    """Audit configuration, read as settings rather than inferred from the absence of a log.
+
+    This is the only check in the logging family that a read-only client can actually decide. `spec.audit` on the
+    cluster-scoped `APIServer` singleton is configuration, not audit content: no event, no request body, nothing
+    about a person. Everything else a reader might want here -- whether events reach a SIEM, whether anyone reads
+    them, whether retention holds -- needs a system kube-noob has no credentials for, and forty rules that answer
+    "not evaluated" would be coverage theatre rather than coverage.
+
+    The second finding is the one worth having. `customRules` is evaluated top to bottom and the first match
+    takes precedence over `spec.audit.profile`, so a cluster reporting `profile: Default` can log nothing at all
+    for a named group. A reader who checks only the top-level profile sees a configured cluster; this is that
+    same shape again, in someone else's API (G202, G216).
+
+    On a bundle that does not carry the object this declines rather than passing: on OpenShift the singleton
+    always exists, so its absence means it was not collected, not that auditing is on.
+    """
+    if not ctx.is_openshift:
+        return  # the resource does not exist off OpenShift; see N15 on telling that apart from a pass
+    # Exact group, not a prefix. `apiVersion` is a Kubernetes group/version, and comparing the group
+    # itself says what is meant -- any served version of config.openshift.io, and nothing whose group
+    # merely begins with those characters. CodeQL reads a dotted literal in `startswith` as URL
+    # validation and flags it; it was not exploitable here (the trailing slash makes it a true prefix),
+    # but a split on the separator is what the data model actually is.
+    docs = [d for d in ctx.by_kind("APIServer") if d.api_version.split("/", 1)[0] == APISERVER_GROUP]
+    if not docs:
+        ctx.cannot_decide(r.rule_id)
+        return
+    for d in docs:
+        spec = d.data.get("spec") if isinstance(d.data, dict) else None
+        audit = spec.get("audit") if isinstance(spec, dict) else None
+        if not isinstance(audit, dict):
+            continue  # the default is Default; an absent audit block is not an absent profile
+        if str(audit.get("profile", "")) == AUDIT_PROFILE_NONE:
+            yield r.finding(
+                d,
+                ("spec", "audit", "profile"),
+                "spec.audit.profile is None, so the API server records no requests at all: there is no audit "
+                "evidence for anything that happens on this cluster, and nothing to forward to a SIEM.",
+            )
+        rules = audit.get("customRules")
+        if not isinstance(rules, list):
+            continue
+        for i, entry in enumerate(rules):
+            if not isinstance(entry, dict) or str(entry.get("profile", "")) != AUDIT_PROFILE_NONE:
+                continue
+            group = str(entry.get("group") or "(unnamed group)")
+            yield r.finding(
+                d,
+                ("spec", "audit", "customRules", i, "profile"),
+                f"spec.audit.customRules[{i}] logs nothing for group {group!r}. customRules are evaluated in "
+                f"order and the first match overrides spec.audit.profile "
+                f"({str(audit.get('profile') or 'Default')!r}), so this cluster looks audited and is not, for "
+                f"everyone in that group.",
+            )
 
 
 def run_rules(ctx: AuditContext, stages: set[Stage] | None = None, evaluated: list[str] | None = None) -> list[Finding]:

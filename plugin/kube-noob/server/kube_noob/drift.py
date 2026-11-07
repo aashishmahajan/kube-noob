@@ -31,6 +31,8 @@ from typing import Any
 import yaml
 
 from kube_noob.attack_paths import LIVE_RESOURCES
+from kube_noob.audit.podspec import LONG_RUNNING_EMBEDDED_KINDS
+from kube_noob.sanitize import MAX_JSON_DEPTH_FILE, loads_bounded
 
 FORMAT = "kube-noob-snapshot/1"
 REPORT_FORMAT = "kube-noob-drift/1"
@@ -40,6 +42,10 @@ MAX_CHANGED_FIELDS = 20
 MAX_SNAPSHOT_BYTES = 200_000_000
 MAX_NOT_READ = 200  # entries kept in a snapshot; the reason strings are bounded by collect_live
 MAX_CONTROL_NAMESPACES = 20  # named on a byControl row; the count is exact, the list is a sample
+MAX_HISTORY = 60  # points in a trend; `keep` is normally smaller, and the oldest go first
+MAX_REPORT_BYTES = 50_000_000  # a retained report read back for the trend
+MAX_HISTORY_BYTES = 200_000_000  # read across the whole series, so a large folder is bounded too
+MAX_ASSUMPTIONS = 60  # carried from the audit into the snapshot; the engine writes a handful
 WATCHED = frozenset(
     {
         "Deployment",
@@ -66,6 +72,11 @@ WATCHED = frozenset(
         "PersistentVolumeClaim",
         "Namespace",
     }
+    # Workload CRDs whose pod specs are embedded rather than at `spec.template.spec`. They are collected live
+    # (LIVE_RESOURCES) and audited, so leaving them out of this set meant their findings landed in a snapshot
+    # with no namespace and no owner, while the same finding on a Deployment beside them carried both (G231).
+    | LONG_RUNNING_EMBEDDED_KINDS
+    | {"RayJob"}
 )
 EXTRA_LIVE: dict[str, str] = {
     "networkpolicies": "NetworkPolicy",
@@ -313,6 +324,12 @@ def snapshot(
         },
         "notRead": unread[:MAX_NOT_READ],
         "notReadKinds": sorted(_kinds_not_read(unread)),
+        # What the audit had to ASSUME, kept because `notRead` is only half the story of what this snapshot
+        # could not see. `notRead` is what the cluster refused; assumptions are what kube-noob itself could
+        # not read -- above all "N pod spec(s) are in kinds kube-noob has no reader for, NOT audited" (G232).
+        # Dropping them left a folder of Argo Rollout snapshots reporting a complete read every day while a
+        # whole class of workload was never looked at, which is this project's own defect in a fifth place.
+        "assumptions": list(report.assumptions[:MAX_ASSUMPTIONS]),
     }
 
 
@@ -451,7 +468,14 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
         "format": REPORT_FORMAT,
         "from": old["takenAt"],
         "to": new["takenAt"],
+        # What was snapshotted: `live`, or the manifests. Two reports in one folder can describe different
+        # populations -- a `-f` run and a `--live` run -- and a trend drawn across them compares things nobody
+        # compared, so the series needs to be able to see the difference.
+        "source": new.get("source"),
         "notRead": list(new.get("notRead") or ()),
+        # Forward from the snapshot unchanged: a report is what a reviewer opens, and the HTML page renders
+        # `assumptions` as caveats above the findings the moment they are there.
+        "assumptions": list(new.get("assumptions") or ()),
         "objects": {
             "added": sorted(set(b) - set(a)),
             "removed": removed,
@@ -519,6 +543,19 @@ def markdown(report: dict[str, Any]) -> str:
         ]
         if len(not_read) > 20:
             lines += [f"...and {len(not_read) - 20} more.", ""]
+    # Beside `notRead`, and for the same reason: these are the things kube-noob itself could not read, so they
+    # bound every count below exactly as a refused resource does.
+    assumed = [str(x) for x in report.get("assumptions") or ()]
+    if assumed:
+        lines += [
+            f"**The audit behind this report made {len(assumed)} assumption(s).** Each one bounds what the "
+            "counts below cover.",
+            "",
+            *[f"- {entry}" for entry in assumed[:20]],
+            "",
+        ]
+        if len(assumed) > 20:
+            lines += [f"...and {len(assumed) - 20} more.", ""]
     if o["changed"]:
         lines += ["## Changed", "", "| Object | Owner | Fields |", "| --- | --- | --- |"]
         for c in o["changed"]:
@@ -596,7 +633,10 @@ def load(path: Path) -> dict[str, Any]:
     if path.stat().st_size > MAX_SNAPSHOT_BYTES:
         raise DriftError(f"{path} is larger than {MAX_SNAPSHOT_BYTES} bytes")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # Depth-guarded like every other reader of a file somebody else wrote: a snapshot is passed to
+        # `posture diff` by path, and from Python 3.14 the depth at which `json.loads` gives up is whatever C
+        # stack the process has.
+        data = loads_bounded(path.read_text(encoding="utf-8"), MAX_JSON_DEPTH_FILE)
     except (OSError, ValueError, RecursionError) as exc:
         raise DriftError(f"{path}: not a snapshot ({type(exc).__name__})") from exc
     if not isinstance(data, dict) or data.get("format") != FORMAT:
@@ -659,15 +699,90 @@ def write_report(state_dir: Path, snap: dict[str, Any], keep: int = 14) -> tuple
         stem = old.name.removeprefix("snapshot-").removesuffix(".json")
         for suffix in (".json", ".md"):
             (state_dir / f"report-{stem}{suffix}").unlink(missing_ok=True)
-    return report, paths
+    # Attached to what the caller renders, and deliberately NOT to the file written above: a report that held
+    # the history of the reports before it would nest one inside the next, and the folder would grow with the
+    # square of `keep`. The series is derived from the files, so it is rebuilt on every read instead.
+    return {**report, "history": history(state_dir, keep)}, paths
+
+
+def _count(value: Any) -> int | None:
+    """A count, or nothing when the report does not carry one. `or 0` here would publish a missing number as a
+    measured zero, which is the defect this whole series is written around."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def history(state_dir: Path, limit: int = MAX_HISTORY) -> dict[str, Any]:
+    """One point per retained report, oldest first, and the files behind the points that could not be made.
+
+    Every field can be absent, and absent is never zero or yes:
+
+    * ``complete`` says whether the snapshot read everything. It is ``None`` -- not ``True`` -- for a report that
+      carries no ``notRead`` key at all, which is every report kube-noob wrote before 0.8: the format string did
+      not change when the key was added, so a two-week-old folder survives an upgrade full of reports whose
+      completeness is simply unknown. Reading a missing key as "nothing was unread" would draw an undercount as
+      a measurement, which is the defect this project keeps finding.
+    * ``open`` and ``excepted`` are ``None`` when the report does not carry an integer for them.
+    * ``source`` is what was snapshotted, so the caller can refuse to draw one line across two populations.
+
+    ``unplaced`` names every kept file behind a point that could not be made: unreadable, too large, over the
+    whole-series budget, not a report at all, or a snapshot whose report was never written (a kill between the
+    two writes). A series quietly one point short is the thing to avoid: the absence reads as continuity.
+    """
+    out: dict[str, Any] = {"points": [], "unplaced": []}
+    if not state_dir.is_dir():
+        return out
+    kept = max(1, limit)
+    reports = sorted(state_dir.glob("report-*.json"))[-kept:]
+    rows: list[dict[str, Any]] = []
+    budget = MAX_HISTORY_BYTES
+    # Newest first, so a folder of large reports spends the budget on the end a trend is read from rather than
+    # on the oldest points.
+    for path in reversed(reports):
+        try:
+            size = path.stat().st_size
+            if size > MAX_REPORT_BYTES or size > budget:
+                raise ValueError("not read: too large")
+            budget -= size
+            data = loads_bounded(path.read_text(encoding="utf-8"), MAX_JSON_DEPTH_FILE)
+            if not isinstance(data, dict) or data.get("format") != REPORT_FORMAT:
+                raise ValueError("not a report")
+            findings = data.get("findings")
+            if not isinstance(findings, dict):
+                raise ValueError("no findings")
+            unread = data.get("notRead")
+            rows.append(
+                {
+                    "at": data["to"] if isinstance(data.get("to"), str) else None,
+                    "open": _count(findings.get("open")),
+                    "excepted": _count(findings.get("excepted")),
+                    "complete": (not unread) if isinstance(unread, list) else None,
+                    "source": data["source"] if isinstance(data.get("source"), str) else None,
+                }
+            )
+        except (OSError, ValueError, TypeError, RecursionError, AttributeError):
+            out["unplaced"].append(path.name)
+    out["points"] = list(reversed(rows))
+    stems = {p.name.removeprefix("report-").removesuffix(".json") for p in reports}
+    orphans = sorted(state_dir.glob("snapshot-*.json"))[-kept:]
+    out["unplaced"] += [p.name for p in orphans if p.name.removeprefix("snapshot-").removesuffix(".json") not in stems]
+    out["unplaced"].sort()
+    return out
 
 
 def latest_report(state_dir: Path) -> dict[str, Any] | None:
+    """The newest report kept, with the trend attached -- the same thing :func:`write_report` returned when it
+    wrote that report, so reading it back later shows what writing it showed."""
     reports = sorted(state_dir.glob("report-*.json")) if state_dir.is_dir() else []
     if not reports:
         return None
     try:
-        data = json.loads(reports[-1].read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        # The same guards the series reads under: a file too large or nested too deeply is not a report this
+        # returns half of.
+        if reports[-1].stat().st_size > MAX_REPORT_BYTES:
+            return None
+        data = loads_bounded(reports[-1].read_text(encoding="utf-8"), MAX_JSON_DEPTH_FILE)
+    except (OSError, ValueError, RecursionError):
         return None
-    return data if isinstance(data, dict) and data.get("format") == REPORT_FORMAT else None
+    if not isinstance(data, dict) or data.get("format") != REPORT_FORMAT:
+        return None
+    return {**data, "history": history(state_dir)}

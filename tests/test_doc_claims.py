@@ -16,6 +16,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import doc_numbers as dn  # noqa: E402
@@ -45,6 +47,33 @@ def test_the_generated_table_sums_to_the_rule_count() -> None:
     assert rows, "the limits table has rows"
     for row in rows:
         assert row.generated + row.not_generated == len(list_rules()), row
+
+
+def test_the_roadmap_states_the_measured_numbers() -> None:
+    """The one file that measures the whole product was the one the generator did not cover, so it drifted: "91
+    rules" and "28 of NIST's controls" on the day the catalogue reached 92 and the thirtieth control got a rule,
+    and "105 commands" matching no counting method at all (G230)."""
+    text = (ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8")
+    n = dn.measured()
+    flat = " ".join(text.split())
+    assert f"exactly {n.rules} rules, {n.mcp_tools} MCP tools, {n.commands} commands" in flat
+    assert f"about {round(n.engine_lines, -3):,} lines across {n.modules} modules" in flat
+    assert f"about {round(n.test_lines, -3):,} lines of tests" in flat
+    assert f"names {n.controls} of NIST SP 800-53 Rev. 5's controls across its {n.rules} rules" in flat
+
+
+def test_the_measured_sentence_counts_the_catalogue_the_audit_runs() -> None:
+    """Pins each figure to its source rather than to the generator, so rewriting the regex cannot quietly
+    redefine what a number means while `--check` still passes."""
+    from kube_noob.audit.controls import RULE_CONTROLS
+    from kube_noob.audit.engine import list_rules
+
+    n = dn.measured()
+    assert n.rules == len(list_rules())
+    assert n.controls == len({c for cs in RULE_CONTROLS.values() for c in cs})
+    assert n.modules == len(sorted((ROOT / "src" / "kube_noob").rglob("*.py")))
+    assert n.chart_templates == len(sorted((ROOT / "deploy" / "helm" / "kube-noob" / "templates").glob("*.yaml")))
+    assert n.commands > n.chart_templates, "every subcommand node, at any depth"
 
 
 def test_the_limits_table_states_the_measured_numbers() -> None:
@@ -178,3 +207,45 @@ def test_an_openshift_version_on_the_kubernetes_platform_is_refused() -> None:
     assert k8s_version_for("openshift", "1.33") == "1.33", "the reverse is still accepted, as it always was"
     with pytest.raises(ValueError, match="not a Kubernetes version"):
         k8s_version_for("kubernetes", "4.22")
+
+
+def test_every_guarded_claim_is_measured_from_the_code() -> None:
+    """P8. Each entry in GUARDS names a key of `counted()`, and `counted()` reads the code or the data rather
+    than another document. A guard pointing at a key nobody measures would pass by accident."""
+    measured = dn.counted()
+    for path, _pattern, key, why in dn.GUARDS:
+        assert key in measured, f"{path.name}: the guard for {why} names {key}, which nothing measures"
+    assert all(isinstance(v, int) for v in measured.values())
+
+
+def test_a_reworded_sentence_fails_rather_than_stops_being_guarded() -> None:
+    """The failure mode worth catching: somebody edits the prose, the pattern stops matching, and the claim
+    quietly leaves the guard. A guard that matches zero or several times is an error, not a skip."""
+    path, pattern, _key, _why = dn.GUARDS[0]
+    text = path.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as gone:
+        dn.guarded({path: text.replace(pattern.split("(")[0].strip("\\"), "REWORDED", 1)})
+    assert "reworded or removed" in str(gone.value)
+
+
+def test_a_stale_guarded_number_is_rewritten_not_accepted() -> None:
+    path, pattern, _key, _why = dn.GUARDS[0]
+    text = path.read_text(encoding="utf-8")
+    wrong = re.sub(pattern, lambda m: m.group(0).replace(m.group(1), "4242", 1), text, count=1)
+    assert wrong != text, "the fixture has to actually differ from the committed text"
+    assert dn.guarded({path: wrong})[path] == text
+
+
+def test_the_guards_cover_the_rule_count_wherever_a_document_states_it() -> None:
+    """The defect this item was opened for: `docs/use-cases.md` said "the same 92 rules" while the code had 93.
+    Any document stating a bare rule count has to be guarded, or the next one drifts the same way."""
+
+    guarded_files = {p for p, *_ in dn.GUARDS}
+    rules = dn.counted()["rules"]
+    pat = re.compile(r"\b(\d{2,3}) (?:audit )?rules\b")
+    for doc in (dn.ROOT / "README.md", dn.ROOT / "docs" / "use-cases.md", dn.ROOT / "docs" / "compliance.md"):
+        for found in pat.findall(doc.read_text(encoding="utf-8")):
+            assert int(found) == rules or doc in guarded_files, (
+                f"{doc.name} states {found} rules; the code has {rules}. Guard the sentence in "
+                "scripts/doc_numbers.py GUARDS or correct it."
+            )

@@ -10,13 +10,13 @@ FedRAMP's own repository tells a reader to "account for framework applicability,
 
 An indicator and a rule meet here only because they name the same NIST control, and a shared control is not shared subject matter. FedRAMP cites broad control sets -- `KSI-IAM-SNU` (non-user authentication) cites `ac-4`, Information Flow Enforcement -- and kube-noob maps its NetworkPolicy rules to `ac-4` because that is what `ac-4` is. The join is then arithmetically correct and about nothing: eight network and RBAC rules reported under an indicator about how service credentials are issued. Entries below marked `onSubject: False` are exactly that case, and saying so is the only honest thing a crosswalk can do about it.
 
-## Coverage: 26 of kube-noob's 28 controls are cited by an indicator
+## Coverage: 28 of kube-noob's 30 controls are cited by an indicator
 
 2 are cited by none, so no finding of kube-noob's is evidence for any indicator through them: **SC-36** (Distributed Processing and Storage), **SC-6** (Resource Availability).
 
-In the other direction, 18 of the 46 indicators have no kube-noob rule behind them at all. Those rows carry `evidenced: false` and no counts: a zero in a findings column reads as a pass, and an indicator kube-noob cannot see has not passed anything. They are `KSI-CED-RAT`, `KSI-CNA-OFA`, `KSI-IAM-AAM`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RIR`, `KSI-INR-RPI`, `KSI-MLA-ALA`, `KSI-MLA-LET`, `KSI-MLA-OSM`, `KSI-MLA-RVL`, `KSI-PIY-GIV`, `KSI-PIY-RES`, `KSI-PIY-RVD`, `KSI-SCR-MON`, `KSI-SVC-ASM`, `KSI-SVC-RUD`, `KSI-SVC-VCM`.
+In the other direction, 15 of the 46 indicators have no kube-noob rule behind them at all. Those rows carry `evidenced: false` and no counts: a zero in a findings column reads as a pass, and an indicator kube-noob cannot see has not passed anything. They are `KSI-CED-RAT`, `KSI-CNA-OFA`, `KSI-IAM-AAM`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RIR`, `KSI-INR-RPI`, `KSI-MLA-ALA`, `KSI-PIY-GIV`, `KSI-PIY-RES`, `KSI-PIY-RVD`, `KSI-SCR-MON`, `KSI-SVC-ASM`, `KSI-SVC-RUD`, `KSI-SVC-VCM`.
 
-## The 13 indicators a kube-noob finding speaks to directly
+## The 16 indicators a kube-noob finding speaks to directly
 
 One line each on what the evidence shows and, more importantly, what it does not. An indicator is a statement about an organisation's practice; kube-noob reads configuration. The gap is not a detail.
 
@@ -25,7 +25,7 @@ One line each on what the evidence shows and, more importantly, what it does not
 - **Shows:** whether a workload could be redeployed to a known state at all -- a mutable image reference (KN-S012), a pull secret that exists only in another namespace (KN-C013), a replica count fighting an HPA (KN-C014), a resource claim no object in the bundle defines (KN-C015), a request above its limit (KN-C006).
 - **Does not show:** how changes reach the cluster, which is what the indicator is about. This is the widest row in the table because it cites `cm-6` (Configuration Settings) and a third of kube-noob's rules are evidence about `cm-6`, so the count here is a weak signal and the named findings are the useful part.
 - kube-noob controls: CM-2, CM-6, CM-7
-- Rules that are evidence (48), of which the sentences above name 5: `KN-C006`, `KN-C013`, `KN-C014`, `KN-C015`, `KN-N005`, `KN-N009`, `KN-N010`, `KN-N011`, `KN-S001`, `KN-S002`, `KN-S003`, `KN-S004` and 36 more
+- Rules that are evidence (49), of which the sentences above name 5: `KN-C006`, `KN-C013`, `KN-C014`, `KN-C015`, `KN-N005`, `KN-N009`, `KN-N010`, `KN-N011`, `KN-S001`, `KN-S002`, `KN-S003`, `KN-S004` and 37 more
 
 | Rule named above | Its own title, so the sentence can be checked against it |
 |---|---|
@@ -157,6 +157,43 @@ One line each on what the evidence shows and, more importantly, what it does not
 | `KN-N014` | Admin network policy the cluster's CNI does not enforce |
 | `KN-S016` | Binding to cluster-admin |
 
+### KSI-MLA-LET — Logging Event Types (Monitoring, Logging, and Auditing)
+
+- **Shows:** whether the cluster is configured to record API requests at all, and whether a `customRules` entry quietly exempts a group from being recorded (KN-S035). That is the event-type question this indicator asks, read from `spec.audit` on the OpenShift `APIServer` singleton -- configuration, never an audit event and never anything about a person.
+- **Does not show:** whether the events the profile selects are the events this system needs, and nothing at all off OpenShift: upstream Kubernetes keeps its audit policy in a file on the control-plane host, which no read-only client can reach. A healthy profile is evidence that logging is on, not that the right things are logged.
+- kube-noob controls: AU-12, AU-2
+- Rules that are evidence (1), of which the sentences above name 1: `KN-S035`
+
+| Rule named above | Its own title, so the sentence can be checked against it |
+|---|---|
+| `KN-S035` | Cluster audit logging is turned off, for everyone or for one group |
+
+### KSI-MLA-OSM — Operating SIEM Capability (Monitoring, Logging, and Auditing)
+
+> **These rules reach this indicator only through a shared control.** Read the row as a warning, not as evidence.
+
+- **Shows:** nothing about a SIEM. This indicator is about operating a centralised, tamper-resistant logging capability, and what reaches it from kube-noob is one rule about whether the API server records requests (KN-S035) -- which both sides happen to call `au-2`.
+- **Does not show:** the subject. Whether logs are forwarded anywhere, whether the destination is tamper-resistant, whether retention holds, whether the pipeline is healthy. All of it needs credentials for a system kube-noob has none for, and holds none by design.
+- kube-noob controls: AU-2
+- Rules that are evidence (1), of which the sentences above name 1: `KN-S035`
+
+| Rule named above | Its own title, so the sentence can be checked against it |
+|---|---|
+| `KN-S035` | Cluster audit logging is turned off, for everyone or for one group |
+
+### KSI-MLA-RVL — Reviewing Logs (Monitoring, Logging, and Auditing)
+
+> **These rules reach this indicator only through a shared control.** Read the row as a warning, not as evidence.
+
+- **Shows:** nothing about review. The one rule that reaches this indicator (KN-S035) says whether requests are recorded; this indicator asks whether somebody looks at them.
+- **Does not show:** any human activity. Who reviewed, when, what they found, what they escalated. A configuration scanner cannot produce evidence of an organisation's practice, and a crosswalk that implied otherwise would be this file's own failure mode.
+- kube-noob controls: AU-2
+- Rules that are evidence (1), of which the sentences above name 1: `KN-S035`
+
+| Rule named above | Its own title, so the sentence can be checked against it |
+|---|---|
+| `KN-S035` | Cluster audit logging is turned off, for everyone or for one group |
+
 ### KSI-RPL-ABO — Aligning Backups with Objectives (Recovery Planning)
 
 > **These rules reach this indicator only through a shared control.** Read the row as a warning, not as evidence.
@@ -196,7 +233,7 @@ One line each on what the evidence shows and, more importantly, what it does not
 - **Shows:** the settings most often changed by hand, through `cm-2` and `cm-6`: a mutable image tag (KN-S012), a replica count fighting an HPA (KN-C014), a request above its limit (KN-C006), a container that may run as root (KN-S003), no seccomp profile (KN-S008), and ReadWriteMany asked of a StorageClass that only offers ReadWriteOnce (KN-ST001).
 - **Does not show:** drift, and whether automation made the change. kube-noob does measure drift -- `posture diff` names every object whose configuration changed between two snapshots and reports standing per control -- but that output does not feed this view, so nothing in this row is evidence of drift over time. It is one audit of one bundle, like every other row.
 - kube-noob controls: CM-2, CM-6
-- Rules that are evidence (32), of which the sentences above name 6: `KN-C006`, `KN-C013`, `KN-C014`, `KN-C015`, `KN-N010`, `KN-S003`, `KN-S004`, `KN-S008`, `KN-S012`, `KN-S032`, `KN-ST001`, `KN-ST002` and 20 more
+- Rules that are evidence (33), of which the sentences above name 6: `KN-C006`, `KN-C013`, `KN-C014`, `KN-C015`, `KN-N010`, `KN-S003`, `KN-S004`, `KN-S008`, `KN-S012`, `KN-S032`, `KN-S036`, `KN-ST001` and 21 more
 
 | Rule named above | Its own title, so the sentence can be checked against it |
 |---|---|
@@ -228,7 +265,7 @@ One line each on what the evidence shows and, more importantly, what it does not
 - **Shows:** the integrity controls the bundle declares, through `si-7`: an image referenced by a mutable tag rather than a digest (KN-S012), a writable root filesystem (KN-S007), and an admission webhook whose failure policy lets unchecked objects through (KN-S030).
 - **Does not show:** whether any signature verifies. kube-noob fetches no image, no signature and no attestation, so a digest-pinned image is evidence of intent and not of a validated artefact.
 - kube-noob controls: SI-7
-- Rules that are evidence (3), of which the sentences above name 3: `KN-S007`, `KN-S012`, `KN-S030`
+- Rules that are evidence (4), of which the sentences above name 3: `KN-S007`, `KN-S012`, `KN-S030`, `KN-S036`
 
 | Rule named above | Its own title, so the sentence can be checked against it |
 |---|---|
@@ -241,7 +278,7 @@ One line each on what the evidence shows and, more importantly, what it does not
 | Indicator | Family | Name | kube-noob controls | Varies by class |
 |---|---|---|---|---|
 | KSI-CED-RAT | CED | Reviewing All Training | — | no |
-| KSI-CMT-LMC | CMT | Logging Changes | CM-3(2), CM-6 | no |
+| KSI-CMT-LMC | CMT | Logging Changes | AU-2, CM-3(2), CM-6 | no |
 | KSI-CMT-RMV | CMT | Redeploying vs Modifying | CM-2, CM-6, CM-7 | no |
 | KSI-CMT-RVP | CMT | Reviewing Change Procedures | CM-3(2) | no |
 | KSI-CMT-VTD | CMT | Validating Throughout Deployment | CM-3(2), SI-2 | no |
@@ -264,9 +301,9 @@ One line each on what the evidence shows and, more importantly, what it does not
 | KSI-INR-RPI | INR | Reviewing Past Incidents | — | no |
 | KSI-MLA-ALA | MLA | Authorizing Log Access | — | b, c |
 | KSI-MLA-EVC | MLA | Evaluating Configurations | CM-2, CM-6 | no |
-| KSI-MLA-LET | MLA | Logging Event Types | — | no |
-| KSI-MLA-OSM | MLA | Operating SIEM Capability | — | no |
-| KSI-MLA-RVL | MLA | Reviewing Logs | — | no |
+| KSI-MLA-LET | MLA | Logging Event Types | AU-12, AU-2 | no |
+| KSI-MLA-OSM | MLA | Operating SIEM Capability | AU-2 | no |
+| KSI-MLA-RVL | MLA | Reviewing Logs | AU-2 | no |
 | KSI-PIY-GIV | PIY | Generating Inventories | — | no |
 | KSI-PIY-RES | PIY | Reviewing Executive Support | — | no |
 | KSI-PIY-RIS | PIY | Reviewing Investments in Security | AC-5 | no |

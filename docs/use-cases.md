@@ -68,8 +68,8 @@ kube-noob --format json audit -f k8s/ --platform openshift --compact
 
 Each rule's constant fields -- title, severity, remediation, citations, controls and the rest -- are collected
 once into a `ruleInfo` map keyed by rule id instead of being repeated on every finding that rule produced. On
-this repository's `examples/` directory that is 115 findings over 21 rules, and the JSON goes from 141 349 to
-69 936 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
+this repository's `examples/` directory that is 115 findings over 21 rules, and the JSON goes from 145 957 to
+74 544 bytes with nothing dropped: `kube_noob.audit.compact.expand_report` turns it back into the flat report
 exactly. The MCP and HTTP tool takes the same thing as `compact: true`, off by default so the flat shape stays
 what it was. The exit code is the audit's either way, so a gate reads the same verdict with the flag as without.
 
@@ -187,6 +187,22 @@ oc describe pod web-7d9c6b9f5-x2k8p -n shop | kube-noob diagnose --platform open
 
 `bundle` writes a redacted, read-only evidence pack (`bundle.md` and `bundle.json`) that you can attach to a ticket.
 Once a fix is confirmed, save it with `kube-noob learning note`. The team finds it next time as `[kn:local-N#0]`.
+
+### Ask in words, and it names the command
+
+`insight` recognises what you paste. Ask it a question instead and it says which command answers it, because the
+answer to "which of our exposed services could reach a node?" is `posture scan`, not a list of `kubectl describe`
+steps. The mapping is keyword-matched and deterministic -- there is no model making the choice -- and it covers
+attack paths, pod-to-pod reachability, upgrade risks, Kyverno migration, FedRAMP indicators, exceptions, rule
+explanations, the RHACS comparison, CVE ranking, the CI gate, drift, Helm failures, builds, must-gathers, threat
+models, the learning tracks, policy generation, fixes and the audit itself. A pasted error or manifest gets none
+of it: those are diagnosed, not routed.
+
+```bash
+kube-noob insight 'which of our exposed services could reach a node?'
+kube-noob insight 'what could break if I upgrade OpenShift from 4.16 to 4.18?'
+kube-noob insight 'how do I suppress KN-S010 for one namespace until next quarter?'
+```
 
 ### Does it answer our problems? Test it on them
 
@@ -673,6 +689,20 @@ drawn their conclusion. `audited: false`, `assumed`, `not checked that far`, a f
 withheld control standing, and the shows/does-not-show pair all survive into the page -- an HTML report that drops
 them would be the same defect in a third format.
 
+The page is laid out as what it is: an evidence document, not a dashboard. It opens with the verdict as a sentence, the three numbers that decide what the reader does next -- findings, how much reached no verdict, and what was evaluated and clean -- and a provenance block stating the scope those numbers are true of. Section 1 is the limits of the examination, numbered and ahead of anything the run found, because a rule that was never evaluated is indistinguishable from a clean one in any table that does not say so. Sections are numbered so a reviewer can cite one, every finding and control row has an id so a colleague can be sent to a single line, and controls with nothing to report fold away on screen and open again in print, so the PDF in an audit package is never a subset of the page.
+
+The page carries charts, and they are drawn rather than plotted: inline SVG, still no script and still nothing
+fetched. A gate report gets findings by severity; a posture report gets open findings per control, the five
+standing buckets as a stacked bar, and open against excepted findings across the snapshots still kept. Three rules
+decide what may be drawn. A chart shows only what a table on the same page shows, so every bar has a row under it
+to check. Every bar is labelled with its name and its count, so a reader in print, in forced colours or with no
+colour vision at all loses nothing -- the palettes were put through a colour-vision validator in both light and
+dark rather than eyeballed. And a count that was withheld is not drawn at all: the trend is withheld entirely when
+any snapshot in the series could not read every resource, when a report written before kube-noob recorded that
+cannot say, when a kept file could not be read back, or when the folder mixes a `-f` run with a `--live` run --
+in every case with the reason and the per-snapshot counts in its place, because a line through a floor publishes
+a fall in findings that may only be a fall in what kube-noob was allowed to see.
+
 Everything from a manifest is escaped before it is written. Resource names, messages and paths come from someone
 else's cluster, and this is the one place in the product where that text becomes a document another person opens:
 a Deployment named `<script>alert(1)</script>` appears as text, and a test asserts both that it is shown and that
@@ -696,7 +726,7 @@ Read the two lines under a curated indicator before quoting the first one, and r
 them. `KSI-CNA-RNT` (Restricting Network Traffic) is evidence that policies exist, not that the cluster enforces
 them; `KSI-SVC-VRI` (Validating Resource Integrity) is evidence that images are pinned by digest, not that any
 signature verifies; `KSI-RPL-ABO` (Aligning Backups with Objectives) is about surviving the loss of a pod, and says
-nothing about backups at all. 18 of the 46 indicators have no kube-noob rule behind them and say so instead of
+nothing about backups at all. 15 of the 46 indicators have no kube-noob rule behind them and say so instead of
 showing a zero.
 
 Two rows carry a warning rather than evidence, and they are the most useful thing in the page. An indicator and a
@@ -711,9 +741,17 @@ not read, and carries the audit's own assumptions into the page. A finding whose
 schema error, or a rule whose only control nothing cites -- is listed under `findingsNotMapped` rather than
 dropped, and a filter that hides rows says how many.
 
+It is a projection of one audit, not a second audit, so the numbers reconcile: it takes the same
+`--exceptions` list and the same `--min-severity` as `audit`, with the same defaults. An excepted finding is
+counted under `excepted` on the indicators it reaches rather than as an open finding -- an exception is a
+reviewed, owned, expiring decision about a control, and it reads the same way on both pages -- and a finding the
+threshold removed is reported as `withheld` rather than counted clean. An expired or refused entry fails the
+gate here too, with exit 1.
+
 ```bash
 kube-noob ksi
 kube-noob ksi -f k8s/ --evidenced-only
+kube-noob ksi -f k8s/ --exceptions kube-noob-exceptions.yaml --format json
 kube-noob ksi --control AC-6 --format json
 kube-noob ksi --indicator KSI-IAM-JIT
 ```
@@ -772,10 +810,64 @@ above one namespace), lists every step with the field that proves it, and ends w
 Secrets (Secret objects in a bundle are dropped unread). `--fail-above` makes it a CI gate. NetworkPolicies on the
 entry edge are not applied: check a path with `policy reach`.
 
+A workload whose pod spec is embedded in a CRD is scored per component, named `Kind/namespace/name[component]`: a
+Ray head and each worker group separately, a KServe predictor, transformer and explainer separately. Where the
+operator generates the pod's labels rather than the manifest carrying them, the scan says so in `limitations`
+naming that component -- its node and API capabilities are scored, but no exposure edge can be traced to it from
+that input, which is not the same as it being unexposed.
+
 ```bash
 kube-noob posture scan -f k8s/
 kube-noob posture scan -f k8s/ --fail-above 17
 kube-noob --cluster-enabled posture scan --live -n shop -n payments
+```
+
+### AI and GPU workloads: the pods an operator runs for you
+
+A KServe `InferenceService` or a KubeRay `RayCluster`, `RayService` or `RayJob` does not keep its pod spec at
+`spec.template.spec`. It carries one per component -- `spec.predictor` (and its `workerSpec` for multi-node
+inference), `spec.transformer`, `spec.explainer` and `spec.canary[].predictor` for KServe; `headGroupSpec.template`
+and every entry of `workerGroupSpecs` for Ray, under `rayClusterConfig` in a RayService and `rayClusterSpec` in a
+RayJob, plus that job's `submitterPodTemplate` -- and those are the pods that actually run. Every pod-level rule in
+the catalogue reads them: a privileged predictor, a Ray worker running as root, a `hostPath` mount, a mutable
+image tag, a mounted ServiceAccount token, a missing memory limit on something holding a model in RAM. Findings
+name the component, so `spec.workerGroupSpecs.0.template.spec.containers.0` tells you which group to change.
+
+A predictor written the usual way is read the usual way. `model: {modelFormat: {name: sklearn}, storageUri: ...}`
+is a container, not a settings block -- as are the ten framework shorthands it replaced (`sklearn`, `xgboost`,
+`tensorflow`, `pytorch`, `triton`, `onnx`, `huggingface`, `pmml`, `lightgbm`, `paddle`) and the explainer's `art`
+-- so a privileged `model:` scores exactly what the same container in a `containers:` list would. KubeRay's
+`autoscalerOptions` is read as what it is too: a container the operator injects into the head pod.
+
+Two things these objects cannot tell you from a manifest, and both are said rather than assumed. An operator
+merges extra labels onto the pods and creates the Services they are served through, so where no exposure edge can
+be proven `posture scan` names the component and lists what it can do instead of leaving it looking unexposed; and
+a Service or NetworkPolicy selector that does not match the labels the manifest shows makes the wiring rules
+decline, because the label it asks for may be one the operator adds -- telling you a working NetworkPolicy
+protects nothing would be worse than saying nothing.
+
+It reads these four kinds in full, each at paths taken from the published CRD schema, and it checks the API group
+before reading: a CRD of the same name from somewhere else is left alone, and the report says which group it
+declared and that its pods were not audited rather than going quiet.
+
+The admission webhook runs the same rules, so a privileged predictor or a root Ray head is refused there too:
+the chart asks the API server to send `serving.kserve.io` InferenceServices and `ray.io` RayClusters, RayJobs
+and RayServices, whether or not KServe or KubeRay is installed (a webhook rule for a resource the cluster does
+not serve never matches). The generated ValidatingAdmissionPolicies and Kyverno policies do **not** cover these
+kinds -- their CEL would have to index each CRD's own pod-spec paths -- and the generated file says so in its
+header rather than leaving "the policies refuse exactly what the audit reports" to be read as covering them.
+
+**Any other workload CRD is named, not passed.** There are far more of them than four -- Argo Rollouts, Knative
+Services, Kubeflow Notebooks, the training-operator jobs, Seldon, Volcano, JobSet, Flink, ECK -- and a guessed
+path would produce a confident wrong finding, so kube-noob does not guess. It recognises the shape instead: an
+object of a kind it has no reader for that contains a pod spec is reported as one it did not audit, with the
+object and the path, and `posture scan` records the same in `notRead`. You get a gap you can see rather than a
+clean report you cannot trust, and a kind worth reading properly can be added with its published schema.
+
+```bash
+kube-noob audit -f serving/            # the same 93 rules, now reaching the components
+kube-noob posture scan -f serving/     # per-component attack paths
+kube-noob --cluster-enabled posture scan --live -n model-serving
 ```
 
 ### Which vulnerabilities matter here? Scanner output, VEX and reachability
@@ -931,6 +1023,39 @@ kube-noob audit -f k8s/ --exceptions examples/kube-noob-exceptions.yaml
 kube-noob policy generate --mode enforce --exceptions examples/kube-noob-exceptions.yaml -o policies.yaml
 ```
 
+### What this cluster's audit configuration can and cannot record
+
+Pass the cluster's `APIServer` object (it is in a must-gather, and `oc get apiserver cluster -o yaml` prints it)
+and the audit adds a detection-coverage block: which categories of API activity the settings record -- who did
+what to which object, what a create or update contained, what a get or list returned, an OAuth token grant,
+activity on Event objects -- and which they do not.
+
+Every row is read from the manifests `cluster-kube-apiserver-operator` generates the real policy from
+(openshift/library-go), not from the API type's summary comment, and the block names that source so a reader
+can check it. The difference matters: the comment says events are never logged, and the rule that dropped them
+was removed in OpenShift 4.18 -- and one release later on a hosted control plane, because HyperShift generates
+that policy from its own vendored copy, so ROSA HCP records Event activity from 4.19 and not from 4.18. That
+row is therefore decided by `--platform` and `--version` together, and reported as undecidable without a
+version; telling a reader that a deleted Event left no trace on a cluster whose audit log has it would be the
+worst kind of wrong here. Two other rows the comment does not mention: no profile records the body of a Secret, a
+ServiceAccount token, a Route, a token review or an OAuthClient, and nothing is recorded for the discovery and
+health endpoints. A third is version-dependent in the other direction: the `machineconfiguration.openshift.io`
+group's bodies ARE recorded under the body profiles before 4.18 and not from 4.18, and because the manifest
+spells that rule's key `resource` rather than `resources` -- which the loader drops -- it covers every resource
+of the group rather than the two it names. A `customRules` entry is reported per group with its precedence, and the
+cluster-wide sentence says which groups it does not describe, because the first matching entry wins.
+
+It also lists what no reading of that object can establish -- whether the records leave the cluster, how long
+they are kept, whether anyone reads them, and anything that is not an API request to the OpenShift-provided API
+servers. That is the honest half of a coverage claim, and the reason this is a projection of one setting rather
+than a family of checks about a SIEM kube-noob has no credentials for.
+
+```bash
+oc get apiserver cluster -o yaml > apiserver.yaml
+kube-noob audit -f apiserver.yaml --platform openshift --version 4.20
+kube-noob audit -f apiserver.yaml --platform openshift --version 4.20 --format json | jq .detectionCoverage
+```
+
 ### Enforce the audit rules at admission
 
 `policy generate` turns every audit rule that can be decided from one object into an admission policy: a
@@ -949,6 +1074,15 @@ other objects (a Service and its pods, a claim and its StorageClass) or that the
 listed in the file header with the reason. Platform namespaces (`kube-*`, and `openshift-*` on OpenShift) and the
 platform's operators are exempt; calibrate rules (probes, resources, replicas) skip objects a controller owns, so a
 rollout is never blocked by its own ReplicaSets.
+
+One rule is generated only when you have configured it: `KN-S036` refuses an image from a registry outside
+`audit.allowedRegistries`, and with no list there is nothing to enforce, so the file header says so rather than
+emitting a policy that admits everything. Set the list in the configuration file (`quay.io`, or
+`quay.io/my-org` to narrow it to one organisation) and it generates for both engines. Two kinds of list are
+refused rather than compiled, again with the reason in the header: one naming `docker.io`, because deciding
+whether `nginx` is a Docker Hub image needs string handling the API server's CEL does not have, and one whose
+host has no dot, port or `localhost`, because `myregistry/app` is a Docker Hub image and the policy would admit
+what `kube-noob audit` reports.
 
 ```bash
 kube-noob policy generate --platform openshift --version 4.20 --mode audit -o kube-noob-policies.yaml
@@ -983,9 +1117,23 @@ namespace (a PodDisruptionBudget for a Deployment, a NetworkPolicy, a claim's St
 `admission.lookups`, which lists those kinds read-only in the background, and can never be enforced. Exceptions use
 the same ExceptionList as `kube-noob audit --exceptions`.
 
+`kubectl debug` is checked too, which almost nothing checks: an ephemeral container is added through the
+`pods/ephemeralcontainers` subresource, a different admission request from the Pod's own creation. The webhook
+evaluates that one subresource and reports only what the request adds, so a privileged debug container is
+refused where the rule is enforced while a Pod that already breaks that rule can still be debugged. The
+generated policies are deliberately not extended to it: they have no before-and-after comparison, so one would
+refuse every debug of an already-failing Pod.
+
+One rule needs configuring before the webhook can say anything about it. `KN-S036` compares every image against
+`audit.allowedRegistries`, and with no list it declines, so it warns about nothing; set the list and the webhook,
+`kube-noob audit` and `policy generate` all read the same one and give the same verdict. Enforcing it without a
+list is refused at install and at startup rather than denying nothing, and an entry that could never match an
+image -- `MyRegistry`, or a host with no dot, port or `localhost` -- is refused by the chart's values schema and
+when the configuration loads.
+
 ```bash
 helm upgrade --install kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob -n kube-noob --create-namespace \
-  --set admission.enabled=true
+  --set admission.enabled=true --set "audit.allowedRegistries={quay.io/my-org}"
 helm upgrade kube-noob oci://ghcr.io/aashishmahajan/charts/kube-noob -n kube-noob --reuse-values \
   --set "admission.enforce={KN-S001,KN-S009}"
 kube-noob admission review -f review.json --enforce KN-S001

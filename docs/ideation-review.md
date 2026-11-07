@@ -1,0 +1,176 @@
+# External ideation, reviewed
+
+Three external AI reviews of kube-noob's FedRAMP KSI report arrived on 2026-11-05. Between them they proposed
+about 250 checks, a dozen modules, two architectures and five "if I could only build five things" lists. This
+file is the durable record of what was in them and what this project decided, so the thinking is not lost in a
+chat log and nobody re-litigates it from memory.
+
+| Source | sha256 (first 16) | Shape |
+|---|---|---|
+| Review A | `2c07edf49120ed01` | 12 control families, ~120 numbered checks (`IAM-001`...), a five-engine architecture, an evidence-contract field list |
+| Review B | `8365003f7cc3cd30` | A 6-phase roadmap, 8 rule families with detection logic and test cases (`KN-WRK-001`...), an evidence JSON schema, a KSI mapping registry, a 12-gate test matrix |
+| Review C | `a6f58a188fd6c762` | 12 security modules, 8 "standout" features, a FedRAMP intelligence layer, a remediation engine, a 3-score risk model, 10 extra ideas |
+
+The reviews are not quoted here. Every proposal below is restated in this project's own words, and every verdict
+was checked against the code on 2026-11-06 — the 92-rule catalogue, the 108 commands, the 48 MCP tools — not
+recalled.
+
+## What they got right, and what that is worth
+
+All three independently identified the same architectural point, and all three put it first: **a shared NIST
+control ID must never imply that a rule proves a KSI's subject**. Two of them named `onSubject` as the field to
+make mandatory. That is [G219](guidance.md), shipped before the reviews were written, and the reviews were
+reading the report it produces — so this is confirmation rather than discovery. It is still worth recording,
+because three independent readers reaching for the same safeguard is the strongest available evidence that the
+safeguard is the right one and should never be quietly relaxed.
+
+They also converged on a second point this project had already made load-bearing: **an unknown must not read as
+a pass**. Review B wrote test cases for it ("a partial manifest bundle does not produce a namespace-wide pass",
+"missing seccomp on a node with unknown support returns Not evaluated, not a false pass"); Review C proposed a
+six-state verdict model; Review A asked for an `Evaluation status` field. kube-noob has three-valued verdicts,
+`cannot_decide`, `partial_bundle`, `notEvaluatedRules` and `notReadBeyond`. Same conclusion, arrived at
+independently.
+
+Where the reviews are weakest is uniform and predictable: **they price every proposal at the cost of naming it**.
+Review A's 120 checks include MFA enforcement, JIT access expiry, crypto-mining detection, log retention
+verification, restore-test evidence and training-effectiveness review. Each is a real control. None of them can
+be decided by a tool that holds no credential for an identity provider, a SIEM, a backup system or an HR system,
+and Review A says so itself in three separate asides — then counts them in the total anyway. A catalogue of 250
+checks of which 60 can answer is not five times better than a catalogue of 92 that all can; it is the same
+product with 190 rows that say "not evaluated", which is the coverage theatre [G226](guidance.md) exists to
+refuse.
+
+## Verdicts
+
+Verdict key: **Shipped** — in the product today. **Shipped differently** — the need is met, by a different shape,
+and the difference is the point. **Taken** — accepted into the backlog with an id. **Refused** — a deliberate no,
+with the reason. **Blocked** — wanted, but gated on something this project does not have.
+
+### Already shipped before the reviews were written
+
+| Proposal | Where it lives |
+|---|---|
+| `onSubject` as a mandatory mapping field; never derive a KSI from a shared NIST id (all three) | `audit/fedramp.py`, G219, G221, G226 |
+| Six-state / explicit-unknown verdicts; partial bundles must not pass (A, B, C) | three-valued verdicts, `cannot_decide`, `partial_bundle`, `notEvaluatedRules` |
+| Versioned, hash-pinned FedRAMP ruleset rather than a copied KSI table (B) | `vendor/fedramp/fedramp-ksi.json`, rules `2026.11.02.01`, regenerated and `--check`ed by `scripts/fedramp_ksi.py` |
+| Attack-path analysis, exposure × blast radius, every step with its evidence field (B, C — C called it the strongest differentiator) | `posture scan`, `attack_paths.py` |
+| Privileged containers, host namespaces, hostPath, capabilities, seccomp, resource limits, pod-security enforcement (B's family A) | `KN-S001`, `KN-S009`, `KN-S010`, `KN-S005`/`KN-S006`, `KN-S008`, `KN-C004`/`KN-C005`, `KN-S032` |
+| Wildcard RBAC, cluster-admin bindings, escalate/bind/impersonate, token automount, legacy token Secrets (B's family B) | `KN-S015`, `KN-S016`, `KN-S017`, `KN-S014`, `KN-S027` |
+| Namespace without NetworkPolicy, allow-all ingress, a policy selecting no pods, external exposure, unenforced CNI tier (B's family C) | `KN-N001`, `KN-N007`, `KN-N012`, `KN-N004`/`KN-N008`, `KN-N014` |
+| Credentials in env and in ConfigMaps, secret material in manifests (B's family D) | `KN-S013`, `KN-S026`, `KN-S018` |
+| Kubernetes audit logging not configured, and event types absent for one group (B's `KN-LOG-001`/`002`, A's `AUD-001`/`003`) | `KN-S035`, G226 — the one logging question a credential-free tool can decide |
+| Mutable image tags / digest pinning (A, B, C) | `KN-S012` |
+| CVEs ranked by reachability, with VEX applied rather than raw CVSS (A, C) | `vuln`, Red Hat VEX, VUL1 |
+| GitOps / live drift against an approved state (A, B, C) | `drift.py`, `posture snapshot` and `posture diff` |
+| Exception management with owner, reason, expiry and scope (C) | `exceptions check` — refuses an entry with no owner, an unknown rule, too wide a scope, or an expiry over 400 days |
+| Pre-deploy guardrails on manifests and Helm charts (C) | `gate`, `helm-audit`, SARIF, the GitHub action, pre-commit hooks, a Tekton task |
+| Ticket creation from findings (C) | `ticket` |
+| Evidence export for an auditor (B, C) | OSCAL export, `--html`, `ksi` |
+| Multi-framework mapping without pretending similar ids mean identical requirements (C) | NIST SP 800-53 Rev. 5 + FedRAMP 20x KSI, with the `onSubject` discipline between them; Docker CIS benchmark items cited on the rules that match them |
+| Historical posture and control-regression detection (C's idea 4) | `posture snapshot` / `posture diff`, per-control standing in `drift.py` |
+
+### Shipped differently, and the difference is the point
+
+| Proposal | What kube-noob does instead, and why |
+|---|---|
+| An evidence JSON schema with ~14 provenance fields per finding, an evidence store with integrity hashes, and a reproducible six-months-later answer (B §4, C's evidence vault) | Findings carry the rule, the object ref, the exact field path, the value, the controls, the severity and the platform/version the verdict was made under; the reproducibility story is the **snapshot**, not a vault — `posture snapshot` writes an owner-only snapshot with its own checksum manifest, and the audit is deterministic on the same bytes. A per-finding integrity hash over evidence the tool itself just read is ceremony: it proves the tool did not corrupt its own output, not that the cluster was in that state. Worth revisiting only when someone needs to hand a third party evidence they cannot re-collect. |
+| Separate `rules/` tree with JSON/YAML rule definitions and a JSON Schema per rule (B §9) | Rules are Python with a declarative registry and a `tests/fixtures/rules/<id>.yaml` good/bad pair each, which AGENTS.md requires before a rule merges. A YAML rule DSL buys third-party rule authoring, which nobody has asked for, and costs the type checker — the thing that catches a rule bug before any test runs (G220, G223). |
+| "Three independent scores: security risk, compliance readiness, operational resilience" (C §5) | Attack paths score exposure × blast radius; the KSI view counts evidence and gaps; reliability and availability rules are a separate category. Deliberately **not** composed into three headline numbers, for the same reason the KSI page shows no percentage: a single number invites the comparison it cannot support. |
+| A dashboard with asset, finding, coverage and unevaluated tiles (B §8, C) | `--html` ships a self-contained report with the caveats rendered above the findings (U1). A live dashboard is U2 and is worth nothing before N11's `/metrics` exists. |
+| Remediation: explain / prepare a patch / apply through a controlled integration (C §4) | `fix` and `generate` produce the manifest change and the admission policy; **the third option is refused** — see below. |
+| Installed-operator and resource inventory (A, B's `KN-SUP-006`, C's module A) | Partly there: the must-gather analyser parses ClusterServiceVersions and two allowlist entries exist. The full inventory is moat item **E2**, already next in that queue. An "authoritative real-time inventory" (`KSI-PIY-GIV`) from a read-only scanner is a narrower claim than the reviews imply, and E2 will say which. |
+
+### Taken into the backlog
+
+These are the proposals that survived: a real gap, decidable from evidence kube-noob can actually reach, and not
+already queued. Each gets an id in [roadmap.md](roadmap.md).
+
+| id | What, and why it survived |
+|---|---|
+| **R1** | ~~A rule for excessive RBAC access to Secret objects~~ — **the claim behind this item was wrong, and the correction is the item.** It said "there is no catalogue rule that reports it on its own". `KN-S017` has reported it all along, as one branch of the escalation-paths rule, which is what this file got for reading the three reviews' gap lists instead of the code. What the reviews actually asked for was finer than a new rule and the catalogue was not doing it: `list` returns the Secrets' **contents**, so one grant hands over every value in scope, while a `get` hands over the ones whose names the holder already knows — and both were reported identically, a namespaced `list` at LOW. Fixed in `KN-S017` (G240), along with a false positive it turns out to have had: a `get` narrowed by `resourceNames` is the least-privilege pattern upstream recommends, and the rule was calling it an escalation path. |
+| **R2** | **Certificate expiry from TLS Secrets and Routes already in the bundle.** All three reviews ask for it. Nothing in the code reads a `notAfter` today — verified against the code this time, not the reviews' gap lists. Parsing the public certificate needs no credential, no network and no private key. It does need an X.509 parser, and `cryptography` is in `requirements.lock` only **transitively**: building a rule on an undeclared dependency is the G228 defect, and declaring one is a decision about every install, the air-gap bundle and the plugin's own lock. **Blocked on the maintainer's call**, recorded rather than guessed. |
+| **R3** | **Registry and publisher allowlist as a configurable rule.** Review A (`IMG-006`), B (`KN-SUP-005`) and C all name it; nothing implements it. It is decidable from the image reference plus a policy the operator supplies, and it fails honestly when no policy is configured (not evaluated, not clean). |
+| **R4** | ~~A detection-coverage statement for the logging family~~ — **shipped** (G244). Review C's "detection coverage map", from `KN-S035`'s reading of the audit configuration: which categories of API activity this cluster's own settings can and cannot record, per group where a `customRules` entry overrides the top level. Every row is the field documentation of `Audit` in openshift/api rather than advice, an unrecognised profile is reported as undecidable instead of empty, and the block carries what no reading of that object can establish — forwarding, retention, review, and anything that is not an API request. One honest answer in place of eleven unanswerable AUD-* checks. |
+| **R5** | **Operator Subscription and add-on vulnerability surface.** Review A's `RA-010` ("vulnerable third-party operators") is reachable once E2's operator inventory exists, by matching installed CSV versions against the known-issue corpus the product already ships. Gated on E2, recorded here so it is not rediscovered. |
+
+Not one of the five is a new engine, an integration or a credential. That is the test they had to pass.
+
+### Refused, with the reason
+
+Grouped by the reason, because the reasons repeat and the grouping is the argument.
+
+**It needs a credential this product has promised not to hold.** MFA enforcement, IdP account lifecycle,
+joiner/mover/leaver evidence, dormant and orphaned accounts, OIDC issuer validation against the live issuer, JIT
+access expiry, authentication-failure monitoring (A's `IAM-001`, `004`-`012`; B's `KN-IAM-007`, `KN-ORG-001`;
+C's module C). Log forwarding health, SIEM ingestion timestamps, log retention and tamper-protection, alert-rule
+execution, log-review records (A's `AUD-004`-`AUD-012`; B's `KN-LOG-003`-`008`; C's module D). Secret rotation
+and revocation records, KMS key lifecycle (A's `SEC-003`, `005`, `008`, `011`; B's `KN-SEC-004`, `008`).
+Backup completion, restore tests, RPO/RTO, immutability (A's `BCP-001`-`012`; B's family G; C's module I).
+Training effectiveness, incident exercises, security-investment review (B's family H). Cloud IAM, security
+groups, bucket exposure, disk encryption, metadata-service reachability (A §10; C's module J). CI/CD approvals,
+branch protection, pipeline identity, separation of duties (A §11; C's module K).
+
+Every one of these is a legitimate control and kube-noob reports that it cannot evaluate it. The reviews propose
+closing the gap with read-only integrations to an IdP, a SIEM, a cloud provider, a secret manager, a backup
+system, a Git provider and a training system. That is between seven and twelve credentialed connectors, each with
+a permission model, a token lifecycle and a blast radius — in a product whose entire distribution argument is
+that it runs offline in a disconnected cluster and holds nothing. The honest gap is cheaper than the connector,
+and it is the reason a FedRAMP assessor can run this at all.
+
+**It needs runtime telemetry, and a static scanner must never claim to have it.** Shell execution, reverse
+shells, crypto-mining, syscall anomalies, container-escape indicators, behavioural baselines (A's
+`RUN-001`-`012`; C's module E). Both reviews say plainly that a manifest scanner cannot establish these, and
+both then list them as checks to build. kube-noob's own rules are the inverse: they report the *configuration
+that makes an escape possible*, which is decidable from the manifest, and say nothing about what happened. A
+Falco or Tetragon integration is a different product with a different trust model; the `insight` router already
+recognises Falco output when a person pastes it, which is the correct depth for a tool with no agent.
+
+**It is a write to a customer's cluster.** Review C's remediation option 3 ("apply a fix through a controlled
+integration"), auto-created pull requests, assignment and post-deploy verification. Review B states the rule
+itself better than this file could: no rule may create, patch, delete, restart or exec, and any write-capable
+capability must be a separately permissioned product rather than hidden in the scanner. kube-noob generates the
+patch and the policy and stops. The safety contract (`scripts/safety_contract.py`) proves it, per release.
+
+**It is an organisational artifact, and a tool that reports on it is making it up.** Data-classification
+discovery, PII detection, data-removal completion, unapproved data exports, deletion requests fulfilled (A §12;
+B's `KN-DAT-001`/`002`; C's module L). `KSI-SVC-RUD` is a workflow with human sign-off. A scanner can report
+that a PersistentVolumeClaim was deleted. It cannot report that data was removed, and the gap between those two
+sentences is the whole control.
+
+**It is a product this project is not.** "An AI-powered Continuous Security Posture, Attack-Path and Compliance
+Evidence Platform" (C §10), a security digital twin, risk prediction, an AI security analyst, multi-tenant
+architecture with its own RBAC and SSO. The product's positioning is **"No AI inside. Works with yours."** — the
+engine is deterministic, which is what makes its output usable as evidence and reproducible in a disconnected
+cluster. An AI analyst inside the tool would invert that. Multi-tenancy, platform SSO and a 3PAO-grade evidence
+platform also need a legal entity and an assessment this project does not have; see
+[the honest ceiling](roadmap.md) and [editions.md](editions.md).
+
+**It renames things that already work.** Review B's proposal to re-namespace the catalogue as `KN-WRK-*`,
+`KN-IAM-*`, `KN-NET-*`, `KN-SEC-*` while preserving the old ids. Review B also says, correctly, "keep the
+existing rule IDs: add new rule families without breaking existing reports" — those two instructions conflict,
+and the existing ids win. `KN-S001` is in published reports, SARIF uploads, exception files, generated Kyverno
+and Gatekeeper policies, the OSCAL export and six people's CI configuration. A prefix is not worth a migration.
+
+**It is already a release blocker here, phrased as a proposal.** Review B's ten acceptance criteria (unique
+versioned rule ids, positive/negative/incomplete tests per rule, evidence provenance per finding, no KSI pass
+from a shared NIST id, no organisational KSI from configuration, redaction, demonstrably read-only, versioned
+mappings, posture separated from compliance readiness) map one-for-one onto rules already enforced by
+`scripts/check.sh`, `scripts/safety_contract.py`, the `tests/fixtures/rules/` requirement in AGENTS.md and
+G219-G226. Recorded as agreement, not as work.
+
+## What the reviews missed
+
+Worth writing down, because it is the measure of what external ideation is and is not good for. None of the three
+reviews found a defect. Between them they proposed about 250 checks and did not identify a single case where the
+existing engine returns a wrong answer. The four red-team passes run on 2026-11-05/06 found 49, and the two that
+mattered most are the kind no catalogue proposal would have reached:
+
+- a rule that skipped its cross-object branch under `partial_bundle` **without declining**, so it counted clean
+  while the report's own caveats said otherwise;
+- pod specs embedded in operator CRDs read as clean by every pod-level rule, because the reader looked only at
+  `spec.template.spec` ([G229](guidance.md)) — a KServe predictor running privileged, as root, with
+  `hostPath: /` produced 14 findings as a Deployment and zero as an `InferenceService`.
+
+Both are the same failure the reviews correctly named in the abstract — an absence reading as a pass — found in
+the place the reviews could not see, which is inside the code. Breadth proposals come from reading the output;
+defects come from attacking the engine. Keep asking for both, and do not mistake one for the other.
