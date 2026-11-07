@@ -338,13 +338,16 @@ jobs:
           # webhook's -- because `kube-noob audit` and the webhook must give one verdict, and an entry that can
           # never match an image, or enforcing the rule with no list at all, must fail at install rather than
           # look like a registry policy while allowing everything through.
-          reg="--set audit.allowedRegistries={quay.io/my-org,registry.example.com:5000}"
-          helm template kn deploy/helm/kube-noob $base "$reg" --show-only templates/configmap.yaml | python -c "
+          # An array, not a string: `"$reg"` made `--set audit.allowedRegistries={...}` ONE argument, so helm
+          # answered `unknown flag: --set audit.allowedRegistries` and this guard could never pass. The brace list
+          # has to stay one argument of its own, so it cannot be word-split like $base either.
+          reg=(--set "audit.allowedRegistries={quay.io/my-org,registry.example.com:5000}")
+          helm template kn deploy/helm/kube-noob $base "${reg[@]}" --show-only templates/configmap.yaml | python -c "
           import sys, yaml
           cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
           assert cfg['audit']['allowedRegistries'] == ['quay.io/my-org', 'registry.example.com:5000'], cfg
           "
-          helm template kn deploy/helm/kube-noob $base "$reg" --set admission.enabled=true \
+          helm template kn deploy/helm/kube-noob $base "${reg[@]}" --set admission.enabled=true \
             --show-only templates/admission.yaml | python -c "
           import sys, yaml
           maps = [d for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind') == 'ConfigMap']
