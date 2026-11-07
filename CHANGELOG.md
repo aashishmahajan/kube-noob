@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-11-07
 
 - **A corpus shard bigger than the bundle allows is written as parts.** `redhat-vex.jsonl` is 2.78 GB, and `db-bundle` refuses a member over 300 MB, so the scheduled db image could not be built. The cap stays. A shard over 250 MB is `<name>.jsonl`, `<name>-2.jsonl`, and so on. A read concatenates them. A later write that fits in one file deletes the parts it no longer uses (G262).
 
