@@ -15,10 +15,12 @@ API removal history and version map. Removed/deprecated Kubernetes APIs relevant
 
 Audit manifests. Full deterministic audit: security, network exposure, storage access modes, reliability and red-team scenarios. Findings carry rule ids, line numbers, fixes, citations and matching RHACS policy names. On a large manifest set pass compact=true: the same report, with each rule's constants hoisted once into ruleInfo instead of repeated on every finding, which is lossless and about a third smaller.
 
+- `cni` (null/string): The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, which Calico did in 3.32 without reporting an error -- is NOT EVALUATED unless you name it, rather than counted clean.
 - `compact` (boolean): Return the same report with each rule's constant fields (title, severity, stage, category, remediation, citations, stackroxPolicies, controls) collected once into a `ruleInfo` map keyed by rule id instead of repeated on every finding. Lossless and about a third smaller on a report where rules fire more than once; the findings keep their order, rule id, resource, line and message. Off by default so the flat shape stays what it was.
 - `exceptions` (null/string): An exception list (YAML, apiVersion kube-noob.io/v1, kind ExceptionList): each entry names a rule, a scope, an owner, a reason and an expiry date. Active entries hide the findings they cover; expired and refused entries are reported and fail the gate.
 - `manifests`* (string): One or more YAML documents (Kubernetes/OpenShift objects).
 - `min_severity` (string): Hide findings below this severity.
+- `partial_bundle` (boolean): Set when these documents are only part of a namespace (one file, a diff, staged changes). Rules that fire because another object is absent -- no NetworkPolicy selects this workload, no PodDisruptionBudget, a StorageClass not declared here -- are then not evaluated, because from a partial bundle they cannot tell a real gap from an object you did not pass. The report says so in its assumptions.
 - `platform` (string): Target platform.
 - `stages` (array)
 - `version` (null/string): Platform version, e.g. '4.22' (OCP) or '1.35'.
@@ -35,6 +37,7 @@ Diagnose a failed build log. Read a failed GitHub Actions, Jenkins, Tekton or Op
 
 Would this traffic be allowed?. Evaluate NetworkPolicies offline: can the source reach the destination on this port? Checks egress from the source and ingress to the destination, names the policy and rule that decide each, says why the other rules did not match, and proposes the smallest NetworkPolicy that would allow it.
 
+- `cni` (null/string): The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Given, it decides whether AdminNetworkPolicy and BaselineAdminNetworkPolicy are enforced at all: Calico ignores both from 3.32 onward, so policies in that tier are reported as inert instead of deciding the answer, and a CNI whose enforcement is undocumented makes the verdict undetermined rather than guessing either way.
 - `default_namespace` (string): For objects without one.
 - `destination`* (string): Where it goes: namespace/name of a workload (namespace/kind/name when names clash), namespace:key=value,... for a set of pod labels, or an IP address / CIDR outside the cluster.
 - `manifests`* (string): The NetworkPolicies and the workloads they apply to (Deployments, Pods ...); add Namespace objects when policies select namespaces by label.
@@ -82,6 +85,21 @@ Explain an audit rule. Rationale, remediation, citations for a rule id.
 Extract signals. Read the canonical names in an error: Alertmanager alert names (webhook payload or text), event and ClusterOperator condition reasons, container reasons, admission rules, components and normalised error templates, plus the alerts its words imply. Returns each signal with where it was found, the catalogue entry (components, playbooks, upstream source) and the playbooks it points at. Read-only and offline.
 
 - `text`* (string): An Alertmanager payload, events, a ClusterOperator, pod status, logs or an error in words.
+
+## fedramp_ksi
+
+FedRAMP 20x KSI evidence. Which FedRAMP 20x Key Security Indicators an audit's findings are evidence for, by inverting the NIST control list each indicator carries in FedRAMP's own consolidated dataset (vendored with its version and hash). Without manifests it returns the crosswalk itself. Every indicator is listed: the ones no kube-noob rule can see carry evidenced=false and no counts, and two carry a warning because their rules reach them only through a shared control and not a shared subject. A mapping is evidence, never a claim of compliance -- an assessment decides whether an indicator is met.
+
+- `cni` (null/string): The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Without it the rule that decides whether an AdminNetworkPolicy is inert cannot decide, and the row says so instead of counting it clean.
+- `control` (null/string): Only the indicators citing this NIST control, in kube-noob's spelling: 'AC-6', 'AC-6(10)'.
+- `evidenced_only` (boolean): Hide the indicators no kube-noob rule can evidence. The reply says how many were hidden.
+- `exceptions` (null/string): The same exception list `audit_manifests` takes (YAML, apiVersion kube-noob.io/v1, kind ExceptionList). Active entries move their findings from `findings` to `excepted` on the indicators they reach, so a KSI page reconciles with the audit instead of counting a signed-off finding as open.
+- `indicator` (null/string): One indicator by id, e.g. 'KSI-IAM-ELP'. Ids are mnemonics, not numbers.
+- `manifests` (null/string): One or more YAML documents to audit first. Omit to get the crosswalk with no findings.
+- `min_severity` (string): Hide findings below this severity. The default is `audit_manifests`' default, because this view is a projection of one audit: a rule whose finding this threshold removed is reported as `withheld` on its indicators rather than counted clean.
+- `partial_bundle` (boolean): These documents are only part of a namespace. Default true here, unlike audit_manifests: a pasted manifest is usually a fragment, and a rule that fires because another object is absent cannot tell a real gap from an object the caller did not paste. Set false only for a whole namespace. This is the one input whose default differs between the two views (N14, G246): the threshold and the exception list are now shared, and this one stays because a pasted fragment and a directory are not the same input -- pass the same value to both tools and they report the same numbers.
+- `platform` (null/string): Target platform. Unset means the server's configured defaultPlatform, which is what the `ksi` command uses -- a fixed default here made the two front doors disagree on a configured server.
+- `version` (null/string): Platform version, e.g. '4.22' (OCP) or '1.35'.
 
 ## fix_manifests
 
@@ -143,7 +161,7 @@ Incidents the watch has seen. Open (or resolved) incidents from the local incide
 
 ## insight
 
-What is this, and what does it say?. Start here for anything the user pastes. Names what the input is (events, pod status, logs, an Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at once) and runs every analyser that applies: diagnosis with reported issues and team memory, the denial explainer, the audit, the documentation. Returns every finding with its source, read-only next steps and what was not analysed and why. Read-only, local.
+What is this, and what does it say?. Start here for anything the user pastes. Names what the input is (events, pod status, logs, an Alertmanager payload, a policy denial, a ticket, manifests, a Helm template, a build log, a Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at once) and runs every analyser that applies: diagnosis with reported issues and team memory, the denial explainer, the audit, the documentation. Returns every finding with its source, read-only next steps and what was not analysed and why. When the input is a QUESTION about something this product does, `answeredBy` names the command that answers it and why -- a question about exposure and node access is answered by `posture scan`, not by reading pods. It is empty whenever the input was recognised as something pasted, and empty for a sentence reporting a malfunction, because the diagnosis above it is the answer to those. Read-only, local.
 
 - `platform` (null/string)
 - `text`* (string): Anything pasted: events, describe output, logs, an Alertmanager payload, Ceph health output (ceph health detail or ceph status, text or JSON), a policy denial, a ticket, manifests or a Helm template, a build log, a Containerfile, an SBOM or scanner report, or a question.

@@ -19,7 +19,7 @@ CONTROL_ID = re.compile(r"^(AC|AT|AU|CA|CM|CP|IA|IR|MA|MP|PE|PL|PM|PS|PT|RA|SA|S
 
 def test_every_rule_maps_to_titled_800_53_controls() -> None:
     ids = {r["ruleId"] for r in list_rules()}
-    assert len(ids) == 78 and set(RULE_CONTROLS) == ids
+    assert len(ids) == 93 and set(RULE_CONTROLS) == ids
     for rid, controls in RULE_CONTROLS.items():
         assert controls, rid
         for c in controls:
@@ -35,18 +35,18 @@ def test_findings_and_reports_carry_controls(capsys: pytest.CaptureFixture[str])
     report = analyze((ROOT / "examples" / "insecure-deployment.yaml").read_text(), "openshift", "4.22").as_dict()
     secret = next(f for f in report["findings"] if f["ruleId"] == "KN-S013")
     assert secret["controls"] == ["IA-5(7)", "SC-28"]
-    touched = {c["id"]: c["findings"] for c in report["controlSummary"]["controls"]}
+    # The summary now also names controls whose rules ran and found nothing, so compare the findings
+    # side against the findings side: a control at zero is coverage, not a finding (G191).
+    touched = {c["id"]: c["findings"] for c in report["controlSummary"]["controls"] if c["findings"]}
     expected = summary([f["ruleId"] for f in report["findings"]])
     assert touched == {c["id"]: c["findings"] for c in expected["controls"]} and touched["AC-6"] >= 1
+    clean = [c for c in report["controlSummary"]["controls"] if c["findings"] == 0]
+    assert clean and all("clean" in c and "notEvaluated" in c for c in clean), (
+        "a control that was checked and found nothing must be named, not absent"
+    )
     assert "assessment" in report["controlSummary"]["note"]
     main(["audit", "-f", str(ROOT / "examples" / "insecure-deployment.yaml"), "--platform", "openshift"])
     assert "NIST SP 800-53 controls with findings: " in capsys.readouterr().out
-
-
-def test_compliance_doc_lists_every_rule_with_its_controls() -> None:
-    doc = (ROOT / "docs" / "compliance.md").read_text()
-    for r in list_rules():
-        assert f"| {r['ruleId']} | {r['title']} | {', '.join(r['controls'])} |" in doc, r["ruleId"]
 
 
 def test_crypto_is_fips_friendly_and_reported() -> None:

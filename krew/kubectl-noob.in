@@ -1,0 +1,44 @@
+#!/usr/bin/env sh
+# kubectl-noob: the krew entry point for kube-noob.
+#
+# This is a passthrough on purpose. Every argument is forwarded to the kube-noob CLI unchanged, so
+# `kubectl noob audit -f k8s/` is `kube-noob audit -f k8s/` and this file cannot drift from the command set it
+# exposes -- there is no verb table here to go stale when a subcommand moves.
+#
+# What it adds over installing the CLI is the fallback: if kube-noob is not on PATH but `uv` is, it runs the
+# pinned release through `uvx`, so `kubectl krew install noob` is enough on a machine with no Python environment
+# set up. The uvx pin is the plugin's own version, so `kubectl noob --version` agrees with what krew installed
+# rather than silently tracking the latest release.
+#
+# Overrides: KUBE_NOOB_BIN names the executable to use instead of searching PATH.
+set -eu
+
+VERSION="__VERSION__"
+
+if [ -n "${KUBE_NOOB_BIN:-}" ]; then
+    exec "$KUBE_NOOB_BIN" "$@"
+fi
+
+# Only `kube-noob` is searched, never the shorter `noob` alias the same package also installs: the alias is
+# generic enough to collide with something else on a shared machine, and it adds no capability.
+if command -v kube-noob >/dev/null 2>&1; then
+    exec kube-noob "$@"
+fi
+
+if command -v uvx >/dev/null 2>&1; then
+    exec uvx --from "kube-noob==$VERSION" kube-noob "$@"
+fi
+
+if command -v uv >/dev/null 2>&1; then
+    exec uv tool run --from "kube-noob==$VERSION" kube-noob "$@"
+fi
+
+echo "kubectl-noob: neither kube-noob nor uv is installed." >&2
+echo "" >&2
+echo "Install one of:" >&2
+echo "  pipx install kube-noob==$VERSION      # or: pip install --user kube-noob==$VERSION" >&2
+echo "  brew install kube-noob/tap/kube-noob" >&2
+echo "  curl -LsSf https://astral.sh/uv/install.sh | sh   # then this plugin runs kube-noob through uvx" >&2
+echo "" >&2
+echo "kube-noob is offline by default: it reaches no network and no cluster unless you turn those on." >&2
+exit 127

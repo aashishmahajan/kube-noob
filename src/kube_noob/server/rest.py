@@ -33,6 +33,12 @@ class Route:
     tool: str
     methods: tuple[str, ...] = ("POST",)
     summary: str = ""
+    #: When set, the whole request body becomes this ONE argument rather than being read as the argument map.
+    #: Needed for a route that receives somebody else's payload shape: Alertmanager posts
+    #: `{"receiver": ..., "status": ..., "alerts": [...]}`, which is not a kube-noob argument map and would be
+    #: refused by the tool's `extra=forbid` model. The payload IS the text to analyse, so it is passed as one
+    #: (N11): that is what makes this an Alertmanager receiver rather than a documented shape to reformat by hand.
+    body_as: str | None = None
 
 
 ROUTES: tuple[Route, ...] = (
@@ -50,6 +56,12 @@ ROUTES: tuple[Route, ...] = (
     Route("/v1/memory/match", "memory_match", summary="Your team's approved memory entries for an error"),
     Route("/v1/reports", "posture_report", ("GET", "POST"), summary="The newest daily drift and policy report"),
     Route("/v1/must-gather", "analyze_must_gather", summary="What is wrong in a must-gather on the server's volume"),
+    Route(
+        "/v1/alerts",
+        "extract_signals",
+        summary="Alertmanager webhook receiver: post the payload, get the signals it carries",
+        body_as="text",
+    ),
 )
 ERROR_SCHEMA = {
     "type": "object",
@@ -172,7 +184,7 @@ def register(
     pairs = offered(specs)
     document = openapi(specs)
 
-    def endpoint(spec: ToolSpec) -> Any:
+    def endpoint(spec: ToolSpec, route: Route) -> Any:
         async def handle(request: Request) -> Response:
             is_post = request.method == "POST"
             refused = await guard.validate_request(request, is_post=is_post)
@@ -196,7 +208,10 @@ def register(
                         arguments = json.loads(text)
                     except (ValueError, RecursionError):
                         return JSONResponse({"error": "the body is not JSON"}, status_code=400)
-                    if not isinstance(arguments, dict):
+                    if route.body_as is not None:
+                        # Somebody else's payload shape: the body is the input, not the argument map.
+                        arguments = {route.body_as: text}
+                    elif not isinstance(arguments, dict):
                         return JSONResponse({"error": "the body must be a JSON object"}, status_code=400)
             try:
                 result = await anyio.to_thread.run_sync(call, spec, arguments)
@@ -207,7 +222,7 @@ def register(
         return handle
 
     for route, spec in pairs:
-        mcp.custom_route(route.path, methods=list(route.methods))(endpoint(spec))
+        mcp.custom_route(route.path, methods=list(route.methods))(endpoint(spec, route))
 
     async def describe(request: Request) -> Response:
         refused = await guard.validate_request(request)

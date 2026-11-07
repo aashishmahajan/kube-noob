@@ -115,17 +115,47 @@ def test_warn_mode_never_denies_fuzzed() -> None:
     assert adm.review_bytes(big, cfg)["response"]["allowed"] is True
 
 
+def _registries(rule: str) -> tuple[str, ...]:
+    """The fixture's `allowedRegistries`, which KN-S036 needs to decide anything at all (G243)."""
+    data = yaml.safe_load((RULES / f"{rule}.yaml").read_text())
+    return tuple(str(r) for r in (data.get("allowedRegistries") or []))
+
+
 def test_every_bad_fixture_warns_and_is_admitted() -> None:
-    cfg = adm.Config.build(platform="openshift", version="4.20")
     for rule, which, doc in FIXTURES:
         if which != "bad" or rule in adm.SKIPPED_RULES | adm.CROSS_OBJECT:
             continue
+        registries = _registries(rule)
+        cfg = adm.Config.build(platform="openshift", version="4.20", allowed_registries=registries)
         ns = (doc.get("metadata") or {}).get("namespace") or "shop"
         r = _well_formed(adm.review(_review(doc, ns=ns), cfg), cfg)
         assert r["allowed"] is True
-        single = {f.rule_id for f in analyze(yaml.safe_dump(doc), platform="openshift", version="4.20").findings}
+        single = {
+            f.rule_id
+            for f in analyze(
+                yaml.safe_dump(doc), platform="openshift", version="4.20", allowed_registries=registries
+            ).findings
+        }
         if rule in single:
             assert any(w.startswith(f"[{rule}]") for w in r.get("warnings", [])), (rule, r.get("warnings"))
+
+
+def test_the_registry_rule_declines_rather_than_warning_without_an_allowlist() -> None:
+    """With no list the webhook says nothing about registries, and refuses to pretend it is enforcing one."""
+    bad = yaml.safe_load(yaml.safe_dump(next(d for r, w, d in FIXTURES if r == "KN-S036" and w == "bad")))
+    off = adm.Config.build(platform="openshift", version="4.20")
+    r = _well_formed(adm.review(_review(bad, ns="shop"), off), off)
+    assert r["allowed"] is True and not [w for w in r.get("warnings", []) if w.startswith("[KN-S036]")]
+    on = adm.Config.build(platform="openshift", version="4.20", allowed_registries=("quay.io/my-org",))
+    warned = _well_formed(adm.review(_review(bad, ns="shop"), on), on)
+    assert any(w.startswith("[KN-S036]") for w in warned.get("warnings", []))
+    with pytest.raises(adm.AdmissionConfigError, match="allowedRegistries"):
+        adm.Config.build(enforce=["KN-S036"], platform="openshift", version="4.20")
+    enforcing = adm.Config.build(
+        enforce=["KN-S036"], platform="openshift", version="4.20", allowed_registries=("quay.io/my-org",)
+    )
+    denied = _well_formed(adm.review(_review(bad, ns="shop"), enforcing), enforcing)
+    assert denied["allowed"] is False and "[KN-S036]" in denied["status"]["message"]
 
 
 # -- enforce ---------------------------------------------------------------------------------------------------------
@@ -140,13 +170,19 @@ ENFORCEABLE = sorted(
 def test_enforce_denies_only_the_listed_rule(rule: str) -> None:
     data = yaml.safe_load((RULES / f"{rule}.yaml").read_text())
     platform, version = data.get("platform", "openshift"), str(data.get("version", "4.20"))
-    cfg = adm.Config.build(enforce=[rule], platform=platform, version=version)
+    registries = tuple(str(r) for r in (data.get("allowedRegistries") or []))
+    cfg = adm.Config.build(enforce=[rule], platform=platform, version=version, allowed_registries=registries)
     denied_bad = False
     for which in ("good", "bad"):
         for doc in [d for d in yaml.safe_load_all(data[which]) if isinstance(d, dict)]:
             ns = (doc.get("metadata") or {}).get("namespace") or "shop"
             r = _well_formed(adm.review(_review(doc, ns=ns), cfg), cfg)
-            single = {f.rule_id for f in analyze(yaml.safe_dump(doc), platform=platform, version=version).findings}
+            single = {
+                f.rule_id
+                for f in analyze(
+                    yaml.safe_dump(doc), platform=platform, version=version, allowed_registries=registries
+                ).findings
+            }
             if rule in single and which == "bad":
                 assert r["allowed"] is False, (rule, doc.get("kind"))
                 assert f"[{rule}]" in r["status"]["message"] and r["status"]["code"] == 403
@@ -296,6 +332,55 @@ def test_asgi_app_metrics_and_limits() -> None:
     assert 'kube_noob_admission_duration_seconds_bucket{le="+Inf"} 3' in m
 
 
+def test_a_padded_object_does_not_outrun_the_webhooks_timeout() -> None:
+    """The locator was O(n^2) in a list's length, so an object padded with containers neutralised the webhook.
+
+    Measured before the fix: 2,000 containers took 6.1 s, 8,000 took 90 s and 16,000 took 352 s -- all far
+    past the chart's `timeoutSeconds: 3`, so the API server gave up and admitted the object with no warning
+    and no denial, while the single process stayed busy and every other request timed out with it. The keys a
+    list's items share are computed once per list now (G252), which makes the cost linear.
+    """
+    cfg = adm.Config.build(enforce=["KN-S001"], platform="kubernetes")
+
+    def padded(n: int) -> dict[str, Any]:
+        return {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "d", "namespace": "shop"},
+            "spec": {
+                "selector": {"matchLabels": {"a": "b"}},
+                "template": {
+                    "metadata": {"labels": {"a": "b"}},
+                    "spec": {
+                        "containers": [
+                            {"name": f"c{i}", "image": "nginx", "securityContext": {"privileged": True}}
+                            for i in range(n)
+                        ]
+                    },
+                },
+            },
+        }
+
+    start = time.perf_counter()
+    out = adm.review(_review(padded(4000)), cfg)["response"]
+    elapsed = time.perf_counter() - start
+    # 4,000 containers took about 24 s before; the bound here is loose enough for a slow runner and still
+    # an order of magnitude under the quadratic cost.
+    assert elapsed < 5.0, f"{elapsed:.1f}s for 4,000 containers"
+    assert out["allowed"] is False, "and it still decides: the denial is the point of being fast enough"
+    # The sibling memo must not change what a locator says: a shared name is still ambiguous, a unique one
+    # still identifies its item.
+    from kube_noob.yamlio import load_documents, locator
+
+    doc = load_documents(yaml.safe_dump(padded(3)))[0]
+    path = ("spec", "template", "spec", "containers", 1)
+    assert locator(doc.data, path, doc.ambiguous_keys).endswith("[name=c1]")
+    dupes = padded(2)
+    dupes["spec"]["template"]["spec"]["containers"][1]["name"] = "c0"
+    same = load_documents(yaml.safe_dump(dupes))[0]
+    assert locator(same.data, path, same.ambiguous_keys).endswith("[1]")
+
+
 def test_p99_well_under_50_ms() -> None:
     cfg = adm.Config.build(platform="openshift", version="4.20")
     cases = [_review(doc) for _, which, doc in FIXTURES if which == "bad"][:60]
@@ -326,6 +411,31 @@ def test_cli_review(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
 # -- the chart (deploy/helm/kube-noob/templates/admission.yaml); rendered and installed in CI (helm, kind) -------------
 
 CHART = ROOT / "deploy" / "helm" / "kube-noob"
+
+
+def test_chart_carries_the_registry_allowlist_to_both_config_files() -> None:
+    """One list, three readers (R3c, G243).
+
+    `kube-noob audit` in the sidecar, the webhook, and `policy generate` must agree about which registries are
+    approved, so the chart writes the same value into both config files -- and refuses at install, rather than
+    at a crash loop, when the list could never match an image or when the rule is enforced without one.
+    """
+    import jsonschema
+
+    values = yaml.safe_load((CHART / "values.yaml").read_text())
+    assert values["audit"]["allowedRegistries"] == []
+    schema = jsonschema.Draft7Validator(json.loads((CHART / "values.schema.json").read_text()))
+    good = {**values, "audit": {"allowedRegistries": ["quay.io/my-org", "localhost:5000", "registry.local:5000/t"]}}
+    assert not list(schema.iter_errors(good))
+    for bad in (["MyRegistry"], ["quay.io/My-Org"], [""], ["quay.io/"], ["quay.io"] * 65, [5]):
+        assert list(schema.iter_errors({**values, "audit": {"allowedRegistries": bad}})), bad
+    for name in ("configmap.yaml", "admission.yaml"):
+        text = (CHART / "templates" / name).read_text()
+        assert "allowedRegistries: {{- toYaml . | nindent 8 }}" in text, name
+    admission = (CHART / "templates" / "admission.yaml").read_text()
+    assert 'has "KN-S036" ($a.enforce | default list)' in admission, "enforcing it with no list must not render"
+    checksum = next(line for line in admission.splitlines() if "checksum/config" in line)
+    assert "allowedRegistries" in checksum, "the webhook must restart when the allowlist changes"
 
 
 def test_chart_values_and_schema() -> None:
@@ -396,6 +506,13 @@ def test_chart_webhook_matches_the_server() -> None:
         "networkpolicies",
         "roles",
         "rolebindings",
+        # The AI-workload CRDs that carry pod specs (R6, G248). The webhook already audits the containers
+        # inside them -- it is the same rule code -- so the only reason a privileged KServe predictor was
+        # admitted while the same container in a Deployment was denied is that these were never sent.
+        "inferenceservices",
+        "rayclusters",
+        "rayjobs",
+        "rayservices",
     ):
         assert re.search(rf"[\[ ,]{resource}[\],]", rules), resource
     assert "scope: Namespaced" in rules and "secrets" not in rules
@@ -404,6 +521,127 @@ def test_chart_webhook_matches_the_server() -> None:
     assert '"--port", "8443"' in text and "/etc/kube-noob-admission/tls/tls.key" in text
     values = yaml.safe_load((CHART / "values.yaml").read_text())
     assert values["admission"]["enforce"] == [] and all(r in RULES for r in ("KN-S001",))
+
+
+def test_a_debug_container_is_checked_and_the_pods_own_findings_are_not_repeated() -> None:
+    """R7/G250: `kubectl debug` goes through `pods/ephemeralcontainers`, which nothing was matching.
+
+    Three things have to hold at once, and each was a defect taken the other way: the request is evaluated at
+    all; the owner check does not skip it (no owner carries an ephemeral container, so a managed workload's
+    Pod would have been the one request nothing checked); and only what the request ADDS is reported, or a Pod
+    that already breaks an enforced rule could never be debugged.
+    """
+    pod = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": "web-7d9f",
+            "namespace": "shop",
+            "ownerReferences": [{"apiVersion": "apps/v1", "kind": "ReplicaSet", "name": "web-7d9", "controller": True}],
+        },
+        "spec": {"containers": [{"name": "web", "image": "nginx", "securityContext": {"privileged": True}}]},
+    }
+    debug = copy.deepcopy(pod)
+    debug["spec"]["ephemeralContainers"] = [
+        {"name": "debugger", "image": "quay.io/evil/tools:latest", "securityContext": {"privileged": True}}
+    ]
+    cfg = adm.Config.build(enforce=["KN-S001"], platform="kubernetes")
+    req = _review(debug, "UPDATE", old=pod, ns="shop", subResource="ephemeralcontainers")
+    out = _well_formed(adm.review(req, cfg), cfg)
+    assert out["allowed"] is False, "a privileged debug container is the request this rule is for"
+    assert "debugger" in out["status"]["message"]
+    assert out["warnings"] and all("debugger" in w for w in out["warnings"]), out["warnings"]
+    assert not any("'web'" in w for w in out["warnings"]), "the pod's own findings belong to its own request"
+    # The same Pod with a clean debug container is admitted, privileged app container and all.
+    clean = copy.deepcopy(pod)
+    clean["spec"]["ephemeralContainers"] = [
+        {
+            "name": "d",
+            "image": "quay.io/o/t@sha256:" + "a" * 64,
+            "securityContext": {
+                "privileged": False,
+                "allowPrivilegeEscalation": False,
+                "runAsNonRoot": True,
+                "runAsUser": 1001,
+                "readOnlyRootFilesystem": True,
+                "capabilities": {"drop": ["ALL"]},
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
+            "resources": {"requests": {"cpu": "10m", "memory": "32Mi"}, "limits": {"memory": "64Mi"}},
+        }
+    ]
+    ok = _well_formed(
+        adm.review(_review(clean, "UPDATE", old=pod, ns="shop", subResource="ephemeralcontainers"), cfg), cfg
+    )
+    assert ok["allowed"] is True and not ok.get("warnings")
+    # Every other subresource is still somebody else's business.
+    for other in ("status", "exec", "log", "portforward", "scale"):
+        res = adm.review(_review(debug, "UPDATE", old=pod, ns="shop", subResource=other), cfg)["response"]
+        assert res["allowed"] is True and not res.get("warnings"), other
+    assert set(adm.SUBRESOURCES) == {"ephemeralcontainers"}
+    text = (CHART / "templates" / "admission.yaml").read_text()
+    assert "pods/ephemeralcontainers" in text.split("    rules:\n", 1)[1]
+
+
+def test_the_webhook_sends_every_kind_whose_pod_specs_the_audit_reads() -> None:
+    """The rules list is derived from what the audit can read, not maintained beside it (R6, G248).
+
+    `kube_noob.audit.podspec.EMBEDDED_POD_SPEC_GROUPS` is the audit's own table of CRDs that carry pod specs.
+    A kind added there and not here would be audited on a directory and admitted by the cluster, which is the
+    gap this closed -- so the test reads that table rather than a list someone has to remember to update.
+    """
+    from kube_noob.audit.podspec import EMBEDDED_POD_SPEC_GROUPS
+
+    text = (CHART / "templates" / "admission.yaml").read_text()
+    rules = text.split("    rules:\n", 1)[1]
+    for kind, groups in EMBEDDED_POD_SPEC_GROUPS.items():
+        plural = f"{kind.lower()}s"
+        assert re.search(rf"[\[ ,]{plural}[\],]", rules), f"{kind}: the webhook is never sent {plural}"
+        for group in groups:
+            assert f"apiGroups: [{group}]" in rules, group
+
+
+def test_the_webhook_audits_a_container_inside_a_crd() -> None:
+    """End to end on the kinds the chart now sends: the finding, the denial and the field path."""
+    isvc = {
+        "apiVersion": "serving.kserve.io/v1beta1",
+        "kind": "InferenceService",
+        "metadata": {"name": "m", "namespace": "shop"},
+        "spec": {
+            "predictor": {
+                "model": {
+                    "modelFormat": {"name": "sklearn"},
+                    "image": "quay.io/o/m:1.2",
+                    "securityContext": {"privileged": True},
+                }
+            }
+        },
+    }
+    warn = adm.Config.build(platform="kubernetes")
+    out = _well_formed(adm.review(_review(isvc, ns="shop"), warn), warn)
+    assert out["allowed"] is True
+    assert any(w.startswith("[KN-S001]") and "model" in w for w in out["warnings"]), out["warnings"]
+    enforcing = adm.Config.build(enforce=["KN-S001"], platform="kubernetes")
+    denied = _well_formed(adm.review(_review(isvc, ns="shop"), enforcing), enforcing)
+    assert denied["allowed"] is False and "InferenceService/shop/m" in denied["status"]["message"]
+    ray = {
+        "apiVersion": "ray.io/v1",
+        "kind": "RayCluster",
+        "metadata": {"name": "r", "namespace": "shop"},
+        "spec": {
+            "headGroupSpec": {
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {"name": "ray-head", "image": "quay.io/o/ray:1", "securityContext": {"privileged": True}}
+                        ]
+                    }
+                }
+            }
+        },
+    }
+    out = _well_formed(adm.review(_review(ray, ns="shop"), warn), warn)
+    assert any(w.startswith("[KN-S001]") and "ray-head" in w for w in out["warnings"]), out["warnings"]
 
 
 def test_chart_config_loads_as_the_server_reads_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

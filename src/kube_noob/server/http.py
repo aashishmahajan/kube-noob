@@ -18,6 +18,7 @@ from kube_noob.config import Settings
 from kube_noob.server.mcp_app import build_server
 
 PUBLIC_PATHS = frozenset({"/healthz", "/readyz"})
+METRICS_PATH = "/metrics"
 DEFAULT_TOKEN_ENV = "KUBE_NOOB_HTTP_TOKEN"  # noqa: S105 - the variable's name, not a secret
 # Every tool argument is capped at 1,000,000 characters (``toolkit.MAX_*``), so a body much above that can never be
 # a valid request. The limit used to be 8 MiB, which bought nothing and cost a lot: each buffered body is copied
@@ -81,6 +82,42 @@ class BodyLimit:
         await self.app(scope, replay, send)
 
 
+class MetricsEndpoint:
+    """Serve `/metrics` and pass everything else through.
+
+    Mounted INSIDE `BearerAuth`, so by default the scrape needs the same token as every other call: an
+    unauthenticated endpoint on a non-loopback bind publishes which tools a team runs and how often, and the
+    refusal in `http_app` exists to stop exactly that. `server.metrics.allowUnauthenticated` opts out for a mesh
+    that authenticates upstream, and the chart's ServiceMonitor carries the token from the existing secret.
+    """
+
+    def __init__(self, app: ASGIApp, settings: Settings) -> None:
+        self.app = app
+        self.settings = settings
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("path") != METRICS_PATH:
+            await self.app(scope, receive, send)
+            return
+        if scope.get("method") not in {"GET", "HEAD"}:
+            await JSONResponse({"error": "method not allowed"}, status_code=405)(scope, receive, send)
+            return
+        from kube_noob.server.metrics import render
+
+        body = render(self.settings).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"text/plain; version=0.0.4; charset=utf-8"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"" if scope.get("method") == "HEAD" else body})
+
+
 class BearerAuth:
     """Constant-time static bearer token check for HTTP mode (health endpoints stay public for probes)."""
 
@@ -138,4 +175,10 @@ def http_app(settings: Settings, *, allow_unauthenticated: bool = False) -> ASGI
         json_response=True,
     )
     # Authenticate before reading any body, so a caller without the token cannot make the server buffer requests.
-    return BearerAuth(BodyLimit(app), token)
+    # `/metrics` sits inside the authentication wrapper unless it is explicitly opened: a scrape endpoint on a
+    # non-loopback bind publishes which tools a team runs and how often (N11).
+    # Inside BearerAuth by default (the token is checked first, then the path), outside it only when the operator
+    # has asked for that -- the order of the two wrappers IS the policy, so it is written once, here.
+    if srv.metrics.allow_unauthenticated:
+        return MetricsEndpoint(BearerAuth(BodyLimit(app), token), settings)
+    return BearerAuth(MetricsEndpoint(BodyLimit(app), settings), token)

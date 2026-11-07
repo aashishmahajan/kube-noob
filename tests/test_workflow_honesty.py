@@ -175,3 +175,45 @@ def test_the_weekly_risk_review_closes_the_week_it_supersedes() -> None:
     )
     # Closing must be scoped to superseded reviews, never to this week's own issue or to unrelated work.
     assert "risk-review" in opener, "the close has to be scoped by the risk-review label"
+
+
+# A variable holding a bundle of flags -- `reg="--set a=1 --set b=2"` -- is meant to be used UNQUOTED, so the shell
+# splits it into separate arguments. Quoted, it becomes ONE argument, and helm reports `unknown flag: --set a=1`.
+# That is how the registry-allowlist guard (G243) failed from the day it was written: `"$reg"` instead of `$reg`.
+_FLAG_BUNDLE = re.compile(r'^\s*(?P<name>[a-z_][a-z0-9_]*)=(?P<q>["\'])(?P<val>--[^"\']*\s[^"\']*)\2\s*$')
+
+
+def _logical_lines(text: str) -> list[str]:
+    """Join backslash continuations, so a `for x in ... \\` list is one line and can be recognised as a list."""
+    out: list[str] = []
+    buf = ""
+    for raw in text.splitlines():
+        buf += raw[:-1] + " " if raw.rstrip().endswith("\\") else raw
+        if not raw.rstrip().endswith("\\"):
+            out.append(buf)
+            buf = ""
+    if buf:
+        out.append(buf)
+    return out
+
+
+def test_no_bundle_of_flags_is_passed_to_a_command_as_a_single_argument() -> None:
+    """`"$reg"` is one argv element; `$reg` is several. helm rejects the first with `unknown flag`.
+
+    Quoting it inside a `for args in "$a" "$b"` list is correct -- each element is split later by `cmd $args` -- so
+    only a quoted use in a command's own arguments is the defect. Found after `ci/helm-and-dogfood` spent a day red
+    on a guard that could never have passed.
+    """
+    bad: list[str] = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = path.read_text()
+        bundles = {m.group("name") for line in text.splitlines() if (m := _FLAG_BUNDLE.match(line))}
+        if not bundles:
+            continue
+        quoted = re.compile(r'"\$\{?(' + "|".join(sorted(bundles)) + r')\}?"')
+        for line in _logical_lines(text):
+            if re.match(r"\s*(for|while)\s+\w+\s+in\s", line):
+                continue
+            for hit in quoted.finditer(line):
+                bad.append(f"{path.name}: {hit.group(0)} in {line.strip()[:110]}")
+    assert not bad, "a flag bundle quoted into one argument:\n" + "\n".join(bad)

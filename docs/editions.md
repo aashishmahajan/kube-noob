@@ -7,15 +7,20 @@ ever exists; there are no license checks, feature flags or license changes in th
 
 Audit, validation and red-team checks; diagnose, debug and the evidence bundle; known issues from the release notes and
 the local Red Hat Jira copy; policy debugging and network reachability; the incident watch; team memory in one Git
-repository; must-gather analysis; the pcap analyser and `net verify`; the CLI, MCP server, Claude plugin, chart and
-sidecar; learning tracks and `selftest`.
+repository; must-gather analysis; OSCAL `assessment-results` from `audit --oscal` and `gate --oscal`; the CLI, MCP
+server, Claude plugin, chart and sidecar; learning tracks and `selftest`.
+
+This list names only what is built. It used to name the pcap analyser and `net verify`, and neither exists: packet
+capture is recognised and reported as not analysed, and there is no `net` command at all. A page whose whole job is
+to draw the free/paid line is the last place to promise something unbuilt, and
+`tests/test_doc_claims.py` now holds that line.
 
 ## Enterprise candidates: governance at scale
 
 | Capability | Why it is an enterprise need |
 |---|---|
 | Single sign-on for the HTTP service; answers read as the caller | Multi-tenant clusters where one ServiceAccount must not see every namespace |
-| Caller identity in every audit record; OSCAL assessment results; the FedRAMP 20x KSI mapping | Auditors need who asked what, in their formats |
+| Caller identity in every audit record | Auditors need who asked what. Two things left this row and shipped free: OSCAL `assessment-results` (`audit --oscal`, `gate --oscal`) and the FedRAMP 20x KSI crosswalk (`kube-noob ksi`). A format assessors read is not where to put a paywall, and a mapping onto a public register is not a product |
 | Memory across many clusters and teams, with retention policies | Fleet operators, not one team |
 | Online ITSM connectors (ServiceNow, Jira Service Management) | Ticket history and evidence attachments without exports |
 | Gate approvals, roles and the tamper-evident audit log | Change control for agents that act on clusters |

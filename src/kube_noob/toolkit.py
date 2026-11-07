@@ -32,6 +32,7 @@ from kube_noob.catalog import (
     REMOVED_APIS,
     beyond_checked,
     k8s_version_for,
+    not_checked_beyond,
     parse_minor,
 )
 from kube_noob.config import Settings
@@ -39,7 +40,7 @@ from kube_noob.debug.cluster import cluster_info, get_backend, resolve_resource
 from kube_noob.debug.diagnose import debug_workload, diagnose
 from kube_noob.debug.netpol import Inventory, check_reachability, inventory_from_cluster
 from kube_noob.debug.policy import explain as explain_denials
-from kube_noob.errors import ClarificationNeeded, WebContentRejectedError
+from kube_noob.errors import ClarificationNeeded, ConfigError, WebContentRejectedError
 from kube_noob.evals.reward import benchmark, grade
 from kube_noob.generate.blueprint import Blueprint, clarify
 from kube_noob.generate.helm import generate_chart
@@ -81,6 +82,16 @@ class _In(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
 
 
+def _normalised_cni(value: str | None) -> str | None:
+    """Refuse an unparseable CNI at the boundary rather than ignoring it later, and store one spelling."""
+    if value is None:
+        return None
+    from kube_noob.debug.cni import parse_cni
+
+    name, version = parse_cni(value)
+    return f"{name}:{version}" if version else name
+
+
 class ManifestsIn(_In):
     manifests: str = Field(
         ...,
@@ -90,6 +101,63 @@ class ManifestsIn(_In):
     )
     platform: PlatformT = Field("kubernetes", description="Target platform.")
     version: str | None = Field(None, max_length=16, description="Platform version, e.g. '4.22' (OCP) or '1.35'.")
+
+
+class KsiIn(_In):
+    """The FedRAMP 20x KSI view. ``manifests`` is optional: without it this is the crosswalk itself."""
+
+    manifests: str | None = Field(
+        None,
+        max_length=MAX_MANIFEST_CHARS,
+        description="One or more YAML documents to audit first. Omit to get the crosswalk with no findings.",
+    )
+    platform: PlatformT | None = Field(
+        None,
+        description="Target platform. Unset means the server's configured defaultPlatform, which is what the "
+        "`ksi` command uses -- a fixed default here made the two front doors disagree on a configured server.",
+    )
+    version: str | None = Field(None, max_length=16, description="Platform version, e.g. '4.22' (OCP) or '1.35'.")
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). "
+        "Without it the rule that decides whether an AdminNetworkPolicy is inert cannot decide, and the row says "
+        "so instead of counting it clean.",
+    )
+    partial_bundle: bool = Field(
+        True,
+        description="These documents are only part of a namespace. Default true here, unlike audit_manifests: a "
+        "pasted manifest is usually a fragment, and a rule that fires because another object is absent cannot "
+        "tell a real gap from an object the caller did not paste. Set false only for a whole namespace. This is "
+        "the one input whose default differs between the two views (N14, G246): the threshold and the exception "
+        "list are now shared, and this one stays because a pasted fragment and a directory are not the same "
+        "input -- pass the same value to both tools and they report the same numbers.",
+    )
+    indicator: str | None = Field(
+        None, max_length=20, description="One indicator by id, e.g. 'KSI-IAM-ELP'. Ids are mnemonics, not numbers."
+    )
+    control: str | None = Field(
+        None,
+        max_length=20,
+        description="Only the indicators citing this NIST control, in kube-noob's spelling: 'AC-6', 'AC-6(10)'.",
+    )
+    evidenced_only: bool = Field(
+        False,
+        description="Hide the indicators no kube-noob rule can evidence. The reply says how many were hidden.",
+    )
+    exceptions: str | None = Field(
+        None,
+        max_length=1_000_000,
+        description="The same exception list `audit_manifests` takes (YAML, apiVersion kube-noob.io/v1, kind "
+        "ExceptionList). Active entries move their findings from `findings` to `excepted` on the indicators they "
+        "reach, so a KSI page reconciles with the audit instead of counting a signed-off finding as open.",
+    )
+    min_severity: Literal["info", "low", "medium", "high", "critical"] = Field(
+        "low",
+        description="Hide findings below this severity. The default is `audit_manifests`' default, because this "
+        "view is a projection of one audit: a rule whose finding this threshold removed is reported as `withheld` "
+        "on its indicators rather than counted clean.",
+    )
 
 
 class AuditIn(ManifestsIn):
@@ -104,6 +172,27 @@ class AuditIn(ManifestsIn):
         "low", description="Hide findings below this severity."
     )
     stages: list[StageName] = Field(default_factory=lambda: list(ALL_STAGE_NAMES))
+    partial_bundle: bool = Field(
+        False,
+        description="Set when these documents are only part of a namespace (one file, a diff, staged changes). "
+        "Rules that fire because another object is absent -- no NetworkPolicy selects this workload, no "
+        "PodDisruptionBudget, a StorageClass not declared here -- are then not evaluated, because from a partial "
+        "bundle they cannot tell a real gap from an object you did not pass. The report says so in its assumptions.",
+    )
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No "
+        "manifest states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped "
+        "enforcing, which Calico did in 3.32 without reporting an error -- is NOT EVALUATED unless you name it, "
+        "rather than counted clean.",
+    )
+
+    @field_validator("cni")
+    @classmethod
+    def _audit_cni(cls, v: str | None) -> str | None:
+        return _normalised_cni(v)
+
     compact: bool = Field(
         False,
         description="Return the same report with each rule's constant fields (title, severity, stage, category, "
@@ -415,6 +504,19 @@ class TrafficIn(_In):
     port: int | str = Field(..., description="Destination port number (1-65535) or a named container port.")
     protocol: Literal["TCP", "UDP", "SCTP"] = "TCP"
     platform: PlatformT | None = None
+    cni: str | None = Field(
+        None,
+        max_length=50,
+        description="The cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Given, "
+        "it decides whether AdminNetworkPolicy and BaselineAdminNetworkPolicy are enforced at all: Calico ignores "
+        "both from 3.32 onward, so policies in that tier are reported as inert instead of deciding the answer, and "
+        "a CNI whose enforcement is undocumented makes the verdict undetermined rather than guessing either way.",
+    )
+
+    @field_validator("cni")
+    @classmethod
+    def _cni(cls, v: str | None) -> str | None:
+        return _normalised_cni(v)
 
     @field_validator("port")
     @classmethod
@@ -825,6 +927,145 @@ class Toolkit:
         r = analyze(p.manifests, p.platform, p.version, stages={Stage.VALIDATE})
         return r.as_dict()
 
+    def fedramp_ksi(self, p: KsiIn) -> dict[str, Any]:
+        """Which FedRAMP 20x Key Security Indicators the findings are evidence for.
+
+        The same crosswalk the `ksi` command prints, through the same input pipeline: a bundle that is not
+        manifests is refused rather than scored, the audit's assumptions are carried, and a finding whose rule
+        reaches no indicator is counted rather than dropped. A mapping is evidence, never a compliance claim.
+        """
+        from kube_noob.audit import exceptions as exc_mod
+        from kube_noob.audit import fedramp
+        from kube_noob.audit.engine import refuse_if_not_manifests
+
+        if p.indicator and p.indicator not in fedramp.INDICATORS:
+            raise ConfigError(
+                f"no indicator {p.indicator} in {fedramp.DATASET} {fedramp.DATASET_VERSION}; ids are mnemonics "
+                f"such as KSI-IAM-ELP, not numbers"
+            )
+        if p.control and p.control not in fedramp.BY_CONTROL:
+            raise ConfigError(
+                f"{p.control} is not one of the controls kube-noob maps; they are spelled as NIST prints them, "
+                f"AC-6(10) rather than ac-6.10"
+            )
+        rule_ids: list[str] = []
+        evaluated: list[str] | None = None
+        fired: list[str] | None = None
+        assumptions: list[str] = []
+        ceiling: dict[str, str] | None = None
+        excepted: list[dict[str, Any]] = []
+        excepted_ids: list[str] = []
+        exceptions_block: dict[str, Any] | None = None
+        review = exc_mod.review(p.exceptions) if p.exceptions else None
+        if review is not None:
+            # Reviewed here, not inside the audit branch: with no manifests the list used to be dropped
+            # without a word -- a refused entry returned success and an active one was simply ignored (G249).
+            exceptions_block = {**review.summary(), "unused": [e.id for e in review.active]}
+        if p.manifests is not None:
+            # `is not None`, not truthiness: the model strips whitespace, so an empty or blank `manifests` used to
+            # be indistinguishable from omitting it and returned the crosswalk at success -- a caller who passed
+            # an empty file was told there were no findings.
+            refuse_if_not_manifests(p.manifests)
+            r = analyze(
+                p.manifests,
+                p.platform or self.settings.default_platform,
+                p.version,
+                # The audit's threshold and the audit's exceptions, because this is a projection of one audit
+                # and not a second one: without them the same bundle gave a KSI page and an audit report two
+                # different figures for one control, each internally honest (N14, G246).
+                min_severity=Severity.parse(p.min_severity),
+                partial_bundle=p.partial_bundle,
+                cni=p.cni,
+                allowed_registries=self._allowed_registries(),
+            )
+            if review is not None:
+                kept, excepted, used = self._split_excepted(review, r.findings)
+                r.findings = kept
+                excepted_ids = [str(e["ruleId"]) for e in excepted if "ruleId" in e]
+                exceptions_block = {
+                    **review.summary(),
+                    "unused": [e.id for e in review.active if e.id not in used],
+                }
+            rule_ids = [f.rule_id for f in r.findings]
+            evaluated, fired = sorted(r.evaluated_rules), sorted(r.fired_rules)
+            assumptions = list(r.assumptions)
+            ceiling = not_checked_beyond(r.kubernetes_version)
+        out = fedramp.summary(
+            rule_ids,
+            # `excepted_ids or None` made the row SHAPE depend on whether an entry happened to match: a list
+            # whose only entry was unused, expired or refused produced an `exceptions` block and rows with no
+            # `excepted` column at all, so a reader reconciling the two pages hit a missing key rather than a
+            # zero. A list that was passed is a list that was considered (G249).
+            excepted_rule_ids=excepted_ids if exceptions_block is not None else None,
+            evaluated_rule_ids=evaluated,
+            fired_rule_ids=fired,
+            not_checked_beyond=ceiling,
+        )
+        if exceptions_block is not None:
+            out["exceptions"] = exceptions_block
+            out["excepted"] = excepted
+        if assumptions:
+            out["assumptions"] = assumptions
+        rows = out["indicators"]
+        total = len(rows)
+        hidden: dict[str, Any] = {}
+        if p.indicator:
+            rows = [r for r in rows if r["id"] == p.indicator]
+            hidden["indicator"] = p.indicator
+        if p.control:
+            cited = set(fedramp.indicators_for(p.control))
+            rows = [r for r in rows if r["id"] in cited]
+            out["forControl"] = {"id": p.control, "indicators": sorted(cited)}
+        if p.evidenced_only:
+            before = len(rows)
+            rows = [r for r in rows if r["evidenced"]]
+            hidden["evidencedOnly"] = before - len(rows)
+        out["indicators"] = rows
+        if len(rows) != total:
+            hidden["shown"] = len(rows)
+            hidden["of"] = total
+            if not rows:
+                # Named filters, not "these filters": a reader who asked for one indicator and one control
+                # needs to know which combination emptied the page (G249).
+                hidden["why"] = (
+                    f"no indicator matches these filters: {p.indicator or 'any indicator'}"
+                    + (f" and the indicators citing {p.control}" if p.control else "")
+                    + (", with evidenced_only" if p.evidenced_only else "")
+                )
+            out["filtered"] = hidden
+        return out
+
+    def _allowed_registries(self) -> tuple[str, ...]:
+        """The registry allowlist from the configuration file.
+
+        Read from settings rather than taken as a tool argument: which registries an organisation has approved is
+        an organisational decision that should be the same for every caller of a deployment, not something a
+        caller chooses per request. With none configured, KN-S036 declines to decide (G241).
+        """
+        return tuple(self.settings.audit.allowed_registries)
+
+    @staticmethod
+    def _split_excepted(review: Any, findings: list[Any]) -> tuple[list[Any], list[dict[str, Any]], set[str]]:
+        """Findings an active exception covers, moved out of the open set rather than deleted (N14, G246).
+
+        One implementation, because `audit_manifests` and `fedramp_ksi` are two views of one audit and the whole
+        point of an exception is that it reads the same on both: an owned, reviewed, expiring decision about a
+        control, not a finding that went away.
+        """
+        from kube_noob.audit import exceptions as exc
+
+        kept: list[Any] = []
+        excepted: list[dict[str, Any]] = []
+        used: set[str] = set()
+        for f in findings:
+            hit = exc.match(review, f.rule_id, f.resource)
+            if hit is None:
+                kept.append(f)
+                continue
+            used.add(hit.id)
+            excepted.append({**f.as_dict(), "exception": {"id": hit.id, "owner": hit.owner, "expires": hit.expires}})
+        return kept, excepted, used
+
     def audit(self, p: AuditIn) -> dict[str, Any]:
         from kube_noob.audit import exceptions as exc
         from kube_noob.audit.engine import refuse_if_not_manifests
@@ -832,21 +1073,22 @@ class Toolkit:
         # Before anything is scored: a score on a file the rules never saw is a wrong answer, not a thin one.
         refuse_if_not_manifests(p.manifests)
         stages = {Stage(s) for s in p.stages}
-        r = analyze(p.manifests, p.platform, p.version, stages=stages, min_severity=Severity.parse(p.min_severity))
+        r = analyze(
+            p.manifests,
+            p.platform,
+            p.version,
+            stages=stages,
+            min_severity=Severity.parse(p.min_severity),
+            partial_bundle=p.partial_bundle,
+            cni=p.cni,
+            allowed_registries=self._allowed_registries(),
+        )
         excepted: list[dict[str, Any]] = []
         review = exc.review(p.exceptions) if p.exceptions else None
+        kept: list[Any] = []
+        used: set[str] = set()
         if review is not None:
-            kept = []
-            used: set[str] = set()
-            for f in r.findings:
-                hit = exc.match(review, f.rule_id, f.resource)
-                if hit is None:
-                    kept.append(f)
-                else:
-                    used.add(hit.id)
-                    excepted.append(
-                        {**f.as_dict(), "exception": {"id": hit.id, "owner": hit.owner, "expires": hit.expires}}
-                    )
+            kept, excepted, used = self._split_excepted(review, r.findings)
             r.findings = kept
         out = r.as_dict()
         if review is not None:
@@ -858,7 +1100,14 @@ class Toolkit:
             from kube_noob.audit.controls import summary as control_summary
 
             out["controlSummary"] = control_summary(
-                [f.rule_id for f in kept], [str(e["ruleId"]) for e in excepted if "ruleId" in e]
+                [f.rule_id for f in kept],
+                [str(e["ruleId"]) for e in excepted if "ruleId" in e],
+                # The coverage record has to survive the rebuild too, or filing an exception would drop
+                # every checked-and-clean control from the report and make the two states one again.
+                r.evaluated_rules or None,
+                # And the fired set, or a withheld finding would become clean again on any report that
+                # applies an exception list (G199).
+                r.fired_rules or None,
             )
         self._observe(
             [f"platform:{out.get('platform')}"]
@@ -1181,6 +1430,7 @@ class Toolkit:
             rules=p.rules or None,
             exclude_namespaces=p.exclude_namespaces,
             exceptions=entries,
+            allowed_registries=self._allowed_registries(),
         )
         self._observe([f"policy-generate:{e}" for e in engines])
         header = policies.header(
@@ -1465,7 +1715,7 @@ class Toolkit:
         return out
 
     def check_network_policy(self, p: NetpolCheckIn) -> dict[str, Any]:
-        inv = Inventory.from_yaml(p.manifests, p.default_namespace)
+        inv = Inventory.from_yaml(p.manifests, p.default_namespace, p.cni)
         cli = "oc" if p.platform in {"openshift", "rosa-classic", "rosa-hcp"} else "kubectl"
         out = check_reachability(inv, p.source, p.destination, p.port, p.protocol, cli)
         self._observe([f"netpol:{out['verdict']}"])
@@ -1473,7 +1723,7 @@ class Toolkit:
 
     def cluster_check_traffic(self, p: TrafficIn) -> dict[str, Any]:
         backend = get_backend(self.settings)
-        inv = inventory_from_cluster(backend, p.source, p.destination)
+        inv = inventory_from_cluster(backend, p.source, p.destination, p.cni)
         platform = p.platform
         if platform is None:
             with contextlib.suppress(Exception):  # the platform only picks oc or kubectl in the commands
@@ -1730,6 +1980,18 @@ class Toolkit:
                 self.audit,
             ),
             ToolSpec(
+                "fedramp_ksi",
+                "FedRAMP 20x KSI evidence",
+                "Which FedRAMP 20x Key Security Indicators an audit's findings are evidence for, by inverting the "
+                "NIST control list each indicator carries in FedRAMP's own consolidated dataset (vendored with its "
+                "version and hash). Without manifests it returns the crosswalk itself. Every indicator is listed: "
+                "the ones no kube-noob rule can see carry evidenced=false and no counts, and two carry a warning "
+                "because their rules reach them only through a shared control and not a shared subject. A mapping "
+                "is evidence, never a claim of compliance -- an assessment decides whether an indicator is met.",
+                KsiIn,
+                self.fedramp_ksi,
+            ),
+            ToolSpec(
                 "red_team",
                 "Red-team manifests",
                 "Hostile-auditor scenarios: node crash, zone outage, RWX split-brain, exposure, privilege "
@@ -1836,7 +2098,11 @@ class Toolkit:
                 "Containerfile, an SBOM or scanner report, a packet trace, must-gather paths, a question; several at "
                 "once) and runs every analyser that applies: diagnosis with reported issues and team memory, the "
                 "denial explainer, the audit, the documentation. Returns every finding with its source, read-only "
-                "next steps and what was not analysed and why. Read-only, local.",
+                "next steps and what was not analysed and why. When the input is a QUESTION about something this "
+                "product does, `answeredBy` names the command that answers it and why -- a question about exposure "
+                "and node access is answered by `posture scan`, not by reading pods. It is empty whenever the "
+                "input was recognised as something pasted, and empty for a sentence reporting a malfunction, "
+                "because the diagnosis above it is the answer to those. Read-only, local.",
                 InsightIn,
                 self.insight,
             ),

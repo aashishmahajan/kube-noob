@@ -1,0 +1,88 @@
+{{- /*
+Prometheus scraping and alerts. Both objects need the Prometheus Operator CRDs, so both are off by default: a
+chart that renders a CRD the cluster does not serve fails the install, and this chart is meant to go into a
+cluster it knows nothing about.
+
+The ServiceMonitor carries the same bearer token the clients use, because /metrics sits behind it unless
+monitoring.allowUnauthenticatedMetrics says otherwise. Prometheus reads the Secret itself, so the token is never
+rendered into this object.
+*/ -}}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+{{- $secret := .Values.auth.existingSecret | default (printf "%s-token" (include "kube-noob.fullname" .)) }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "kube-noob.fullname" . }}
+  labels:
+    {{- include "kube-noob.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  selector:
+    matchLabels: {{- include "kube-noob.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      scheme: http
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      {{- if not .Values.monitoring.allowUnauthenticatedMetrics }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ $secret | quote }}
+          key: token
+      {{- end }}
+{{- end }}
+{{- if .Values.monitoring.prometheusRule.enabled }}
+{{- if not .Values.monitoring.serviceMonitor.enabled }}
+{{- fail "monitoring.prometheusRule.enabled needs monitoring.serviceMonitor.enabled: an alert on a metric nobody scrapes never fires, which looks exactly like a healthy cluster" }}
+{{- end }}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+---
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "kube-noob.fullname" . }}
+  labels:
+    {{- include "kube-noob.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  groups:
+    - name: kube-noob
+      rules:
+        - alert: KubeNoobDown
+          expr: up{job="{{ include "kube-noob.fullname" . }}"} == 0
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: kube-noob is not being scraped
+            description: >-
+              No successful scrape for 10 minutes. The MCP tools may still be serving; what is certain is that
+              nothing here can be alerted on until the scrape is back.
+        - alert: KubeNoobKnowledgeStale
+          expr: kube_noob_knowledge_age_seconds > {{ mul (int .Values.monitoring.prometheusRule.knowledgeMaxAgeDays) 86400 }}
+          for: 1h
+          labels: {severity: info}
+          annotations:
+            summary: kube-noob's built-in knowledge is older than {{ .Values.monitoring.prometheusRule.knowledgeMaxAgeDays }} days
+            description: >-
+              This is the age of the knowledge in the IMAGE, fixed when it was built, not a failed refresh:
+              answers about releases newer than that come only from web lookups you enable. Update the image, or
+              turn this alert off if the version is pinned deliberately.
+        - alert: KubeNoobToolErrorRatio
+          expr: >-
+            sum(rate(kube_noob_tool_calls_total{outcome=~"crash|error"}[15m]))
+            /
+            clamp_min(sum(rate(kube_noob_tool_calls_total[15m])), 1e-9)
+            > {{ .Values.monitoring.prometheusRule.toolErrorRatio }}
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: more than {{ .Values.monitoring.prometheusRule.toolErrorRatio }} of kube-noob tool calls are failing
+            description: >-
+              Counts crash and error only. invalid-arguments is deliberately excluded: a caller sending bad input
+              is not this pod failing, and paging someone for somebody else's typo teaches them to mute the alert.
+{{- end }}

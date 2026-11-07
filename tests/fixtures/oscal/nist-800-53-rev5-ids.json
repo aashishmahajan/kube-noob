@@ -1,0 +1,129 @@
+{
+  "_source": "NIST_SP-800-53_rev5_catalog.json from usnistgov/oscal-content (main)",
+  "_catalogVersion": "5.2.0",
+  "_catalogLastModified": "2026-10-22T11:30:00.00000-00:00",
+  "_oscalVersion": "1.2.3",
+  "_why": "Every id below was confirmed present in that catalogue, control and objective alike. The catalogue is 10 MB, so it is not vendored; this mapping is, and a test asserts kube-noob still derives exactly these. An id kube-noob invents would produce a document that validates and points at nothing.",
+  "controls": {
+    "AC-14": {
+      "controlId": "ac-14",
+      "objectiveId": "ac-14_obj"
+    },
+    "AC-3": {
+      "controlId": "ac-3",
+      "objectiveId": "ac-3_obj"
+    },
+    "AC-4": {
+      "controlId": "ac-4",
+      "objectiveId": "ac-4_obj"
+    },
+    "AC-5": {
+      "controlId": "ac-5",
+      "objectiveId": "ac-5_obj"
+    },
+    "AC-6": {
+      "controlId": "ac-6",
+      "objectiveId": "ac-6_obj"
+    },
+    "AC-6(10)": {
+      "controlId": "ac-6.10",
+      "objectiveId": "ac-6.10_obj"
+    },
+    "AC-6(5)": {
+      "controlId": "ac-6.5",
+      "objectiveId": "ac-6.5_obj"
+    },
+    "AU-12": {
+      "controlId": "au-12",
+      "objectiveId": "au-12_obj"
+    },
+    "AU-2": {
+      "controlId": "au-2",
+      "objectiveId": "au-2_obj"
+    },
+    "CM-2": {
+      "controlId": "cm-2",
+      "objectiveId": "cm-2_obj"
+    },
+    "CM-3(2)": {
+      "controlId": "cm-3.2",
+      "objectiveId": "cm-3.2_obj"
+    },
+    "CM-6": {
+      "controlId": "cm-6",
+      "objectiveId": "cm-6_obj"
+    },
+    "CM-7": {
+      "controlId": "cm-7",
+      "objectiveId": "cm-7_obj"
+    },
+    "CP-10": {
+      "controlId": "cp-10",
+      "objectiveId": "cp-10_obj"
+    },
+    "IA-5": {
+      "controlId": "ia-5",
+      "objectiveId": "ia-5_obj"
+    },
+    "IA-5(7)": {
+      "controlId": "ia-5.7",
+      "objectiveId": "ia-5.7_obj"
+    },
+    "SA-22": {
+      "controlId": "sa-22",
+      "objectiveId": "sa-22_obj"
+    },
+    "SC-28": {
+      "controlId": "sc-28",
+      "objectiveId": "sc-28_obj"
+    },
+    "SC-36": {
+      "controlId": "sc-36",
+      "objectiveId": "sc-36_obj"
+    },
+    "SC-39": {
+      "controlId": "sc-39",
+      "objectiveId": "sc-39_obj"
+    },
+    "SC-4": {
+      "controlId": "sc-4",
+      "objectiveId": "sc-4_obj"
+    },
+    "SC-5": {
+      "controlId": "sc-5",
+      "objectiveId": "sc-5_obj"
+    },
+    "SC-6": {
+      "controlId": "sc-6",
+      "objectiveId": "sc-6_obj"
+    },
+    "SC-7": {
+      "controlId": "sc-7",
+      "objectiveId": "sc-7_obj"
+    },
+    "SC-7(5)": {
+      "controlId": "sc-7.5",
+      "objectiveId": "sc-7.5_obj"
+    },
+    "SC-8": {
+      "controlId": "sc-8",
+      "objectiveId": "sc-8_obj"
+    },
+    "SC-8(1)": {
+      "controlId": "sc-8.1",
+      "objectiveId": "sc-8.1_obj"
+    },
+    "SI-10": {
+      "controlId": "si-10",
+      "objectiveId": "si-10_obj"
+    },
+    "SI-2": {
+      "controlId": "si-2",
+      "objectiveId": "si-2_obj"
+    },
+    "SI-7": {
+      "controlId": "si-7",
+      "objectiveId": "si-7_obj"
+    }
+  }
+}

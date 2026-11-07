@@ -29,7 +29,7 @@ cluster order, naming the tier, policy and rule that decided. A checker reading 
 **Which system denied this pod?** One pass across Pod Security, SCC, Kyverno, Gatekeeper, VAP and RHACS, with the
 smallest fix. `reach` exits 1 when denied; both say what they could not determine.
 
-Also: 78 rules with strict schemas and 9 red-team scenarios; 67 offline playbooks, read-only steps first;
+Also: 93 rules with strict schemas and 9 red-team scenarios; 67 offline playbooks, read-only steps first;
 must-gathers triaged into a case draft that says what could not be read; OpenShift bugs with fix versions; hardened
 manifests and admission policies; 5 tracks, 16 lessons. `kube-noob gate` puts any of it in CI with SARIF and one
 exception list, and a design request runs the 7-step protocol (Clarify, Validate, Research, Audit, Calibrate,
@@ -69,14 +69,14 @@ Claude plugin, in Claude Code (needs [uv](https://docs.astral.sh/uv/)):
 Desktop app, claude.ai chat and the Agent Skill: [install.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/install.md). Any MCP client:
 
 ```json
-{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.7.1", "kube-noob", "mcp"]}}}
+{"mcpServers": {"kube-noob": {"command": "uvx", "args": ["--from", "kube-noob==0.8.0", "kube-noob", "mcp"]}}}
 ```
 
 ## Run on OpenShift
 
 As a token-protected service, loopback-only sidecar or Lightspeed tool:
 [docs/openshift.md](https://github.com/aashishmahajan/kube-noob/blob/main/docs/openshift.md). The chart ships
-NetworkPolicies and runs under `restricted-v2`.
+NetworkPolicies, written for `restricted-v2`.
 
 ## Safe by default
 
@@ -89,9 +89,10 @@ generated [safety contract](https://github.com/aashishmahajan/kube-noob/blob/mai
 ## Docs
 
 Everything is at **[kube-noob.com](https://kube-noob.com)**, and in [docs/](https://github.com/aashishmahajan/kube-noob/blob/main/docs/): [use cases](https://github.com/aashishmahajan/kube-noob/blob/main/docs/use-cases.md),
-[architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md), [measured accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md),
+[architecture](https://github.com/aashishmahajan/kube-noob/blob/main/docs/architecture.md), [accuracy](https://github.com/aashishmahajan/kube-noob/blob/main/docs/evals/supported-technologies.md),
 [guidance](https://github.com/aashishmahajan/kube-noob/blob/main/docs/guidance.md), [learning](https://github.com/aashishmahajan/kube-noob/blob/main/docs/learning.md), [privacy](https://github.com/aashishmahajan/kube-noob/blob/main/PRIVACY.md), [security](https://github.com/aashishmahajan/kube-noob/blob/main/SECURITY.md),
-[contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md).
+[contributing](https://github.com/aashishmahajan/kube-noob/blob/main/CONTRIBUTING.md), [limits](https://github.com/aashishmahajan/kube-noob/blob/main/docs/limits.md), [roadmap](https://github.com/aashishmahajan/kube-noob/blob/main/docs/roadmap.md), [maintenance](https://github.com/aashishmahajan/kube-noob/blob/main/MAINTENANCE.md), [governance](https://github.com/aashishmahajan/kube-noob/blob/main/GOVERNANCE.md).
+
 
 ## Credits
 

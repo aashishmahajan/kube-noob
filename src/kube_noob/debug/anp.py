@@ -18,9 +18,10 @@ Precedence, as OVN-Kubernetes implements it:
 Sources: https://ovn-kubernetes.io/features/network-security-controls/admin-network-policy/ and
 https://network-policy-api.sigs.k8s.io/api-overview/.
 
-Upstream is replacing both with a single ``ClusterNetworkPolicy`` in v1alpha2, and **this module does not
-evaluate it**. The two tiers survive as a ``tier`` field, but the semantics are not the same and nothing here
-should be reused on a v1alpha2 document without reading each of these:
+Upstream replaces both with a single ``ClusterNetworkPolicy`` in v1alpha2, which **this module does not
+evaluate**: :mod:`kube_noob.debug.cnp` does (P4). The two tiers survive there as a ``tier`` field, but the
+semantics are not the same, which is why it is a module of its own rather than a flag on this one. Nothing here
+may be reused on a v1alpha2 document without reading each of these:
 
 * ``Allow`` is renamed ``Accept``, so :data:`ANP_ACTIONS` rejects every valid v1alpha2 Admin rule.
 * ``Pass`` is legal in the Baseline tier, which :data:`BANP_ACTIONS` does not allow.
@@ -34,12 +35,15 @@ should be reused on a v1alpha2 document without reading each of these:
   tier as ``undetermined``; it is not skipped so a later rule can allow the traffic.
 * The per-list cap fell from 100 items to 25.
 
-Until that work is done, ``ClusterNetworkPolicy`` is listed in
-:data:`kube_noob.debug.netpol.CLUSTER_SCOPED_ABOVE_NETWORKPOLICY`, which makes ``policy reach`` answer
-``undetermined`` rather than guess. This matters on current clusters rather than future ones: Calico 3.32
-removed AdminNetworkPolicy and BaselineAdminNetworkPolicy enforcement outright in favour of
-``ClusterNetworkPolicy``, so on such a cluster the policy that actually decides is the kind this module cannot
-read.
+Each of those is now implemented in :mod:`kube_noob.debug.cnp`, and ``policy reach`` evaluates both APIs:
+the v1alpha2 Admin tier first, then this one, then the NetworkPolicies, then this baseline, then the v1alpha2
+Baseline tier. This mattered on current clusters rather than future ones: Calico 3.32 removed
+AdminNetworkPolicy and BaselineAdminNetworkPolicy enforcement outright in favour of ``ClusterNetworkPolicy``,
+so on such a cluster the policy that actually decides was the kind nothing could read.
+
+The other half of that is :mod:`kube_noob.debug.cni`: everything here is the semantics of a tier the CNI may not
+apply at all, so when the caller names the CNI, the policies this module would have evaluated are withheld from
+it rather than fed through it.
 """
 
 from __future__ import annotations
@@ -74,9 +78,9 @@ def _str(v: Any) -> str:
     return v if isinstance(v, str) else ""
 
 
-def _peer_matches(peer: Any, other: Endpoint, inv: Inventory) -> bool:
+def peer_matches(peer: Any, other: Endpoint, inv: Inventory) -> bool:
     """One ``namespaces`` or ``pods`` entry. ``nodes``, ``networks`` and ``domainNames`` are handled by
-    :func:`_outside_peer`, which can say "unknown" rather than pretend the peer did not match."""
+    :func:`outside_peer`, which can say "unknown" rather than pretend the peer did not match."""
     if not isinstance(peer, dict):
         return False
     if "namespaces" in peer:
@@ -132,7 +136,7 @@ def _port_matches(ports: Any, port: int | str, protocol: str, dest: Endpoint) ->
     return False
 
 
-def _subject_matches(subject: Any, subject_ep: Endpoint, inv: Inventory) -> bool:
+def subject_matches(subject: Any, subject_ep: Endpoint, inv: Inventory) -> bool:
     """``spec.subject`` is exactly one of ``namespaces`` (a namespace selector) or ``pods`` (both selectors)."""
     if not isinstance(subject, dict) or subject_ep.namespace is None:
         return False
@@ -148,7 +152,7 @@ def _subject_matches(subject: Any, subject_ep: Endpoint, inv: Inventory) -> bool
     return False
 
 
-def _rules(spec: Any, direction: str) -> list[Any]:
+def rules_of(spec: Any, direction: str) -> list[Any]:
     if not isinstance(spec, dict):
         return []
     rules = spec.get("ingress" if direction == "Ingress" else "egress")
@@ -178,7 +182,7 @@ def _overlaps(
     return False
 
 
-def _outside_peer(peer: dict[str, Any], other: Endpoint) -> bool | None:
+def outside_peer(peer: dict[str, Any], other: Endpoint) -> bool | None:
     """A ``nodes``, ``networks`` or ``domainNames`` peer.
 
     ``True`` matches, ``False`` does not, ``None`` might and cannot be checked from what was passed in. ``None``
@@ -241,9 +245,9 @@ def _policy_decision(
     meta = pol.get("metadata") or {}
     name = f"{pol.get('kind')}/{meta.get('name')}"
     spec = pol.get("spec") or {}
-    if not _subject_matches(spec.get("subject") if isinstance(spec, dict) else None, subject_ep, inv):
+    if not subject_matches(spec.get("subject") if isinstance(spec, dict) else None, subject_ep, inv):
         return None
-    for i, raw in enumerate(_rules(spec, direction), 1):
+    for i, raw in enumerate(rules_of(spec, direction), 1):
         rule = raw if isinstance(raw, dict) else {}
         action = _str(rule.get("action"))
         label = _str(rule.get("name")) or f"rule {i}"
@@ -263,12 +267,12 @@ def _policy_decision(
             if not isinstance(peer, dict):
                 continue
             if "namespaces" in peer or "pods" in peer:
-                if _peer_matches(peer, other, inv):
+                if peer_matches(peer, other, inv):
                     matched = True
                     break
                 continue
             if "nodes" in peer or "networks" in peer or "domainNames" in peer:
-                got = _outside_peer(peer, other)
+                got = outside_peer(peer, other)
                 if got is True:
                     matched = True
                     break

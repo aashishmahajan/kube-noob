@@ -25,6 +25,8 @@ Do not report a change as working until that exit status is 0. "The tests I wrot
 ```bash
 python scripts/sync_plugin_server.py
 python scripts/safety_contract.py --check
+python scripts/compliance_doc.py --check
+python scripts/doc_numbers.py --check
 ```
 
 `src/` is the only source of truth. `plugin/kube-noob/server/kube_noob/` is a **generated copy** — never edit it, and
@@ -35,6 +37,19 @@ always that it is meant to be missing.
 
 `scripts/safety_contract.py` regenerates `docs/safety-contract.md` from the code. If it reports a mismatch, the
 contract document is stale — regenerate it, do not edit it.
+
+`scripts/compliance_doc.py` does the same for the rule table, the control-titles table and the rule count in the
+heading of `docs/compliance.md` — run it after adding a rule or a control instead of editing those tables. It
+rewrites only those three regions and leaves the prose alone, and it REFUSES rather than half-rewriting a table
+whose shape has changed. A control the document evidences through posture rather than through a rule (`SC-13`,
+via `kube-noob doctor`) lives in `POSTURE_CONTROLS` in that script, because generating from `RULE_CONTROLS` alone
+would delete it.
+
+`scripts/doc_numbers.py` does the same for the measured numbers in `docs/limits.md` (how many rules generate an
+admission policy per platform) and `docs/use-cases.md` (the compaction measurement). Both are measured by running
+the command the document shows -- the compaction one shells out to the CLI, because the sentence is about the
+bytes that command writes and an in-process reconstruction was 20 bytes off. Four of these numbers were wrong at
+once on 2026-11-05, and two of them summed to a rule count retired three releases ago (G212).
 
 ## Tests first, and make them fail first
 
@@ -114,7 +129,7 @@ rewrite history on a shared branch.
   `PART_MAX` is 250 MB. Files are `<shard>.jsonl` then `<shard>-2.jsonl`. `vuln.parts.shard_paths` reads them.
   The plugin must not import `sources`: that package is how the Jira client, which names `JIRA_API_TOKEN`, would
   be bundled. Held by `tests/test_db_bundle.py::test_a_shard_over_the_member_cap_is_written_as_parts_and_read_back`
-  and `tests/test_jira_main_copy.py::test_the_plugin_gets_reconciliation_without_the_jira_client` (G185).
+  and `tests/test_jira_main_copy.py::test_the_plugin_gets_reconciliation_without_the_jira_client` (G262).
 - `brew.yml` asks for macOS only on `workflow_dispatch` and `workflow_call`. A push, a pull request and the schedule
   run Ubuntu. Run 41858323552 was cancelled because GitHub did not assign a macOS runner. The formula itself passed
   on Ubuntu.

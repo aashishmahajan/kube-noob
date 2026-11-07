@@ -1,0 +1,26 @@
+rule: KN-S031
+good: |
+  apiVersion: resource.k8s.io/v1
+  kind: ResourceClaim
+  metadata: {name: gpu-pool, namespace: ml}
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: example.com-gpu
+          allocationMode: ExactCount
+          count: 1
+bad: |
+  apiVersion: resource.k8s.io/v1
+  kind: ResourceClaim
+  metadata: {name: gpu-pool, namespace: ml}
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: example.com-gpu
+          allocationMode: ExactCount
+          count: 1
+          adminAccess: true

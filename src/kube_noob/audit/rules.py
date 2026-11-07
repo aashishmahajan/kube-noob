@@ -16,6 +16,7 @@ from typing import Any
 from kube_noob.audit.controls import controls_for
 from kube_noob.audit.model import Finding, Severity, Stage
 from kube_noob.audit.podspec import (
+    LONG_RUNNING_EMBEDDED_KINDS,
     LONG_RUNNING_KINDS,
     REPLICATED_KINDS,
     ContainerRef,
@@ -24,7 +25,9 @@ from kube_noob.audit.podspec import (
     effective_security,
     pdb_allows_no_disruption,
     pod_template,
+    pod_templates,
     replicas,
+    selector_decides,
     selector_matches,
 )
 from kube_noob.audit.quantity import parse_quantity
@@ -37,11 +40,17 @@ from kube_noob.catalog import (
     PROVISIONERS,
     ROSA_FAMILY,
     api_group,
+    claims_a_known_group,
     deprecated_api,
     parse_minor,
     removed_api,
 )
-from kube_noob.yamlio import Document, PathT, fmt_path, get_path
+from kube_noob.debug.netpol import ANP_KIND, BANP_KIND, policy_types
+from kube_noob.yamlio import Document, PathT, fmt_path, get_path, locator
+
+#: The two cluster-scoped tiers `kube_noob.debug.anp` evaluates, and the kinds KN-N014 reports when the CNI
+#: named on the command line does not enforce them.
+ADMIN_TIER_KINDS = (ANP_KIND, BANP_KIND)
 
 
 @dataclass
@@ -50,6 +59,27 @@ class AuditContext:
     platform: str
     k8s_version: str
     platform_version: str | None = None
+    # True when the caller knows these documents are only part of the namespace: `audit -f one.yaml`, a
+    # pre-commit hook over staged files. A rule that fires because another object was ABSENT cannot tell
+    # "there is no NetworkPolicy" from "you did not pass it", so those rules say nothing here instead of
+    # reporting a finding the reader cannot act on. Never inferred from len(docs): the admission webhook
+    # audits a one-document bundle on purpose and needs those rules to fire (tests/test_admission.py).
+    partial_bundle: bool = False
+    # The cluster's CNI, as NAME or NAME:VERSION, when the caller knows it. No manifest states it, so a rule that
+    # depends on it (KN-N014) declines to decide without it rather than reporting the policy as fine.
+    cni: str | None = None
+    # Rules that declined to DECIDE on this input: the partial-bundle guard returned before they could
+    # evaluate anything. `run_rules` keeps them out of the evaluated list, because "it skipped" and "it ran
+    # and found nothing" are the two states a compliance record must never merge -- G186 made these rules
+    # silent, G191 started calling a silent rule clean, and together they said a skipped rule had passed
+    # (G202). A rule whose guard skips one branch but evaluates the rest does NOT register here.
+    # Registries an image may come from, from the configuration file. A POLICY: no manifest states which
+    # registries an organisation approved, so KN-S036 declines without it rather than passing every image.
+    allowed_registries: tuple[str, ...] = ()
+    undecided: set[str] = field(default_factory=set)
+
+    def cannot_decide(self, rule_id: str) -> None:
+        self.undecided.add(rule_id)
 
     @property
     def is_openshift(self) -> bool:
@@ -63,10 +93,14 @@ class AuditContext:
         return [d for d in self.docs if d.kind in kinds]
 
     def workloads(self) -> Iterator[tuple[Document, PodTemplate]]:
+        """Every pod spec in the bundle, including the ones embedded in an operator's own kind.
+
+        One object can yield several: a RayCluster has a head and a template per worker group, an
+        InferenceService up to three components. Before this read them, every pod-level rule returned nothing
+        for those kinds and the bundle came back clean (G229).
+        """
         for d in self.docs:
-            pt = pod_template(d)
-            if pt is not None:
-                yield d, pt
+            yield from ((d, pt) for pt in pod_templates(d))
 
     def ns(self, doc: Document) -> str:
         return doc.namespace or "<default>"
@@ -105,6 +139,7 @@ class Rule:
             message=message,
             remediation=remediation or self.remediation,
             path=fmt_path(path),
+            locator=locator(doc.data, path, doc.ambiguous_keys) if doc else fmt_path(path),
             line=doc.line_for(path) if doc else None,
             doc_index=doc.index if doc else None,
             citations=list(self.citations),
@@ -431,6 +466,12 @@ def _v002(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         valid = KIND_API_VERSIONS.get(d.kind)
         if not valid or d.api_version in valid:
             continue
+        if not claims_a_known_group(d.api_version):
+            # A kind name is unique only inside its group. `Service` is core v1 AND serving.knative.dev/v1;
+            # `Job` is batch/v1 AND batch.volcano.sh/v1alpha1. Firing on the name alone called a correct Knative
+            # Service invalid, as a CRITICAL (G233). An unknown group is somebody else's CRD: the report already
+            # says there is no bundled schema for it, and that is the honest statement.
+            continue
         if removed_api(d.api_version, d.kind, "99.0") is not None:
             continue  # handled by the deprecation rules with a precise version message
         yield r.finding(d, ("apiVersion",), f"{d.kind} is not served by '{d.api_version}'. Use {' or '.join(valid)}.")
@@ -625,12 +666,20 @@ def _v011(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
         same_ns = [pt for d, pt in workloads if ctx.ns(d) == ns]
         if not same_ns:
             continue
-        if not any(selector_matches({"matchLabels": sel}, pt.labels()) for pt in same_ns):
-            yield r.finding(
-                svc,
-                ("spec", "selector"),
-                f"Selector {sel} matches no pod template in namespace {ns}; the Service will have no endpoints.",
-            )
+        verdicts = [selector_decides({"matchLabels": sel}, pt) for pt in same_ns]
+        if any(v is True for v in verdicts):
+            continue
+        if any(v is None for v in verdicts):
+            # A component whose pod labels an operator merges in from outside this input might well be selected
+            # by this Service. Reporting "no endpoints" there told the reader their working Service was broken
+            # (G231), so the rule declines instead.
+            ctx.cannot_decide(r.rule_id)
+            continue
+        yield r.finding(
+            svc,
+            ("spec", "selector"),
+            f"Selector {sel} matches no pod template in namespace {ns}; the Service will have no endpoints.",
+        )
 
 
 @rule(
@@ -671,6 +720,75 @@ def _v012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                     f"targetPort '{tp}' is not a named "
                     f"containerPort of the selected pods (named ports: {sorted(names) or 'none'}).",
                 )
+
+
+@rule(
+    "KN-V023",
+    "Service numeric targetPort is not a declared containerPort",
+    Stage.VALIDATE,
+    "wiring",
+    Severity.LOW,
+    "Point the Service at a port these containers declare, or declare the one it points at.",
+    "A numeric targetPort outside the ports the selected containers declare is usually a typo, though Kubernetes "
+    "does not require the declaration.",
+)
+def _v023(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    """The numeric half of KN-V012, and it has to be weaker.
+
+    A named targetPort must resolve or the Service gets no endpoints, which is why KN-V012 is HIGH. A numeric one
+    needs no declaration at all: ``containerPort`` is informational, so a Service pointing at 8080 works whenever
+    something listens on 8080. Reporting every undeclared numeric port would therefore fire on correct
+    repositories. The signal this rule reports is narrower: these containers DO declare ports, and the Service
+    points outside that set, so either the declaration or the Service is wrong. Where the containers declare no
+    ports, there is no signal and the rule says nothing.
+    """
+    workloads = list(ctx.workloads())
+    for svc in ctx.by_kind("Service"):
+        sel = get_path(svc.data, ("spec", "selector"))
+        if not isinstance(sel, dict) or not sel:
+            continue  # endpoints come from an EndpointSlice this bundle need not carry
+        pods = [
+            pt
+            for d, pt in workloads
+            if ctx.ns(d) == ctx.ns(svc) and selector_matches({"matchLabels": sel}, pt.labels())
+        ]
+        if not pods:
+            continue  # the claim needs the pod spec; without it there is nothing to compare
+        # Init containers are excluded deliberately: a Service never reaches one, so a port declared only there
+        # would clear a target the running containers do not serve.
+        declared = {
+            int(p["containerPort"])
+            for pt in pods
+            for c in containers(pt, include_init=False)
+            for p in (c.container.get("ports") or [])
+            if isinstance(p, dict) and isinstance(p.get("containerPort"), int)
+        }
+        if not declared:
+            continue  # the declaration is optional, so its absence is not evidence of anything
+        for i, port in enumerate(get_path(svc.data, ("spec", "ports")) or []):
+            if not isinstance(port, dict):
+                continue
+            tp = port.get("targetPort")
+            if tp is None:
+                # An absent targetPort is not an absent target: it defaults to `port`, so the same mismatch is
+                # there and reporting only the explicit case would read the default as safe.
+                target, field, prefix = port.get("port"), "port", "no targetPort, so it defaults to port "
+            elif isinstance(tp, int) or (isinstance(tp, str) and tp.isdigit()):
+                target, field, prefix = tp, "targetPort", "targetPort "
+            else:
+                continue  # a named target belongs to KN-V012, and two findings for one mistake is one too many
+            if not isinstance(target, int) and not (isinstance(target, str) and target.isdigit()):
+                continue  # a malformed port is the schema rule's to report
+            if int(target) in declared:
+                continue
+            yield r.finding(
+                svc,
+                ("spec", "ports", i, field),
+                f"{prefix}{int(target)}, which is not a declared containerPort of the selected pods "
+                f"(declared: {', '.join(str(x) for x in sorted(declared))}). Kubernetes does not require the "
+                "declaration, so the Service still works if a container listens there -- this is a likely typo, "
+                "not proof of a broken Service.",
+            )
 
 
 @rule(
@@ -849,8 +967,504 @@ def _v019(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
 
 
 # =====================================================================================================
+# VALIDATE - Dynamic Resource Allocation (DRA)
+# =====================================================================================================
+# DRA went GA in Kubernetes 1.34 and the claim wiring is three names deep: a container names a pod-level
+# claim, which names a ResourceClaim or a template. Both checks below mirror upstream's own object validation
+# (`pkg/apis/core/validation/validation.go`: `validateResourceClaimNames`, `validatePodResourceClaim`), which
+# the bundled OpenAPI schemas cannot express -- one is a cross-field reference, the other a mutual exclusion
+# the schema declares no `oneOf` for. So the API server refuses these manifests and nothing before
+# `kubectl apply` says so. That is the whole gap these two close (G192): both are decided inside one
+# document, so neither needs the bundle and `partial_bundle` does not silence them.
+
+
+def _declared_pod_claims(pt: PodTemplate) -> list[str]:
+    """``spec.resourceClaims[].name``, in order, skipping entries that are not name-carrying mappings."""
+    claims = pt.spec.get("resourceClaims")
+    if not isinstance(claims, list):
+        return []
+    out: list[str] = []
+    for item in claims:
+        if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]:
+            out.append(str(item["name"]))
+    return out
+
+
+@rule(
+    "KN-V020",
+    "Container claims a resource the Pod does not declare",
+    Stage.VALIDATE,
+    "wiring",
+    Severity.HIGH,
+    "Name a claim the Pod declares: every resources.claims[].name has to match a spec.resourceClaims[].name.",
+    "A container's resources.claims entry refers to a pod-level claim by name, so a name the Pod never declares "
+    "resolves to nothing. The API server refuses the object, and a typo here reads at a glance as a device "
+    "request that was made.",
+)
+def _v020(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt, c in _resource_containers(ctx):
+        resources = c.container.get("resources")
+        claims = resources.get("claims") if isinstance(resources, dict) else None
+        if not isinstance(claims, list):
+            continue
+        declared = _declared_pod_claims(pt)
+        for i, item in enumerate(claims):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name or name in declared:
+                continue
+            where = f"the Pod declares {', '.join(declared)}" if declared else "the Pod declares none"
+            yield r.finding(
+                d,
+                (*c.path, "resources", "claims", i, "name"),
+                f"Container '{c.name}' claims {name!r}, which is not one of the Pod's resource claims: {where}.",
+            )
+
+
+@rule(
+    "KN-V021",
+    "Pod resource claim names no source, or two",
+    Stage.VALIDATE,
+    "wiring",
+    Severity.HIGH,
+    "Set exactly one of resourceClaimName (share a ResourceClaim that already exists) or "
+    "resourceClaimTemplateName (give this Pod its own, created from a ResourceClaimTemplate).",
+    "A spec.resourceClaims entry has to name exactly one source. With neither there is no device to allocate, "
+    "and with both which one applies is undefined; the API server refuses the object either way.",
+)
+def _v021(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt in ctx.workloads():
+        claims = pt.spec.get("resourceClaims")
+        if not isinstance(claims, list):
+            continue
+        seen: set[str] = set()
+        for i, item in enumerate(claims):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            label = repr(str(name)) if isinstance(name, str) and name else f"resourceClaims[{i}]"
+            path: PathT = (*pt.path, "resourceClaims", i)
+            if isinstance(name, str) and name:
+                if name in seen:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"Pod declares the resource claim {label} more than once. Claim names identify an entry "
+                        "for the containers that reference it, so they have to be unique within the Pod; the API "
+                        "server refuses this object.",
+                    )
+                    continue
+                seen.add(name)
+            # PRESENCE, not truthiness. Upstream tests whether the pointer is set, and an empty string decodes
+            # to a non-nil *string -- so `resourceClaimName: ""` beside a template name really is "both", and
+            # reading it as unset let that case through. An empty name is its own error, not a missing source.
+            sources = {k: item[k] for k in _CLAIM_SOURCE_KINDS if k in item and item[k] is not None}
+            if len(sources) == 2:
+                yield r.finding(
+                    d,
+                    path,
+                    f"Pod resource claim {label} sets both resourceClaimName and resourceClaimTemplateName; "
+                    "exactly one source may be named.",
+                )
+            elif not sources:
+                yield r.finding(
+                    d,
+                    path,
+                    f"Pod resource claim {label} names neither resourceClaimName nor resourceClaimTemplateName, "
+                    "so there is no device for it to allocate.",
+                )
+            else:
+                field_name, value = next(iter(sources.items()))
+                if isinstance(value, str) and not value:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"Pod resource claim {label} sets {field_name} to an empty name. The field is set, so "
+                        "this is not a missing source; it names an object that cannot exist, because an empty "
+                        "string is not a valid name.",
+                    )
+
+
+# A pod-level claim names its source by one of two fields, each naming a different kind.
+_CLAIM_SOURCE_KINDS = {"resourceClaimName": "ResourceClaim", "resourceClaimTemplateName": "ResourceClaimTemplate"}
+# Upstream `DRAAdminNamespaceLabelKey`: set to the string "true" (case-sensitive) on a namespace, it is what
+# permits `adminAccess: true` in that namespace's ResourceClaims and ResourceClaimTemplates at all.
+_ADMIN_NS_LABEL = "resource.kubernetes.io/admin-access"
+# ResourceClaim carries the request tree at spec.devices; ResourceClaimTemplate wraps it one deeper.
+_REQUEST_ROOTS: tuple[tuple[str, PathT], ...] = (
+    ("ResourceClaim", ("spec",)),
+    ("ResourceClaimTemplate", ("spec", "spec")),
+)
+# v1beta1 FLATTENS the request: adminAccess and deviceClassName sit directly on it, where v1 and v1beta2 put
+# them under `exactly`. Upstream normalises between the two shapes for exactly this reason, and the bundled
+# schemas still serve v1beta1, so reading only `exactly` missed every v1beta1 claim. The group-version gate
+# matters in the other direction too: on v1 the request has no adminAccess property at all, so a key of that
+# name there is a schema error for KN-V007 to report, not this field.
+_FLATTENED_GROUP_VERSION = "resource.k8s.io/v1beta1"
+
+
+@rule(
+    "KN-C015",
+    "Pod names a resource claim that is not in this bundle",
+    Stage.AUDIT,
+    "wiring",
+    Severity.HIGH,
+    "Add the ResourceClaim or ResourceClaimTemplate to this bundle, in the Pod's own namespace, or point the "
+    "entry at one that is already there.",
+    "A pod-level claim names a ResourceClaim or a ResourceClaimTemplate in the Pod's own namespace. If no such "
+    "object exists the Pod is admitted and then stays Pending, so the failure arrives after the deploy rather "
+    "than during it.",
+)
+def _c015(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        # a claim that lives in a file you did not pass is not a missing claim (G186)
+        ctx.cannot_decide(r.rule_id)
+        return
+    present: dict[tuple[str, str], set[str]] = {}
+    for kind in _CLAIM_SOURCE_KINDS.values():
+        for d in ctx.by_kind(kind):
+            name = get_path(d.data, ("metadata", "name"))
+            if isinstance(name, str) and name:
+                present.setdefault((kind, ctx.ns(d)), set()).add(name)
+    for d, pt in ctx.workloads():
+        claims = pt.spec.get("resourceClaims")
+        if not isinstance(claims, list):
+            continue
+        ns = ctx.ns(d)
+        names = [i["name"] for i in claims if isinstance(i, dict) and isinstance(i.get("name"), str)]
+        duplicated = {n for n in names if names.count(n) > 1}
+        for i, item in enumerate(claims):
+            if not isinstance(item, dict):
+                continue
+            # A duplicate claim name, and an entry naming two sources, are both refused by the API server, so
+            # the Pod never reaches Pending and "is admitted and then stays Pending" would be a false sentence.
+            # KN-V021 owns those two shapes; skipping them here also stops two findings on one entry from
+            # sharing a name-keyed identity, which a baseline would then collapse into one.
+            if isinstance(item.get("name"), str) and item["name"] in duplicated:
+                continue
+            if len([k for k in _CLAIM_SOURCE_KINDS if k in item and item[k] is not None]) == 2:
+                continue
+            for field_name, kind in _CLAIM_SOURCE_KINDS.items():
+                target = item.get(field_name)
+                if not isinstance(target, str) or not target:
+                    continue
+                if target in present.get((kind, ns), set()):
+                    continue
+                yield r.finding(
+                    d,
+                    (*pt.path, "resourceClaims", i, field_name),
+                    f"Pod resource claim names the {kind} {target!r}, which no document in this bundle defines in "
+                    f"namespace {ns}. The Pod is admitted and then stays Pending.",
+                )
+
+
+@rule(
+    "KN-S031",
+    "Device claim requests administrative access",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Drop adminAccess unless this really is a monitoring or device-management workload, and keep such claims in "
+    'a namespace labelled resource.kubernetes.io/admin-access: "true" that only operators can write to.',
+    "A request with adminAccess ignores every ordinary claim to the device with respect to access modes and "
+    "resource allocations, so the workload reaches devices another tenant holds exclusively. It is the DRA "
+    "equivalent of a privileged container, and the only thing standing between it and any namespace is a label.",
+)
+def _s031(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    in_bundle: set[str] = set()
+    labelled: set[str] = set()
+    for d in ctx.by_kind("Namespace"):
+        name = get_path(d.data, ("metadata", "name"))
+        if not isinstance(name, str) or not name:
+            continue
+        in_bundle.add(name)
+        labels = get_path(d.data, ("metadata", "labels"))
+        if isinstance(labels, dict) and labels.get(_ADMIN_NS_LABEL) == "true":
+            labelled.add(name)
+    for kind, base in _REQUEST_ROOTS:
+        for d in ctx.by_kind(kind):
+            flattened = str(get_path(d.data, ("apiVersion",)) or "") == _FLATTENED_GROUP_VERSION
+            requests = get_path(d.data, (*base, "devices", "requests"))
+            if not isinstance(requests, list):
+                continue
+            for i, req in enumerate(requests):
+                if not isinstance(req, dict):
+                    continue
+                # Only ExactDeviceRequest carries adminAccess; DeviceSubRequest under firstAvailable omits it
+                # on purpose, so a key of that name there is not the API field and means nothing.
+                if flattened:
+                    holder: dict[str, Any] | None = req
+                    tail: PathT = ()
+                else:
+                    exactly = req.get("exactly")
+                    holder = exactly if isinstance(exactly, dict) else None
+                    tail = ("exactly",)
+                if holder is None or holder.get("adminAccess") is not True:
+                    continue
+                ns = ctx.ns(d)
+                where = f"request '{req.get('name')}'" if isinstance(req.get("name"), str) else f"request {i}"
+                path: PathT = (*base, "devices", "requests", i, *tail, "adminAccess")
+                if ns in in_bundle and ns not in labelled:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"{kind} {where} sets adminAccess: true, and namespace {ns} in this bundle does not carry "
+                        f'{_ADMIN_NS_LABEL}: "true". The API server will refuse this object, so the claim does not '
+                        "exist and nothing that depends on it will schedule.",
+                    )
+                else:
+                    yield r.finding(
+                        d,
+                        path,
+                        f"{kind} {where} sets adminAccess: true, so it ignores every ordinary claim to the device "
+                        "and reaches devices another workload holds exclusively.",
+                    )
+
+
+@rule(
+    "KN-V022",
+    "Resource claims set at pod level, where they are forbidden",
+    Stage.VALIDATE,
+    "schema",
+    Severity.HIGH,
+    "Move the claims onto the containers that use the devices: resources.claims belongs on a container, and "
+    "spec.resourceClaims is where the Pod declares them.",
+    "Pod-level resources carries no claims: the API server forbids the field outright, whatever names are in "
+    "it. The schema accepts it, because PodSpec.resources really does have a claims property, so nothing before "
+    "apply says the object will be refused.",
+)
+def _v022(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d, pt in ctx.workloads():
+        resources = pt.spec.get("resources")
+        if not isinstance(resources, dict):
+            continue
+        # Upstream tests `spec.Resources.Claims != nil`, so an empty list is set and refused while an explicit
+        # null is not set at all. Presence of a non-null value is the condition, not a non-empty one.
+        if "claims" not in resources or resources["claims"] is None:
+            continue
+        yield r.finding(
+            d,
+            (*pt.path, "resources", "claims"),
+            "spec.resources.claims is set, and claims may not be set for resources at pod-level: the API server "
+            "refuses this object regardless of which claims are named.",
+        )
+
+
+# =====================================================================================================
 # AUDIT - security
 # =====================================================================================================
+
+
+@rule(
+    "KN-C016",
+    "Namespace has workloads but no ResourceQuota or LimitRange",
+    Stage.CALIBRATE,
+    "resources",
+    Severity.LOW,
+    "Add a ResourceQuota for the namespace's aggregate limits and a LimitRange for per-container defaults, or "
+    "confirm a ClusterResourceQuota or a cluster default already covers it.",
+    "Without a quota one namespace can take the cluster's schedulable capacity, and without a LimitRange a "
+    "container that declares no limits inherits none. A ClusterResourceQuota or a cluster-wide default can "
+    "supply either, and no manifest in the namespace shows that, so this is advisory.",
+)
+def _c016(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        # The namespace's ResourceQuota and LimitRange were not passed, so their absence here means nothing.
+        ctx.cannot_decide(r.rule_id)
+        return
+    quota_ns = {ctx.ns(d) for d in ctx.by_kind("ResourceQuota")}
+    limit_ns = {ctx.ns(d) for d in ctx.by_kind("LimitRange")}
+    # An object with no `metadata.namespace` lands wherever it is applied, so a bundle carrying one is
+    # ambiguous rather than missing it -- the kustomize and `apply -n` shape. Claiming "none in this bundle"
+    # about a bundle that contains one is the false statement this rule's hedging exists to avoid.
+    any_quota = "<default>" in quota_ns or bool(ctx.by_kind("ClusterResourceQuota"))
+    any_limit = "<default>" in limit_ns
+    # The remediation tells the reader to confirm a ClusterResourceQuota covers it; one in the same bundle is
+    # that confirmation. Presence is enough here: matching its selector is a finer answer than the message
+    # claims, and over-claiming is the failure being fixed.
+    # Only namespaces this bundle DECLARES. A workload whose Namespace is managed elsewhere has its quota
+    # managed elsewhere too, and firing there would report nearly every application repository for an object
+    # it is not responsible for. If you ship the Namespace, you own its guardrails.
+    declared = {
+        name
+        for d in ctx.by_kind("Namespace")
+        if isinstance(name := get_path(d.data, ("metadata", "name")), str) and name
+    }
+    flagged: set[str] = set()
+    for d, _pt in ctx.workloads():
+        ns = ctx.ns(d)
+        # Every workload kind, not just the long-running ones. A bare Pod was reported and a recurring
+        # CronJob was not, which is backwards: a runaway CronJob is the textbook reason a namespace needs
+        # `count/jobs.batch`, and a Job's pod inherits no limits just as a Deployment's does.
+        if ns in flagged or ns not in declared or platform_owned_namespace(ctx, ns):
+            continue
+        missing = [
+            label
+            for label, have, blanket in (
+                ("ResourceQuota", quota_ns, any_quota),
+                ("LimitRange", limit_ns, any_limit),
+            )
+            if ns not in have and not blanket
+        ]
+        if not missing:
+            continue
+        flagged.add(ns)
+        yield r.finding(
+            d,
+            ("metadata",),
+            f"Namespace {ns} has workloads and no {' or '.join(missing)} in this bundle. A "
+            "ClusterResourceQuota or a cluster default may still cover it; this bundle cannot show that.",
+        )
+
+
+@rule(
+    "KN-S033",
+    "MachineConfigPool is paused",
+    Stage.AUDIT,
+    "platform",
+    Severity.MEDIUM,
+    'Unpause the pool (oc patch machineconfigpool/<name> --type merge -p \'{"spec":{"paused":false}}\') once '
+    "the maintenance that needed it is over, and track the pause so it cannot be forgotten.",
+    "A paused MachineConfigPool stops generating a new desiredMachineConfig and stops updating machines, so "
+    "every node in the pool keeps the OS, kubelet and container runtime it has -- including their unpatched "
+    "flaws -- until the pool is unpaused. Pausing is a legitimate maintenance step; leaving it paused is how a "
+    "cluster silently stops receiving them.",
+)
+def _s033(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("MachineConfigPool"):
+        if api_group(str(d.data.get("apiVersion", ""))) != "machineconfiguration.openshift.io":
+            continue  # other APIs can use the kind; this rule is about OpenShift's pools
+        spec = d.data.get("spec") if isinstance(d.data, dict) else None
+        if not isinstance(spec, dict) or spec.get("paused") is not True:
+            continue
+        name = get_path(d.data, ("metadata", "name"))
+        yield r.finding(
+            d,
+            ("spec", "paused"),
+            f"MachineConfigPool {name if isinstance(name, str) else '<unnamed>'} is paused, so no machine in it "
+            "receives a new rendered MachineConfig: OS, kubelet and runtime updates stop for every node in the "
+            "pool until it is unpaused.",
+        )
+
+
+@rule(
+    "KN-S034",
+    "Operator Subscription upgrades without review",
+    Stage.AUDIT,
+    "supply-chain",
+    Severity.MEDIUM,
+    "Set spec.installPlanApproval: Manual and approve each InstallPlan deliberately, or record that automatic "
+    "upgrades on this channel are an accepted risk for this operator.",
+    "An OLM Subscription with automatic approval installs whatever the channel publishes next, with no review "
+    "of what changed, and the field is Automatic unless it explicitly says Manual -- so omitting it chooses "
+    "automatic upgrades rather than deferring the decision.",
+)
+def _s034(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("Subscription"):
+        if api_group(str(d.data.get("apiVersion", ""))) != "operators.coreos.com":
+            continue  # other APIs use the kind too; this rule is about OLM
+        spec = d.data.get("spec") if isinstance(d.data, dict) else None
+        spec = spec if isinstance(spec, dict) else {}
+        approval = spec.get("installPlanApproval")
+        if isinstance(approval, str) and approval == "Manual":
+            continue
+        name = get_path(d.data, ("metadata", "name"))
+        name = name if isinstance(name, str) else "<unnamed>"
+        channel = spec.get("channel")
+        where: PathT = ("spec", "installPlanApproval") if approval is not None else ("spec",)
+        stated = f"installPlanApproval: {approval!r}" if approval is not None else "no installPlanApproval"
+        yield r.finding(
+            d,
+            where,
+            f"Subscription {name} has {stated}, so OLM installs whatever "
+            f"{f'channel {channel} ' if isinstance(channel, str) and channel else 'the channel '}publishes next "
+            "without anyone approving the InstallPlan. Absent, the field means Automatic: upstream returns "
+            "Manual only when it is set to Manual.",
+        )
+
+
+# Pod Security admission reads three labels per mode off the NAMESPACE, not off the workload. The constants are
+# upstream's (`staging/src/k8s.io/pod-security-admission/api/constants.go`): the prefix, and the three levels.
+PSA_ENFORCE_LABEL = "pod-security.kubernetes.io/enforce"
+PSA_LEVELS = ("privileged", "baseline", "restricted")
+# `SYSTEM_NAMESPACES` mixes the two platforms: `openshift` belongs to OpenShift and the `kube-*` ones to every
+# cluster. Skipping `openshift` and `openshift-*` on vanilla Kubernetes gave an ordinary namespace on EKS or
+# GKE a silent pass, because the reason for the skip -- OpenShift owns those namespaces and its Pod Security
+# syncer is permanently off for them -- is an OpenShift fact (G204).
+_PLATFORM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease", "default"})
+
+
+def platform_owned_namespace(ctx: AuditContext, name: str) -> bool:
+    """True when the platform owns this namespace, so its guardrails are not the author's to set."""
+    if name in _PLATFORM_NAMESPACES:
+        return True
+    return ctx.is_openshift and (name == "openshift" or name.startswith("openshift-"))
+
+
+@rule(
+    "KN-S032",
+    "Namespace does not enforce a pod security level",
+    Stage.AUDIT,
+    "security",
+    Severity.MEDIUM,
+    "Set pod-security.kubernetes.io/enforce: restricted on the Namespace (baseline where a workload genuinely "
+    "needs more), and pin pod-security.kubernetes.io/enforce-version so a cluster upgrade cannot change what "
+    "the label means.",
+    "Pod Security admission is configured per namespace by a label. Without it the namespace runs at whatever "
+    "the cluster's AdmissionConfiguration default is, which is privileged on a default install -- so the "
+    "namespace enforces nothing, and no manifest in it will say so.",
+)
+def _s032(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    seen: set[str] = set()
+    for d in ctx.by_kind("Namespace"):
+        name = get_path(d.data, ("metadata", "name"))
+        if not isinstance(name, str) or not name:
+            continue  # KN-V007 already refuses the object, and a nameless namespace is not actionable here
+        if platform_owned_namespace(ctx, name) or name in seen:
+            continue
+        seen.add(name)
+        labels = get_path(d.data, ("metadata", "labels"))
+        level = labels.get(PSA_ENFORCE_LABEL) if isinstance(labels, dict) else None
+        if level is not None and not (isinstance(level, str) and level in PSA_LEVELS):
+            # The enum is exactly the three lowercase strings, so `Privileged` is not a level. Reporting
+            # nothing here made the rule QUIETER about a namespace that looks privileged than about one with
+            # no label at all. What the cluster does with an invalid value is not claimed.
+            yield r.finding(
+                d,
+                ("metadata", "labels", PSA_ENFORCE_LABEL),
+                f"Namespace {name} sets {PSA_ENFORCE_LABEL}: {level!r}, which is not one of Pod Security's "
+                "levels -- they are privileged, baseline or restricted, lower-case. The namespace does not "
+                "enforce the level this label appears to name.",
+            )
+            continue
+        if level == "privileged":
+            yield r.finding(
+                d,
+                ("metadata", "labels", PSA_ENFORCE_LABEL),
+                f"Namespace {name} sets {PSA_ENFORCE_LABEL}: privileged, which is Pod Security's "
+                "no-restrictions level: every pod in it may run as root, share host namespaces and mount host "
+                "paths, whatever its own securityContext says.",
+                severity=Severity.HIGH,
+            )
+            continue
+        if level is not None:
+            continue  # baseline or restricted is a judgement about the workload, not a defect
+        if ctx.is_openshift:
+            # OpenShift's label syncer sets `warn` and `audit` from the SCCs the namespace's service accounts
+            # can use, and deliberately NOT `enforce`: the platform enforces the privileged profile globally
+            # and leaves real enforcement to SCCs. Reporting the absent label here would report the platform's
+            # own design as a defect, which is absence read as a defect (G193).
+            continue
+        yield r.finding(
+            d,
+            ("metadata",),
+            f"Namespace {name} sets no {PSA_ENFORCE_LABEL} label, so the level enforced for it is the "
+            "cluster's AdmissionConfiguration default -- privileged on a default install, and not something "
+            "these manifests show. Set the label to say what this namespace enforces rather than inheriting "
+            "an answer the repository cannot see.",
+        )
+
 
 DANGEROUS_CAPS = frozenset(
     {
@@ -1244,6 +1858,105 @@ def image_tag(image: str) -> tuple[str | None, bool]:
     return tag, has_digest
 
 
+def image_registry(image: str) -> str:
+    """The registry an image reference names, as the container runtime resolves it.
+
+    Docker's rule, which is not obvious and is the whole of this function: the first path component is the
+    registry only when it looks like a host -- it contains a dot or a colon, or it is exactly `localhost`.
+    Everything else is a Docker Hub repository, so `nginx` and `bitnami/nginx` both come from `docker.io`
+    however little they look like it, and an allowlist that missed that would pass every unqualified image
+    (G241).
+    """
+    ref = image.split("@", 1)[0]
+    head = ref.split("/", 1)[0]
+    if "/" in ref and ("." in head or ":" in head or head == "localhost"):
+        return head
+    return "docker.io"
+
+
+#: The whitespace a blank image reference may be made of. ASCII only, and spelled out rather than left to
+#: `str.strip()`, because the generated admission policy decides the same question with an RE2 character class
+#: and `str.strip()` also removes U+00A0 and other Unicode spaces, which RE2 would not (G245).
+BLANK_IMAGE_CHARS = " \t\n\r\f\v"
+
+
+def image_repository(image: str) -> str:
+    """The repository path a reference names, as the runtime resolves it: no registry host, Docker Hub expanded.
+
+    This is the part an `host/org` allowlist entry is compared against, and it has to be the path the runtime
+    would pull, not the text after the first slash. Two normalisations, and without either one the same image
+    written three ways got three verdicts (G245):
+
+    * The registry host is removed when the reference states it, so `docker.io/bitnami/nginx` is the
+      `bitnami/nginx` repository and not a repository called `docker.io/bitnami/nginx`.
+    * A single-component Docker Hub path is expanded to the organisation it really lives in, so `nginx`,
+      `library/nginx` and `docker.io/library/nginx` are all `library/nginx`.
+    """
+    ref = image.split("@", 1)[0]
+    registry = image_registry(image)
+    head, _, rest = ref.partition("/")
+    path = rest if (head == registry and rest) else ref
+    if registry == "docker.io" and "/" not in path:
+        path = f"library/{path}"
+    return path
+
+
+def _registry_allowed(image: str, allowed: tuple[str, ...]) -> bool:
+    """Whether this image comes from an allowed registry, honouring an `host/org` entry.
+
+    An entry with a path narrows the allowance to that organisation: `quay.io/my-org` permits
+    `quay.io/my-org/app` and refuses `quay.io/someone-else/app`, which is the point of an allowlist for a
+    registry anyone can push to. The entry's path is an organisation prefix, not a repository, so it is NOT
+    put through `image_repository`: `docker.io/library` means the organisation every official image lives in.
+    """
+    registry = image_registry(image)
+    path = image_repository(image)
+    for entry in allowed:
+        host, _, prefix = entry.strip().partition("/")
+        if host != registry:
+            continue
+        if not prefix or path == prefix or path.startswith(prefix.rstrip("/") + "/"):
+            return True
+    return False
+
+
+@rule(
+    "KN-S036",
+    "Image from a registry outside the allowlist",
+    Stage.AUDIT,
+    "supply-chain",
+    Severity.HIGH,
+    "Mirror the image into an approved registry and reference it there, or add the registry to "
+    "`audit.allowedRegistries` if it is approved.",
+    "An image from an unapproved registry is code of unknown provenance running with the pod's identity, and it "
+    "is the step every other supply-chain control depends on: a signature, an SBOM and a scan all describe an "
+    "artifact somebody chose to trust.",
+    ("k8s-images",),
+)
+def _s036(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if not ctx.allowed_registries:
+        # No manifest states which registries an organisation has approved. Reporting every image as fine
+        # because no policy was configured is the absence-read-as-pass failure this catalogue is built against,
+        # so the rule declines and `run_rules` keeps it out of the evaluated list (G241).
+        ctx.cannot_decide(r.rule_id)
+        return
+    for d, pt in ctx.workloads():
+        for c in containers(pt):
+            image = c.container.get("image")
+            if not isinstance(image, str) or not image.strip(BLANK_IMAGE_CHARS):
+                continue  # no image to measure; KN-S012 reports that
+            if _registry_allowed(image, ctx.allowed_registries):
+                continue
+            where = image_registry(image)
+            implicit = " (an unqualified name resolves to Docker Hub)" if "/" not in image.split("@", 1)[0] else ""
+            yield r.finding(
+                d,
+                (*c.path, "image"),
+                f"Container '{c.name}' pulls from '{where}'{implicit}, which is not in "
+                f"audit.allowedRegistries ({', '.join(ctx.allowed_registries)}).",
+            )
+
+
 @rule(
     "KN-S012",
     "Mutable image reference",
@@ -1259,6 +1972,12 @@ def _s012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     for d, _pt, c in _containers(ctx):
         image = c.container.get("image")
         if not isinstance(image, str) or not image:
+            if c.label:
+                # A field-shaped container -- a KServe `model:`, one of its framework shorthands, KubeRay's
+                # injected autoscaler -- gets its image from the ServingRuntime or the operator, so an absent
+                # one is the canonical form rather than a defect. The report says the image was not read
+                # instead of calling the upstream sample a HIGH finding (G252).
+                continue
             yield r.finding(d, c.path, f"Container '{c.name}' has no image.", severity=Severity.HIGH)
             continue
         tag, digest = image_tag(image)
@@ -1455,8 +2174,35 @@ def _s017(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
             if verbs & ESCALATION_VERBS:
                 yield r.finding(d, ("rules", i, "verbs"), f"Grants {sorted(verbs & ESCALATION_VERBS)}.")
             if "secrets" in resources and verbs & {"get", "list", "watch", "*"}:
-                sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.LOW
-                yield r.finding(d, ("rules", i, "resources"), f"{d.kind} can read Secrets.", severity=sev)
+                # `list` and `watch` return the Secrets' CONTENTS, so one grant hands over every value in scope;
+                # a `get` hands over the ones whose names the holder already knows. All three external reviews
+                # of this catalogue asked for that distinction and it was not being made: a namespaced `list`
+                # was reported at LOW, the same as a `get` (G240).
+                #
+                # The severity does NOT depend on `resourceNames` for `list` and `watch`, deliberately. Whether
+                # `resourceNames` narrows a list request is a question about the authorizer that this project
+                # has not verified against the published reference, so the rule takes the conservative reading
+                # in which it does not -- which is right whichever way that falls, instead of resting on it.
+                values = bool(verbs & {"list", "watch", "*"})
+                names = [str(n) for n in (rr.get("resourceNames") or [])]
+                if not values and names:
+                    # `get` restricted to named Secrets is the least-privilege pattern the upstream RBAC guidance
+                    # recommends. Reporting it as an escalation path told people their correct configuration was
+                    # a defect, which is the one thing a security rule must not do.
+                    continue
+                if values:
+                    sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.MEDIUM
+                    scope = (
+                        "every Secret in the cluster" if d.kind == "ClusterRole" else "every Secret in the namespace"
+                    )
+                    message = (
+                        f"{d.kind} grants {sorted(verbs & {'list', 'watch', '*'})} on Secrets, which returns their "
+                        f"contents: this hands over the values of {scope}, not only the names."
+                    )
+                else:
+                    sev = Severity.HIGH if d.kind == "ClusterRole" else Severity.LOW
+                    message = f"{d.kind} can read Secrets."
+                yield r.finding(d, ("rules", i, "resources"), message, severity=sev)
             if resources & {"pods/exec", "pods/attach"} and verbs & {"create", "*"}:
                 yield r.finding(d, ("rules", i, "resources"), "Grants exec/attach into pods.", severity=Severity.MEDIUM)
             if "nodes/proxy" in resources:
@@ -1974,11 +2720,16 @@ def _s028(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
     ("Deployments should have at least one ingress Network Policy",),
 )
 def _n001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        # the namespace's NetworkPolicies were not passed, so their absence here means nothing
+        ctx.cannot_decide(r.rule_id)
+        return
     netpol_ns = {ctx.ns(d) for d in ctx.by_kind("NetworkPolicy")}
     flagged: set[str] = set()
     for d, _pt in ctx.workloads():
         ns = ctx.ns(d)
-        if d.kind in LONG_RUNNING_KINDS | {"Pod"} and ns not in netpol_ns and ns not in flagged:
+        long_running = LONG_RUNNING_KINDS | LONG_RUNNING_EMBEDDED_KINDS | {"Pod"}
+        if d.kind in long_running and ns not in netpol_ns and ns not in flagged:
             flagged.add(ns)
             yield r.finding(d, ("metadata",), f"No NetworkPolicy for namespace {ns} in this bundle.")
 
@@ -2397,20 +3148,228 @@ def _selects_something(selector: dict[str, Any]) -> bool:
     ("k8s-networkpolicy",),
 )
 def _n012(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
-    by_ns: dict[str, list[dict[str, str]]] = {}
+    by_ns: dict[str, list[PodTemplate]] = {}
     for d, pt in ctx.workloads():
-        by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
+        by_ns.setdefault(ctx.ns(d), []).append(pt)
     for d in ctx.by_kind("NetworkPolicy"):
         sel = get_path(d.data, ("spec", "podSelector"))
         pods = by_ns.get(ctx.ns(d))
         if not isinstance(sel, dict) or not _selects_something(sel) or not pods:
             continue
-        if not any(selector_matches(sel, labels) for labels in pods):
+        verdicts = [selector_decides(sel, pt) for pt in pods]
+        if any(v is True for v in verdicts):
+            continue
+        if any(v is None for v in verdicts):
+            # Same reason as KN-V011: an operator-merged label could be exactly the one this selector asks for,
+            # and "this policy protects nothing" is the most alarming thing this rule can say (G231).
+            ctx.cannot_decide(r.rule_id)
+            continue
+        yield r.finding(
+            d,
+            ("spec", "podSelector"),
+            f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
+            f"namespace {ctx.ns(d)}: this policy protects nothing.",
+        )
+
+
+_DNS_PORTS = frozenset({53, 5353})  # 53 is the Service port; OpenShift CoreDNS pods listen on 5353
+
+
+def _rule_allows_dns(rule: dict[str, Any]) -> bool:
+    """True when this one egress rule lets UDP reach a DNS port.
+
+    UDP, not TCP. ``NetworkPolicyPort.protocol`` defaults to TCP, so a bare ``{port: 53}`` permits TCP
+    only, and a resolver queries UDP first -- glibc falls back to TCP only on a truncated answer and
+    musl does not fall back at all. Allowing TCP 53 alone leaves lookups timing out, which is the
+    commonest forgotten-``protocol: UDP`` mistake, so it must not clear the finding.
+
+    A rule with no ``ports`` permits every port and protocol to its peers, and an empty rule permits
+    everything. A port range is honoured (``{port: 1, endPort: 1024}`` covers 53). A named port cannot
+    be resolved from the manifest -- the DNS pod that declares it is never in the bundle -- so it is
+    treated as permitting DNS: the manifest does not prove stranding, and reporting it would flag a
+    policy that works.
+    """
+    ports = rule.get("ports")
+    if ports is None:
+        return True
+    if not isinstance(ports, list):
+        return False
+    for entry in ports:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("protocol") or "TCP").upper() != "UDP":
+            continue
+        port = entry.get("port")
+        if port is None:
+            return True  # every port to these peers
+        if isinstance(port, int) or (isinstance(port, str) and port.isdigit()):
+            lo = int(port)
+            hi = int(entry["endPort"]) if str(entry.get("endPort") or "").isdigit() else lo
+            if any(lo <= dns <= hi for dns in _DNS_PORTS):
+                return True
+        else:
+            return True  # a named port: not resolvable here, and not disprovable either
+    return False
+
+
+def _egress_allows_dns(spec: dict[str, Any]) -> bool:
+    """True when this policy lets the pods it selects reach cluster DNS.
+
+    Peers are deliberately not checked: cluster DNS is reached by a Service address that a manifest need
+    not mention, and demanding a kube-system peer here would report a policy that works.
+    """
+    rules = spec.get("egress")
+    if not isinstance(rules, list):
+        return False
+    return any(_rule_allows_dns(r) for r in rules if isinstance(r, dict))
+
+
+@rule(
+    "KN-N013",
+    "Egress is denied without allowing cluster DNS",
+    Stage.AUDIT,
+    "network",
+    Severity.MEDIUM,
+    "Add an egress rule allowing UDP and TCP port 53 to the cluster DNS namespace, or widen this policy.",
+    "A policy that restricts egress and allows no route to port 53 stops every pod it selects from resolving "
+    "names. The pods keep running and every outbound connection fails on lookup, which reads as an application "
+    "outage rather than as a policy change.",
+    ("k8s-networkpolicy",),
+)
+def _n013(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        # another policy in the namespace may allow 53, and it was not passed
+        ctx.cannot_decide(r.rule_id)
+        return
+    by_ns: dict[str, list[dict[str, str]]] = {}
+    for d, pt in ctx.workloads():
+        if (pt.spec or {}).get("hostNetwork") is True:
+            continue  # NetworkPolicy does not govern host-networked pods on the common plugins
+        by_ns.setdefault(ctx.ns(d), []).append(pt.labels())
+    egress_policies: dict[str, list[Document]] = {}
+    for d in ctx.by_kind("NetworkPolicy"):
+        spec = d.data.get("spec")
+        if isinstance(spec, dict) and "Egress" in policy_types(spec):
+            egress_policies.setdefault(ctx.ns(d), []).append(d)
+    for ns, policies in egress_policies.items():
+        pods = by_ns.get(ns) or []
+        for d in policies:
+            spec = d.data.get("spec") or {}
+            sel = spec.get("podSelector")
+            if not isinstance(sel, dict):
+                continue
+            selected = [labels for labels in pods if selector_matches(sel, labels)]
+            if not selected:
+                continue
+            # Policies are additive, so DNS is reachable when ANY egress policy selecting the pod allows it.
+            stranded = [
+                labels
+                for labels in selected
+                if not any(
+                    _egress_allows_dns(other.data.get("spec") or {})
+                    for other in policies
+                    if selector_matches((other.data.get("spec") or {}).get("podSelector") or {}, labels)
+                )
+            ]
+            if stranded:
+                yield r.finding(
+                    d,
+                    ("spec", "egress"),
+                    f"Egress is restricted for {len(stranded)} pod template(s) in namespace {ns} and no policy "
+                    "selecting them allows UDP to port 53 or 5353, so they cannot resolve any name.",
+                )
+
+
+@rule(
+    "KN-N014",
+    "Admin network policy the cluster's CNI does not enforce",
+    Stage.AUDIT,
+    "network",
+    Severity.HIGH,
+    "Replace it with the kind this CNI does enforce (ClusterNetworkPolicy for Calico 3.32+), or remove it and move "
+    "the rules into NetworkPolicies.",
+    "An AdminNetworkPolicy or BaselineAdminNetworkPolicy a CNI stopped enforcing is in the cluster and decides "
+    "nothing: Calico removed support in 3.32 without reporting an error.",
+)
+def _n014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    """The inert-policy case as a finding a gate can fail on.
+
+    No manifest states which CNI runs the cluster, so without ``--cni`` this rule cannot decide and says so --
+    "nobody told me the CNI" is not "the policy is enforced", and a coverage record that counted it clean would be
+    reporting a check that never ran (G202). The same holds for a CNI upstream does not characterise, and for a
+    version too coarse to sit on either side of the removal. HIGH for the same reason KN-S030 is: a policy gate
+    that silently stopped applying is worse than one that was never there, because somebody is relying on it.
+    """
+    from kube_noob.debug.cni import REPLACEMENT, admin_tier_reason, admin_tier_support, parse_cni
+
+    docs = ctx.by_kind(ADMIN_TIER_KINDS[0], ADMIN_TIER_KINDS[1])
+    if not ctx.cni:
+        if docs:
+            ctx.cannot_decide(r.rule_id)
+        return  # nothing of this kind is nothing to decide, whatever the CNI
+    try:
+        name, version = parse_cni(ctx.cni)
+    except ValueError:
+        if docs:
+            ctx.cannot_decide(r.rule_id)
+        return
+    support = admin_tier_support(name, version)
+    if support == "enforced" or not docs:
+        return
+    if support == "unknown":
+        ctx.cannot_decide(r.rule_id)
+        return
+    reason = admin_tier_reason(name, version, support)
+    for d in docs:
+        yield r.finding(
+            d,
+            ("kind",),
+            f"{d.kind} is evaluated by kube-noob and by nothing on this cluster: {reason}. "
+            f"Move its rules into a {REPLACEMENT} or into NetworkPolicies.",
+        )
+
+
+@rule(
+    "KN-S030",
+    "Admission webhook fails open",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Set failurePolicy: Fail, and scope the webhook with namespaceSelector or objectSelector so a failure "
+    "cannot stall the whole cluster.",
+    "failurePolicy: Ignore means the API server admits the object when the webhook cannot be reached. The "
+    "control appears to be in place and is silently not applied whenever the service is down, upgrading or "
+    "unreachable, which is also when a bad object is most likely to be admitted. The API default is Fail, so "
+    "Ignore is a decision rather than an oversight.",
+    ("k8s-admission-webhook-failure-policy",),
+)
+def _s030(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    for d in ctx.by_kind("ValidatingWebhookConfiguration", "MutatingWebhookConfiguration"):
+        hooks = d.data.get("webhooks")
+        if not isinstance(hooks, list):
+            continue
+        for i, hook in enumerate(hooks):
+            if not isinstance(hook, dict):
+                continue
+            policy = hook.get("failurePolicy")
+            if policy is None or policy == "Fail":
+                continue  # absent means Fail, which is the safe default
+            name = str(hook.get("name") or f"webhooks[{i}]")
+            if policy != "Ignore":
+                # Invalid is not the safe default. The API server refuses the object, so the control the
+                # manifest describes does not exist at all -- the same stance selectors take (G185).
+                yield r.finding(
+                    d,
+                    ("webhooks", i, "failurePolicy"),
+                    f"Webhook '{name}' sets failurePolicy: {policy!r}, which is neither Fail nor Ignore. The API "
+                    "server refuses this object, so the check it describes is not running at all.",
+                )
+                continue
             yield r.finding(
                 d,
-                ("spec", "podSelector"),
-                f"podSelector {sel.get('matchLabels') or sel} selects none of the {len(pods)} pod template(s) in "
-                f"namespace {ctx.ns(d)}: this policy protects nothing.",
+                ("webhooks", i, "failurePolicy"),
+                f"Webhook '{name}' sets failurePolicy: Ignore, so the object is admitted whenever this webhook "
+                "cannot be reached and the check it performs is skipped without rejecting anything.",
             )
 
 
@@ -2478,7 +3437,16 @@ def _st001(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                         "default StorageClass supports ReadWriteMany (most block classes do not).",
                         severity=Severity.MEDIUM,
                     )
-            elif sc != "":  # "" = static binding to a pre-created PV, no provisioner involved
+            elif sc != "":
+                # "" = static binding to a pre-created PV, no provisioner involved. Only this branch of the rule
+                # reads another object; the rest decide from the claim alone and still fire on a partial bundle.
+                if ctx.partial_bundle:
+                    # Declining is not the same as passing. Skipping this branch silently left the rule in
+                    # evaluated_rules, so a per-control summary counted it `clean` while the report's own
+                    # assumptions said an undeclared StorageClass was not evaluated -- the two halves of one
+                    # report disagreeing, with the reassuring half the one a reader sees first.
+                    ctx.cannot_decide(r.rule_id)
+                    continue
                 yield r.finding(
                     d,
                     (*path, "storageClassName"),
@@ -2846,6 +3814,10 @@ def _pdbs_for(ctx: AuditContext, d: Document, labels: dict[str, str]) -> list[Do
     ("k8s-pdb",),
 )
 def _c008(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    if ctx.partial_bundle:
+        # the namespace's PodDisruptionBudgets were not passed, so no match here means nothing
+        ctx.cannot_decide(r.rule_id)
+        return
     for d, pt in ctx.workloads():
         if d.kind in REPLICATED_KINDS and (replicas(d) or 1) >= 2 and not _pdbs_for(ctx, d, pt.labels()):
             yield r.finding(d, ("spec",), "No PodDisruptionBudget selects this workload.")
@@ -3027,11 +3999,102 @@ def _c014(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
                 )
 
 
-def run_rules(ctx: AuditContext, stages: set[Stage] | None = None) -> list[Finding]:
+#: The one audit profile that logs nothing, from openshift/api config/v1 types_apiserver.go (retrieved
+#: 2026-11-06). The other three -- Default, WriteRequestBodies, AllRequestBodies -- differ in how much of each
+#: request they record, not in whether they record it.
+AUDIT_PROFILE_NONE = "None"
+
+#: The API group the cluster audit configuration lives in. An `APIServer` kind in any other group is a
+#: different resource that happens to share a name.
+APISERVER_GROUP = "config.openshift.io"
+
+
+@rule(
+    "KN-S035",
+    "Cluster audit logging is turned off, for everyone or for one group",
+    Stage.AUDIT,
+    "security",
+    Severity.HIGH,
+    "Set spec.audit.profile to Default or higher on the APIServer named 'cluster', and remove any customRules "
+    "entry whose profile is None. If a group genuinely must be excluded, record why: an assessor will ask.",
+    "An OpenShift cluster can be configured to log no API requests at all, or -- less visibly -- to log none of "
+    "the requests made by one group, through a customRules entry that overrides a healthy-looking top-level "
+    "profile.",
+)
+def _s035(ctx: AuditContext, r: Rule) -> Iterator[Finding]:
+    """Audit configuration, read as settings rather than inferred from the absence of a log.
+
+    This is the only check in the logging family that a read-only client can actually decide. `spec.audit` on the
+    cluster-scoped `APIServer` singleton is configuration, not audit content: no event, no request body, nothing
+    about a person. Everything else a reader might want here -- whether events reach a SIEM, whether anyone reads
+    them, whether retention holds -- needs a system kube-noob has no credentials for, and forty rules that answer
+    "not evaluated" would be coverage theatre rather than coverage.
+
+    The second finding is the one worth having. `customRules` is evaluated top to bottom and the first match
+    takes precedence over `spec.audit.profile`, so a cluster reporting `profile: Default` can log nothing at all
+    for a named group. A reader who checks only the top-level profile sees a configured cluster; this is that
+    same shape again, in someone else's API (G202, G216).
+
+    On a bundle that does not carry the object this declines rather than passing: on OpenShift the singleton
+    always exists, so its absence means it was not collected, not that auditing is on.
+    """
+    if not ctx.is_openshift:
+        return  # the resource does not exist off OpenShift; see N15 on telling that apart from a pass
+    # Exact group, not a prefix. `apiVersion` is a Kubernetes group/version, and comparing the group
+    # itself says what is meant -- any served version of config.openshift.io, and nothing whose group
+    # merely begins with those characters. CodeQL reads a dotted literal in `startswith` as URL
+    # validation and flags it; it was not exploitable here (the trailing slash makes it a true prefix),
+    # but a split on the separator is what the data model actually is.
+    docs = [d for d in ctx.by_kind("APIServer") if d.api_version.split("/", 1)[0] == APISERVER_GROUP]
+    if not docs:
+        ctx.cannot_decide(r.rule_id)
+        return
+    for d in docs:
+        spec = d.data.get("spec") if isinstance(d.data, dict) else None
+        audit = spec.get("audit") if isinstance(spec, dict) else None
+        if not isinstance(audit, dict):
+            continue  # the default is Default; an absent audit block is not an absent profile
+        if str(audit.get("profile", "")) == AUDIT_PROFILE_NONE:
+            yield r.finding(
+                d,
+                ("spec", "audit", "profile"),
+                "spec.audit.profile is None, so the API server records no requests at all: there is no audit "
+                "evidence for anything that happens on this cluster, and nothing to forward to a SIEM.",
+            )
+        rules = audit.get("customRules")
+        if not isinstance(rules, list):
+            continue
+        for i, entry in enumerate(rules):
+            if not isinstance(entry, dict) or str(entry.get("profile", "")) != AUDIT_PROFILE_NONE:
+                continue
+            group = str(entry.get("group") or "(unnamed group)")
+            yield r.finding(
+                d,
+                ("spec", "audit", "customRules", i, "profile"),
+                f"spec.audit.customRules[{i}] logs nothing for group {group!r}. customRules are evaluated in "
+                f"order and the first match overrides spec.audit.profile "
+                f"({str(audit.get('profile') or 'Default')!r}), so this cluster looks audited and is not, for "
+                f"everyone in that group.",
+            )
+
+
+def run_rules(ctx: AuditContext, stages: set[Stage] | None = None, evaluated: list[str] | None = None) -> list[Finding]:
+    """Every rule in ``stages``, appending the ids that actually ran to ``evaluated`` when given.
+
+    The caller needs that list because a rule producing no findings and a rule that never ran look
+    identical in the output otherwise, and a compliance record built on that cannot tell a control
+    that was checked and is clean from one nothing looked at.
+
+    The id is appended AFTER the check runs, and only when the rule did not call ``cannot_decide``: a rule
+    the partial-bundle guard skipped produces no findings, and recording it as evaluated made the control
+    summary report it as checked-and-clean (G202).
+    """
     findings: list[Finding] = []
     for r in RULES.values():
         if stages is not None and r.stage not in stages:
             continue
         if r.check is not None:
             findings.extend(r.check(ctx, r))
+            if evaluated is not None and r.rule_id not in ctx.undecided:
+                evaluated.append(r.rule_id)
     return findings

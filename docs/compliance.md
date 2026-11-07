@@ -49,17 +49,19 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 
 - Per-user identity in the service: authorization is one shared token unless you add the OAuth proxy, and audit
   records do not carry the caller's identity yet.
-- Machine-readable output for assessors (OSCAL assessment results) and the FedRAMP 20x Key Security Indicator
-  mapping. When that mapping ships it will name the release it was built from and carry the retirement list:
-  `FRMR.KSI.key-security-indicators.json` is at release 25.11C (published 2025-12-01), 20x is at Phase 2 Pilot,
-  and seven indicators are now marked `retired: true` -- KSI-CMT-05, KSI-MLA-03, KSI-MLA-04, KSI-MLA-06,
-  KSI-SVC-03, KSI-TPR-01 and KSI-TPR-02. The eleven families are unchanged. Evidence offered against a withdrawn
-  indicator is worse than no evidence, so a mapping without that list is not shippable.
+- The 20x Key Security Indicator crosswalk now ships -- `kube-noob ksi` -- and what is left is its reach, not its
+  absence. 28 of the 30 controls kube-noob maps are cited by an indicator; `SC-6` and `SC-36` are cited by none, so
+  no finding reaches an indicator through them, and 15 of the 46 indicators have no kube-noob rule behind them at
+  all and say so rather than showing a zero. See [FedRAMP 20x KSI](fedramp-ksi.md), which is generated from the
+  vendored dataset with its version and hash. The five specifics this bullet used to carry were all wrong by
+  2026-11-02 and it asserted them anyway: there is no separate `FRMR.KSI.key-security-indicators.json` at 25.11C,
+  there are ten families and not eleven, indicators are keyed by mnemonic and not by number, and nothing in the
+  consolidated dataset is flagged retired -- the seven ids recorded here as `retired: true` no longer exist as ids.
 - FIPS mode is checked by `doctor` but not exercised in CI (no FIPS-mode runner).
 - No 3PAO assessment, Iron Bank listing, DISA STIG review of the image, or CISA secure software development
   attestation has been done.
 
-## The 78 audit rules and their controls
+## The 93 audit rules and their controls
 
 | Rule | What it checks | NIST SP 800-53 Rev. 5 controls |
 |---|---|---|
@@ -77,6 +79,8 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-C012 | HPA cannot compute CPU utilization | SC-6 |
 | KN-C013 | Pull secret exists only in another namespace | CM-6 |
 | KN-C014 | Workload scaled by an HPA also sets spec.replicas | CM-6, SC-6 |
+| KN-C015 | Pod names a resource claim that is not in this bundle | CM-6 |
+| KN-C016 | Namespace has workloads but no ResourceQuota or LimitRange | SC-5, SC-6 |
 | KN-N001 | Namespace has workloads but no NetworkPolicy | SC-7, SC-7(5), AC-4 |
 | KN-N002 | Route without TLS | SC-8, SC-8(1) |
 | KN-N003 | Ingress without TLS | SC-8, SC-8(1) |
@@ -89,6 +93,8 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-N010 | ingress-nginx ConfigMap widens what an Ingress may ask of the controller | CM-6, CM-7, SI-2 |
 | KN-N011 | Ingress path type ImplementationSpecific on ingress-nginx | SI-2, SI-10, CM-7 |
 | KN-N012 | NetworkPolicy selects no pod in this bundle | SC-7, SC-7(5), AC-4 |
+| KN-N013 | Egress is denied without allowing cluster DNS | SC-7, CP-10 |
+| KN-N014 | Admin network policy the cluster's CNI does not enforce | SC-7, SC-7(5), AC-4 |
 | KN-S001 | Privileged container | AC-6, CM-7, SC-39 |
 | KN-S002 | Privilege escalation not disabled | AC-6, AC-6(10), CM-7 |
 | KN-S003 | Container may run as root | AC-6, CM-6 |
@@ -118,6 +124,13 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-S027 | Legacy ServiceAccount token Secret | IA-5, AC-6 |
 | KN-S028 | RBAC binding grants a role to everyone | AC-14, AC-3, AC-6 |
 | KN-S029 | Probe or lifecycle handler with a host | SC-7, CM-7 |
+| KN-S030 | Admission webhook fails open | CM-7, SI-7 |
+| KN-S031 | Device claim requests administrative access | AC-6, SC-4 |
+| KN-S032 | Namespace does not enforce a pod security level | AC-6, CM-6 |
+| KN-S033 | MachineConfigPool is paused | SI-2 |
+| KN-S034 | Operator Subscription upgrades without review | CM-3(2) |
+| KN-S035 | Cluster audit logging is turned off, for everyone or for one group | AU-2, AU-12 |
+| KN-S036 | Image from a registry outside the allowlist | CM-2, SI-7 |
 | KN-ST001 | ReadWriteMany requested from a ReadWriteOnce-only StorageClass | CM-6 |
 | KN-ST002 | ReadWriteOnce volume shared by a rolling Deployment | CM-6, CP-10 |
 | KN-ST003 | Zonal storage with Immediate volume binding | SC-36, CM-6 |
@@ -141,6 +154,10 @@ Claude on Google Vertex AI with Assured Workloads, or a model you host inside th
 | KN-V017 | MachineConfig is not a customer lever on ROSA | CM-6 |
 | KN-V018 | Duplicate key in a YAML mapping | CM-3(2), CM-6 |
 | KN-V019 | Ingress targets the retired ingress-nginx | SA-22 |
+| KN-V020 | Container claims a resource the Pod does not declare | CM-3(2), CM-6 |
+| KN-V021 | Pod resource claim names no source, or two | CM-3(2), CM-6 |
+| KN-V022 | Resource claims set at pod level, where they are forbidden | CM-3(2), CM-6 |
+| KN-V023 | Service numeric targetPort is not a declared containerPort | CM-3(2), CM-6 |
 
 Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final)):
 
@@ -150,23 +167,27 @@ Control titles ([NIST SP 800-53 Rev. 5](https://csrc.nist.gov/pubs/sp/800/53/r5/
 | AC-4 | Information Flow Enforcement |
 | AC-5 | Separation of Duties |
 | AC-6 | Least Privilege |
-| AC-6(5) | Least Privilege | Privileged Accounts |
-| AC-6(10) | Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions |
+| AC-6(5) | Least Privilege \| Privileged Accounts |
+| AC-6(10) | Least Privilege \| Prohibit Non-privileged Users from Executing Privileged Functions |
 | AC-14 | Permitted Actions Without Identification or Authentication |
+| AU-2 | Event Logging |
+| AU-12 | Audit Record Generation |
 | CM-2 | Baseline Configuration |
-| CM-3(2) | Configuration Change Control | Testing, Validation, and Documentation of Changes |
+| CM-3(2) | Configuration Change Control \| Testing, Validation, and Documentation of Changes |
 | CM-6 | Configuration Settings |
 | CM-7 | Least Functionality |
 | CP-10 | System Recovery and Reconstitution |
 | IA-5 | Authenticator Management |
-| IA-5(7) | Authenticator Management | No Embedded Unencrypted Static Authenticators |
+| IA-5(7) | Authenticator Management \| No Embedded Unencrypted Static Authenticators |
 | SA-22 | Unsupported System Components |
+| SC-4 | Information in Shared System Resources |
 | SC-5 | Denial-of-service Protection |
 | SC-6 | Resource Availability |
 | SC-7 | Boundary Protection |
-| SC-7(5) | Boundary Protection | Deny by Default — Allow by Exception |
+| SC-7(5) | Boundary Protection \| Deny by Default — Allow by Exception |
 | SC-8 | Transmission Confidentiality and Integrity |
-| SC-8(1) | Transmission Confidentiality and Integrity | Cryptographic Protection |
+| SC-8(1) | Transmission Confidentiality and Integrity \| Cryptographic Protection |
+| SC-13 | Cryptographic Protection |
 | SC-28 | Protection of Information at Rest |
 | SC-36 | Distributed Processing and Storage |
 | SC-39 | Process Isolation |

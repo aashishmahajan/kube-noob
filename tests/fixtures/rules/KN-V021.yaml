@@ -1,0 +1,35 @@
+rule: KN-V021
+good: |
+  apiVersion: v1
+  kind: Pod
+  metadata: {name: inference, namespace: ml}
+  spec:
+    resourceClaims:
+    - name: gpu
+      resourceClaimTemplateName: single-gpu
+    - name: shared-fpga
+      resourceClaimName: fpga-pool
+    containers:
+    - name: serve
+      image: registry.example.com/serve@sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+      resources:
+        claims:
+        - name: gpu
+        - name: shared-fpga
+bad: |
+  apiVersion: v1
+  kind: Pod
+  metadata: {name: inference, namespace: ml}
+  spec:
+    resourceClaims:
+    - name: gpu
+      resourceClaimName: gpu-pool
+      resourceClaimTemplateName: single-gpu
+    - name: fpga
+    containers:
+    - name: serve
+      image: registry.example.com/serve@sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+      resources:
+        claims:
+        - name: gpu
+        - name: fpga

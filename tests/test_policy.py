@@ -579,7 +579,11 @@ class FakeCluster:
             "globalnetworkpolicies": "GlobalNetworkPolicy",
             "adminnetworkpolicies": "AdminNetworkPolicy",
             "baselineadminnetworkpolicies": "BaselineAdminNetworkPolicy",
-        }[resource]
+        }.get(resource)
+        if kind is None:
+            # What a cluster says for a kind it does not serve. This fake used to KeyError, which meant adding a
+            # resource to the allowlist broke the fake rather than exercising it.
+            raise ClusterAccessError(f'the server doesn\'t have a resource type "{resource}"')
         if resource == "namespaces" and not self.readable_namespaces:
             raise ClusterAccessError("namespaces is forbidden")
         hits = [
@@ -613,6 +617,9 @@ def test_live_reachability_reads_only_what_it_needs() -> None:
         "globalnetworkpolicies",
         "adminnetworkpolicies",
         "baselineadminnetworkpolicies",
+        # Calico's own version, read once so the live answer knows whether this cluster still enforces the admin
+        # tier instead of assuming OVN-Kubernetes semantics on a Calico 3.32 cluster (roadmap P9).
+        "clusterinformations",
     }
     assert {c[0] for c in cluster.calls} <= {"deployments", "networkpolicies", "namespaces"} | cluster_scoped
     for plural in cluster_scoped:
@@ -657,7 +664,9 @@ def test_cli_policy_commands(capsys: pytest.CaptureFixture[str], tmp_path: Path)
             platform="openshift",
         )
     )
-    assert "oc get adminnetworkpolicy,baselineadminnetworkpolicy" in [s["command"] for s in out["readOnlyNextSteps"]]
+    assert "oc get adminnetworkpolicy,baselineadminnetworkpolicy,clusternetworkpolicy" in [
+        s["command"] for s in out["readOnlyNextSteps"]
+    ]
 
 
 def test_live_tool_and_cli_read_the_cluster(

@@ -28,6 +28,12 @@ EXPECTED: dict[str, Any] = {
     "format": "kube-noob-drift/1",
     "from": "2026-10-27T03:00:00Z",
     "to": "2026-10-28T03:00:00Z",
+    # What was snapshotted. A folder holding both a `-f` run and a `--live` run holds two populations, and the
+    # trend has to be able to refuse to draw one line across them.
+    "source": "manifests",
+    # Carried from the audit, because `notRead` is only what the CLUSTER refused: an assumption is what
+    # kube-noob itself could not read, and it bounds every count in the report the same way.
+    "assumptions": ["No Kubernetes version given; assumed 1.35."],
     # Manifests are all read, so there is nothing undetermined. A live snapshot that was refused a resource puts
     # the reason here and the objects behind it under `undetermined` rather than `removed`.
     "notRead": [],
@@ -90,22 +96,69 @@ EXPECTED: dict[str, Any] = {
             },
         ],
         "undetermined": [],
-        "open": 3,
+        "open": 5,
         "excepted": 0,
     },
     "violations": {
         "byNamespace": [
-            {"namespace": "ops", "findings": 2, "critical": 1, "medium": 1},
-            {"namespace": "shop", "findings": 1, "low": 1},
+            {"namespace": "ops", "findings": 3, "critical": 1, "low": 1, "medium": 1},
+            {"namespace": "shop", "findings": 2, "low": 2},
         ],
         "byOwner": [
-            {"owner": "unowned", "findings": 2, "critical": 1, "medium": 1},
-            {"owner": "team-shop", "findings": 1, "low": 1},
+            {"owner": "unowned", "findings": 3, "critical": 1, "low": 1, "medium": 1},
+            {"owner": "team-shop", "findings": 2, "low": 2},
         ],
         "byRule": [
+            {"ruleId": "KN-C016", "findings": 2, "low": 2},
             {"ruleId": "KN-S001", "findings": 1, "critical": 1},
             {"ruleId": "KN-S002", "findings": 1, "medium": 1},
             {"ruleId": "KN-S017", "findings": 1, "low": 1},
+        ],
+        # Hand-derived from the byRule rows above and the published rule-to-control map, the same way the rest of
+        # this expectation was written. A finding counts once per control its rule names, so this column does not
+        # sum to five: a rule that is evidence about three controls is evidence about three controls (N4).
+        "byControl": [
+            {
+                "control": "AC-6",
+                "title": "Least Privilege",
+                "findings": 3,
+                "critical": 1,
+                "low": 1,
+                "medium": 1,
+                "namespaces": ["ops", "shop"],
+            },
+            {
+                "control": "CM-7",
+                "title": "Least Functionality",
+                "findings": 2,
+                "critical": 1,
+                "medium": 1,
+                "namespaces": ["ops"],
+            },
+            {
+                "control": "SC-5",
+                "title": "Denial-of-service Protection",
+                "findings": 2,
+                "low": 2,
+                "namespaces": ["ops", "shop"],
+            },
+            {
+                "control": "SC-6",
+                "title": "Resource Availability",
+                "findings": 2,
+                "low": 2,
+                "namespaces": ["ops", "shop"],
+            },
+            {"control": "AC-3", "title": "Access Enforcement", "findings": 1, "low": 1, "namespaces": ["shop"]},
+            {"control": "AC-5", "title": "Separation of Duties", "findings": 1, "low": 1, "namespaces": ["shop"]},
+            {
+                "control": "AC-6(10)",
+                "title": "Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions",
+                "findings": 1,
+                "medium": 1,
+                "namespaces": ["ops"],
+            },
+            {"control": "SC-39", "title": "Process Isolation", "findings": 1, "critical": 1, "namespaces": ["ops"]},
         ],
     },
 }
@@ -120,7 +173,14 @@ def _snap(name: str, when: dt.datetime, **kw: Any) -> dict[str, Any]:
 
 
 def test_two_snapshots_give_the_exact_expected_report() -> None:
-    assert drift.diff(_snap("day1.yaml", T1), _snap("day2.yaml", T2)) == EXPECTED
+    report = drift.diff(_snap("day1.yaml", T1), _snap("day2.yaml", T2))
+    # `controlStanding` is `kube_noob.audit.controls.summary` over the new snapshot's coverage record: 28 rows
+    # whose buckets have their own tests (G191, G199, G202, and tests/test_control_standing.py). Pasting them
+    # into an expectation whose entire value is that it was written BY HAND from the two fixtures would be
+    # copying code output into the one test that must not contain any, so it is asserted there instead.
+    standing = report.pop("controlStanding")
+    assert standing["catalog"] == "NIST SP 800-53 Rev. 5" and standing["controls"]
+    assert report == EXPECTED
 
 
 def test_a_snapshot_holds_hashes_and_names_never_values() -> None:
@@ -190,7 +250,8 @@ def test_excepted_findings_are_not_counted_open() -> None:
     )
     rep = drift.diff(_snap("day1.yaml", T1), _snap("day2.yaml", T2, exceptions=rev))
     assert [f["ruleId"] for f in rep["findings"]["new"]] == ["KN-S002", "KN-S017"]
-    assert rep["findings"]["open"] == 2 and rep["findings"]["excepted"] == 1
+    # +2: KN-C016 reports `shop` and `ops` for a missing ResourceQuota on both days, so both stay open.
+    assert rep["findings"]["open"] == 4 and rep["findings"]["excepted"] == 1
 
 
 def test_the_daily_report_folder_keeps_the_newest_and_is_owner_only(tmp_path: Path) -> None:
@@ -198,7 +259,14 @@ def test_the_daily_report_folder_keeps_the_newest_and_is_owner_only(tmp_path: Pa
     first, paths = drift.write_report(state, _snap("day1.yaml", T1), keep=2)
     assert first["from"] is None and len(first["objects"]["added"]) == 11
     second, paths = drift.write_report(state, _snap("day2.yaml", T2), keep=2)
-    assert {k: v for k, v in second.items() if k != "from"} == {k: v for k, v in EXPECTED.items() if k != "from"}
+    assert {k: v for k, v in second.items() if k not in {"from", "controlStanding", "history"}} == {
+        k: v for k, v in EXPECTED.items() if k != "from"
+    }
+    # The trend is attached to what the caller renders and left out of the file written, so a report never
+    # carries the history of the reports before it (which would nest, and grow the folder with keep squared).
+    assert "history" not in json.loads(paths["report"].read_text(encoding="utf-8"))
+    assert [(pt["open"], pt["complete"]) for pt in second["history"]["points"]] == [(3, True), (5, True)]
+    assert second["history"]["unplaced"] == []
     for p in paths.values():
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
     assert stat.S_IMODE(state.stat().st_mode) == 0o700
@@ -269,19 +337,20 @@ def test_cli_snapshot_diff_and_report(tmp_path: Path, capsys: pytest.CaptureFixt
     s1, s2 = tmp_path / "1.json", tmp_path / "2.json"
     assert main(["posture", "snapshot", "-f", str(FIX / "day1.yaml"), "-o", str(s1)]) == 0
     assert main(["posture", "snapshot", "-f", str(FIX / "day2.yaml"), "-o", str(s2)]) == 0
-    assert "11 objects, 1 findings" in capsys.readouterr().out
+    assert "11 objects, 3 findings" in capsys.readouterr().out
     md = tmp_path / "r.md"
     assert main(["--format", "json", "posture", "diff", str(s1), str(s2), "--markdown", str(md)]) == 0
     rep = json.loads(capsys.readouterr().out)
-    assert {k: v for k, v in rep.items() if k not in {"from", "to"}} == {
+    assert {k: v for k, v in rep.items() if k not in {"from", "to", "controlStanding"}} == {
         k: v for k, v in EXPECTED.items() if k not in {"from", "to"}
     }
+    assert rep["controlStanding"]["controls"], "the standing travels through the CLI too"
     assert md.read_text(encoding="utf-8").startswith("# Drift and policy report")
     state = tmp_path / "state"
     assert main(["posture", "report", "-f", str(FIX / "day1.yaml"), "--state-dir", str(state)]) == 0
     assert main(["posture", "report", "-f", str(FIX / "day2.yaml"), "--state-dir", str(state)]) == 0
     out = capsys.readouterr().out
-    assert "3 new, 1 fixed, 3 open" in out
+    assert "3 new, 1 fixed, 5 open" in out
     for argv in (
         ["posture", "snapshot", "-o", str(s1)],
         ["posture", "report", "--live"],
@@ -310,3 +379,127 @@ def test_mcp_tool_and_serve_settings(tmp_path: Path) -> None:
         assert 30 <= stop.first_delay <= 600
     finally:
         stop.set()
+
+
+def test_a_kept_report_that_cannot_be_placed_is_named_rather_than_skipped(tmp_path: Path) -> None:
+    """The trend is built by reading the reports still kept. A file that cannot be parsed, is not an object at
+    all, or carries a count that is not a number, is a point nobody can place -- and a series quietly one point
+    short is the defect this project keeps finding: the absence reads as continuity. None of them may crash
+    either: `write_report` has already written three files by the time the trend is built, and `latest_report`
+    is what the MCP tool and the daily job call."""
+    state = tmp_path / "posture"
+    for day, fixture in enumerate(("day1.yaml", "day2.yaml", "day1.yaml", "day2.yaml", "day1.yaml")):
+        drift.write_report(state, _snap(fixture, T1 + dt.timedelta(days=day)), keep=14)
+    kept = sorted(state.glob("report-*.json"))
+    assert len(kept) == 5
+    kept[1].write_text("{not json", encoding="utf-8")
+    kept[2].write_text("null", encoding="utf-8")  # valid JSON, not an object
+    kept[3].write_text(
+        json.dumps({"format": "kube-noob-drift/1", "to": "x", "findings": {"open": "many", "excepted": None}}),
+        encoding="utf-8",
+    )
+    series = drift.history(state)
+    assert series["unplaced"] == [kept[1].name, kept[2].name]
+    assert [(p["open"], p["excepted"]) for p in series["points"]] == [(3, 0), (None, None), (3, 0)]
+    assert drift.latest_report(state) is not None, "the newest report is still readable"
+
+
+def test_a_report_written_before_completeness_was_recorded_is_unknown_rather_than_complete(
+    tmp_path: Path,
+) -> None:
+    """kube-noob 0.7.1 and earlier wrote reports under this same `format` string with no `notRead` key at all.
+    Reading a missing key as "nothing was unread" would mark a two-week-old folder, inherited across an
+    upgrade, as fourteen complete reads -- and draw a line through counts that may be floors."""
+    state = tmp_path / "posture"
+    drift.write_report(state, _snap("day1.yaml", T1), keep=14)
+    old = sorted(state.glob("report-*.json"))[0]
+    data = json.loads(old.read_text(encoding="utf-8"))
+    del data["notRead"]
+    old.write_text(json.dumps(data), encoding="utf-8")
+    assert drift.history(state)["points"][0]["complete"] is None
+
+
+def test_a_snapshot_whose_report_was_never_written_is_named(tmp_path: Path) -> None:
+    """`write_report` writes the snapshot first. A kill between the two writes leaves a snapshot the next run
+    diffs against and a point the trend cannot make, which has to be said rather than skipped."""
+    state = tmp_path / "posture"
+    for day in range(2):
+        drift.write_report(state, _snap("day1.yaml", T1 + dt.timedelta(days=day)), keep=14)
+    sorted(state.glob("report-*.json"))[0].unlink()
+    series = drift.history(state)
+    assert len(series["points"]) == 1
+    assert series["unplaced"] == [sorted(state.glob("snapshot-*.json"))[0].name]
+
+
+def test_a_kept_report_nested_past_the_limit_is_refused_rather_than_parsed(tmp_path: Path) -> None:
+    """The trend reads files back off disk, so it goes through the bounded loader like every other reader:
+    from Python 3.14 the depth at which `json.loads` gives up is whatever C stack the process has."""
+    from kube_noob.sanitize import MAX_JSON_DEPTH_FILE
+
+    state = tmp_path / "posture"
+    drift.write_report(state, _snap("day1.yaml", T1), keep=14)
+    bomb = sorted(state.glob("report-*.json"))[0]
+    depth = MAX_JSON_DEPTH_FILE + 1
+    bomb.write_text("[" * depth + "]" * depth, encoding="utf-8")
+    series = drift.history(state)
+    assert series["points"] == [] and series["unplaced"] == [bomb.name]
+    assert drift.latest_report(state) is None, "and the same file is not returned as the latest report"
+
+
+def test_a_folder_of_large_reports_spends_its_budget_on_the_newest(tmp_path: Path) -> None:
+    """A trend is read from its right-hand end, so when the whole-series budget runs out the points that
+    survive are the recent ones -- and every file it did not read is named."""
+    state = tmp_path / "posture"
+    for day in range(3):
+        drift.write_report(state, _snap("day1.yaml", T1 + dt.timedelta(days=day)), keep=14)
+    kept = sorted(state.glob("report-*.json"))
+    big = drift.MAX_HISTORY_BYTES // 2 + 1
+    for path in kept[:2]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["padding"] = "x" * big
+        path.write_text(json.dumps(data), encoding="utf-8")
+    series = drift.history(state)
+    # Two files of half the budget each cannot both be read, so the newest alone survives and the two the
+    # budget refused are named rather than dropped from the series.
+    assert [p["at"] for p in series["points"]] == ["2026-10-29T03:00:00Z"]
+    assert series["unplaced"] == [kept[0].name, kept[1].name]
+
+
+def test_one_report_larger_than_the_per_file_limit_is_not_parsed(tmp_path: Path) -> None:
+    state = tmp_path / "posture"
+    drift.write_report(state, _snap("day1.yaml", T1), keep=14)
+    big = sorted(state.glob("report-*.json"))[0]
+    big.write_text(" " * (drift.MAX_REPORT_BYTES + 1), encoding="utf-8")
+    series = drift.history(state)
+    assert series["points"] == [] and series["unplaced"] == [big.name]
+
+
+def test_a_snapshot_keeps_what_the_audit_had_to_assume(tmp_path: Path) -> None:
+    """U4. `notRead` is only what the CLUSTER refused. An assumption is what kube-noob itself could not read
+    -- above all a pod spec inside a kind it has no reader for -- and dropping it let a folder of snapshots
+    report a complete read every day while a whole class of workload was never looked at."""
+    rollout = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Rollout",
+        "metadata": {"name": "web", "namespace": "shop"},
+        "spec": {"template": {"spec": {"containers": [{"name": "web", "image": "nginx:1.27"}]}}},
+    }
+    snap = drift.snapshot([rollout], source="manifests", taken_at=T1)
+    assert any("no reader for" in a for a in snap["assumptions"]), snap["assumptions"]
+
+    report = drift.first_report(snap)
+    assert report["assumptions"] == snap["assumptions"], "a report carries them forward for the reviewer"
+    assert any("no reader for" in line for line in drift.markdown(report).splitlines())
+
+
+def test_the_assumptions_a_snapshot_keeps_are_bounded(tmp_path: Path) -> None:
+    many = [
+        {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Rollout",
+            "metadata": {"name": f"w{i}", "namespace": "shop"},
+            "spec": {"template": {"spec": {"containers": [{"name": "c", "image": "nginx:1.27"}]}}},
+        }
+        for i in range(drift.MAX_ASSUMPTIONS + 40)
+    ]
+    assert len(drift.snapshot(many, source="manifests", taken_at=T1)["assumptions"]) <= drift.MAX_ASSUMPTIONS

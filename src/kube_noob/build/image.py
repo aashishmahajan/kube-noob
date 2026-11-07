@@ -11,16 +11,18 @@ from kube_noob.build import oci
 
 def manifests_have_probes(text: str) -> bool:
     """Whether a workload in the manifests defines a readiness, liveness or startup probe on an app container."""
-    from kube_noob.audit.podspec import containers, pod_template
+    from kube_noob.audit.podspec import containers, pod_templates
     from kube_noob.yamlio import load_documents
 
+    # Every template: a probe declared on a KServe component or a Ray group is a probe (G238). What this still
+    # cannot see is a probe the OPERATOR injects, which both of those do -- so False here means "none declared in
+    # these manifests", which is what the caller uses it for.
     for doc in load_documents(text):
-        pod = pod_template(doc)
-        if pod is None:
-            continue
-        for ref in containers(pod, include_init=False, ephemeral=False):
-            if any(isinstance(ref.container.get(k), dict) for k in ("readinessProbe", "livenessProbe", "startupProbe")):
-                return True
+        for pod in pod_templates(doc):
+            for ref in containers(pod, include_init=False, ephemeral=False):
+                probes = ("readinessProbe", "livenessProbe", "startupProbe")
+                if any(isinstance(ref.container.get(k), dict) for k in probes):
+                    return True
     return False
 
 

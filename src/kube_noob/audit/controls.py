@@ -23,6 +23,10 @@ TITLES: dict[str, str] = {
     "AC-6(5)": "Least Privilege | Privileged Accounts",
     "AC-6(10)": "Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions",
     "AC-14": "Permitted Actions Without Identification or Authentication",
+    # AU arrives with KN-S035: the first rule in this catalogue that reads audit CONFIGURATION rather
+    # than inferring the state of logging from the absence of a log. Nothing here reads an audit event.
+    "AU-2": "Event Logging",
+    "AU-12": "Audit Record Generation",
     "CM-2": "Baseline Configuration",
     "CM-3(2)": "Configuration Change Control | Testing, Validation, and Documentation of Changes",
     "CM-6": "Configuration Settings",
@@ -31,6 +35,7 @@ TITLES: dict[str, str] = {
     "IA-5": "Authenticator Management",
     "IA-5(7)": "Authenticator Management | No Embedded Unencrypted Static Authenticators",
     "SA-22": "Unsupported System Components",
+    "SC-4": "Information in Shared System Resources",
     "SC-5": "Denial-of-service Protection",
     "SC-6": "Resource Availability",
     "SC-7": "Boundary Protection",
@@ -61,6 +66,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S010": ("AC-6", "SC-39"),
     "KN-S011": ("SC-7", "CM-7"),
     "KN-S012": ("CM-2", "SI-7"),
+    "KN-S036": ("CM-2", "SI-7"),  # provenance of the artifact that runs, like KN-S012's half of the reference
     "KN-S013": ("IA-5(7)", "SC-28"),
     "KN-S014": ("AC-6", "IA-5", "CM-7"),
     "KN-S015": ("AC-3", "AC-6"),
@@ -70,6 +76,7 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-S019": ("AC-6", "CM-7", "SC-39"),
     "KN-S020": ("SC-39", "CM-7"),
     "KN-S029": ("SC-7", "CM-7"),  # the kubelet is made to cross a boundary on the pod's behalf
+    "KN-S030": ("CM-7", "SI-7"),  # a control the cluster believes it has is skipped when the hook is down
     "KN-S021": ("SI-2", "CM-7", "SC-39"),  # a deprecated volume driver with a published breakout
     "KN-S022": ("SI-2", "SC-39", "CM-7"),
     "KN-S023": ("SI-2", "SC-39"),
@@ -91,6 +98,8 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-N010": ("CM-6", "CM-7", "SI-2"),
     "KN-N011": ("SI-2", "SI-10", "CM-7"),
     "KN-N012": ("SC-7", "SC-7(5)", "AC-4"),  # a policy that selects no pod enforces nothing
+    "KN-N013": ("SC-7", "CP-10"),  # egress denied without DNS: the workload cannot resolve and stops serving
+    "KN-N014": ("SC-7", "SC-7(5)", "AC-4"),
     # Storage
     "KN-ST001": ("CM-6",),
     "KN-ST002": ("CM-6", "CP-10"),
@@ -125,12 +134,23 @@ RULE_CONTROLS: dict[str, tuple[str, ...]] = {
     "KN-V010": _VALIDATION,
     "KN-V011": _VALIDATION,
     "KN-V012": _VALIDATION,
+    "KN-V023": _VALIDATION,
     "KN-V014": _VALIDATION,
     "KN-V015": ("SC-7", "CM-6"),  # an EgressFirewall not named 'default' is ignored: no egress control at all
     "KN-V016": ("SC-8", "CM-6"),
     "KN-V017": ("CM-6",),
     "KN-V018": _VALIDATION,
     "KN-V019": ("SA-22",),  # the retired ingress-nginx receives no fixes
+    "KN-V020": _VALIDATION,
+    "KN-V021": _VALIDATION,
+    "KN-V022": _VALIDATION,
+    "KN-C015": ("CM-6",),  # a claim that does not exist: the workload never schedules
+    "KN-S031": ("AC-6", "SC-4"),  # device access across tenants, and the device keeps prior state
+    "KN-S032": ("AC-6", "CM-6"),  # the pod security level the namespace enforces
+    "KN-S033": ("SI-2",),  # a paused pool stops receiving OS and runtime patches
+    "KN-S034": ("CM-3(2)",),  # an operator upgrade nobody reviewed
+    "KN-S035": ("AU-2", "AU-12"),  # audit turned off, for everyone or for one group
+    "KN-C016": ("SC-5", "SC-6"),  # one namespace can take the cluster's capacity
 }
 
 
@@ -142,7 +162,12 @@ def describe(rule_id: str) -> list[dict[str, str]]:
     return [{"id": c, "title": TITLES[c]} for c in RULE_CONTROLS.get(rule_id, ())]
 
 
-def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> dict[str, Any]:
+def summary(
+    rule_ids: list[str],
+    excepted_rule_ids: list[str] | None = None,
+    evaluated_rule_ids: list[str] | None = None,
+    fired_rule_ids: list[str] | None = None,
+) -> dict[str, Any]:
     """Controls touched by a set of findings, most findings first: for an audit report.
 
     ``excepted_rule_ids`` are the rules whose findings an exceptions file accepted. They are counted separately
@@ -150,6 +175,18 @@ def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> 
     control -- it is evidence *about* that control, so a control held only by excepted findings must stay named.
     Dropping it would make a control somebody signed off on indistinguishable from a control nothing evaluated,
     which is the one confusion a compliance record must not create.
+
+    ``evaluated_rule_ids`` is every rule that actually ran. With it, that same confusion is resolved for the
+    other direction too: a control whose rules ran and found nothing is reported with ``clean``, and one whose
+    rules did not run at all is reported with ``notEvaluated``, instead of both being absent from the list.
+    Without it the older shape is kept, so a caller that cannot say what ran does not get a coverage claim it
+    has not earned.
+
+    ``fired_rule_ids`` is every rule that produced a finding BEFORE the caller's severity filter. Without it,
+    `--min-severity high` moved every rule whose finding was withheld into ``clean``: CP-10 went from "3
+    findings, 6 clean" to "0 findings, 9 clean", and the record then said nine rules ran and found nothing when
+    three of them had found something. Those rules are counted as ``withheld`` instead -- not a finding in this
+    view, and emphatically not clean (G199).
     """
     counts: dict[str, int] = {}
     excepted: dict[str, int] = {}
@@ -159,8 +196,24 @@ def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> 
     for rid in excepted_rule_ids or ():
         for c in RULE_CONTROLS.get(rid, ()):
             excepted[c] = excepted.get(c, 0) + 1
+    clean: dict[str, int] = {}
+    unevaluated: dict[str, int] = {}
+    withheld: dict[str, int] = {}
+    if evaluated_rule_ids is not None:
+        ran = set(evaluated_rule_ids)
+        with_findings = set(rule_ids) | set(excepted_rule_ids or ())
+        hidden = set(fired_rule_ids or ()) - with_findings
+        for rid, cs in RULE_CONTROLS.items():
+            if rid in with_findings:
+                continue  # already counted as a finding or an accepted exception
+            if rid in hidden:
+                bucket = withheld  # it ran and it DID find something; this view just does not show it
+            else:
+                bucket = clean if rid in ran else unevaluated
+            for c in cs:
+                bucket[c] = bucket.get(c, 0) + 1
     ordered = sorted(
-        set(counts) | set(excepted),
+        set(counts) | set(excepted) | set(clean) | set(unevaluated) | set(withheld),
         key=lambda c: (-counts.get(c, 0), -excepted.get(c, 0), c),
     )
     controls: list[dict[str, Any]] = []
@@ -168,6 +221,11 @@ def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> 
         entry: dict[str, Any] = {"id": c, "title": TITLES[c], "findings": counts.get(c, 0)}
         if excepted.get(c):
             entry["excepted"] = excepted[c]
+        if evaluated_rule_ids is not None:
+            entry["clean"] = clean.get(c, 0)
+            entry["notEvaluated"] = unevaluated.get(c, 0)
+            if fired_rule_ids is not None:
+                entry["withheld"] = withheld.get(c, 0)
         controls.append(entry)
     out: dict[str, Any] = {"catalog": CATALOG, "controls": controls}
     note = "Findings are evidence about these controls; an assessment decides whether a control is met."
@@ -175,6 +233,11 @@ def summary(rule_ids: list[str], excepted_rule_ids: list[str] | None = None) -> 
         note += (
             " A control with `excepted` had findings an exceptions file accepted: the decision is recorded, not"
             " that the control is clean."
+        )
+    if withheld:
+        note += (
+            " A control with `withheld` had findings from rules that ran and reported, which this view's"
+            " severity filter removed: those rules are not clean."
         )
     out["note"] = note
     return out

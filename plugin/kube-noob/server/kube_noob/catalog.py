@@ -71,6 +71,12 @@ SOURCES: dict[str, Citation] = {
         "https://kubernetes.io/docs/concepts/storage/storage-classes/#volume-binding-mode",
         "CC-BY-4.0",
     ),
+    "k8s-admission-webhook-failure-policy": Citation(
+        "k8s-admission-webhook-failure-policy",
+        "Dynamic Admission Control: failure policy",
+        "https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#failure-policy",
+        "CC-BY-4.0",
+    ),
     "k8s-networkpolicy": Citation(
         "k8s-networkpolicy",
         "Network Policies",
@@ -574,6 +580,53 @@ ADDON_GROUPS_ON_VANILLA: dict[str, str] = {
 }
 
 # kind -> currently served apiVersions (group/version) on the newest supported platforms.
+#: The API groups `KIND_API_VERSIONS` is a complete statement about. A kind name is only unique WITHIN a group, so
+#: the table alone cannot say whether an apiVersion is wrong: `Service` is core v1 and also
+#: `serving.knative.dev/v1`, `Job` is `batch/v1` and also `batch.volcano.sh/v1alpha1`, and `Build`, `Task`,
+#: `Pipeline` and `Workflow` are each several people's CRD. Checking the table without checking the group told a
+#: Knative user their correct Service "is not served by serving.knative.dev/v1. Use v1" -- as a CRITICAL, which
+#: fails a gate on a valid manifest. A wrong CRITICAL costs more trust than a missed finding, so a kind whose
+#: group is not in this set is left to the "no bundled schema" note instead (G233).
+KNOWN_API_GROUPS: frozenset[str] = frozenset(
+    {
+        "",  # core/v1
+        "admissionregistration.k8s.io",
+        "apiextensions.k8s.io",
+        "apps",
+        "apps.openshift.io",
+        "autoscaling",
+        "batch",
+        "build.openshift.io",
+        "config.openshift.io",
+        "discovery.k8s.io",
+        "gateway.networking.k8s.io",
+        "image.openshift.io",
+        "k8s.ovn.org",
+        "machine.openshift.io",
+        "machineconfiguration.openshift.io",
+        "networking.k8s.io",
+        "node.k8s.io",
+        "operators.coreos.com",
+        "platform.stackrox.io",
+        "policy",
+        "policy.networking.k8s.io",
+        "project.openshift.io",
+        "quota.openshift.io",
+        "rbac.authorization.k8s.io",
+        "route.openshift.io",
+        "scheduling.k8s.io",
+        "security.openshift.io",
+        "storage.k8s.io",
+        "template.openshift.io",
+    }
+)
+
+
+def claims_a_known_group(api_version: str) -> bool:
+    """True when this apiVersion names a group kube-noob's kind table is authoritative for."""
+    return (api_version.split("/", 1)[0] if "/" in api_version else "") in KNOWN_API_GROUPS
+
+
 KIND_API_VERSIONS: dict[str, tuple[str, ...]] = {
     "Pod": ("v1",),
     "Service": ("v1",),
@@ -829,6 +882,16 @@ def k8s_version_for(platform: str, version: str | None) -> str:
     if version is None:
         return DEFAULT_K8S_VERSION
     major, minor = parse_minor(version)
+    if major != 1:
+        # Kubernetes minors are 1.x. `--platform kubernetes --version 4.22` was taken at face value as a
+        # Kubernetes 1-like minor "4.22", which does not exist: every version-gated rule then answered about a
+        # fictional release, and only the beyond-the-table caveat kept it from being a silent wrong answer.
+        # Refuse rather than guess which half the caller meant -- mapping it through the OpenShift table would
+        # also silently change which rules apply, since some of them exist only on OpenShift.
+        raise ValueError(
+            f"{version!r} is not a Kubernetes version: Kubernetes minors are 1.x. For OpenShift {major}.{minor} "
+            f"pass --platform openshift (or rosa-classic, rosa-hcp) with --version {major}.{minor}"
+        )
     return f"{major}.{minor}"
 
 

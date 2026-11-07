@@ -100,7 +100,11 @@ def test_mux_keeps_the_whole_picture(tmp_path: Path) -> None:
     # The mux keeps every frame of the picture. With -shortest, the 4K walkthrough's capture lost its last two frames
     # (video 150.167 s against audio 150.233 s) and verify() refused it; this synthetic picture does not reproduce
     # that cut, so the test holds the contract: the picture's length unchanged, the sound within a frame of it.
-    import audio_kit
+    #
+    # `audio_kit` needs numpy, which no dev extra installs -- the videos job installs it with ffmpeg and runs this
+    # file. The module guard above covers only ffmpeg, so a bare import here passed or exploded on whether the
+    # runner happened to have ffmpeg, which is an accident and not a verdict. Same idiom as test_video_voice.py.
+    audio_kit = pytest.importorskip("audio_kit")
 
     video = tmp_path / "pic.mp4"
     _ff("-f", "lavfi", "-i", "color=c=black:s=320x180:r=30", "-frames:v", "157", "-c:v", "libx264",

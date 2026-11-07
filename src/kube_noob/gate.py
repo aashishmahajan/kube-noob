@@ -28,6 +28,10 @@ from kube_noob.audit.model import Severity
 MAX_FILES = 2_000
 MAX_TOTAL = 5_000_000
 SEVERITIES = ("info", "low", "medium", "high", "critical")
+#: GitHub displays "10 warning annotations, 10 error annotations, and 10 notice annotations per step" and
+#: "50 annotations per job" (actions/toolkit, docs/problem-matchers.md, retrieved 2026-11-05). The eleventh
+#: of a kind is dropped without a word, so the tenth is spent saying how many are not shown.
+MAX_ANNOTATIONS_PER_TYPE = 10
 _SOURCE = re.compile(r"^# Source: ([\w.-]{1,200})/(.{1,400})$")
 _KIND = re.compile(r"^kind:\s{0,5}([A-Z][A-Za-z0-9]{1,62})\s*$", re.M)
 # Kinds whose names are distinctive enough to search release notes for (Route, Service or Pod are everyday words).
@@ -252,6 +256,7 @@ def run(
     code_builds: list[Any] | None = None,
     unknown_builds: list[str] | None = None,
     repo: Path | None = None,
+    cni: str | None = None,
 ) -> dict[str, Any]:
     """``code_builds``: Containerfiles read with their context (``kube_noob.code.builds``); without them each
     Containerfile's directory is its context. ``unknown_builds``: Containerfiles given but not readable as builds
@@ -290,13 +295,20 @@ def run(
     enforced, not_generated = _admission(platform, version)
     excepted = 0
     kinds: set[str] = set()
+    # The gate already runs `analyze`, so it HAS the coverage record; it just never published it, and a
+    # compliance document built from the gate could therefore only ever say not-satisfied (G201).
+    coverage: dict[str, Any] = {}
     if sources:
-        report = analyze(combined, platform, version)
+        report = analyze(combined, platform, version, cni=cni)
+        kept_rules: list[str] = []
+        excepted_rules: list[str] = []
         kinds = set(_KIND.findall(combined))
         for f in report.findings:
             if review is not None and exc.match(review, f.rule_id, f.resource) is not None:
                 excepted += 1
+                excepted_rules.append(f.rule_id)
                 continue
+            kept_rules.append(f.rule_id)
             uri, line = _where(sources, f.line, chart_path)
             findings.append(
                 {
@@ -313,6 +325,18 @@ def run(
                     "helpUri": next((c.url for c in f.citation_objects()), INFO_URI),
                 }
             )
+        from kube_noob.audit.controls import summary as control_summary
+
+        coverage = {
+            "kubernetesVersion": report.kubernetes_version,
+            "resources": report.resources,
+            "controlSummary": control_summary(
+                kept_rules,
+                excepted_rules or None,
+                report.evaluated_rules or None,
+                report.fired_rules or None,
+            ),
+        }
         if review is not None and not review.summary()["gate"]:
             failures.append("the exception list has expired or refused entries (kube-noob exceptions check)")
     for uri, text in containerfiles:
@@ -369,6 +393,8 @@ def run(
             for r in findings
             if Severity.parse(r["severity"]) >= floor and not r.get("vulnerability") and not r.get("code")
         ]
+        for r in over:
+            r["failsGate"] = True
         if over:
             failures.append(f"{len(over)} finding(s) at {fail_on} or above")
     known = _known(kinds, platform, version, data_dir)
@@ -386,6 +412,9 @@ def run(
         "counts": counts,
         "excepted": excepted,
         "findings": findings,
+        # Empty when the gate audited no manifests (Containerfiles or scanner reports only), in which case
+        # there is no coverage to claim and the OSCAL emitter degrades on its own.
+        **coverage,
         "admission": {
             "refusedInEnforceMode": sum(1 for r in findings if r["admission"].startswith("refused in enforce mode")),
             "command": f"kube-noob policy generate --platform {platform}"
@@ -508,6 +537,7 @@ def _code_findings(
             }
         )
         if floor is not None and not unshipped and Severity.parse(f.severity) >= floor:
+            findings[-1]["failsGate"] = True
             failing += 1
     summary = {
         "tools": sorted({t for r in parsed for t in r.tools}),
@@ -593,6 +623,10 @@ def _vulnerabilities(
             }
         )
         if floor is not None and Severity.parse(sev) >= floor and (f["fixVersion"] or f["knownExploited"]):
+            # Marked on the finding, not re-derived later. A vulnerability at or above the floor with no fix and
+            # no KEV entry does NOT fail the gate, so an annotation that called it an error would show a red
+            # cross on a green step -- the same "publish what you computed" lesson as G201.
+            findings[-1]["failsGate"] = True
             failing += 1
     summary = {
         **out["counts"],
@@ -690,6 +724,109 @@ def _cell(text: Any, limit: int = 300) -> str:
     a different verdict, an image or a link in the job summary (red team, VUL1)."""
     flat = _CONTROL.sub(" ", str(text))[:limit]
     return "".join(_MD_ESCAPE.get(c, c) for c in flat)
+
+
+def _annotation(level: str, finding: dict[str, Any]) -> str:
+    """One GitHub workflow command. `file`, `line`, `title` and the message are escaped per the toolkit's rules."""
+
+    def esc(text: str, *, prop: bool = False) -> str:
+        # A raw newline ends the command and an unescaped % corrupts the next escape. In a property, a comma or a
+        # colon ends the property list, so those go too.
+        out = str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        # In a property a comma ends the property and a colon ends the property LIST, so both go -- every colon,
+        # not just a pair of them: a value ending in ":" produced `title=x:::[KN-X] ...`, and the runner then cut
+        # the title and moved the colon into the message.
+        return out.replace(",", "%2C").replace(":", "%3A") if prop else out
+
+    rule = str(finding.get("ruleId") or "kube-noob")
+    heading = f"{rule} {finding.get('title') or ''}".strip()
+    props = [f"title={esc(heading, prop=True)}"]
+    uri = str(finding.get("uri") or "")
+    # Only anchor the annotation to a path a checkout could actually have. Reading from stdin gives every
+    # finding the uri "-", and `file=-` asks GitHub to anchor 11 annotations to a file named "-": the runner
+    # either drops them from the diff or puts them somewhere meaningless, which is worse than a repository-level
+    # annotation, because the finding looks reported and is not.
+    if uri and uri not in {"-", "<stdin>", "(stdin)"} and not uri.startswith("<"):
+        props.insert(0, f"file={esc(uri, prop=True)}")
+        line = finding.get("line")
+        if isinstance(line, int) and line > 0:
+            props.insert(1, f"line={line}")
+    resource = str(finding.get("resource") or "")
+    message = " ".join(
+        part
+        for part in (
+            f"[{rule}]",
+            resource,
+            str(finding.get("message") or ""),
+            f"Fix: {finding['remediation']}" if finding.get("remediation") else "",
+        )
+        if part
+    )
+    return f"::{level} {','.join(props)}::{esc(message)}"
+
+
+def github_annotations(report: dict[str, Any]) -> list[str]:
+    """Gate findings as GitHub workflow commands, so they appear on the pull request rather than in a log.
+
+    Not named `annotations`: this module starts with `from __future__ import annotations`, so that name is
+    already bound and a function with it shadows the feature flag -- mypy refuses it, and rightly.
+
+    A finding is an error when it is one the gate FAILED on (`failsGate`, set where that decision was made) and a
+    warning otherwise. The first version read the severity instead, which annotated an unfixable critical CVE as
+    an error on a step that passed -- the gate fails on a vulnerability only when it is fixable or known
+    exploited, and on a code finding only when an image ships the file. The reasons in `failures` are annotated
+    too: a gate can fail with no finding at all (an expired exception, a Containerfile that would not parse), and
+    those left the step red with nothing on the pull request.
+
+    GitHub's caps decide the shape: 10 of each type per step and 50 per job (actions/toolkit,
+    docs/problem-matchers.md). The eleventh annotation of a kind is dropped with no message, so a developer who
+    saw ten would reasonably believe there were ten. The last slot of each kind therefore carries the count that
+    was not shown and points at the SARIF and the job summary, which have all of them.
+    """
+    rows = [f for f in report.get("findings") or () if isinstance(f, dict)]
+    reasons = [str(x) for x in report.get("failures") or () if str(x).strip()]
+    if not rows and not reasons:
+        return []
+
+    def rank(f: dict[str, Any]) -> tuple[int, str, str]:
+        sev = str(f.get("severity") or "info")
+        order = SEVERITIES.index(sev) if sev in SEVERITIES else 0
+        return (-order, str(f.get("ruleId") or ""), str(f.get("resource") or ""))
+
+    buckets: dict[str, list[dict[str, Any]]] = {"error": [], "warning": []}
+    for f in sorted(rows, key=rank):
+        # `failsGate` is set where the gate DECIDED, so the annotation level matches the exit code. Deriving it
+        # from severity here instead put a red cross on a green step: an unfixable critical CVE with no KEV entry
+        # is at or above the floor and does not fail the gate, and nor does a code finding in an image that
+        # ships nothing.
+        buckets["error" if f.get("failsGate") else "warning"].append(f)
+    out: list[str] = []
+    # A gate can fail with no finding at all -- an expired exception, a Containerfile that would not parse, a
+    # SARIF file that could not be read. Those went unannotated, so the step was red and the pull request said
+    # nothing. They come first, because they are why the step failed.
+    for reason in reasons[:MAX_ANNOTATIONS_PER_TYPE]:
+        out.append(f"::error title=kube-noob gate::{reason}")
+    if len(reasons) > MAX_ANNOTATIONS_PER_TYPE:
+        out[-1] = (
+            f"::error title=kube-noob gate::{len(reasons) - MAX_ANNOTATIONS_PER_TYPE + 1} more reason(s) this "
+            "gate failed are not annotated; the job summary has all of them."
+        )
+    for level in ("error", "warning"):
+        found = buckets[level]
+        room = MAX_ANNOTATIONS_PER_TYPE - sum(1 for line in out if line.startswith(f"::{level} "))
+        if not found or room <= 0:
+            continue
+        if len(found) <= room:
+            out += [_annotation(level, f) for f in found]
+            continue
+        shown = found[: room - 1]
+        out += [_annotation(level, f) for f in shown]
+        hidden = len(found) - len(shown)
+        out.append(
+            f"::{level} title=kube-noob::{hidden} more {level}-level finding(s) are not annotated: GitHub shows "
+            f"{MAX_ANNOTATIONS_PER_TYPE} of each kind per step. All of them are in the SARIF file and the job summary."
+        )
+    return out
 
 
 def markdown(report: dict[str, Any], top: int = 25) -> str:

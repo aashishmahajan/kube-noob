@@ -31,6 +31,8 @@ from typing import Any
 import yaml
 
 from kube_noob.attack_paths import LIVE_RESOURCES
+from kube_noob.audit.podspec import LONG_RUNNING_EMBEDDED_KINDS
+from kube_noob.sanitize import MAX_JSON_DEPTH_FILE, loads_bounded
 
 FORMAT = "kube-noob-snapshot/1"
 REPORT_FORMAT = "kube-noob-drift/1"
@@ -39,6 +41,11 @@ MAX_FIELDS = 400
 MAX_CHANGED_FIELDS = 20
 MAX_SNAPSHOT_BYTES = 200_000_000
 MAX_NOT_READ = 200  # entries kept in a snapshot; the reason strings are bounded by collect_live
+MAX_CONTROL_NAMESPACES = 20  # named on a byControl row; the count is exact, the list is a sample
+MAX_HISTORY = 60  # points in a trend; `keep` is normally smaller, and the oldest go first
+MAX_REPORT_BYTES = 50_000_000  # a retained report read back for the trend
+MAX_HISTORY_BYTES = 200_000_000  # read across the whole series, so a large folder is bounded too
+MAX_ASSUMPTIONS = 60  # carried from the audit into the snapshot; the engine writes a handful
 WATCHED = frozenset(
     {
         "Deployment",
@@ -65,6 +72,11 @@ WATCHED = frozenset(
         "PersistentVolumeClaim",
         "Namespace",
     }
+    # Workload CRDs whose pod specs are embedded rather than at `spec.template.spec`. They are collected live
+    # (LIVE_RESOURCES) and audited, so leaving them out of this set meant their findings landed in a snapshot
+    # with no namespace and no owner, while the same finding on a Deployment beside them carried both (G231).
+    | LONG_RUNNING_EMBEDDED_KINDS
+    | {"RayJob"}
 )
 EXTRA_LIVE: dict[str, str] = {
     "networkpolicies": "NetworkPolicy",
@@ -232,7 +244,11 @@ def snapshot(
     from kube_noob.audit.model import Severity, Stage
     from kube_noob.yamlio import load_documents
 
-    objs = watched(objects)
+    # Materialised once: `objects` is an Iterable, and the audit below needs it again. Taking it twice read
+    # an exhausted generator and silently produced a snapshot with zero findings -- which the CLI test
+    # caught, and which would otherwise have looked like a clean cluster.
+    raw = [o for o in objects if isinstance(o, dict) and o.get("kind")]
+    objs = watched(raw)
     ns_owner = _namespace_owners(objs)
     items: dict[str, dict[str, Any]] = {}
     owners: dict[str, str] = {}
@@ -249,8 +265,25 @@ def snapshot(
             "hash": _digest(norm),
             "fields": _fields(norm),
         }
-    docs = load_documents(yaml.safe_dump_all([{k: v for k, v in o.items() if k != "status"} for o in objs]))
-    report = analyze(docs, platform, version, stages={Stage.VALIDATE, Stage.AUDIT, Stage.CALIBRATE}, schema=False)
+    # Audited over EVERY object collected, not the watched subset. `watched()` decides what is TRACKED for drift
+    # (hashes per object), which is a different question from what the rules may look at -- and feeding them the
+    # subset made two wrong answers: KN-C016 reported "no ResourceQuota in this namespace" for a bundle holding
+    # one, because ResourceQuota is not a watched kind, and a rule whose subject kind was filtered out ran
+    # against nothing, found nothing, and was recorded as evaluated. With N4 that second one became a per-control
+    # `clean`, which is the absence-read-as-pass this project exists to catch.
+    docs = load_documents(yaml.safe_dump_all([{k: v for k, v in o.items() if k != "status"} for o in raw]))
+    # A resource the cluster would not show is exactly "you did not pass it": the rules that fire because another
+    # object is absent cannot tell that from a real gap, so they decline to decide and land in `notEvaluated`
+    # rather than `clean` (G186, G202). Without this, a forbidden `roles` read left AC-6 reading "16 clean".
+    partial = bool(list(not_read))
+    report = analyze(
+        docs,
+        platform,
+        version,
+        stages={Stage.VALIDATE, Stage.AUDIT, Stage.CALIBRATE},
+        schema=False,
+        partial_bundle=partial,
+    )
     findings: list[dict[str, Any]] = []
     seen: set[str] = set()
     for f in report.findings:
@@ -282,8 +315,21 @@ def snapshot(
         "platform": platform,
         "objects": dict(sorted(items.items())),
         "findings": sorted(findings, key=lambda x: str(x["id"])),
+        # What RAN, not just what fired. Without it a control with no open finding and a control nothing ever
+        # evaluated are the same empty row, and reporting the first as satisfied is the defect G191, G202 and
+        # G210 each fixed somewhere else. Sorted, so two snapshots of the same cluster are byte-identical.
+        "coverage": {
+            "evaluatedRules": sorted(report.evaluated_rules),
+            "firedRules": sorted(report.fired_rules),
+        },
         "notRead": unread[:MAX_NOT_READ],
         "notReadKinds": sorted(_kinds_not_read(unread)),
+        # What the audit had to ASSUME, kept because `notRead` is only half the story of what this snapshot
+        # could not see. `notRead` is what the cluster refused; assumptions are what kube-noob itself could
+        # not read -- above all "N pod spec(s) are in kinds kube-noob has no reader for, NOT audited" (G232).
+        # Dropping them left a folder of Argo Rollout snapshots reporting a complete read every day while a
+        # whole class of workload was never looked at, which is this project's own defect in a fifth place.
+        "assumptions": list(report.assumptions[:MAX_ASSUMPTIONS]),
     }
 
 
@@ -309,6 +355,82 @@ def _counts(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
         by.setdefault(str(r.get(key) or "-"), Counter())[str(r["severity"])] += 1
     out = [{key: k, "findings": sum(c.values()), **dict(sorted(c.items()))} for k, c in by.items()]
     return sorted(out, key=lambda x: (-int(x["findings"]), str(x[key])))
+
+
+def _by_control(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Open findings grouped by the controls their rules map to, most findings first.
+
+    A finding counts once for each control its rule names, so the column does not sum to the finding total -- a
+    rule that is evidence about three controls is evidence about three controls. This is a COUNT of open findings
+    and nothing more: a control with none is absent, which is why it cannot be read as a coverage claim. The
+    standing view below is where clean and never-evaluated are separated.
+    """
+    from kube_noob.audit.controls import RULE_CONTROLS, TITLES
+
+    by: dict[str, Counter[str]] = {}
+    where: dict[str, set[str]] = {}
+    for r in rows:
+        for control in RULE_CONTROLS.get(str(r.get("ruleId")), ()):
+            by.setdefault(control, Counter())[str(r["severity"])] += 1
+            # A finding on a cluster-scoped object has no namespace. Named rather than left as a bare "-",
+            # which read as a namespace called "-" and took one of the listed slots without saying what it was.
+            where.setdefault(control, set()).add(str(r.get("namespace") or "(cluster-scoped)"))
+    out = []
+    for control, counts in by.items():
+        names = sorted(where[control])
+        row: dict[str, Any] = {
+            "control": control,
+            "title": TITLES[control],
+            "findings": sum(counts.values()),
+            **dict(sorted(counts.items())),
+            "namespaces": names[:MAX_CONTROL_NAMESPACES],
+        }
+        # A silent slice makes the row claim fewer namespaces than there are. The count of the rest is part of
+        # the answer, the same way a `changed` row carries `more`.
+        if len(names) > MAX_CONTROL_NAMESPACES:
+            row["moreNamespaces"] = len(names) - MAX_CONTROL_NAMESPACES
+        out.append(row)
+    return sorted(out, key=lambda x: (-int(x["findings"]), str(x["control"])))
+
+
+def _standing(new: dict[str, Any], open_rows: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str]:
+    """Per-control standing from the new snapshot's coverage record, or nothing and a reason.
+
+    The record says which rules ran, which is the only way `clean` means anything. A snapshot written before the
+    record existed has none, and then this returns no standing at all rather than a list in which every control
+    with no finding looks satisfied. The OLD snapshot's record is not needed: standing describes where the cluster
+    is now, not what changed.
+    """
+    from kube_noob.audit.controls import summary as control_summary
+
+    unread = [str(x) for x in new.get("notRead") or ()]
+    if unread:
+        # A rule whose SUBJECT kind was refused runs against nothing, finds nothing, and would be reported
+        # `clean`. The engine knows which rules fire on another object's absence (they decline to decide on a
+        # partial bundle) but not which kind each rule reads, so no `clean` on this snapshot can be trusted and
+        # none is offered. Counts still stand: a finding that was reported was reported.
+        return None, (
+            f"{len(unread)} resource(s) could not be read in this snapshot, so no per-control standing is "
+            "reported: a rule whose subject kind was refused finds nothing and would look clean. The open "
+            "findings per control below are still what was found. First: " + "; ".join(unread[:3])
+        )
+    coverage = new.get("coverage")
+    if not isinstance(coverage, dict) or not isinstance(coverage.get("evaluatedRules"), list):
+        return None, (
+            "this snapshot carries no coverage record, so the report counts open findings per control and makes "
+            "no statement about the controls without one: a control with no open finding here may simply not "
+            "have been evaluated. Take a new snapshot to get per-control standing."
+        )
+    excepted = [str(f["ruleId"]) for f in new["findings"] if f.get("excepted") and f.get("ruleId")]
+    return (
+        control_summary(
+            [str(r["ruleId"]) for r in open_rows],
+            excepted,
+            [str(x) for x in coverage.get("evaluatedRules") or ()],
+            [str(x) for x in coverage.get("firedRules") or ()],
+        ),
+        "",
+    )
 
 
 def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
@@ -342,11 +464,18 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     was_fixed = [old_f[i] for i in sorted(set(old_f) - set(new_f))]
     fixed = [brief(f) for f in was_fixed if _kind_of(str(f["resource"])) not in blind]
     undetermined_findings = [brief(f) for f in was_fixed if _kind_of(str(f["resource"])) in blind]
-    return {
+    out: dict[str, Any] = {
         "format": REPORT_FORMAT,
         "from": old["takenAt"],
         "to": new["takenAt"],
+        # What was snapshotted: `live`, or the manifests. Two reports in one folder can describe different
+        # populations -- a `-f` run and a `--live` run -- and a trend drawn across them compares things nobody
+        # compared, so the series needs to be able to see the difference.
+        "source": new.get("source"),
         "notRead": list(new.get("notRead") or ()),
+        # Forward from the snapshot unchanged: a report is what a reviewer opens, and the HTML page renders
+        # `assumptions` as caveats above the findings the moment they are there.
+        "assumptions": list(new.get("assumptions") or ()),
         "objects": {
             "added": sorted(set(b) - set(a)),
             "removed": removed,
@@ -365,8 +494,15 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
             "byNamespace": _counts(open_rows, "namespace"),
             "byOwner": _counts(open_rows, "owner"),
             "byRule": _counts(open_rows, "ruleId"),
+            "byControl": _by_control(open_rows),
         },
     }
+    standing, note = _standing(new, open_rows)
+    if standing is not None:
+        out["controlStanding"] = standing
+    if note:
+        out.setdefault("notes", []).append(note)
+    return out
 
 
 def first_report(new: dict[str, Any]) -> dict[str, Any]:
@@ -407,6 +543,19 @@ def markdown(report: dict[str, Any]) -> str:
         ]
         if len(not_read) > 20:
             lines += [f"...and {len(not_read) - 20} more.", ""]
+    # Beside `notRead`, and for the same reason: these are the things kube-noob itself could not read, so they
+    # bound every count below exactly as a refused resource does.
+    assumed = [str(x) for x in report.get("assumptions") or ()]
+    if assumed:
+        lines += [
+            f"**The audit behind this report made {len(assumed)} assumption(s).** Each one bounds what the "
+            "counts below cover.",
+            "",
+            *[f"- {entry}" for entry in assumed[:20]],
+            "",
+        ]
+        if len(assumed) > 20:
+            lines += [f"...and {len(assumed) - 20} more.", ""]
     if o["changed"]:
         lines += ["## Changed", "", "| Object | Owner | Fields |", "| --- | --- | --- |"]
         for c in o["changed"]:
@@ -440,6 +589,43 @@ def markdown(report: dict[str, Any]) -> str:
             ]
             lines += [f"| {r[key]} | {r['findings']} | {r.get('critical', 0)} | {r.get('high', 0)} |" for r in rows]
             lines.append("")
+    controls = report["violations"].get("byControl") or []
+    if controls:
+        lines += [
+            "## Open findings by control",
+            "",
+            "| Control | Title | Findings | Critical | High | Namespaces |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| {r['control']} | {r['title']} | {r['findings']} | {r.get('critical', 0)} | "
+            f"{r.get('high', 0)} | {', '.join(r['namespaces'])}"
+            + (f", +{r['moreNamespaces']} more" if r.get("moreNamespaces") else "")
+            + " |"
+            for r in controls
+        ]
+        lines.append("")
+    standing = report.get("controlStanding")
+    if standing:
+        # The point of this table is the two columns a count cannot have: a control whose rules ran and found
+        # nothing, and one nothing evaluated. Reported together so neither can be read as the other.
+        # Every bucket, because the note under this table explains `excepted` and `withheld` and the first
+        # version of the table did not have those columns: a CRITICAL finding somebody accepted, and one a
+        # severity filter removed, both rendered as a row of zeros beside a `Clean` count.
+        lines += [
+            "## Control standing",
+            "",
+            "| Control | Findings | Excepted | Withheld | Clean | Not evaluated |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| {c['id']} | {c['findings']} | {c.get('excepted', 0)} | {c.get('withheld', 0)} | "
+            f"{c.get('clean', 0)} | {c.get('notEvaluated', 0)} |"
+            for c in standing["controls"]
+        ]
+        lines += ["", standing["note"], ""]
+    for note in report.get("notes") or []:
+        lines += [f"> {note}", ""]
     return "\n".join(lines)
 
 
@@ -447,7 +633,10 @@ def load(path: Path) -> dict[str, Any]:
     if path.stat().st_size > MAX_SNAPSHOT_BYTES:
         raise DriftError(f"{path} is larger than {MAX_SNAPSHOT_BYTES} bytes")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # Depth-guarded like every other reader of a file somebody else wrote: a snapshot is passed to
+        # `posture diff` by path, and from Python 3.14 the depth at which `json.loads` gives up is whatever C
+        # stack the process has.
+        data = loads_bounded(path.read_text(encoding="utf-8"), MAX_JSON_DEPTH_FILE)
     except (OSError, ValueError, RecursionError) as exc:
         raise DriftError(f"{path}: not a snapshot ({type(exc).__name__})") from exc
     if not isinstance(data, dict) or data.get("format") != FORMAT:
@@ -510,15 +699,90 @@ def write_report(state_dir: Path, snap: dict[str, Any], keep: int = 14) -> tuple
         stem = old.name.removeprefix("snapshot-").removesuffix(".json")
         for suffix in (".json", ".md"):
             (state_dir / f"report-{stem}{suffix}").unlink(missing_ok=True)
-    return report, paths
+    # Attached to what the caller renders, and deliberately NOT to the file written above: a report that held
+    # the history of the reports before it would nest one inside the next, and the folder would grow with the
+    # square of `keep`. The series is derived from the files, so it is rebuilt on every read instead.
+    return {**report, "history": history(state_dir, keep)}, paths
+
+
+def _count(value: Any) -> int | None:
+    """A count, or nothing when the report does not carry one. `or 0` here would publish a missing number as a
+    measured zero, which is the defect this whole series is written around."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def history(state_dir: Path, limit: int = MAX_HISTORY) -> dict[str, Any]:
+    """One point per retained report, oldest first, and the files behind the points that could not be made.
+
+    Every field can be absent, and absent is never zero or yes:
+
+    * ``complete`` says whether the snapshot read everything. It is ``None`` -- not ``True`` -- for a report that
+      carries no ``notRead`` key at all, which is every report kube-noob wrote before 0.8: the format string did
+      not change when the key was added, so a two-week-old folder survives an upgrade full of reports whose
+      completeness is simply unknown. Reading a missing key as "nothing was unread" would draw an undercount as
+      a measurement, which is the defect this project keeps finding.
+    * ``open`` and ``excepted`` are ``None`` when the report does not carry an integer for them.
+    * ``source`` is what was snapshotted, so the caller can refuse to draw one line across two populations.
+
+    ``unplaced`` names every kept file behind a point that could not be made: unreadable, too large, over the
+    whole-series budget, not a report at all, or a snapshot whose report was never written (a kill between the
+    two writes). A series quietly one point short is the thing to avoid: the absence reads as continuity.
+    """
+    out: dict[str, Any] = {"points": [], "unplaced": []}
+    if not state_dir.is_dir():
+        return out
+    kept = max(1, limit)
+    reports = sorted(state_dir.glob("report-*.json"))[-kept:]
+    rows: list[dict[str, Any]] = []
+    budget = MAX_HISTORY_BYTES
+    # Newest first, so a folder of large reports spends the budget on the end a trend is read from rather than
+    # on the oldest points.
+    for path in reversed(reports):
+        try:
+            size = path.stat().st_size
+            if size > MAX_REPORT_BYTES or size > budget:
+                raise ValueError("not read: too large")
+            budget -= size
+            data = loads_bounded(path.read_text(encoding="utf-8"), MAX_JSON_DEPTH_FILE)
+            if not isinstance(data, dict) or data.get("format") != REPORT_FORMAT:
+                raise ValueError("not a report")
+            findings = data.get("findings")
+            if not isinstance(findings, dict):
+                raise ValueError("no findings")
+            unread = data.get("notRead")
+            rows.append(
+                {
+                    "at": data["to"] if isinstance(data.get("to"), str) else None,
+                    "open": _count(findings.get("open")),
+                    "excepted": _count(findings.get("excepted")),
+                    "complete": (not unread) if isinstance(unread, list) else None,
+                    "source": data["source"] if isinstance(data.get("source"), str) else None,
+                }
+            )
+        except (OSError, ValueError, TypeError, RecursionError, AttributeError):
+            out["unplaced"].append(path.name)
+    out["points"] = list(reversed(rows))
+    stems = {p.name.removeprefix("report-").removesuffix(".json") for p in reports}
+    orphans = sorted(state_dir.glob("snapshot-*.json"))[-kept:]
+    out["unplaced"] += [p.name for p in orphans if p.name.removeprefix("snapshot-").removesuffix(".json") not in stems]
+    out["unplaced"].sort()
+    return out
 
 
 def latest_report(state_dir: Path) -> dict[str, Any] | None:
+    """The newest report kept, with the trend attached -- the same thing :func:`write_report` returned when it
+    wrote that report, so reading it back later shows what writing it showed."""
     reports = sorted(state_dir.glob("report-*.json")) if state_dir.is_dir() else []
     if not reports:
         return None
     try:
-        data = json.loads(reports[-1].read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        # The same guards the series reads under: a file too large or nested too deeply is not a report this
+        # returns half of.
+        if reports[-1].stat().st_size > MAX_REPORT_BYTES:
+            return None
+        data = loads_bounded(reports[-1].read_text(encoding="utf-8"), MAX_JSON_DEPTH_FILE)
+    except (OSError, ValueError, RecursionError):
         return None
-    return data if isinstance(data, dict) and data.get("format") == REPORT_FORMAT else None
+    if not isinstance(data, dict) or data.get("format") != REPORT_FORMAT:
+        return None
+    return {**data, "history": history(state_dir)}

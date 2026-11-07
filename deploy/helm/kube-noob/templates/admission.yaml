@@ -20,6 +20,9 @@ a dead or slow webhook never blocks the cluster; it only stops warning. Off by d
 {{- if and $a.lookups .Values.networkPolicy.enabled .Values.networkPolicy.egress.enabled (not .Values.networkPolicy.egress.apiServerCIDRs) }}
 {{- fail "admission.lookups reads the API server: set networkPolicy.egress.apiServerCIDRs (or networkPolicy.egress.enabled=false)" }}
 {{- end }}
+{{- if and (has "KN-S036" ($a.enforce | default list)) (not (.Values.audit | default dict).allowedRegistries) }}
+{{- fail "admission.enforce KN-S036 needs audit.allowedRegistries: with no approved registries the rule declines and would deny nothing (R3c)" }}
+{{- end }}
 {{- $tlsSecret := ternary $a.tls.secretName (printf "%s-tls" $name) (eq $a.certificates "secret") }}
 {{- $excluded := concat (list "kube-system" "kube-public" "kube-node-lease" "openshift" $ns) ($a.excludedNamespaces | default list) | uniq }}
 apiVersion: v1
@@ -55,6 +58,10 @@ data:
       {{- if $a.exceptions }}
       exceptionsFile: /etc/kube-noob-admission/config/exceptions.yaml
       {{- end }}
+    {{- with (.Values.audit | default dict).allowedRegistries }}
+    audit:
+      allowedRegistries: {{- toYaml . | nindent 8 }}
+    {{- end }}
   {{- with $a.exceptions }}
   exceptions.yaml: |
     {{- . | nindent 4 }}
@@ -113,7 +120,7 @@ spec:
     metadata:
       labels: {{- include "kube-noob.admissionLabels" . | nindent 8 }}
       annotations:
-        checksum/config: {{ printf "%s|%s|%s|%s" (toJson $a.enforce) (toJson $excluded) (toString $a.lookups) ($a.exceptions | default "") | sha256sum }}
+        checksum/config: {{ printf "%s|%s|%s|%s|%s" (toJson $a.enforce) (toJson $excluded) (toString $a.lookups) ($a.exceptions | default "") (toJson ((.Values.audit | default dict).allowedRegistries | default list)) | sha256sum }}
     spec:
       serviceAccountName: {{ $name }}
       automountServiceAccountToken: {{ $a.lookups }}
@@ -325,8 +332,14 @@ webhooks:
           !object.metadata.ownerReferences.exists(r, has(r.controller) && r.controller)
     {{- end }}
     rules:
+      # `pods/ephemeralcontainers` is how `kubectl debug` adds a container, and it is a different admission
+      # request from the Pod's own creation: without it a privileged debug container from an unapproved
+      # registry walked past every rule that had just refused the same container in a Deployment (R7, G250).
+      # The webhook reports only what the request ADDS -- it already compares the findings with the old
+      # object -- so a Pod that breaks a rule can still be debugged; a generated policy has no such diff,
+      # which is why that half of R7 stays open rather than being emitted as a trap.
       - {apiGroups: [""], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
-         resources: [pods, services, serviceaccounts, persistentvolumeclaims]}
+         resources: [pods, pods/ephemeralcontainers, services, serviceaccounts, persistentvolumeclaims]}
       - {apiGroups: [apps], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
          resources: [deployments, statefulsets, daemonsets, replicasets]}
       - {apiGroups: [batch], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
@@ -347,4 +360,16 @@ webhooks:
          resources: [gateways, httproutes]}
       - {apiGroups: [k8s.ovn.org], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
          resources: [egressfirewalls]}
+      # The AI-workload CRDs that CARRY pod specs. `kube-noob audit` reads the containers inside a KServe
+      # predictor and a Ray worker group -- including the ones written as a FIELD rather than a list entry --
+      # and the webhook runs the same rules, so the only reason a privileged container in one was admitted
+      # while the same container in a Deployment was denied is that these resources were never sent here (R6,
+      # G248). A rule naming a resource the cluster does not serve never matches, so the chart lists them
+      # whether or not KServe or KubeRay is installed. The generated ValidatingAdmissionPolicies still do not
+      # cover these kinds: their CEL would have to index each CRD's own pod-spec paths, which is why the
+      # generated file states the gap and this closes the half that costs nothing.
+      - {apiGroups: [serving.kserve.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [inferenceservices]}
+      - {apiGroups: [ray.io], apiVersions: ["*"], operations: [CREATE, UPDATE], scope: Namespaced,
+         resources: [rayclusters, rayjobs, rayservices]}
 {{- end }}

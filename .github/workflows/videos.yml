@@ -201,7 +201,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install ./product "numpy==2.5.3" "kokoro-onnx==0.6.1" "onnxruntime==1.29.0"
           test "v$(python -c 'import kube_noob; print(kube_noob.__version__)')" = "$TAG"
-          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+          command -v ffmpeg > /dev/null || { sudo apt-get update -q -o Acquire::Retries=3 && sudo apt-get install -y -q -o Acquire::Retries=3 -o DPkg::Lock::Timeout=180 ffmpeg; }
           cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
       - name: Voice model (Kokoro-82M, sha256-checked by audio_kit.py)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

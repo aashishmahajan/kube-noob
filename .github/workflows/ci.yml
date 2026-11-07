@@ -72,7 +72,9 @@ jobs:
     # rules on every frame (capture.js --check), and stills of every scene, the walkthrough cards and the thumbnail
     # uploaded to look at. The 4K masters are rendered for releases by videos.yml.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 36, not 30, because the per-step budgets below have to fit inside it or a step timeout could never be the
+    # thing that fires -- and the ffmpeg budget had to grow once a real mirror stall was measured.
+    timeout-minutes: 36
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,15 +85,59 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      - name: kube-noob, ffmpeg and Chromium (pinned in demos/video/package-lock.json)
+      # One command per step, each bounded, because a job timeout is not a diagnosis. The first version of this
+      # was one 12-minute install step and it died at its own limit, which said only "something in here hangs".
+      # Measured on this code: pip 20s, npm ci 3s, the whole render about 90 seconds (voiceover 7-17s per video,
+      # capture --check 6-9s, stills 5-7s, walkthrough and thumbnail 11s, 23 stills out). So the hang is in one
+      # of the two commands that cannot be measured off a runner -- apt, or the browser download -- and these
+      # steps name which.
+      - name: kube-noob and its video dependencies
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip && pip install . "numpy==2.5.3" "pytest>=8.3"
-          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
-          cd demos/video && npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
+      # DPkg::Lock::Timeout is the fix for the known runner hang: unattended-upgrades holds the dpkg lock and
+      # apt-get waits for it forever by default. DEBIAN_FRONTEND needs `sudo -E`, which plain sudo would drop.
+      # The 4-minute bound this step used to carry was guessed, not measured -- the measurements above cover pip,
+      # npm and the render, and apt was named as the thing they could not measure. On 2026-11-05 at 21:19Z the
+      # Azure Ubuntu mirror served libflite1 (13.6 MB) in 62 seconds and the step was still downloading when the
+      # bound killed it, so a slow third-party mirror became a red pull request on a green commit. Three changes,
+      # cheapest first: skip apt entirely when the runner image already ships ffmpeg; let apt retry a dropped
+      # connection itself; and try twice before giving up. The bound stays -- an unbounded apt is the hang this
+      # job was split up to find -- but it is now above the slowest transfer actually observed, not below it.
+      - name: ffmpeg
+        timeout-minutes: 8
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if command -v ffmpeg > /dev/null; then
+            ffmpeg -version | head -1
+            exit 0
+          fi
+          apt=(sudo -E apt-get -q -o DPkg::Lock::Timeout=180 -o Acquire::Retries=3)
+          "${apt[@]}" update
+          for attempt in 1 2; do
+            if "${apt[@]}" install -y ffmpeg; then exit 0; fi
+            echo "apt attempt $attempt failed; the mirror may be slow or a package may have moved"
+            "${apt[@]}" update || true
+          done
+          exit 1
+      - name: Video node modules (pinned in demos/video/package-lock.json)
+        timeout-minutes: 4
+        run: cd demos/video && npm ci --ignore-scripts --no-audit --no-fund
+      # `--with-deps` is deliberately NOT used: it shells out to apt a second time, inside Playwright's own sudo
+      # where neither DEBIAN_FRONTEND nor the lock timeout above reaches it. The ubuntu-latest image already
+      # carries Chromium's libraries, and if one is ever missing the render step fails in seconds naming the
+      # library -- a loud failure, where an unbounded apt was a silent one.
+      - name: Chromium for Playwright (no apt)
+        timeout-minutes: 6
+        run: cd demos/video && timeout 300 npx playwright install chromium
       - name: Video tests with ffmpeg (loudness, captions, facts, brand)
+        timeout-minutes: 4
         run: python -m pytest -q tests/test_video_loudness.py tests/test_video_captions.py tests/test_video_facts.py tests/test_brand.py tests/test_video_workflows.py tests/test_video_voice.py
       - name: Video scripts, facts and layout rules on every frame, and stills (silent voice)
+        timeout-minutes: 6
         env:
           NODE_PATH: ${{ github.workspace }}/demos/video/node_modules
           KN_SIDECAR_TRANSCRIPT: ${{ github.workspace }}/tests/fixtures/video-sidecar-transcript.txt
@@ -134,6 +180,12 @@ jobs:
         run: python scripts/safety_contract.py --check
       - name: Agent Skill is valid and its tool reference matches the code
         run: python scripts/build_skill.py --check
+      - name: Compliance document's rule and control tables match the code
+        run: python scripts/compliance_doc.py --check
+      - name: Documented measurements match what the commands produce
+        run: python scripts/doc_numbers.py --check
+      - name: FedRAMP KSI crosswalk matches the vendored dataset
+        run: python scripts/fedramp_ksi.py --check
       - name: Plugin lock matches its pyproject
         run: uv lock --check --project plugin/kube-noob --default-index https://pypi.org/simple
       - name: Plugin dependency vulnerability audit
@@ -144,6 +196,22 @@ jobs:
         run: python scripts/e2e_plugin.py
       - name: Formula matches the PyPI release files
         run: python scripts/brew_formula.py --check
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: OSCAL output validates against the pinned NIST schema (ajv, not jsonschema)
+        run: |
+          npm install --no-save --no-audit --no-fund ajv@8.17.1 ajv-formats@3.0.1
+          python -m kube_noob audit -f examples/insecure-deployment.yaml --platform openshift --version 4.22 \
+            --oscal > /tmp/assessment-results.json || true
+          node scripts/oscal_validate.mjs tests/fixtures/oscal/oscal_assessment-results_schema.json \
+            /tmp/assessment-results.json
+      - name: The schema check ran rather than skipping for a missing ajv
+        run: |
+          out=$(python -m pytest tests/test_oscal.py -q -rs 2>&1)
+          echo "$out" | tail -5
+          echo "$out" | grep -q "ajv is not installed" && { echo "the OSCAL schema test SKIPPED"; exit 1; }
+          echo "$out" | grep -qE "[0-9]+ passed" || exit 1
 
   publishable:
     # Upload validation exactly as pypa/gh-action-pypi-publish runs it: same twine, same Python as its container.
@@ -242,6 +310,57 @@ jobs:
           if helm template kn deploy/helm/kube-noob $base $pv \
                --api-versions security.openshift.io/v1 | grep -q "fsGroup"; then
             echo "::error title=chart::fsGroup must not be set on OpenShift"; exit 1
+          fi
+          # Monitoring (N11): both objects need the Prometheus Operator CRDs, so both are off by default and a
+          # default render must contain neither; a PrometheusRule without a ServiceMonitor must refuse, because an
+          # alert on a metric nobody scrapes never fires and looks exactly like a healthy cluster.
+          mon="--set monitoring.serviceMonitor.enabled=true"
+          if helm template kn deploy/helm/kube-noob $base | grep -q "kind: ServiceMonitor"; then
+            echo "::error title=chart::ServiceMonitor must be off by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base | grep -q "kind: PrometheusRule"; then
+            echo "::error title=chart::PrometheusRule must be off by default"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set monitoring.prometheusRule.enabled=true \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::a PrometheusRule without a ServiceMonitor must fail to render"; exit 1
+          fi
+          helm template kn deploy/helm/kube-noob $base $mon | grep -q "path: /metrics"
+          helm template kn deploy/helm/kube-noob $base $mon | grep -q "name: \"kn-token\""
+          helm template kn deploy/helm/kube-noob $base $mon --set monitoring.prometheusRule.enabled=true \
+            | grep -q "alert: KubeNoobToolErrorRatio"
+          # The scrape must carry the bearer token unless the operator opened /metrics deliberately.
+          if helm template kn deploy/helm/kube-noob $base $mon \
+               --set monitoring.allowUnauthenticatedMetrics=true | grep -q "authorization:"; then
+            echo "::error title=chart::an opened /metrics must not still send credentials"; exit 1
+          fi
+          # The registry allowlist (KN-S036, R3c) has to reach BOTH config files -- the sidecar's and the
+          # webhook's -- because `kube-noob audit` and the webhook must give one verdict, and an entry that can
+          # never match an image, or enforcing the rule with no list at all, must fail at install rather than
+          # look like a registry policy while allowing everything through.
+          # An array, not a string: `"$reg"` made `--set audit.allowedRegistries={...}` ONE argument, so helm
+          # answered `unknown flag: --set audit.allowedRegistries` and this guard could never pass. The brace list
+          # has to stay one argument of its own, so it cannot be word-split like $base either.
+          reg=(--set "audit.allowedRegistries={quay.io/my-org,registry.example.com:5000}")
+          helm template kn deploy/helm/kube-noob $base "${reg[@]}" --show-only templates/configmap.yaml | python -c "
+          import sys, yaml
+          cfg = yaml.safe_load(yaml.safe_load(sys.stdin)['data']['config.yaml'])
+          assert cfg['audit']['allowedRegistries'] == ['quay.io/my-org', 'registry.example.com:5000'], cfg
+          "
+          helm template kn deploy/helm/kube-noob $base "${reg[@]}" --set admission.enabled=true \
+            --show-only templates/admission.yaml | python -c "
+          import sys, yaml
+          maps = [d for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind') == 'ConfigMap']
+          cfg = yaml.safe_load(maps[0]['data']['config.yaml'])
+          assert cfg['audit']['allowedRegistries'] == ['quay.io/my-org', 'registry.example.com:5000'], cfg
+          "
+          if helm template kn deploy/helm/kube-noob $base --set "audit.allowedRegistries={MyRegistry}" \
+               >/dev/null 2>&1; then
+            echo "::error title=chart::an entry that is not a lower-case registry must fail to render"; exit 1
+          fi
+          if helm template kn deploy/helm/kube-noob $base --set admission.enabled=true \
+               --set "admission.enforce={KN-S036}" >/dev/null 2>&1; then
+            echo "::error title=chart::enforcing KN-S036 with no allowlist must fail to render"; exit 1
           fi
           helm template kn deploy/helm/kube-noob $base --set config.webEnabled=true \
             | grep -A1 "name: KUBE_NOOB_WEB_ENABLED" | grep -q '"true"'
@@ -563,15 +682,17 @@ jobs:
           base="--set auth.existingSecret=kn-token --set admission.enabled=true"
           at() { helm template kn deploy/helm/kube-noob -n kube-noob $base "$@"; }
           helm lint --strict deploy/helm/kube-noob $base
+          exc="--exceptions .github/kube-noob-exceptions.yaml"
+          kube-noob exceptions check .github/kube-noob-exceptions.yaml
           for v in 1.33.0 1.35.0; do
             at --kube-version "$v" --set networkPolicy.allowRouter=false \
               --set admission.certificates=secret --set admission.tls.secretName=kn-tls --set admission.tls.caBundle=Zm9v \
-              | kube-noob audit -f - --platform kubernetes --fail-on medium
+              | kube-noob audit -f - --platform kubernetes --fail-on medium $exc
           done
           for v in 4.20:1.33.0 4.22:1.35.0; do
             at --kube-version "${v#*:}" --api-versions security.openshift.io/v1 --set admission.lookups=true \
               --set "networkPolicy.egress.apiServerCIDRs={172.30.0.1/32}" --set "admission.enforce={KN-S001}" \
-              | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium
+              | kube-noob audit -f - --platform openshift --version "${v%%:*}" --fail-on medium $exc
           done
           at --kube-version 1.33.0 --api-versions security.openshift.io/v1 > /tmp/adm-sca.yaml
           at --kube-version 1.33.0 --set admission.certificates=cert-manager \

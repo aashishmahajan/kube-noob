@@ -43,6 +43,12 @@ SYSTEM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease", 
 SYSTEM_PREFIXES = ("openshift-",)
 SKIP_OPERATIONS = frozenset({"DELETE", "CONNECT"})
 OWNED_KINDS = frozenset({"Pod", "ReplicaSet", "Job"})
+#: The one subresource worth evaluating. `kubectl debug` adds an ephemeral container through
+#: `pods/ephemeralcontainers`, which is a different admission request from the Pod's own creation: a policy that
+#: matches `pods` never sees it, so a privileged debug container from an unapproved registry walked past every
+#: rule that had just refused the same container in a Deployment (R7, G250). Every other subresource -- status,
+#: exec, log, portforward -- is somebody else's business and stays skipped.
+SUBRESOURCES = frozenset({"ephemeralcontainers"})
 SKIPPED_RULES = frozenset(
     {
         "KN-V001",  # the API server refuses objects without apiVersion, kind or name
@@ -58,13 +64,22 @@ SKIPPED_RULES = frozenset(
         "KN-V011",  # needs pods that are created after the Service
         "KN-N012",  # needs pods that are created after the NetworkPolicy
         "KN-V012",
+        "KN-V023",  # same: the containerPorts the Service's pods declare are in other objects
+        "KN-N014",  # needs the cluster's CNI and version, which no admitted object carries
         "KN-V014",  # bundle properties
         "KN-V018",
         "KN-S018",  # every Secret in a cluster holds data: the rule is about Git
         "KN-C013",  # needs Secrets of other namespaces, which kube-noob never reads
+        # The context cache fetches PDBs, NetworkPolicies, PVCs, HPAs and StorageClasses and nothing else, so
+        # with lookups on this rule warned that a ResourceClaim was missing from a bundle it never looked in --
+        # on every correct DRA Pod. Fetching them would need get and list on resourceclaims, a privilege the
+        # chart does not grant and should not need for a warning `kube-noob audit` already gives on a directory.
+        "KN-C015",
     }
 )
-CROSS_OBJECT = frozenset({"KN-N001", "KN-C008", "KN-C009", "KN-ST001", "KN-ST002", "KN-C012", "KN-C014"})
+CROSS_OBJECT = frozenset(
+    {"KN-N001", "KN-N013", "KN-C008", "KN-C009", "KN-ST001", "KN-ST002", "KN-C012", "KN-C014", "KN-C016"}
+)
 CONTEXT_RESOURCES = ("poddisruptionbudgets", "networkpolicies", "persistentvolumeclaims", "horizontalpodautoscalers")
 CONTEXT_KINDS = {
     "poddisruptionbudgets": "PodDisruptionBudget",
@@ -88,6 +103,10 @@ class Config:
     max_warnings: int = 10
     exceptions: Any = None  # a reviewed ExceptionList (kube_noob.audit.exceptions.Review)
     lookups: bool = False
+    #: `audit.allowedRegistries` from the same configuration file. KN-S036 is the one rule whose answer is a
+    #: policy rather than a property of the object, so with no list the rule declines (it reports nothing and is
+    #: not recorded as checked) and enforcing it is refused below rather than enforcing nothing (R3c, G243).
+    allowed_registries: tuple[str, ...] = ()
 
     @classmethod
     def build(
@@ -100,6 +119,7 @@ class Config:
         max_warnings: int = 10,
         exceptions_text: str | None = None,
         lookups: bool = False,
+        allowed_registries: list[str] | tuple[str, ...] = (),
     ) -> Config:
         from kube_noob.audit.rules import RULES
 
@@ -111,6 +131,13 @@ class Config:
             raise AdmissionConfigError(
                 f"admission.enforce cannot enforce {', '.join(bad)}: these rules need other objects or the whole "
                 "bundle (they warn with admission.lookups, or kube-noob audit checks them)"
+            )
+        if "KN-S036" in enforce and not [e for e in allowed_registries if e.strip()]:
+            # Fail at startup, not quietly at admission: `enforce: [KN-S036]` with no allowlist would deny
+            # nothing while the chart said a registry policy was being enforced (G243).
+            raise AdmissionConfigError(
+                "admission.enforce includes KN-S036 but audit.allowedRegistries is empty: name the registries "
+                "you approve (quay.io, or quay.io/my-org to narrow it to one organisation) or drop the rule"
             )
         if not 1 <= max_warnings <= 50:
             raise AdmissionConfigError("admission.maxWarnings must be 1-50")
@@ -125,7 +152,16 @@ class Config:
                     f"admission.exceptionsFile has refused entries ({', '.join(e.id for e in refused[:5])}): fix them "
                     "with kube-noob exceptions check"
                 )
-        return cls(frozenset(enforce), frozenset(excluded), platform, version, max_warnings, review, lookups)
+        return cls(
+            frozenset(enforce),
+            frozenset(excluded),
+            platform,
+            version,
+            max_warnings,
+            review,
+            lookups,
+            tuple(allowed_registries),
+        )
 
 
 def _response(uid: str, allowed: bool, warnings: list[str], message: str | None = None) -> dict[str, Any]:
@@ -176,6 +212,7 @@ def _findings(
         version=cfg.version,
         stages={Stage.VALIDATE, Stage.AUDIT, Stage.CALIBRATE},
         schema=False,
+        allowed_registries=cfg.allowed_registries,
     )
     out: list[tuple[str, str, str, str]] = []
     for f in report.findings:
@@ -211,19 +248,31 @@ def review(
         op = str(request.get("operation") or "")
         ns = str(request.get("namespace") or "")
         obj = request.get("object")
-        if op in SKIP_OPERATIONS or request.get("subResource") or not isinstance(obj, dict):
+        sub = str(request.get("subResource") or "")
+        if op in SKIP_OPERATIONS or (sub and sub not in SUBRESOURCES) or not isinstance(obj, dict):
             return _response(uid, True, [])
         if ns and excluded_namespace(ns, cfg):
             return _response(uid, True, [])
         raw_meta = obj.get("metadata")
         meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
-        if meta.get("deletionTimestamp") or (obj.get("kind") in OWNED_KINDS and _owned(obj)):
+        # The owner check deliberately does NOT apply to a subresource. A Pod owned by a ReplicaSet is skipped
+        # because its owner was audited and carries the same spec -- but no owner carries an ephemeral
+        # container, which is added straight to the Pod. Skipping it here would have made `kubectl debug` on
+        # any managed workload the one request nothing checks (G250).
+        if meta.get("deletionTimestamp") or (not sub and obj.get("kind") in OWNED_KINDS and _owned(obj)):
             return _response(uid, True, [])
         extra = context(ns) if (cfg.lookups and context is not None and ns) else []
         found = _findings(obj, ns, cfg, extra)
-        enforced = [f for f in found if f[0] in cfg.enforce]
-        if enforced and op == "UPDATE" and isinstance(request.get("oldObject"), dict):
+        before: set[tuple[str, str]] | None = None
+        if op == "UPDATE" and isinstance(request.get("oldObject"), dict):
             before = {(r, p) for r, p, _, _ in _findings(request["oldObject"], ns, cfg, extra)}
+        if sub and before is not None:
+            # On a subresource the request IS the change, so the Pod's existing findings are not this
+            # request's business: they were reported when it was created and repeating them here would bury
+            # the one line that matters under the workload's whole report.
+            found = [f for f in found if (f[0], f[1]) not in before]
+        enforced = [f for f in found if f[0] in cfg.enforce]
+        if enforced and before is not None:
             enforced = [f for f in enforced if (f[0], f[1]) not in before]
         warnings = [w for _, _, w, _ in found[: cfg.max_warnings]]
         if len(found) > cfg.max_warnings:

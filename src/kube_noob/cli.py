@@ -11,12 +11,13 @@ import json
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from kube_noob import __version__, sanitize
+from kube_noob import __version__, completion, sanitize
 from kube_noob.config import Settings, load_settings
 from kube_noob.errors import ClarificationNeeded, ConfigError, KubeNoobError
 
@@ -62,16 +63,72 @@ def _dir_yaml(d: Path) -> tuple[list[tuple[str, str]], list[dict[str, str]]]:
 
 def _manifest_input(a: argparse.Namespace) -> tuple[str, list[dict[str, str]]]:
     """The manifest text for the audit family, with the files in a directory that could not be read."""
+    text, bad, _sources = _manifest_sources(a)
+    return text, bad
+
+
+def _manifest_sources(a: argparse.Namespace) -> tuple[str, list[dict[str, str]], list[tuple[str, int]]]:
+    """The same text, plus where each file starts in it: (path, its first line of the combined text).
+
+    The audit reads one string, so a directory is concatenated -- and every line number after the first file
+    was then a line of a document nobody can open. `_locate` uses these ranges to put a finding back in the
+    file it came from, which is what `_dir_yaml`'s own docstring says an unreadable file deserved (G251).
+    """
     p = Path(a.file) if a.file != "-" else None
     if p is None or not p.is_dir():
-        return _read(a.file), []
+        return _read(a.file), [], ([] if p is None else [(str(a.file), 1)])
     ok, bad = _dir_yaml(p)
     if not ok:
         named = "; ".join(f"{b['path']}: {b['why']}" for b in bad)
         raise ConfigError(
             f"{a.file}: no readable manifest here" + (f" ({named})" if named else " (no .yaml or .yml files)")
         )
-    return "\n---\n".join(text for _, text in ok), bad
+    sep = "\n---\n"
+    parts: list[str] = []
+    sources: list[tuple[str, int]] = []
+    for path, text in ok:
+        # Counted off the text that will precede this file, separator included: whether a file ends with a
+        # newline changes the arithmetic, and a line number that is right for most inputs is the defect this
+        # replaces. `sep.join(parts)` alone is not that text -- joining one part inserts no separator.
+        before = (sep.join(parts) + sep) if parts else ""
+        sources.append((path, before.count("\n") + 1))
+        parts.append(text)
+    return sep.join(parts), bad, sources
+
+
+def _locate(report: dict[str, Any], sources: Sequence[tuple[str, int]]) -> None:
+    """Put every finding back in the file it came from, in place.
+
+    `line` becomes the line of THAT file and `file` names it. Without this, `kube-noob audit -f dir/` reported
+    a finding in the second file of a directory at a line of the concatenation -- often past the end of the
+    file it was in, and against no path at all. A finding with no line keeps none, and with several files and
+    no line nothing is claimed about which file it was in (G251).
+    """
+    if not sources:
+        return
+    for key in ("findings", "excepted"):
+        for f in report.get(key) or []:
+            if not isinstance(f, dict):
+                continue
+            line = f.get("line")
+            if not isinstance(line, int) or line < 1:
+                if len(sources) == 1:
+                    f["file"] = sources[0][0]
+                continue
+            path, start = next((p, s) for p, s in reversed(sources) if s <= line)
+            f["file"] = path
+            f["line"] = line - start + 1
+
+
+def _partial_input(a: argparse.Namespace) -> bool:
+    """True when the caller named one file or stdin rather than a directory.
+
+    A directory is taken to be the whole namespace, so rules that fire on an absent object are evaluated.
+    One file is not: `audit -f deployment.yaml` cannot tell "this namespace has no NetworkPolicy" from
+    "you did not pass it", and reporting the first would be a finding on every correct repository.
+    """
+    f = getattr(a, "file", None)
+    return not (isinstance(f, str) and f != "-" and Path(f).is_dir())
 
 
 def _refuse_unreadable(bad: list[dict[str, str]], flag: str = "--skip-unreadable") -> None:
@@ -136,6 +193,11 @@ def _print_insight(res: dict[str, Any]) -> None:
             _tprint(f"  {'':15} escalate: {f['escalate'][:400]}")
         for c in f.get("diagnosticCommands", [])[:2]:
             _tprint(f"  {'':15} in the toolbox (needs approval): {c['command']}")
+    if res.get("answeredBy"):
+        _tprint("kube-noob answers this directly:")
+        for st in res["answeredBy"]:
+            _tprint(f"  {st['command']}")
+            _tprint(f"      {st['why']}")
     if res.get("readOnlyNextSteps"):
         _tprint("read-only next steps:")
         for st in res["readOnlyNextSteps"]:
@@ -175,6 +237,96 @@ def _print_ticket_lines(m: dict[str, Any]) -> None:
     for r in m.get("remarks") or []:
         if r["kind"] in _REMARK_LABELS:
             _tprint(f"  {_REMARK_LABELS[r['kind']]} ({r.get('date') or r['from']}): {r['text']}")
+
+
+def _write_html(path: str | None, report: dict[str, Any]) -> None:
+    """Write the self-contained HTML report, when one was asked for (U1)."""
+    if not path:
+        return
+    from kube_noob import report_html
+
+    Path(path).write_text(report_html.render(report), encoding="utf-8", errors="replace")
+
+
+def _ksi_markdown(out: dict[str, Any], audited: bool) -> str:
+    """The KSI view as text. Every indicator keeps a row, including the ones kube-noob cannot see at all: a
+    column of zeros reads as a pass, and an indicator with no rule behind it has passed nothing (G217)."""
+
+    d = out["dataset"]
+    lines = [
+        f"FedRAMP 20x Key Security Indicators -- {d['name']} {d['version']} (updated {d['lastUpdated']})",
+        "",
+        out["note"],
+        "",
+        out["applicability"],
+        "",
+    ]
+    if out.get("unmappedControls"):
+        lines += [
+            "Controls kube-noob maps that no indicator cites, so no finding reaches an indicator through them: "
+            + ", ".join(out["unmappedControls"]),
+            "",
+        ]
+    for note in out.get("assumptions") or []:
+        lines += [f"assumed: {note}", ""]
+    if limit := out.get("notCheckedBeyond"):
+        # Before the rows, as `audit` does it: a reader has to see the limit before reading an empty finding
+        # count as a clean result.
+        lines += [f"not checked: {limit['why']}", ""]
+    for bad in out.get("unreadable") or []:
+        lines += [f"not read: {bad['path']}: {bad['why']}"]
+    if out.get("unreadable"):
+        lines += ["", "This is not a complete audit, so no row below is a clean result.", ""]
+    for miss in out.get("findingsNotMapped") or []:
+        lines += [f"{miss['findings']} finding(s) from {miss['ruleId']} reach no indicator: {miss['why']}"]
+    if out.get("findingsNotMapped"):
+        lines.append("")
+    f = out.get("filtered")
+    if f:
+        lines += [
+            f"showing {f['shown']} of {f['of']} indicators"
+            + (f"; --evidenced-only hid {f['evidencedOnly']}" if f.get("evidencedOnly") else ""),
+            "",
+        ]
+        if f.get("why"):
+            lines += [f["why"], ""]
+    lines += [out["sharedControlCaveat"], ""]
+    # `excepted` only when an exception list was actually read. `ksi` takes none, so printing a column of zeros
+    # asserted that nothing was excepted when nothing was even looked at (G199).
+    excepted = any("excepted" in r for r in out["indicators"])
+    counted = ""
+    if audited:
+        counted = "  findings" + ("  excepted" if excepted else "") + "  clean  not evaluated  withheld"
+    lines.append(f"{'INDICATOR':<14}{'FAM':<5}{'NAME':<36}{counted}")
+    for r in out["indicators"]:
+        name = r["name"][:34]
+        if not r["evidenced"]:
+            lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}  -- {r['why']}")
+            continue
+        if audited:
+            tail = f"  {r['findings']:>8}"
+            if excepted:
+                tail += f"  {r['excepted']:>8}"
+            tail += f"  {r.get('clean', 0):>5}  {r.get('notEvaluated', 0):>13}  {r.get('withheld', 0):>8}"
+        else:
+            tail = f"  {r['rulesBehind']} rule(s), controls {', '.join(r['controls'])}"
+        lines.append(f"{r['id']:<14}{r['family']:<5}{name:<36}{tail}")
+        if r["variesByClass"]:
+            lines.append(
+                f"{'':<14}{'':<5}varies by service class {', '.join(r['variesByClass'])}"
+                + (f"; optional for {', '.join(r['optionalFor'])}" if r["optionalFor"] else "")
+            )
+        if r.get("notEvaluatedRules"):
+            more = f" and {r['moreNotEvaluated']} more" if r.get("moreNotEvaluated") else ""
+            lines.append(f"{'':<19}not evaluated: {', '.join(r['notEvaluatedRules'])}{more}")
+        # From the row, not from EVIDENCE: one source, so the text and the JSON cannot drift apart.
+        if r.get("warning"):
+            lines.append(f"{'':<19}WARNING: {r['warning']}")
+        ev = r.get("evidence")
+        if ev:
+            lines.append(f"{'':<19}shows: {ev['shows']}")
+            lines.append(f"{'':<19}does NOT show: {ev['doesNotShow']}")
+    return "\n".join(lines)
 
 
 def _print_known_issues(out: dict[str, Any]) -> None:
@@ -260,8 +412,12 @@ def _print_report(rep: dict[str, Any]) -> None:
         # limit before they read an empty finding list as a clean one.
         print(f"  not checked: {limit['why']}")
     for f in rep["findings"]:
-        loc = f"L{f['line']}" if f.get("line") else ""
-        print(f"[{f['severity'].upper():8}] {f['ruleId']:9} {f['resource']} {loc} {f['path']}")
+        # `file:line` when the caller gave files, `L<n>` when the input was stdin and there is nothing to
+        # name. A bare line number against a directory audit was a line of the concatenation (G251).
+        where = f"{f['file']}:{f['line']}" if f.get("file") and f.get("line") else ""
+        if not where:
+            where = f.get("file") or (f"L{f['line']}" if f.get("line") else "")
+        print(f"[{f['severity'].upper():8}] {f['ruleId']:9} {f['resource']} {where} {f['path']}")
         print(f"           {f['message']}")
         print(f"           fix: {f['remediation']}")
         if f.get("stackroxPolicies"):
@@ -269,6 +425,11 @@ def _print_report(rep: dict[str, Any]) -> None:
     touched = (rep.get("controlSummary") or {}).get("controls") or []
     if touched:
         print("NIST SP 800-53 controls with findings: " + ", ".join(f"{c['id']} ({c['findings']})" for c in touched))
+    if cov := rep.get("detectionCoverage"):
+        from kube_noob.audit.detection import render_text
+
+        print()
+        print(render_text(cov), end="")
     for sc in rep.get("redTeam", []):
         if sc["verdict"] == "exposed":
             print(f"[RED-TEAM {sc['severity'].upper()}] {sc['scenarioId']}: {sc['question']}")
@@ -362,13 +523,30 @@ def _gate_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             trust_report_vex=a.trust_report_vex,
             sarif_reports=[(p, _read(p)) for p in a.sarif_report],
             source_roots=[str(Path.cwd().resolve()), *(r.rstrip("/") for r in a.source_root if r.startswith("/"))],
+            cni=a.cni,
         )
     except (gate.GateError, ExceptionsError) as exc:
         raise ConfigError(str(exc)) from exc
     gate.write(report, sarif_path=a.sarif, summary=a.summary, quality=a.codequality)
-    if a.format == "text":
-        _tprint(gate.markdown(report, top=50))
-    else:
+    _write_html(a.html, report)
+    if getattr(a, "github_annotations", False):
+        # Before the report, and on stdout: Actions reads workflow commands from the step's output, and a caller
+        # parsing --format json filters the `::` lines (the test does exactly that).
+        for line in gate.github_annotations(report):
+            print(line)
+    quiet_pass = getattr(a, "quiet", False) and report["passed"]
+    if getattr(a, "oscal", False):
+        from kube_noob.oscal import assessment_results, check_import_ap
+
+        # The flag REPLACES the gate report, the same way it does for `audit`. SARIF and the Markdown summary
+        # are still written to their files, because those are paths the caller asked for.
+        check_import_ap(a.oscal_import_ap)
+        if not quiet_pass:
+            _emit(assessment_results(report, import_ap=a.oscal_import_ap), "json" if a.format == "text" else fmt)
+    elif a.format == "text":
+        if not quiet_pass:
+            _tprint(gate.markdown(report, top=50))
+    elif not quiet_pass:
         _emit(report, fmt)
     if report.get("unreadable") and not a.skip_unreadable:
         _refuse_unreadable([{"path": u["file"], "why": u["why"]} for u in report["unreadable"]])
@@ -723,6 +901,9 @@ def _admission_cmd(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             max_warnings=ad.max_warnings,
             exceptions_text=ad.exceptions_file.read_text(encoding="utf-8") if ad.exceptions_file else None,
             lookups=ad.lookups,
+            # KN-S036's allowlist lives with the audit's, in one place: the webhook and `kube-noob audit` read
+            # the same configuration file and must give the same verdict (R3c, G243).
+            allowed_registries=tuple(s.audit.allowed_registries),
         )
     except (admission.AdmissionConfigError, OSError, ValueError) as exc:
         raise ConfigError(str(exc)) from exc
@@ -869,12 +1050,36 @@ def build_parser() -> argparse.ArgumentParser:
         "finding: the same report, losslessly, about a third smaller where a rule fires more than once. The exit "
         "code is unchanged, so a gate reads the same verdict either way",
     )
+    a.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest "
+        "states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, "
+        "which Calico did in 3.32 without reporting an error -- is reported as NOT EVALUATED until you name it, "
+        "rather than counted clean",
+    )
     a.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
     a.add_argument(
         "--exceptions",
         default=None,
         help="exception list (kube-noob.io/v1 ExceptionList): active entries hide the findings they cover; an expired "
         "or refused entry fails the gate (exit 1)",
+    )
+    a.add_argument(
+        "--oscal",
+        action="store_true",
+        help="emit an OSCAL 1.2.3 assessment-results document instead of the report: the findings as observations, "
+        "and one finding per control, satisfied only where that control's rules actually ran and found nothing. A "
+        "control no rule evaluated is named under exclude-controls and never reported satisfied. Every uuid is a v5 "
+        "uuid over the input, so two runs over the same bundle produce the same document and CI can diff it. The "
+        "exit code is unchanged, so a gate reads the same verdict with the flag as without",
+    )
+    a.add_argument(
+        "--oscal-import-ap",
+        default=None,
+        metavar="HREF",
+        help="the assessment plan this document is assessed against. OSCAL requires the field; without it the "
+        "document points at a local fragment and says plainly that no plan was imported",
     )
     exc_p = sub.add_parser(
         "exceptions",
@@ -912,7 +1117,41 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--platform", choices=PLATFORMS)
     gt.add_argument("--version", dest="pversion", help="OpenShift (4.20) or Kubernetes (1.33) version")
     gt.add_argument("--exceptions", default=None, help="exception list (kube-noob.io/v1 ExceptionList)")
+    gt.add_argument(
+        "--github-annotations",
+        action="store_true",
+        help="also print the findings as GitHub Actions workflow commands, so they appear on the pull request "
+        "instead of in a log. GitHub shows ten of each kind per step, so the tenth says how many are not shown",
+    )
+    gt.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). No manifest "
+        "states it, so KN-N014 -- an AdminNetworkPolicy or BaselineAdminNetworkPolicy the CNI stopped enforcing, "
+        "which Calico did in 3.32 without reporting an error -- is reported as NOT EVALUATED until you name it, "
+        "rather than counted clean",
+    )
+    gt.add_argument(
+        "--oscal",
+        action="store_true",
+        help="emit an OSCAL 1.2.3 assessment-results document instead of the gate report: the same document "
+        "`kube-noob audit --oscal` writes, from the gate's own coverage record. The exit code is unchanged, so "
+        "the gate verdict is the same with the flag as without",
+    )
+    gt.add_argument(
+        "--oscal-import-ap",
+        default=None,
+        metavar="HREF",
+        help="the assessment plan this document is assessed against; without it the document says plainly that "
+        "no plan was imported",
+    )
     gt.add_argument("--fail-on", default="high", choices=["info", "low", "medium", "high", "critical", "never"])
+    gt.add_argument(
+        "--quiet",
+        action="store_true",
+        help="print nothing when the gate passes (a failing gate still reports in full). For pre-commit hooks and "
+        "other places where a silent success is the point; the exit code carries the verdict either way",
+    )
     gt.add_argument(
         "--skip-unreadable",
         action="store_true",
@@ -923,6 +1162,12 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--chart-path", default=None, help="the chart in the repository: findings point at its templates")
     gt.add_argument("--sarif", default=None, help="write SARIF 2.1.0 here (GitHub code scanning)")
     gt.add_argument("--summary", default=None, help="write the Markdown summary here ($GITHUB_STEP_SUMMARY)")
+    gt.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     gt.add_argument("--codequality", default=None, help="write GitLab code quality JSON here")
     gt.add_argument(
         "--scanner-report",
@@ -1298,6 +1543,52 @@ def build_parser() -> argparse.ArgumentParser:
     kis.add_argument("--version", dest="pversion", help="your OpenShift version, e.g. 4.20.8")
     kis.add_argument("--limit", type=int, default=3)
 
+    ksi = sub.add_parser(
+        "ksi",
+        help="FedRAMP 20x Key Security Indicators: which ones a kube-noob finding is evidence for",
+        description="Join kube-noob's findings to the FedRAMP 20x Key Security Indicators through the NIST "
+        "controls both sides name. With no input it prints the crosswalk; with -f it audits the manifests first "
+        "and reports, per indicator, what was found. A mapping is evidence, never a compliance claim. "
+        "Example: kube-noob ksi -f deploy/ --format json",
+    )
+    ksi.add_argument("-f", "--file", default=None, help="manifest, directory or '-' for stdin")
+    ksi.add_argument(
+        "--skip-unreadable",
+        action="store_true",
+        help="audit the readable files and list the rest in the report instead of refusing",
+    )
+    ksi.add_argument("--platform", choices=PLATFORMS, default=None)
+    ksi.add_argument("--version", dest="pversion", help="target OpenShift or Kubernetes version")
+    ksi.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32); without it the rule that decides whether "
+        "an AdminNetworkPolicy is inert cannot decide, and the row says so",
+    )
+    ksi.add_argument(
+        "--exceptions",
+        default=None,
+        help="the exception list `audit --exceptions` takes: active entries move their findings to 'excepted' on "
+        "the indicators they reach, so this page reconciles with the audit report; an expired or refused entry "
+        "fails the gate (exit 1), as it does for `audit`",
+    )
+    ksi.add_argument(
+        "--min-severity",
+        default="low",
+        choices=["info", "low", "medium", "high", "critical"],
+        help="hide findings below this severity; the default is `audit`'s default, because this view is a "
+        "projection of one audit and a rule a threshold hid is reported as withheld rather than clean",
+    )
+    ksi.add_argument("--indicator", default=None, help="one indicator by id, e.g. KSI-IAM-ELP")
+    ksi.add_argument("--control", default=None, help="the indicators citing one NIST control, e.g. AC-6")
+    ksi.add_argument("--evidenced-only", action="store_true", help="hide indicators no kube-noob rule can see")
+    ksi.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
+
     upr = sub.add_parser(
         "upgrade-risks",
         help="Known risks for an OpenShift update, from the public update graph (offline)",
@@ -1365,6 +1656,13 @@ def build_parser() -> argparse.ArgumentParser:
     prc.add_argument("--namespace", dest="default_namespace", default="default", help="for objects without one")
     prc.add_argument("--live", action="store_true", help="read the policies from the cluster (read-only)")
     prc.add_argument("--platform", choices=PLATFORMS)
+    prc.add_argument(
+        "--cni",
+        default=None,
+        help="the cluster's CNI as NAME or NAME:VERSION (calico:3.32, ovn-kubernetes, cilium:1.18). Calico ignores "
+        "AdminNetworkPolicy and BaselineAdminNetworkPolicy from 3.32 onward, so with it those policies are reported "
+        "as inert instead of deciding; an undocumented CNI makes the verdict undetermined",
+    )
     pgen = psub.add_parser(
         "generate",
         help="Turn kube-noob's audit rules into ValidatingAdmissionPolicy and Kyverno ValidatingPolicy YAML",
@@ -1460,6 +1758,12 @@ def build_parser() -> argparse.ArgumentParser:
     pdf.add_argument("old", help="the earlier snapshot")
     pdf.add_argument("new", help="the later snapshot")
     pdf.add_argument("--markdown", default=None, help="also write the report as Markdown here")
+    pdf.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     prp = posub.add_parser(
         "report",
         help="Snapshot now, compare with the newest snapshot kept, write the report (the daily job)",
@@ -1467,6 +1771,12 @@ def build_parser() -> argparse.ArgumentParser:
         "them. Example: kube-noob --cluster-enabled posture report --live",
     )
     snap_source(prp)
+    prp.add_argument(
+        "--html",
+        default=None,
+        help="write a self-contained HTML report here: one file, no network, nothing the browser "
+        "fetches -- for forwarding to a reviewer who will not read JSON",
+    )
     prp.add_argument("--state-dir", default=None, help="where snapshots and reports are kept")
     prp.add_argument("--keep", type=int, default=None, help="snapshots to keep (default posture.keep, 14)")
 
@@ -1764,6 +2074,15 @@ def build_parser() -> argparse.ArgumentParser:
     tsub.add_parser("tasks", help="List benchmark tasks")
 
     sub.add_parser("config", help="Show the effective configuration")
+    cmp_p = sub.add_parser(
+        "completion",
+        help="Print a shell completion script (bash, zsh or fish), generated from this CLI",
+        description="Print a completion script for your shell. It is walked off the parser at the moment you run "
+        "it, so it lists the commands this build actually has. bash: source <(kube-noob completion bash). "
+        'zsh: kube-noob completion zsh > "${fpath[1]}/_kube-noob". fish: kube-noob completion fish > '
+        "~/.config/fish/completions/kube-noob.fish",
+    )
+    cmp_p.add_argument("shell", choices=list(completion.SHELLS))
     sub.add_parser("doctor", help="Show what kube-noob can reach (network, cluster, model); exit 1 on conflicts")
     st = sub.add_parser("selftest", help="Answer a battery of real questions offline and score the results")
     st.add_argument("--category", choices=["kubernetes", "helm", "openshift", "rosa-hcp", "rhacs", "everyday"])
@@ -1823,8 +2142,11 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
     fmt = "yaml" if a.format == "text" else a.format
     platform = getattr(a, "platform", None) or s.default_platform
 
+    if a.cmd == "completion":
+        print(completion.script(a.shell, build_parser()), end="")
+        return 0
     if a.cmd in {"audit", "validate", "redteam", "fix"}:
-        text, unreadable = _manifest_input(a)
+        text, unreadable, sources = _manifest_sources(a)
         if unreadable and not getattr(a, "skip_unreadable", False):
             _refuse_unreadable(unreadable)
             return 5
@@ -1844,12 +2166,29 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
                         version=a.pversion,
                         min_severity=a.min_severity,
                         exceptions=exceptions,
+                        partial_bundle=_partial_input(a),
+                        cni=a.cni,
                     )
                 )
             except ExceptionsError as exc:
                 raise ConfigError(f"{a.exceptions}: {exc}") from exc
             rep["unreadable"] = unreadable
-            if a.format == "text":
+            # Before anything is printed or emitted, and before OSCAL and the compact form are built from it:
+            # they all carry the line numbers (G251).
+            _locate(rep, sources)
+            if a.oscal:
+                from kube_noob.oscal import assessment_results, check_import_ap
+
+                # The flag REPLACES the report: a caller asking for OSCAL wants a document it can hand to a
+                # tool, not a document with a human report printed above it. The exit code is unchanged, so a
+                # gate reads the same verdict with the flag as without.
+                check_import_ap(a.oscal_import_ap)
+                _emit(assessment_results(rep, import_ap=a.oscal_import_ap), "json" if a.format == "text" else fmt)
+                # The document names the skipped files in its remarks, and the operator still gets the notice
+                # on stderr: a partial audit must not look clean on either channel.
+                for b in unreadable:
+                    print(f"not read: {b['path']} ({b['why']})", file=sys.stderr)
+            elif a.format == "text":
                 _print_report(rep)
                 _print_exceptions(rep)
                 for b in unreadable:
@@ -1872,12 +2211,23 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
             return 1 if any(Severity.parse(f["severity"]) >= limit for f in rep["findings"]) else 0
         if a.cmd == "validate":
             rep = kit.validate(tk.ManifestsIn(manifests=text, platform=platform, version=a.pversion))
+            _locate(rep, sources)
             _print_report(rep) if a.format == "text" else _emit(rep, fmt)
             return 1 if rep["summary"]["counts"]["high"] + rep["summary"]["counts"]["critical"] else 0
         if a.cmd == "redteam":
             _emit(kit.red_team(tk.ManifestsIn(manifests=text, platform=platform, version=a.pversion)), fmt)
             return 0
         res = kit.fix(tk.FixIn(manifests=text, platform=platform, version=a.pversion, harden=not a.no_harden))
+        if len(sources) > 1:
+            # One stream out of several files in, and the file boundaries are gone: a caller who redirected
+            # this over their directory would have one file where they had five. Said on stderr, where the
+            # summary already goes, rather than refused -- the output is still correct YAML (G251).
+            print(
+                f"note: {len(sources)} files were read and one stream was written, so the file boundaries are "
+                f"not preserved ({', '.join(p for p, _ in sources[:3])}"
+                f"{' and more' if len(sources) > 3 else ''}). Run `fix` per file to keep them.",
+                file=sys.stderr,
+            )
         if a.output:
             Path(a.output).write_text(res["manifests"], encoding="utf-8")
         else:
@@ -2009,6 +2359,59 @@ def _dispatch(a: argparse.Namespace, s: Settings) -> int:
         else:
             _emit(out, fmt)
         return 0
+
+    if a.cmd == "ksi":
+        # Delegated to the toolkit rather than audited here. Two implementations of one view is what N14 was:
+        # this command and the `fedramp_ksi` tool each audited the bundle their own way, so the same files gave
+        # two sets of numbers -- and the fix for one would not have been the fix for the other (G246). What the
+        # command still owns is its input pipeline: `--skip-unreadable`, and an unreadable file that must exit 5
+        # and be named rather than dropped.
+        from pydantic import ValidationError
+
+        from kube_noob.audit.exceptions import ExceptionsError
+
+        manifests: str | None = None
+        not_read: list[dict[str, str]] = []
+        if a.file:
+            manifests, not_read = _manifest_input(a)
+            if not_read and not a.skip_unreadable:
+                _refuse_unreadable(not_read)
+                return 5
+        try:
+            out = kit.fedramp_ksi(
+                tk.KsiIn(
+                    manifests=manifests,
+                    platform=a.platform or s.default_platform,
+                    version=a.pversion,
+                    cni=a.cni,
+                    partial_bundle=_partial_input(a) if a.file else False,
+                    indicator=a.indicator,
+                    control=a.control,
+                    evidenced_only=a.evidenced_only,
+                    exceptions=_read(a.exceptions) if a.exceptions else None,
+                    min_severity=a.min_severity,
+                )
+            )
+        except ExceptionsError as exc:
+            raise ConfigError(f"{a.exceptions}: {exc}") from exc
+        except ValidationError as exc:
+            # An over-long --indicator or --version used to escape as a raw pydantic error and exit 4, where
+            # the same flag with an unknown value exits 2 with a sentence. One front door, one exit code for a
+            # bad flag (G249).
+            detail = "; ".join(str(e["msg"]).removeprefix("Value error, ") for e in exc.errors())
+            raise ConfigError(detail or str(exc)) from exc
+        if not_read:
+            out["unreadable"] = not_read
+        _write_html(a.html, out)
+        if a.format == "text":
+            _tprint(_ksi_markdown(out, audited=bool(a.file)))
+            _print_exceptions(out)
+        else:
+            _emit(out, fmt)
+        # The exception gate decides the exit code here as it does for `audit`: the page already printed
+        # "gate: failed" for an expired or refused entry, and saying so while exiting 0 is two answers (G249).
+        gate = (out.get("exceptions") or {}).get("gate")
+        return 0 if gate is not False else 1
 
     if a.cmd == "upgrade-risks":
         from pydantic import ValidationError
@@ -2481,6 +2884,11 @@ def _print_reach(out: dict[str, Any]) -> None:
         # terminal shows a conclusion with no reason while the JSON carries both `undeterminedBy` and `summary`.
         # A caveat belongs in the surface that is read, not only in the one that is parsed.
         _tprint(f"  unknown because: {', '.join(out['undeterminedBy'])} is not evaluated here")
+    for entry in out.get("inertPolicies", []):
+        # The verdict can read ALLOWED while the operator believes an AdminNetworkPolicy is denying it. That gap
+        # is the whole finding, so it goes on the line below the verdict, not into the JSON alone.
+        _tprint(f"  NOT ENFORCED  {entry['policy']}: {entry['reason']}")
+        _tprint(f"                replace it with an equivalent {entry['replacement']}, or remove it")
     for note in out.get("notes") or []:
         _tprint(f"  note: {note}")
     if out.get("summary") and out["verdict"] == "undetermined":
@@ -2525,7 +2933,14 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
         if not s.cluster.enabled:
             raise ConfigError("--live needs read-only cluster access: pass --cluster-enabled or set cluster.enabled")
         out = kit.cluster_check_traffic(
-            tk.TrafficIn(source=a.source, destination=a.destination, port=port, protocol=a.protocol, platform=platform)
+            tk.TrafficIn(
+                source=a.source,
+                destination=a.destination,
+                port=port,
+                protocol=a.protocol,
+                platform=platform,
+                cni=a.cni,
+            )
         )
     else:
         if not a.file:
@@ -2540,6 +2955,7 @@ def _policy(a: argparse.Namespace, s: Settings, kit: Any, fmt: str) -> int:
                 protocol=a.protocol,
                 platform=platform,
                 default_namespace=a.default_namespace,
+                cni=a.cni,
             )
         )
     _print_reach(out) if a.format == "text" else _emit(out, fmt)
@@ -2562,6 +2978,9 @@ def _policy_generate(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             rules=a.rules or None,
             exclude_namespaces=a.exclude_namespaces,
             exceptions=entries,
+            # From the configuration file, like the audit's: which registries are approved is an organisational
+            # decision, not a flag a caller picks per invocation (G241, G242).
+            allowed_registries=tuple(s.audit.allowed_registries),
         )
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
@@ -2742,6 +3161,7 @@ def _posture_drift(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             rep = drift.diff(drift.load(Path(a.old)), drift.load(Path(a.new)))
             if a.markdown:
                 Path(a.markdown).write_text(drift.markdown(rep), encoding="utf-8")
+            _write_html(a.html, rep)
             _print_drift(rep) if a.format == "text" else _emit(rep, fmt)
             return 0
         snap = _snapshot_from_args(a, s)
@@ -2758,6 +3178,7 @@ def _posture_drift(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             return 0
         state = Path(a.state_dir) if a.state_dir else s.data_dir / "posture"
         rep, paths = drift.write_report(state, snap, a.keep or s.posture.keep)
+        _write_html(a.html, rep)
         if a.format == "text":
             _print_drift(rep)
             _tprint(f"\nwrote {paths['report']} and {paths['markdown']}")
@@ -2805,8 +3226,15 @@ def _posture(a: argparse.Namespace, s: Settings, fmt: str) -> int:
             _tprint("    fix: " + "; or ".join(path["fix"]))
         if out["notRead"]:
             _tprint("\nnot read: " + "; ".join(out["notRead"][:10]))
+        for note in (out.get("assumptions") or [])[:10]:
+            _tprint(f"assumed: {note}")
         if out["secretsIgnored"]:
             _tprint(f"{out['secretsIgnored']} Secret object(s) in the input were ignored, unread.")
+        # The input-specific limitations only. The three standing ones are documented; these name objects in THIS
+        # scan whose exposure edge could not be traced, and a caveat that lives only in the JSON renderer is the
+        # defect G221 was about -- the text reader is the one most likely to act on the number above.
+        for line in out["limitations"][len(ap.STANDING_LIMITATIONS) :]:
+            _tprint("\nnote: " + line)
     else:
         _emit(out, fmt)
     top_score = out["paths"][0]["score"] if out["paths"] else 0

@@ -1,0 +1,24 @@
+- id: kube-noob
+  name: kube-noob (manifest audit)
+  description: >-
+    Audit Kubernetes and OpenShift manifests offline and fail on high or critical findings.
+    Audits the whole manifest directory, not only the changed files, because rules such as
+    "no NetworkPolicy selects this workload" are facts about a bundle: run per file they would
+    report a finding on every commit for a NetworkPolicy that exists one file away.
+  entry: kube-noob gate --fail-on high --quiet -f .
+  language: python
+  pass_filenames: false
+  files: \.(ya?ml)$
+  require_serial: true
+
+- id: kube-noob-changed
+  name: kube-noob (changed files only)
+    Audit only the staged manifests. Faster on a large repository. Rules that fire because another
+    object is absent are not evaluated from a partial bundle and the report says so, so this hook
+    will not report a missing NetworkPolicy that exists in a file you did not stage -- but it will
+    not catch a genuinely missing one either. Prefer the `kube-noob` hook unless the full audit is
+    too slow for you.
+  entry: kube-noob gate --fail-on high --quiet -f
+  language: python
+  files: \.(ya?ml)$
+  require_serial: true

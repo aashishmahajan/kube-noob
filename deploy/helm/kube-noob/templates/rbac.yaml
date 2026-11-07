@@ -32,6 +32,16 @@ rules:
   - apiGroups: [apps.openshift.io]
     resources: [deploymentconfigs]
     verbs: [get, list]
+  # AI workload CRDs. Their pod specs are embedded (a KServe component, a Ray head or worker group) rather than
+  # in `spec.template.spec`, so without these grants the audit and the attack-path scan see no pods at all for
+  # them and report them clean. Namespaced, read-only; a cluster without the operator answers 404, which both
+  # report as not read. Groups and versions are the published CRDs: serving.kserve.io, ray.io.
+  - apiGroups: [serving.kserve.io]
+    resources: [inferenceservices]
+    verbs: [get, list]
+  - apiGroups: [ray.io]
+    resources: [rayclusters, rayservices, rayjobs]
+    verbs: [get, list]
   # Who may do what (no credentials): the attack-path scan reads RBAC; Secrets stay out.
   - apiGroups: [rbac.authorization.k8s.io]
     resources: [roles, rolebindings{{ if .cluster }}, clusterroles, clusterrolebindings{{ end }}]
@@ -50,14 +60,19 @@ rules:
   - apiGroups: [cilium.io]
     resources: [ciliumclusterwidenetworkpolicies]
     verbs: [get, list]
+  # `clusterinformations` carries Calico's own version, which decides whether this cluster still enforces
+  # AdminNetworkPolicy at all (Calico stopped at 3.32). Read-only, cluster-scoped, and no personal data: the
+  # object holds a version, a variant, a cluster type and a generated GUID. The comment sits above the rule
+  # rather than inside it because scripts/safety_contract.py parses these rules as one expression, and a comment
+  # between `apiGroups:` and `resources:` makes it refuse to prove anything (which is the right refusal).
   - apiGroups: [crd.projectcalico.org]
-    resources: [globalnetworkpolicies]
+    resources: [globalnetworkpolicies, clusterinformations]
     verbs: [get, list]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get, list]
   - apiGroups: [config.openshift.io]
-    resources: [clusteroperators, clusterversions]
+    resources: [apiservers, clusteroperators, clusterversions]
     verbs: [get, list]
   - apiGroups: [security.openshift.io]
     resources: [securitycontextconstraints]
